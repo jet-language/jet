@@ -1116,18 +1116,18 @@ e_bl:
 e_bl0:
     .ascii "  --> run.jet:25 in run\n"
     .ascii "     |\n"
-    .ascii "25 |         first_fields :: line.split_once(\" \") ?? panic(\"bad line\")\n"
-    .ascii "     |                                                 ^^^^^\n"
+    .ascii "25 |         first_fields: line.split_once(\" \") ?? panic(\"bad line\")\n"
+    .ascii "     |                                               ^^^^^\n"
 e_bl1:
     .ascii "  --> run.jet:27 in run\n"
     .ascii "     |\n"
-    .ascii "27 |         second_fields :: rest.split_once(\" \") ?? panic(\"bad line\")\n"
-    .ascii "     |                                                  ^^^^^\n"
+    .ascii "27 |         second_fields: rest.split_once(\" \") ?? panic(\"bad line\")\n"
+    .ascii "     |                                                ^^^^^\n"
 e_bl2:
     .ascii "  --> run.jet:28 in run\n"
     .ascii "     |\n"
-    .ascii "28 |         third_fields :: second_fields.after.split_once(\" \") ?? panic(\"bad line\")\n"
-    .ascii "     |                                                                ^^^^^\n"
+    .ascii "28 |         third_fields: second_fields.after.split_once(\" \") ?? panic(\"bad line\")\n"
+    .ascii "     |                                                              ^^^^^\n"
 e_locals:
     .ascii "locals: first_ms = "
 e_last:

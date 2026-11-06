@@ -6,25 +6,25 @@
 // as the regrowth of a fresh empty value does. A value
 // another owner still holds keeps its elements, and the emptied elements
 // end: neither `xs = [T]{}` nor `xs.clear()` keeps them alive.
-package {
+package: {
     name: "lists_and_fields_refill_in_place"
     authority: { allow: [FS.Read, FS.Write] }
 }
 
-use files :: core.files
+use files: core.files
 
-COUNT :: 6000000
-SIZE :: COUNT * 8
-CHUNK :: 1000
-CHUNKS :: 6000
+COUNT: 6000000
+SIZE: COUNT * 8
+CHUNK: 1000
+CHUNKS: 6000
 
-struct Buffers {
+Buffers: struct {
     text: String
     items: [Int]
 }
 
-fn status_kb(field: String) -> Int {
-    status :: files.read("/proc/self/status") ?? panic("read /proc/self/status")
+status_kb: fn(field: String) -> Int {
+    status: files.read("/proc/self/status") ?? panic("read /proc/self/status")
     loop line in status.split("\n") {
         if !line.starts_with(field) -> next
         loop part in line.slice(field.len(), line.len()).trim().split(" ") {
@@ -34,32 +34,32 @@ fn status_kb(field: String) -> Int {
     panic("no {field} line")
 }
 
-fn fill(out: &[Int]) {
+fill: fn(out: &[Int]) {
     out = [Int]{}
     loop i in 0..<COUNT -> &out.push(i)
 }
 
-fn append_text(out: &String, chunk: String) {
+append_text: fn(out: &String, chunk: String) {
     loop _ in 0..<CHUNKS -> out += chunk
 }
 
-fn fill_fields(into: &Buffers, chunk: String) {
+fill_fields: fn(into: &Buffers, chunk: String) {
     into.text = ""
     into.items = [Int]{}
     loop i in 0..<COUNT -> &into.items.push(i)
     append_text(&into.text, chunk)
 }
 
-fn words(out: &[String], seed: Int) {
+words: fn(out: &[String], seed: Int) {
     out = [String]{}
     loop i in 0..<(2 + seed % 3) -> &out.push("w{seed}-{i}")
 }
 
 // The peak resident set's growth in kB while `rounds` rounds each fill and
 // empty a List of fresh heap Strings.
-fn churn(rounds: Int, by_assign: Bool) -> Int {
+churn: fn(rounds: Int, by_assign: Bool) -> Int {
     files.write("/proc/self/clear_refs", "5") ?? panic("reset the peak resident set")
-    start :: status_kb("VmRSS:")
+    start: status_kb("VmRSS:")
     xs := [String]{}
     total := 0
     loop round in 0..<rounds {
@@ -75,17 +75,17 @@ fn churn(rounds: Int, by_assign: Bool) -> Int {
     status_kb("VmHWM:") - start
 }
 
-fn run() {
+run: fn() {
     names := [String]{}
     loop i in 0..<3 {
         words(&names, i)
         print(names.join(","))
     }
     // Other owners keep their elements when the place is emptied.
-    keep :: names.copy()
+    keep: names.copy()
     words(&names, 4)
     print("{keep.join(",")} | {names.join(",")}")
-    shared :: names
+    shared: names
     words(&names, 5)
     print("{shared.join(",")} | {names.join(",")}")
     // An owned local, emptied and refilled.
@@ -96,13 +96,13 @@ fn run() {
     print(local)
     // A literal List, emptied.
     fixed := [Int]{4, 5}
-    held :: fixed
+    held: fixed
     fixed = [Int]{}
     &fixed.push(6)
     print("{held} {fixed}")
     // Fields, emptied and refilled.
     b := Buffers{text: "old", items: [Int]{9, 9}}
-    old :: b.items
+    old: b.items
     b.text = ""
     b.items = [Int]{}
     b.text += "new"
@@ -113,29 +113,29 @@ fn run() {
     fill(&out)
     print(out.len())
     files.write("/proc/self/clear_refs", "5") ?? panic("reset the peak resident set")
-    start :: status_kb("VmRSS:")
+    start: status_kb("VmRSS:")
     fill(&out)
-    grown :: status_kb("VmHWM:") - start
+    grown: status_kb("VmHWM:") - start
     print(out.len())
     if grown * 8192 > SIZE -> panic("list refill: peak grew {grown} kB, more than an eighth of a fill of {SIZE} bytes")
     print("list refill: the buffer was reused")
     into := Buffers{text: "", items: [Int]{}}
-    chunk :: "t".repeat(CHUNK)
+    chunk: "t".repeat(CHUNK)
     fill_fields(&into, chunk)
     print("{into.text.len()} {into.items.len()}")
     files.write("/proc/self/clear_refs", "5") ?? panic("reset the peak resident set")
-    field_start :: status_kb("VmRSS:")
+    field_start: status_kb("VmRSS:")
     fill_fields(&into, chunk)
-    field_grown :: status_kb("VmHWM:") - field_start
+    field_grown: status_kb("VmHWM:") - field_start
     print("{into.text.len()} {into.items.len()}")
     if field_grown * 8192 > SIZE + COUNT -> panic("field refill: peak grew {field_grown} kB, more than an eighth of a fill of {SIZE + COUNT} bytes")
     print("field refill: the buffers were reused")
     // 200000 rounds of 8 fresh Strings: kept elements would grow the
     // resident set by well over 50 MB.
-    assigned :: churn(200000, true)
+    assigned: churn(200000, true)
     if assigned > 20000 -> panic("emptied by assignment: peak grew {assigned} kB")
     print("assign: the elements ended")
-    cleared :: churn(200000, false)
+    cleared: churn(200000, false)
     if cleared > 20000 -> panic("emptied by clear: peak grew {cleared} kB")
     print("clear: the elements ended")
 }

@@ -197,11 +197,11 @@ raw references, source names, providers, channels, source modules, collision
 choices, and a stable fingerprint:
 
 ```jet
-module profile.base {
+profile.base: module {
     packages: [default.ripgrep]
 }
 
-module profile.dev {
+profile.dev: module {
     extends: ["base"]
     packages: [default.fd]
     collisions: { "bin/editor": "fd@default" }
@@ -382,7 +382,7 @@ Readiness is separate from process start. The closed probe types are `exec`,
 `http`, `notify`, and `tcp`, each with a bounded attempt:
 
 ```jet
-module env.dev {
+env.dev: module {
     services: {
         api: Service{
             enable: true,

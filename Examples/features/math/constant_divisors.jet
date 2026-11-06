@@ -1,7 +1,7 @@
 // A constant divisor divides by a multiply instead of a divide. Each of
 // `/%`, `%` and `%%` must agree with the same division by a divisor known
 // only at run time, across signs and both ends of the one-word range.
-fn by_constants(n: Int) -> [Int] {
+by_constants: fn(n: Int) -> [Int] {
     [Int]{
         n /% 3, n % 3, n %% 3,
         n /% 7, n % 7, n %% 7,
@@ -13,7 +13,7 @@ fn by_constants(n: Int) -> [Int] {
     }
 }
 
-fn by_values(n: Int, divisors: [Int]) -> [Int] {
+by_values: fn(n: Int, divisors: [Int]) -> [Int] {
     out := [Int]{}
     loop d in divisors {
         &out.push(n /% d)
@@ -23,8 +23,8 @@ fn by_values(n: Int, divisors: [Int]) -> [Int] {
     out
 }
 
-fn run() {
-    divisors :: [Int]{3, 7, 10, 13, 641, 1000003, 2305843009213693953}
+run: fn() {
+    divisors: [Int]{3, 7, 10, 13, 641, 1000003, 2305843009213693953}
     inputs := [Int]{0, 1, -1, 12, -12, 13, -13, 14, -14, 4611686018427387903, -4611686018427387904, 9223372036854775807, -9223372036854775808}
     n := -1000
     loop n <= 1000 {

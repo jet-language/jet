@@ -141,7 +141,7 @@ const mappings = decodeMappings(jsMap);
 assert(mappings.length > 0, "app.js.map has no mappings");
 const hit = mappings.find((m) => {
   const line = jsMap.sourcesContent[m.source]?.split("\n")[m.originalLine] || "";
-  return line.includes("backend ::") || line.includes(" :: ") || line.includes("print(");
+  return line.includes("backend: ") || /^\s*[A-Za-z_]\w*: /.test(line) || line.includes("print(");
 }) || mappings[0];
 const jetFile = jsMap.sources[hit.source];
 const jetLine = hit.originalLine;

@@ -6,29 +6,29 @@
 use jet_foundation.[JET_CLI_COMMANDS, JET_CLI_HANDLERS, JET_CLI_FLAGS, JET_CLI_JOB_INVOCATION_HELP, JetCLIActionSpec, JetCLIFlagSpec]
 
 // jet-foundation Syntax `BINARY_NAME` and `LANG_NAME`; the `jet` package version.
-JET_CLI_BINARY :: "jet"
-JET_CLI_LANG_NAME :: "Jet"
-JET_CLI_VERSION :: "0.1.0"
+JET_CLI_BINARY: "jet"
+JET_CLI_LANG_NAME: "Jet"
+JET_CLI_VERSION: "0.1.0"
 
 // The flags every command accepts.
-JET_CLI_GLOBAL_FLAGS :: [String]{"--json", "--quiet", "--color"}
+JET_CLI_GLOBAL_FLAGS: [String]{"--json", "--quiet", "--color"}
 
 // One nested action: `JET_CLI_COMMANDS[group].actions[action]`.
-struct JetCLIActionRef {
+JetCLIActionRef: struct {
     group: Int
     action: Int
 }
 
 // `text` left-aligned in `width` characters (Rust `{:<width}`).
-fn jet_cli_pad(text: String, width: Int) -> String Never! {
-    padding :: width - text.len()
+jet_cli_pad: fn(text: String, width: Int) -> String Never! {
+    padding: width - text.len()
     // copy: `text` stays with the caller (`text` is a read parameter: no move out of it, E0201) and
     // the new value owns its own.
     if padding <= 0 -> return text.copy()
     "{text}{" ".repeat(padding)}"
 }
 
-fn jet_cli_command_index(name: String) -> Int? Never! {
+jet_cli_command_index: fn(name: String) -> Int? Never! {
     loop (index, command) in JET_CLI_COMMANDS {
         if command.name == name -> return Val(index)
     }
@@ -36,21 +36,21 @@ fn jet_cli_command_index(name: String) -> Int? Never! {
 }
 
 // A group is a command row with nested actions.
-fn jet_cli_group_index(name: String) -> Int? Never! {
-    index :: jet_cli_command_index(name) ?? return None
+jet_cli_group_index: fn(name: String) -> Int? Never! {
+    index: jet_cli_command_index(name) ?? return None
     if JET_CLI_COMMANDS[index].actions.len() == 0 -> return None
     Val(index)
 }
 
-fn jet_cli_handler_index(key: String) -> Int? Never! {
+jet_cli_handler_index: fn(key: String) -> Int? Never! {
     loop (index, handler) in JET_CLI_HANDLERS {
         if handler.key == key -> return Val(index)
     }
     None
 }
 
-fn jet_cli_nested_command(group: String, action: String) -> JetCLIActionRef? Never! {
-    group_index :: jet_cli_group_index(group) ?? return None
+jet_cli_nested_command: fn(group: String, action: String) -> JetCLIActionRef? Never! {
+    group_index: jet_cli_group_index(group) ?? return None
     loop (index, spec) in JET_CLI_COMMANDS[group_index].actions {
         if spec.name == action -> return Val(JetCLIActionRef{group: group_index, action: index})
     }
@@ -60,7 +60,7 @@ fn jet_cli_nested_command(group: String, action: String) -> JetCLIActionRef? Nev
 // A bare nested-action word typed as a top-level command (`jet publish`).
 // Group names, top-level commands, and actions that are also canonical at the
 // top level win the bare word.
-fn jet_cli_moved_command(name: String) -> JetCLIActionRef? Never! {
+jet_cli_moved_command: fn(name: String) -> JetCLIActionRef? Never! {
     if jet_cli_command_index(name) != None -> return None
     loop command in JET_CLI_COMMANDS {
         loop action in command.actions {
@@ -79,25 +79,25 @@ fn jet_cli_moved_command(name: String) -> JetCLIActionRef? Never! {
 }
 
 // Canonical top-level spellings: never a moved action.
-fn jet_cli_is_canonical_top_level(name: String) -> Bool Never! {
+jet_cli_is_canonical_top_level: fn(name: String) -> Bool Never! {
     jet_cli_moved_command(name) == None
 }
 
 // Is `name` a word the host dispatches: a command or a normalized handler
 // word?
-fn jet_cli_is_builtin(name: String) -> Bool Never! {
+jet_cli_is_builtin: fn(name: String) -> Bool Never! {
     if jet_cli_command_index(name) != None -> return true
     loop command in JET_CLI_COMMANDS {
         loop action in command.actions {
-            handler :: jet_cli_handler_index(action.handler) ?? next
+            handler: jet_cli_handler_index(action.handler) ?? next
             if JET_CLI_HANDLERS[handler].dispatch_word == name -> return true
         }
     }
     false
 }
 
-fn jet_cli_is_known_flag(flag: String) -> Bool Never! {
-    head :: flag.split("=").to_list()[0]
+jet_cli_is_known_flag: fn(flag: String) -> Bool Never! {
+    head: flag.split("=").to_list()[0]
     loop spec in JET_CLI_FLAGS {
         if spec.long == head -> return true
     }
@@ -105,11 +105,11 @@ fn jet_cli_is_known_flag(flag: String) -> Bool Never! {
 }
 
 // The first closest candidate within distance 3 and at most its own length.
-fn jet_cli_closest(needle: String, candidates: [String]) -> String? Never! {
+jet_cli_closest: fn(needle: String, candidates: [String]) -> String? Never! {
     best := ""
     best_distance := -1
     loop candidate in candidates {
-        distance :: jet_cli_edit_distance(needle, candidate)
+        distance: jet_cli_edit_distance(needle, candidate)
         if best_distance < 0 || distance < best_distance {
             best = candidate
             best_distance = distance
@@ -119,7 +119,7 @@ fn jet_cli_closest(needle: String, candidates: [String]) -> String? Never! {
     Val(best)
 }
 
-fn jet_cli_closest_command(name: String) -> String? Never! {
+jet_cli_closest_command: fn(name: String) -> String? Never! {
     names := [String]{}
     loop command in JET_CLI_COMMANDS {
         if jet_cli_is_canonical_top_level(command.name) -> &names.push(command.name)
@@ -127,14 +127,14 @@ fn jet_cli_closest_command(name: String) -> String? Never! {
     jet_cli_closest(name, names)
 }
 
-fn jet_cli_closest_flag(flag: String) -> String? Never! {
+jet_cli_closest_flag: fn(flag: String) -> String? Never! {
     names := [String]{}
     loop spec in JET_CLI_FLAGS -> &names.push(spec.long)
     jet_cli_closest(flag.split("=").to_list()[0], names)
 }
 
 // `registry` -> `Registry`, `shared-store` -> `Shared-Store`.
-fn jet_cli_group_label(name: String) -> String Never! {
+jet_cli_group_label: fn(name: String) -> String Never! {
     parts := [String]{}
     loop part in name.split("-").to_list() {
         if part.len() == 0 {
@@ -148,7 +148,7 @@ fn jet_cli_group_label(name: String) -> String Never! {
 
 // Help-only summaries for the actions whose output carries the application
 // effect projection; man and completions keep the registry summaries.
-fn jet_cli_action_help_summary(group: String, action: JetCLIActionSpec) -> String Never! {
+jet_cli_action_help_summary: fn(group: String, action: JetCLIActionSpec) -> String Never! {
     if group == "inspect" {
         if action.name == {
             "rights" -> return "Read required, granted, denied effects, and their authority source"
@@ -169,13 +169,13 @@ fn jet_cli_action_help_summary(group: String, action: JetCLIActionSpec) -> Strin
 }
 
 // One group's usage block: its own usage row, then one row per action form.
-fn jet_cli_group_usage(name: String) -> String Never! {
-    index :: jet_cli_group_index(name) ?? return ""
-    group :: JET_CLI_COMMANDS[index]
+jet_cli_group_usage: fn(name: String) -> String Never! {
+    index: jet_cli_group_index(name) ?? return ""
+    group: JET_CLI_COMMANDS[index]
     out := ""
     if group.usage == .Val(usage) -> out = "  {JET_CLI_BINARY} {jet_cli_pad(usage, 48)} {group.summary}\n"
     loop action in group.actions {
-        summary :: jet_cli_action_help_summary(group.name, action)
+        summary: jet_cli_action_help_summary(group.name, action)
         loop usage in action.usage.split("\n").to_list() {
             out = "{out}  {JET_CLI_BINARY} {group.name} {jet_cli_pad(usage, 48)} {summary}\n"
         }
@@ -184,13 +184,13 @@ fn jet_cli_group_usage(name: String) -> String Never! {
 }
 
 // The usage shape of a live command.
-fn jet_cli_command_usage(name: String) -> String Never! {
+jet_cli_command_usage: fn(name: String) -> String Never! {
     if jet_cli_group_index(name) == .Val(index) {
         if JET_CLI_COMMANDS[index].usage == .Val(usage) -> return "{JET_CLI_BINARY} {usage}"
         return "{JET_CLI_BINARY} {name} <command>"
     }
     if jet_cli_moved_command(name) == .Val(moved) {
-        group :: JET_CLI_COMMANDS[moved.group]
+        group: JET_CLI_COMMANDS[moved.group]
         lines := [String]{}
         loop usage in group.actions[moved.action].usage.split("\n").to_list() {
             &lines.push("{JET_CLI_BINARY} {group.name} {usage}")
@@ -205,13 +205,13 @@ fn jet_cli_command_usage(name: String) -> String Never! {
 
 // The command list of a `With <cmd>[/<cmd>,…]: ` help prefix, and the help
 // text after it; None for an unscoped flag.
-fn jet_cli_flag_scope(help: String) -> [String]? Never! {
+jet_cli_flag_scope: fn(help: String) -> [String]? Never! {
     rest := ""
     if {
         help.starts_with("with ") || help.starts_with("With ") -> rest = help.slice(5..<help.len())
         else -> return None
     }
-    parts :: rest.split(":").to_list()
+    parts: rest.split(":").to_list()
     if parts.len() < 2 -> return None
     Val([String]{parts[0], rest.slice(parts[0].len() + 1..<rest.len()).trim()})
 }
@@ -219,7 +219,7 @@ fn jet_cli_flag_scope(help: String) -> [String]? Never! {
 // The commands a flag's registry row scopes it to: the first command word of
 // each `/`-separated form in every `With <forms>: ` clause (`fmt --check`
 // names fmt, `inspect digest` inspect); None for an unscoped (global) flag.
-fn jet_cli_flag_commands(help: String) -> [String]? Never! {
+jet_cli_flag_commands: fn(help: String) -> [String]? Never! {
     commands := [String]{}
     scoped := false
     loop clause in help.split("; ").to_list() {
@@ -228,7 +228,7 @@ fn jet_cli_flag_commands(help: String) -> [String]? Never! {
             clause.starts_with("with ") || clause.starts_with("With ") -> rest = clause.slice(5..<clause.len())
             else -> next
         }
-        parts :: rest.split(":").to_list()
+        parts: rest.split(":").to_list()
         if parts.len() < 2 -> next
         scoped = true
         loop form in parts[0].split("/").to_list() {
@@ -246,12 +246,12 @@ fn jet_cli_flag_commands(help: String) -> [String]? Never! {
 // The group a word dispatches under when it is not a top-level command: a
 // group action's name (`digest`) or the word its handler normalizes the
 // action to (`self update` dispatches as `self-update`).
-fn jet_cli_word_group(word: String) -> String? Never! {
+jet_cli_word_group: fn(word: String) -> String? Never! {
     if jet_cli_command_index(word) != None -> return None
     loop command in JET_CLI_COMMANDS {
         loop action in command.actions {
             if action.name == word -> return Val(command.name.copy())
-            handler :: jet_cli_handler_index(action.handler) ?? next
+            handler: jet_cli_handler_index(action.handler) ?? next
             if JET_CLI_HANDLERS[handler].dispatch_word == word -> return Val(command.name.copy())
         }
     }
@@ -262,8 +262,8 @@ fn jet_cli_word_group(word: String) -> String? Never! {
 // with every command. A group's action (`jet inspect digest`, dispatched as
 // `digest`) takes its group's flags, and a group that keeps its own word
 // (`jet inspect expand`, dispatched as `inspect`) takes its actions' flags.
-fn jet_cli_flag_takes(spec: JetCLIFlagSpec, command: String) -> Bool Never! {
-    commands :: jet_cli_flag_commands(spec.help) ?? return true
+jet_cli_flag_takes: fn(spec: JetCLIFlagSpec, command: String) -> Bool Never! {
+    commands: jet_cli_flag_commands(spec.help) ?? return true
     if commands.contains(command) -> return true
     if jet_cli_word_group(command) == .Val(group) {
         if commands.contains(group) -> return true
@@ -278,60 +278,60 @@ fn jet_cli_flag_takes(spec: JetCLIFlagSpec, command: String) -> Bool Never! {
 
 // Flags attached to one command: the scoped flags that name it plus the global
 // output flags, each with its help text after the scope prefix.
-fn jet_cli_flags_for_command(name: String) -> [JetCLIFlagSpec] Never! {
+jet_cli_flags_for_command: fn(name: String) -> [JetCLIFlagSpec] Never! {
     flags := [JetCLIFlagSpec]{}
     loop spec in JET_CLI_FLAGS {
-        commands :: jet_cli_flag_commands(spec.help) ?? [String]{}
+        commands: jet_cli_flag_commands(spec.help) ?? [String]{}
         if !commands.contains(name) && !JET_CLI_GLOBAL_FLAGS.contains(spec.long) -> next
-        help :: if jet_cli_flag_scope(spec.help) == .Val(parts) -> parts[1] else -> spec.help.copy()
+        help: if jet_cli_flag_scope(spec.help) == .Val(parts) -> parts[1] else -> spec.help.copy()
         &flags.push(JetCLIFlagSpec{long: spec.long, help: help})
     }
     flags
 }
 
 // The registry row of a known flag (`--flag` or `--flag=value`).
-fn jet_cli_flag_spec(flag: String) -> JetCLIFlagSpec? Never! {
-    head :: flag.split("=").to_list()[0]
+jet_cli_flag_spec: fn(flag: String) -> JetCLIFlagSpec? Never! {
+    head: flag.split("=").to_list()[0]
     loop spec in JET_CLI_FLAGS {
         if spec.long == head -> return Val(spec.copy())
     }
     None
 }
 
-fn jet_cli_lower_byte(byte: Int) -> Int Never! {
+jet_cli_lower_byte: fn(byte: Int) -> Int Never! {
     if byte >= 65 && byte <= 90 -> return byte + 32
     byte
 }
 
 // Names compare ASCII-case-insensitively.
-fn jet_cli_name_before(left: String, right: String) -> Bool Never! {
-    a :: left.bytes()
-    b :: right.bytes()
+jet_cli_name_before: fn(left: String, right: String) -> Bool Never! {
+    a: left.bytes()
+    b: right.bytes()
     loop index in 0..<a.len() {
         if index >= b.len() -> return false
-        x :: jet_cli_lower_byte(Int.from_u8(a[index]))
-        y :: jet_cli_lower_byte(Int.from_u8(b[index]))
+        x: jet_cli_lower_byte(Int.from_u8(a[index]))
+        y: jet_cli_lower_byte(Int.from_u8(b[index]))
         if x != y -> return x < y
     }
     a.len() < b.len()
 }
 
-fn jet_cli_command_before(left: Int, right: Int, order: String) -> Bool Never! {
+jet_cli_command_before: fn(left: Int, right: Int, order: String) -> Bool Never! {
     if order == "az" -> return jet_cli_name_before(JET_CLI_COMMANDS[left].name, JET_CLI_COMMANDS[right].name)
     if order == "za" -> return jet_cli_name_before(JET_CLI_COMMANDS[right].name, JET_CLI_COMMANDS[left].name)
     JET_CLI_COMMANDS[left].frequency_rank < JET_CLI_COMMANDS[right].frequency_rank
 }
 
 // The accepted `jet help --sort` values.
-JET_CLI_HELP_ORDERS :: "frequency, az, za"
+JET_CLI_HELP_ORDERS: "frequency, az, za"
 
-fn jet_cli_is_help_order(value: String) -> Bool Never! {
+jet_cli_is_help_order: fn(value: String) -> Bool Never! {
     value == "frequency" || value == "az" || value == "za"
 }
 
 // Command row indices in `order` ("frequency", "az", or "za"); equal keys
 // keep table order.
-fn jet_cli_commands_in(order: String) -> [Int] Never! {
+jet_cli_commands_in: fn(order: String) -> [Int] Never! {
     picked := [Bool]{}
     loop _command in JET_CLI_COMMANDS -> &picked.push(false)
     ordered := [Int]{}
@@ -348,15 +348,15 @@ fn jet_cli_commands_in(order: String) -> [Int] Never! {
 }
 
 // `jet help`: every canonical command, each group's actions, then every flag.
-fn jet_cli_usage_page(order: String) -> String Never! {
+jet_cli_usage_page: fn(order: String) -> String Never! {
     out := "Welcome to {JET_CLI_LANG_NAME}! (v{JET_CLI_VERSION})\n\nUsage:\n"
-    commands :: jet_cli_commands_in(order)
+    commands: jet_cli_commands_in(order)
     loop index in commands {
-        command :: JET_CLI_COMMANDS[index]
+        command: JET_CLI_COMMANDS[index]
         if jet_cli_is_canonical_top_level(command.name) -> out = "{out}  {jet_cli_pad(jet_cli_command_usage(command.name), 36)} {command.summary}\n"
     }
     loop index in commands {
-        command :: JET_CLI_COMMANDS[index]
+        command: JET_CLI_COMMANDS[index]
         if command.actions.len() > 0 -> out = "{out}\n{jet_cli_group_label(command.name)} Commands:\n{jet_cli_group_usage(command.name)}"
     }
     out = "{out}\nFlags:\n"
@@ -365,9 +365,9 @@ fn jet_cli_usage_page(order: String) -> String Never! {
 }
 
 // The categories of the bare `jet` command palette, in display order.
-JET_CLI_PALETTE_CATEGORIES :: [String]{"Build & Run", "Projects & Environments", "Packages", "Jetos", "Development Server", "Reference"}
+JET_CLI_PALETTE_CATEGORIES: [String]{"Build & Run", "Projects & Environments", "Packages", "Jetos", "Development Server", "Reference"}
 
-fn jet_cli_palette_category(name: String) -> String Never! {
+jet_cli_palette_category: fn(name: String) -> String Never! {
     if name == {
         "run" | "check" | "test" | "build" | "debug" | "crash" | "eval" | "emit" | "package" | "flash" | "cc" | "c++" | "jobs" -> "Build & Run"
         "new" | "fmt" | "fix" | "lint" | "env" | "init" | "project" | "import" | "split" | "fold" | "generate" -> "Projects & Environments"
@@ -380,13 +380,13 @@ fn jet_cli_palette_category(name: String) -> String Never! {
 
 // Bare `jet`: the command palette, every canonical command under its
 // category. It prints the same static text with or without a terminal.
-fn jet_cli_palette() -> String Never! {
+jet_cli_palette: fn() -> String Never! {
     out := "{JET_CLI_LANG_NAME} command palette\n"
-    commands :: jet_cli_commands_in("frequency")
+    commands: jet_cli_commands_in("frequency")
     loop category in JET_CLI_PALETTE_CATEGORIES {
         out = "{out}\n{category}\n"
         loop index in commands {
-            command :: JET_CLI_COMMANDS[index]
+            command: JET_CLI_COMMANDS[index]
             if !jet_cli_is_canonical_top_level(command.name) || jet_cli_palette_category(command.name) != category -> next
             out = "{out}  {jet_cli_pad("{JET_CLI_BINARY} {command.name}", 18)} {command.summary}\n"
         }
@@ -395,20 +395,20 @@ fn jet_cli_palette() -> String Never! {
     "{out}\nRun `{JET_CLI_BINARY} help` for every command's usage and flags.\n"
 }
 
-fn jet_cli_flag_rows(flags: [JetCLIFlagSpec]) -> String Never! {
+jet_cli_flag_rows: fn(flags: [JetCLIFlagSpec]) -> String Never! {
     out := ""
     loop spec in flags -> out = "{out}  {jet_cli_pad(spec.long, 28)} {spec.help}\n"
     out
 }
 
 // `jet <group> help` for an exhaustive group (and `env`): summary, then usage.
-fn jet_cli_group_help(name: String) -> String Never! {
-    index :: jet_cli_group_index(name) ?? return ""
+jet_cli_group_help: fn(name: String) -> String Never! {
+    index: jet_cli_group_index(name) ?? return ""
     "{JET_CLI_BINARY} {name} — {JET_CLI_COMMANDS[index].summary}\n{jet_cli_group_usage(name)}"
 }
 
 // `jet <cmd> --help` and `jet help <cmd>`.
-fn jet_cli_command_help(name: String) -> String Never! {
+jet_cli_command_help: fn(name: String) -> String Never! {
     // `diff`/`merge` carry their own structural usage (StructuralMerge.jet).
     if jet_cli_structural_help(name) == .Val(bespoke) -> return bespoke
     if jet_cli_group_index(name) == .Val(index) {
@@ -417,13 +417,13 @@ fn jet_cli_command_help(name: String) -> String Never! {
         return out
     }
     if jet_cli_moved_command(name) == .Val(moved) {
-        group :: JET_CLI_COMMANDS[moved.group]
-        action :: group.actions[moved.action]
+        group: JET_CLI_COMMANDS[moved.group]
+        action: group.actions[moved.action]
         lines := ""
         loop usage in action.usage.split("\n").to_list() -> lines = "{lines}  {JET_CLI_BINARY} {group.name} {usage}\n"
         return "{JET_CLI_BINARY} {group.name} {name} — {jet_cli_action_help_summary(group.name, action)}\n\n{lines}"
     }
-    index :: jet_cli_command_index(name) ?? return "{JET_CLI_BINARY} {name}\n\nRun `{JET_CLI_BINARY} help` to see every command.\n"
-    job_help :: if name == "jobs" -> JET_CLI_JOB_INVOCATION_HELP else -> ""
+    index: jet_cli_command_index(name) ?? return "{JET_CLI_BINARY} {name}\n\nRun `{JET_CLI_BINARY} help` to see every command.\n"
+    job_help: if name == "jobs" -> JET_CLI_JOB_INVOCATION_HELP else -> ""
     "{JET_CLI_BINARY} {name} — {JET_CLI_COMMANDS[index].summary}\n\n  {jet_cli_command_usage(name)}\n{jet_cli_flag_rows(jet_cli_flags_for_command(name))}{job_help}"
 }

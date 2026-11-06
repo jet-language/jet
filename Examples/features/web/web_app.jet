@@ -1,19 +1,19 @@
 // D-WEBAPP1=D / D-WEBAUTHOR1=D: one statically known full-stack application graph.
-// `fn run` returns the canonical builder; CSR/SSR/SSG/streaming/islands share one IR.
-package {
+// `run: fn` returns the canonical builder; CSR/SSR/SSG/streaming/islands share one IR.
+package: {
     name: "web_app"
     authority: { allow: [Browser, Env, Net, FS.Read, Time] }
 }
-use web :: core.web
+use web: core.web
 #Target(Web)
 
-fn home() -> WebPage { web.page("Home", "hello from csr") }
+home: fn() -> WebPage { web.page("Home", "hello from csr") }
 
-fn save() -> String { "saved" }
+save: fn() -> String { "saved" }
 
-fn api_mount(prefix: String) { print(prefix) }
+api_mount: fn(prefix: String) { print(prefix) }
 
-fn run() {
+run: fn() {
     web.app()
         .csr()
         .route("/", home)

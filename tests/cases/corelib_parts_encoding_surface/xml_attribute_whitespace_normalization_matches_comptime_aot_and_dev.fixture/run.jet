@@ -1,7 +1,7 @@
 
-use xml :: core.encoding.xml
+use xml: core.encoding.xml
 
-fn summarize(source: String) -> String {
+summarize: fn(source: String) -> String {
     doc := xml.parse(source) ?? panic("xml")
     root := (&doc.field("children") ?? panic("document children")).at(0) ?? panic("root")
     namespace := ((&root.field("namespaces") ?? panic("namespaces")).at(0) ?? panic("namespace")).field("namespace_uri") ?? panic("namespace URI")
@@ -14,12 +14,12 @@ fn summarize(source: String) -> String {
     return "{namespace_ok}|{literal_ok}|{reference.len()}|{lexical_ok}"
 }
 
-CR :: comptime { String.from_bytes([13]) ?? panic("CR") }
-CLOSE :: comptime { "/>" }
-SOURCE :: comptime { "<r xmlns='urn:\tfoo\nbar' a='A\tB\nC{CR}\nD{CR}E' b='&#xD;&#xA;&#x9;'{CLOSE}" }
-NORMALIZED :: comptime { summarize(SOURCE) }
+CR: comptime { String.from_bytes([13]) ?? panic("CR") }
+CLOSE: comptime { "/>" }
+SOURCE: comptime { "<r xmlns='urn:\tfoo\nbar' a='A\tB\nC{CR}\nD{CR}E' b='&#xD;&#xA;&#x9;'{CLOSE}" }
+NORMALIZED: comptime { summarize(SOURCE) }
 
-fn run() {
+run: fn() {
     runtime := summarize(SOURCE)
     print("{NORMALIZED}|{runtime}")
 }

@@ -4,11 +4,11 @@ use {
         BinderHostOS, COM_DISCOVERY_C, ComTypeLibraryInput, ForeignBindError, pkg_com_bind,
         pkg_com_parse_schema, pkg_com_project, pkg_com_render_c, pkg_com_render_jet,
     ]
-    files :: core.files
-    process :: core.process
+    files: core.files
+    process: core.process
 }
 
-COM_TEST_OFFICE_METADATA :: comptime { "LIB\tOffice Fixture\t{{00000000-0000-0000-0000-000000000001}}\nCLASS\t{{00000000-0000-0000-0000-000000000002}}\tApplication\nMETHOD\tApplication\tWorkbooks\t41\t2\tobject=Workbooks\nMETHOD\tWorkbooks\tOpen-Book\t42\t1\tobject=Workbook\tpath:text\nMETHOD\tRange\tValues\t77\t2\tdata\n" }
+COM_TEST_OFFICE_METADATA: comptime { "LIB\tOffice Fixture\t{{00000000-0000-0000-0000-000000000001}}\nCLASS\t{{00000000-0000-0000-0000-000000000002}}\tApplication\nMETHOD\tApplication\tWorkbooks\t41\t2\tobject=Workbooks\nMETHOD\tWorkbooks\tOpen-Book\t42\t1\tobject=Workbook\tpath:text\nMETHOD\tRange\tValues\t77\t2\tdata\n" }
 
 #Test("com contextual result names project as foreign identifiers") {
     assert_eq(pkg_com_project("Ok") ?? panic("Ok projects"), "Ok")
@@ -16,20 +16,20 @@ COM_TEST_OFFICE_METADATA :: comptime { "LIB\tOffice Fixture\t{{00000000-0000-000
 }
 
 #Test("com schema generates typed stub and real windows automation") {
-    schema :: pkg_com_parse_schema(COM_TEST_OFFICE_METADATA.bytes()) ?? panic("the fixture schema parses")
-    jet :: pkg_com_render_jet("office", schema)
-    assert(jet.contains("fn open() -[FFI.Com]> Application ComError!"))
+    schema: pkg_com_parse_schema(COM_TEST_OFFICE_METADATA.bytes()) ?? panic("the fixture schema parses")
+    jet: pkg_com_render_jet("office", schema)
+    assert(jet.contains("open: fn() -[FFI.Com]> Application ComError!"))
     assert(jet.contains("impl Application.Close"))
-    assert(jet.contains("fn close(^self)"))
-    assert(!jet.contains("fn close_Application"))
-    assert(jet.contains("\nfn Application_Workbooks(object: Application) -[FFI.Com]> Workbooks ComError!"))
-    assert(jet.contains("\nfn Workbooks_Open_Book(object: Workbooks, path: String) -[FFI.Com]> Workbook ComError!"))
-    assert(jet.contains("\nfn Range_Values(object: Range) -[FFI.Com]> Dyn ComError!"))
-    assert(jet.contains("#Unsafe(\"dynamic IDispatch has no type-library contract\")\nfn dynamic_Application"))
+    assert(jet.contains("close: fn(^self)"))
+    assert(!jet.contains("close_Application: fn"))
+    assert(jet.contains("\nApplication_Workbooks: fn(object: Application) -[FFI.Com]> Workbooks ComError!"))
+    assert(jet.contains("\nWorkbooks_Open_Book: fn(object: Workbooks, path: String) -[FFI.Com]> Workbook ComError!"))
+    assert(jet.contains("\nRange_Values: fn(object: Range) -[FFI.Com]> Dyn ComError!"))
+    assert(jet.contains("#Unsafe(\"dynamic IDispatch has no type-library contract\")\ndynamic_Application: fn"))
     assert(!jet.contains("pub "))
-    c :: pkg_com_render_c("office", schema)
+    c: pkg_com_render_c("office", schema)
     assert(c.contains("jet_com_office_Workbooks_Open_Book"))
-    needles :: [String]{
+    needles: [String]{
         "CoInitializeEx",
         "HRESULT apartment=CoInitializeEx",
         "CoCreateInstance",
@@ -59,8 +59,8 @@ COM_TEST_OFFICE_METADATA :: comptime { "LIB\tOffice Fixture\t{{00000000-0000-000
 }
 
 #Test("com schema rejects duplicate projected parameter names") {
-    metadata :: "LIB\tOffice Fixture\t{{00000000-0000-0000-0000-000000000001}}\nCLASS\t{{00000000-0000-0000-0000-000000000002}}\tApplication\nMETHOD\tApplication\tOpen\t1\t1\tunit\tbook-name:text\tbook_name:text\n"
-    error :: if pkg_com_parse_schema(metadata.bytes()) == {
+    metadata: "LIB\tOffice Fixture\t{{00000000-0000-0000-0000-000000000001}}\nCLASS\t{{00000000-0000-0000-0000-000000000002}}\tApplication\nMETHOD\tApplication\tOpen\t1\t1\tunit\tbook-name:text\tbook_name:text\n"
+    error: if pkg_com_parse_schema(metadata.bytes()) == {
         .Ok(_) -> panic("duplicate projected parameters were accepted")
         .Err(error) -> error
     }
@@ -69,7 +69,7 @@ COM_TEST_OFFICE_METADATA :: comptime { "LIB\tOffice Fixture\t{{00000000-0000-000
 
 #Test("com generated windows sources cross compile with winegcc") {
     if BinderHostOS.current() == BinderHostOS.Windows -> return
-    probe :: if process.cmd([String]{"winegcc", "--version"}).stdout(.Capture).stderr(.Capture).run() == {
+    probe: if process.cmd([String]{"winegcc", "--version"}).stdout(.Capture).stderr(.Capture).run() == {
         .Ok(receipt) -> receipt
         .Err(error) -> {
             if error == {
@@ -82,23 +82,23 @@ COM_TEST_OFFICE_METADATA :: comptime { "LIB\tOffice Fixture\t{{00000000-0000-000
         }
     }
     if !probe.success -> panic("winegcc --version failed: {probe.errors}")
-    metadata :: "LIB\tOffice Fixture\t{{00000000-0000-0000-0000-000000000001}}\nCLASS\t{{00000000-0000-0000-0000-000000000002}}\tApplication\nMETHOD\tApplication\tTitle\t1\t2\ttext\n"
-    schema :: pkg_com_parse_schema(metadata.bytes()) ?? panic("the fixture schema parses")
-    scratch :: files.temp_dir("jet-com-cross") ?? panic("scratch directory")
-    inspector :: files.join(scratch.path, "inspect.c")
-    runtime :: files.join(scratch.path, "runtime.c")
+    metadata: "LIB\tOffice Fixture\t{{00000000-0000-0000-0000-000000000001}}\nCLASS\t{{00000000-0000-0000-0000-000000000002}}\tApplication\nMETHOD\tApplication\tTitle\t1\t2\ttext\n"
+    schema: pkg_com_parse_schema(metadata.bytes()) ?? panic("the fixture schema parses")
+    scratch: files.temp_dir("jet-com-cross") ?? panic("scratch directory")
+    inspector: files.join(scratch.path, "inspect.c")
+    runtime: files.join(scratch.path, "runtime.c")
     files.write(inspector, COM_DISCOVERY_C) ?? panic("write inspector")
     files.write(runtime, pkg_com_render_c("office", schema)) ?? panic("write runtime")
-    sources :: [(source: String, object: String)]{(source: inspector, object: "inspect.o"), (source: runtime, object: "runtime.o")}
+    sources: [(source: String, object: String)]{(source: inspector, object: "inspect.o"), (source: runtime, object: "runtime.o")}
     loop entry in sources {
-        receipt :: process.cmd([String]{"winegcc", "-std=gnu11", "-c", entry.source, "-o", files.join(scratch.path, entry.object)}).stdout(.Capture).stderr(.Capture).run() ?? panic("winegcc runs")
+        receipt: process.cmd([String]{"winegcc", "-std=gnu11", "-c", entry.source, "-o", files.join(scratch.path, entry.object)}).stdout(.Capture).stderr(.Capture).run() ?? panic("winegcc runs")
         if !receipt.success -> panic("winegcc failed for {entry.source}: {receipt.errors}")
     }
 }
 
 #Test("com non windows host is rejected before tool or file access") {
     if BinderHostOS.current() == BinderHostOS.Windows -> return
-    error :: if pkg_com_bind(ComTypeLibraryInput.File("missing.tlb"), "office", "missing-cache") == {
+    error: if pkg_com_bind(ComTypeLibraryInput.File("missing.tlb"), "office", "missing-cache") == {
         .Ok(_) -> panic("a non-Windows host bound a COM type library")
         .Err(error) -> error
     }

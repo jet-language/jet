@@ -1,15 +1,15 @@
 // Correctness path for Rust f64::from_str captures. Decimal digits become an
 // exact rational; only the final quotient is rounded, ties to even. No Float
 // arithmetic, libc parser, or lossy decimal accumulator.
-struct ScanDecimal {
+ScanDecimal: struct {
     valid: Bool, negative: Bool, first: I64, last: I64,
     digits: I64, fraction: I64, exponent: I64, special: I64
 }
-fn scan_decimal(data: I64, len: I64, stride: I64) -> ScanDecimal {
+scan_decimal: fn(data: I64, len: I64, stride: I64) -> ScanDecimal {
     result := ScanDecimal{valid: false, negative: false, first: I64{0}, last: I64{0}, digits: I64{0}, fraction: I64{0}, exponent: I64{0}, special: I64{0}}
     if (len == I64{0}) { return result }
     at := I64{0}
-    first :: scan_byte(data, stride, at)
+    first: scan_byte(data, stride, at)
     if (first == I64{43} || first == I64{45}) {
         result.negative = first == I64{45}
         at += I64{1}
@@ -29,7 +29,7 @@ fn scan_decimal(data: I64, len: I64, stride: I64) -> ScanDecimal {
     leading := true
     trailing := I64{0}
     loop at < len {
-        byte :: scan_byte(data, stride, at)
+        byte: scan_byte(data, stride, at)
         if (byte == I64{101} || byte == I64{69}) { break }
         if (byte == I64{46} && !point) {
             point = true
@@ -53,7 +53,7 @@ fn scan_decimal(data: I64, len: I64, stride: I64) -> ScanDecimal {
         at += I64{1}
         minus := false
         if (at < len) {
-            byte :: scan_byte(data, stride, at)
+            byte: scan_byte(data, stride, at)
             if (byte == I64{43} || byte == I64{45}) {
                 minus = byte == I64{45}
                 at += I64{1}
@@ -62,10 +62,10 @@ fn scan_decimal(data: I64, len: I64, stride: I64) -> ScanDecimal {
         if (at == len) { return result }
         // Saturate beyond every possible cancellation by this input's decimal
         // point. Arbitrarily long exponent spellings still get fully validated.
-        bound :: len + I64{1024}
+        bound: len + I64{1024}
         exp := I64{0}
         loop at < len {
-            digit :: scan_byte(data, stride, at) - I64{48}
+            digit: scan_byte(data, stride, at) - I64{48}
             if (digit < I64{0} || digit > I64{9}) { return result }
             if (exp <= (bound - digit) /% I64{10}) { exp = exp * I64{10} + digit } else { exp = bound }
             at += I64{1}
@@ -77,7 +77,7 @@ fn scan_decimal(data: I64, len: I64, stride: I64) -> ScanDecimal {
     result.valid = true
     result
 }
-fn scan_pow10(node: I64, count: I64) {
+scan_pow10: fn(node: I64, count: I64) {
     remaining := count
     loop remaining >= (I64{9}) {
         int_scale(node, I64{1000000000}, I64{0})
@@ -90,32 +90,32 @@ fn scan_pow10(node: I64, count: I64) {
     }
     int_scale(node, factor, I64{0})
 }
-fn scan_float_bits(data: I64, len: I64, stride: I64) -> I64 {
-    decimal :: scan_decimal(data, len, stride)
-    sign :: if decimal.negative -> I64{-9223372036854775808} else -> I64{0}
+scan_float_bits: fn(data: I64, len: I64, stride: I64) -> I64 {
+    decimal: scan_decimal(data, len, stride)
+    sign: if decimal.negative -> I64{-9223372036854775808} else -> I64{0}
     if (decimal.special == I64{1}) { return sign.bit_or(I64{9218868437227405312}) }
     if (decimal.special == I64{2}) { return sign.bit_or(I64{9221120237041090560}) }
     if (decimal.digits == I64{0}) { return sign }
-    order :: decimal.digits + decimal.exponent
+    order: decimal.digits + decimal.exponent
     if (order > I64{309}) { return sign.bit_or(I64{9218868437227405312}) }
     if (order < I64{-324}) { return sign }
     // Rust dec2flt's bound: every binary64 rounding boundary terminates within
     // 768 significant decimal digits. A longer suffix can affect rounding only
     // when the retained prefix is exactly halfway. decimal.last excludes all
     // trailing zero digits, so an omitted suffix is necessarily nonzero.
-    retained :: if (decimal.digits > I64{768}) -> I64{768} else -> decimal.digits
-    sticky :: decimal.digits > retained
-    scale :: decimal.exponent + decimal.digits - retained
+    retained: if (decimal.digits > I64{768}) -> I64{768} else -> decimal.digits
+    sticky: decimal.digits > retained
+    scale: decimal.exponent + decimal.digits - retained
     // Bounded private workspaces: no digit-length-dependent bigint growth.
     // Neither node is published into the hazard domain.
-    capacity :: I64{341}
-    numerator :: int_new(capacity)
-    denominator :: int_new(capacity)
+    capacity: I64{341}
+    numerator: int_new(capacity)
+    denominator: int_new(capacity)
     int_set(denominator, I64{0}, I64{1})
     at := decimal.first
     fed := I64{0}
     loop fed < retained {
-        byte :: scan_byte(data, stride, at)
+        byte: scan_byte(data, stride, at)
         if (byte != I64{46}) {
             int_scale(numerator, I64{10}, byte - I64{48})
             fed += I64{1}
@@ -145,10 +145,10 @@ fn scan_float_bits(data: I64, len: I64, stride: I64) -> I64 {
         int_scale(numerator, I64{2}, I64{0})
         shift -= I64{1}
     }
-    quotient :: int_division(int_tag(numerator), int_tag(denominator), I64{0}, I64{0}, I64{0}, I64{0})
-    remainder :: int_division(int_tag(numerator), int_tag(denominator), I64{0}, I64{0}, I64{0}, I64{1})
-    twice :: jet_int_add(remainder, remainder)
-    comparison :: int_compare_abs(twice, int_tag(denominator))
+    quotient: int_division(int_tag(numerator), int_tag(denominator), I64{0}, I64{0}, I64{0}, I64{0})
+    remainder: int_division(int_tag(numerator), int_tag(denominator), I64{0}, I64{0}, I64{0}, I64{1})
+    twice: jet_int_add(remainder, remainder)
+    comparison: int_compare_abs(twice, int_tag(denominator))
     mantissa := int_word(quotient)
     if (comparison > I64{0} || (comparison == I64{0} && (sticky || (mantissa.bit_and(I64{1})) != I64{0}))) { mantissa += I64{1} }
     int_discard(quotient)

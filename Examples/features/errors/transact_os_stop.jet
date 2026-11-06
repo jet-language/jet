@@ -3,39 +3,39 @@
 // implementation, which says so), then the `on_rollback` hook runs, in the
 // cleanup that runs before the process stops with the requested code
 // (D-FAIL-EXIT1).
-package {
+package: {
     name: "transact_os_stop"
     authority: { allow: [Env, Exec, IO] }
 }
 
-use os :: core.sys
+use os: core.sys
 
-struct Ledger {
+Ledger: struct {
     balance: Int
 }
 
-struct LedgerSnap {
+LedgerSnap: struct {
     balance: Int
 }
 
 impl Ledger.Rollback {
-    type Snapshot = LedgerSnap
+    Snapshot: LedgerSnap
 
-    fn snapshot(self) -> LedgerSnap { return LedgerSnap{balance: self.balance} }
+    snapshot: fn(self) -> LedgerSnap { return LedgerSnap{balance: self.balance} }
 
-    fn restore(&self, snap: ^LedgerSnap) {
+    restore: fn(&self, snap: ^LedgerSnap) {
         print("balance {self.balance} restored to {snap.balance}")
         self.balance = snap.balance
     }
 }
 
-fn halt() {
+halt: fn() {
     #Unsafe("the stop runs the shared cleanup boundary") {
         os.stop(0) ?? panic("os.stop was refused")
     }
 }
 
-fn withdraw(ledger: &Ledger) {
+withdraw: fn(ledger: &Ledger) {
     #Transact(tx) {
         ledger.balance -= 10
         tx.on_rollback(() -> print("hook: release the hold"))
@@ -44,7 +44,7 @@ fn withdraw(ledger: &Ledger) {
     }
 }
 
-fn run() {
+run: fn() {
     ledger := Ledger{balance: 100}
     withdraw(&ledger)
     print("not reached: balance {ledger.balance}")

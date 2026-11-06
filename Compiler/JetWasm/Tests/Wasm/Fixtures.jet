@@ -1,18 +1,18 @@
 use {
-    files :: core.files
-    sys :: core.sys
+    files: core.files
+    sys: core.sys
 }
 
 // A repository fixture, read through the toolchain root every test run sets.
-fn fixture(path: String) -[FS.Read, Env]> [U8] {
-    root :: sys.get("JET_TOOLCHAIN_ROOT") ?? panic("JET_TOOLCHAIN_ROOT is not set")
+fixture: fn(path: String) -[FS.Read, Env]> [U8] {
+    root: sys.get("JET_TOOLCHAIN_ROOT") ?? panic("JET_TOOLCHAIN_ROOT is not set")
     files.read_bytes("{root}/{path}") ?? panic("fixture {path}: {err}")
 }
 
-fn mathkit() -[FS.Read, Env]> [U8] {
+mathkit: fn() -[FS.Read, Env]> [U8] {
     fixture("Examples/features/packages/sandbox_mathkit/mathkit.wasm")
 }
 
-fn extension(name: String) -[FS.Read, Env]> [U8] {
+extension: fn(name: String) -[FS.Read, Env]> [U8] {
     fixture("tests/fixtures/compiler_extension/{name}.wasm")
 }

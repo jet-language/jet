@@ -1,17 +1,17 @@
-package {
+package: {
     name: "analysis"
     authority: { allow: [FS.Read, FS.Write, IO, Mem.Alloc] }
 }
 
 use {
-    compute :: core.compute
-    data :: core.data
-    json :: core.encoding.json
-    files :: core.files
+    compute: core.compute
+    data: core.data
+    json: core.encoding.json
+    files: core.files
 }
 
 #Codable
-struct Observation {
+Observation: struct {
     team: String
     segment: String
     x: Float
@@ -20,33 +20,33 @@ struct Observation {
 }
 
 #Codable
-struct Owner {
+Owner: struct {
     team: String
     owner: String
 }
 #Codable
-struct Summary {
+Summary: struct {
     team: String
     mean: Float
 }
 
 
 #Codable
-struct Joined {
+Joined: struct {
     team: String
     owner: String
     mean: Float
 }
 
 #Codable
-struct Regression {
+Regression: struct {
     slope: Float
     intercept: Float
     r_squared: Float
 }
 
 #Codable
-struct AnalysisReceipt {
+AnalysisReceipt: struct {
     rows: Int
     columns: Int
     filtered: Int
@@ -59,7 +59,7 @@ struct AnalysisReceipt {
     regression: Regression
 }
 
-fn fit(rows: [Observation]) -> Regression {
+fit: fn(rows: [Observation]) -> Regression {
     n := 0
     sum_x := Float{0.0}
     sum_y := Float{0.0}
@@ -72,15 +72,15 @@ fn fit(rows: [Observation]) -> Regression {
         sum_xx += row.x * row.x
         sum_xy += row.x * row.y
     }
-    nf :: Float.from_int(n)
-    denominator :: nf * sum_xx - sum_x * sum_x
-    slope :: (nf * sum_xy - sum_x * sum_y) / denominator
-    intercept :: (sum_y - slope * sum_x) / nf
-    mean_y :: sum_y / nf
+    nf: Float.from_int(n)
+    denominator: nf * sum_xx - sum_x * sum_x
+    slope: (nf * sum_xy - sum_x * sum_y) / denominator
+    intercept: (sum_y - slope * sum_x) / nf
+    mean_y: sum_y / nf
     total := Float{0.0}
     residual := Float{0.0}
     loop row in rows {
-        predicted :: intercept + slope * row.x
+        predicted: intercept + slope * row.x
         total += (row.y - mean_y) * (row.y - mean_y)
         residual += (row.y - predicted) * (row.y - predicted)
     }
@@ -91,7 +91,7 @@ fn fit(rows: [Observation]) -> Regression {
     }
 }
 
-fn join_summaries(rows: [Summary], owners: [Owner]) -> [Joined] {
+join_summaries: fn(rows: [Summary], owners: [Owner]) -> [Joined] {
     out := [Joined]{}
     loop row in rows {
         loop owner in owners {
@@ -104,7 +104,7 @@ fn join_summaries(rows: [Summary], owners: [Owner]) -> [Joined] {
     return out
 }
 
-fn labeled_cell(values: [[Float]], row_labels: [String], col_labels: [String], row: String, column: String) -> Float {
+labeled_cell: fn(values: [[Float]], row_labels: [String], col_labels: [String], row: String, column: String) -> Float {
     ri := 0
     ci := 0
     loop label in row_labels {
@@ -118,23 +118,23 @@ fn labeled_cell(values: [[Float]], row_labels: [String], col_labels: [String], r
     return values[ri][ci]
 }
 
-fn mark(stage: String) {
+mark: fn(stage: String) {
     files.write("$JET_STATE_ROOT/dx3/area-data/stage.txt", stage) ?? panic("mark")
 }
 
-fn run() {
-    csv_path :: "$JET_STATE_ROOT/dx3/area-data/fixture-100k.csv"
-    raw :: files.read(csv_path) ?? panic("read csv")
-    rows :: data.csv<Observation>(raw) ?? panic("decode csv")
+run: fn() {
+    csv_path: "$JET_STATE_ROOT/dx3/area-data/fixture-100k.csv"
+    raw: files.read(csv_path) ?? panic("read csv")
+    rows: data.csv<Observation>(raw) ?? panic("decode csv")
     print("stage=loaded")
     mark("loaded")
     row_count := data.count(rows)
     column_count := data.schema(rows).len()
 
-    filtered :: data.query(rows)
+    filtered: data.query(rows)
         .filter(row -> row.value >= Float{50.0})
         .collect() ?? panic("filter")
-    groups :: data.query(filtered)
+    groups: data.query(filtered)
         .group_by(row -> row.team)
         .mean(row -> row.value)
         .collect() ?? panic("group mean")
@@ -142,15 +142,15 @@ fn run() {
         .group_by(row -> row.team)
         .sum(row -> row.value)
         .collect() ?? panic("group sum")
-    pivot :: data.pivot_sum(filtered, row -> row.team, row -> row.segment, row -> row.value) ?? panic("pivot")
+    pivot: data.pivot_sum(filtered, row -> row.team, row -> row.segment, row -> row.value) ?? panic("pivot")
     print("stage=aggregated")
     mark("aggregated")
     values := [Float]{}
     loop row in filtered {
         &values.push(row.value)
     }
-    rolling :: data.rolling_mean(values, 8) ?? panic("rolling mean")
-    summary :: data.describe(values) ?? panic("describe")
+    rolling: data.rolling_mean(values, 8) ?? panic("rolling mean")
+    summary: data.describe(values) ?? panic("describe")
     print("stage=windowed")
     mark("windowed")
 
@@ -158,31 +158,31 @@ fn run() {
     loop group in groups {
         &summaries.push(Summary{team: group.key, mean: group.value})
     }
-    owners :: [Owner]{{team: "team0", owner: "Ada"}, {team: "team1", owner: "Grace"}, {team: "team2", owner: "Lin"}, {team: "team3", owner: "Mina"}, {team: "team4", owner: "Noor"}, {team: "team5", owner: "Omar"}, {team: "team6", owner: "Priya"}, {team: "team7", owner: "Quinn"}, {team: "team8", owner: "Rae"}, {team: "team9", owner: "Sol"}}
-    joined :: join_summaries(summaries, owners)
-    regression :: fit(rows)
+    owners: [Owner]{{team: "team0", owner: "Ada"}, {team: "team1", owner: "Grace"}, {team: "team2", owner: "Lin"}, {team: "team3", owner: "Mina"}, {team: "team4", owner: "Noor"}, {team: "team5", owner: "Omar"}, {team: "team6", owner: "Priya"}, {team: "team7", owner: "Quinn"}, {team: "team8", owner: "Rae"}, {team: "team9", owner: "Sol"}}
+    joined: join_summaries(summaries, owners)
+    regression: fit(rows)
     print("stage=joined")
     mark("joined")
 
-    labeled_values :: [[Float]]{{1.0, 2.0, 3.0}, {4.0, 5.0, 6.0}}
-    row_labels :: [String]{"north", "south"}
-    col_labels :: [String]{"sales", "cost", "margin"}
-    coordinate_value :: labeled_cell(labeled_values, row_labels, col_labels, "south", "margin")
+    labeled_values: [[Float]]{{1.0, 2.0, 3.0}, {4.0, 5.0, 6.0}}
+    row_labels: [String]{"north", "south"}
+    col_labels: [String]{"sales", "cost", "margin"}
+    coordinate_value: labeled_cell(labeled_values, row_labels, col_labels, "south", "margin")
 
-    source_tensor :: compute.from_list([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]) ?? panic("tensor")
-    tensor :: compute.reshape(source_tensor, [2, 3]) ?? panic("reshape")
-    tensor_shape :: compute.shape(tensor)
-    tensor_cell :: compute.get(tensor, [1, 2]) ?? panic("tensor cell")
+    source_tensor: compute.from_list([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]) ?? panic("tensor")
+    tensor: compute.reshape(source_tensor, [2, 3]) ?? panic("reshape")
+    tensor_shape: compute.shape(tensor)
+    tensor_cell: compute.get(tensor, [1, 2]) ?? panic("tensor cell")
     print("stage=tensor")
     mark("tensor")
 
-    svg :: data.bar_svg(groups) ?? panic("bar svg")
-    svg_path :: "$JET_STATE_ROOT/dx3/area-data/analysis.svg"
+    svg: data.bar_svg(groups) ?? panic("bar svg")
+    svg_path: "$JET_STATE_ROOT/dx3/area-data/analysis.svg"
     files.write(svg_path, svg) ?? panic("write svg")
     print("stage=plotted")
     mark("plotted")
 
-    receipt :: AnalysisReceipt{
+    receipt: AnalysisReceipt{
         rows: row_count,
         columns: column_count,
         filtered: filtered.len(),
@@ -194,7 +194,7 @@ fn run() {
         tensor_shape: tensor_shape,
         regression: regression,
     }
-    receipt_json :: json.to_string(receipt) ?? panic(err.reason)
+    receipt_json: json.to_string(receipt) ?? panic(err.reason)
     files.write("$JET_STATE_ROOT/dx3/area-data/analysis.receipt.json", receipt_json) ?? panic("write receipt")
     mark("receipt")
     print("rows={receipt.rows} cols={receipt.columns} filtered={receipt.filtered} groups={receipt.groups} joined={receipt.joined} pivot={receipt.pivot_cells} rolling={rolling.len()} stats={summary.count} coord={coordinate_value} tensor={tensor_cell} svg={receipt.svg_bytes}")

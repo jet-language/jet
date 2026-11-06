@@ -1,22 +1,22 @@
 // D-OUTCOME-SHAPE1=A: `User? DBError!` names its states directly, so the
 // nested `.Ok(.Val(..))` / `.Ok(.None)` spelling is refused (E0392) with an
 // edit to the flat state.
-struct User {
+User: struct {
     name: String
 }
 
 #Error
-enum DBError {
+DBError: enum {
     Down
 }
 
-fn read_user(id: Int) -> User? DBError! {
+read_user: fn(id: Int) -> User? DBError! {
     if id == 0 -> return Err(DBError.Down)
     if id == 7 -> return Ok(Val(User{name: "priya"}))
     Ok(None)
 }
 
-fn run() {
+run: fn() {
     if read_user(7) == {
         .Val(user) -> print(user.name)
         .None -> print("no such user")

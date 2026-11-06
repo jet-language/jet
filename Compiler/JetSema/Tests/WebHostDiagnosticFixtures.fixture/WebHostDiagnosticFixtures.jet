@@ -1,19 +1,19 @@
 // Exercise the production aggregate Web host gate and diagnostic builder.
 // The assembler extracts these exact functions from CheckProgram/Diagnostics.
-fn wh_expect(usage: String) Never! {
+wh_expect: fn(usage: String) Never! {
     diagnostics := [Diagnostic]{}
     if sema_web_host_check_core_usage("wasm.browser", [String]{usage}, &diagnostics) -> panic("host API admitted on browser: {usage}")
     if diagnostics.len() != 1 -> panic("host refusal diagnostic count: {usage}")
-    diagnostic :: diagnostics[0]
-    operation :: usage.replace("::", ".")
+    diagnostic: diagnostics[0]
+    operation: usage.replace("::", ".")
     if diagnostic.code != "E-WEB-UNSUPPORTED" || diagnostic.span != None -> panic("wrong host refusal identity: {usage}")
     if diagnostic.what != "Web output cannot compile `{operation}` yet." -> panic("wrong host refusal operation: {usage}")
     if diagnostic.why != "this Core operation needs a host provider that the browser target does not supply" -> panic("wrong host refusal reason: {usage}")
     if diagnostic.fix != "move this operation behind a native or server boundary" -> panic("wrong host refusal repair: {usage}")
 }
 
-fn run() {
-    names :: [String]{
+run: fn() {
+    names: [String]{
         "core.auth::magic_link_consume", "core.auth::magic_link_issue",
         "core.auth::oauth_begin", "core.auth::oauth_finish",
         "core.auth::password_login", "core.auth::register_user", "core.auth::session_validate",

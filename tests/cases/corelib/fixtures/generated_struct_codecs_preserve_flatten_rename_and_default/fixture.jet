@@ -1,17 +1,17 @@
 
-use json :: core.encoding.json
+use json: core.encoding.json
 
 #Codable
-struct Inner { x: Int  y: Bool }
+Inner: struct { x: Int  y: Bool }
 
 #[Codable, RenameAll(camel)]
-struct Outer {
+Outer: struct {
     display_name: String
     #Flatten inner: Inner
     count: Int{4 + 5}
 }
 
-fn run() {
+run: fn() {
     value := Outer{ display_name: "n", inner: Inner{ x: 1, y: true }, count: 2 }
     print(json.to_string(value))
     back := json.decode<Outer>("{{\"displayName\":\"m\",\"x\":3,\"y\":false}}") ?? panic("decode")

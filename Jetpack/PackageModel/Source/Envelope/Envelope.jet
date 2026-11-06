@@ -5,7 +5,7 @@
 // build-from-source output is an envelope-carrying object exactly like a
 // substituted one, so the resolver never cares which path produced it.
 
-struct Envelope {
+Envelope: struct {
     // Content hash of the realized output tree (`sha256-…`): the cache key.
     output_hash: String
     // Target platform key (`<arch>-<os>`, e.g. `x86_64-linux`).
@@ -16,18 +16,18 @@ struct Envelope {
     provenance: String
 
     // The empty envelope of legacy records and providers that predate it.
-    fn empty() -> Envelope Never! {
+    empty: fn() -> Envelope Never! {
         Envelope{output_hash: "", platform: "", signature: "", provenance: ""}
     }
 
     // True when no envelope field is populated.
-    fn is_empty(self) -> Bool Never! {
+    is_empty: fn(self) -> Bool Never! {
         self.output_hash == "" && self.platform == "" && self.signature == "" && self.provenance == ""
     }
 
     // The envelope of a freshly realized output rooted at `out`. `recipe_id`
     // names the build path (`core-source`, `core-cargo-rlib`, `nix`, …).
-    fn for_output(out: String, reference: String, recipe_id: String) -[FS, Env]> Envelope Never! {
+    for_output: fn(out: String, reference: String, recipe_id: String) -[FS, Env]> Envelope Never! {
         Envelope{
             output_hash: pkg_output_hash_of(out),
             platform: pkg_host_platform(),
@@ -38,6 +38,6 @@ struct Envelope {
 }
 
 // The platform key of the host build target (`<arch>-<os>`).
-fn pkg_host_platform() -[Env]> String Never! {
+pkg_host_platform: fn() -[Env]> String Never! {
     pkg_host_key()
 }

@@ -1,14 +1,14 @@
 // D-ENCSTREAM1: format breadth over one Data tree.
 use {
-    json :: core.encoding.json
-    jsonl :: core.encoding.jsonl
-    xml :: core.encoding.xml
-    cbor :: core.encoding.cbor
-    base64 :: core.encoding.base64
-    base32 :: core.encoding.base32
+    json: core.encoding.json
+    jsonl: core.encoding.jsonl
+    xml: core.encoding.xml
+    cbor: core.encoding.cbor
+    base64: core.encoding.base64
+    base32: core.encoding.base32
 }
 
-fn run() {
+run: fn() {
     data := json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json")
     print(json.canonical(data) ?? panic("value is not canonical JSON"))
     print(json.events(data).contains("object_start $"))
@@ -25,7 +25,7 @@ fn run() {
     decoded := cbor.parse(encoded) ?? panic("cbor decode")
     print(json.canonical(decoded) ?? panic("value is not canonical JSON"))
 
-    bytes :: [U8]{104, 105}
+    bytes: [U8]{104, 105}
     u := base64.encode_url(bytes)
     print(u)
     print((base64.decode_url(u) ?? panic("base64url")).len())

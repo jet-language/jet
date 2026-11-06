@@ -2,30 +2,30 @@
 use {
     jet_semindex.[SymbolDB]
     jet_foundation.[diagnostic_utf8_width, foundation_json_quote]
-    lsp_source_path :: core.files.runtime.kernel_path_components
-    lsp_source_text :: core.text.runtime.kernel_unicode_string
+    lsp_source_path: core.files.runtime.kernel_path_components
+    lsp_source_text: core.text.runtime.kernel_unicode_string
     core.files.runtime.kernel_path_components.[OSPath]
 }
 
 // repository_root is the Jet build's actual repository-root fact replacing
 // env!(CARGO_MANIFEST_DIR), not cwd and not a user-selected workspace root.
-fn lsp_document_links_for(path: OSPath, workspace_root: OSPath?, src: String, repository_root: OSPath) -[FS, Env]> [String] Never! {
+lsp_document_links_for: fn(path: OSPath, workspace_root: OSPath?, src: String, repository_root: OSPath) -[FS, Env]> [String] Never! {
     out := [String]{}
-    fallback :: if lsp_source_path.parent_span(path) == {
+    fallback: if lsp_source_path.parent_span(path) == {
         .Val(extent) -> lsp_source_path.owned_span(path, extent)
         .None -> lsp_source_path.from_text(".", path.platform)
     }
-    base :: if workspace_root == {
+    base: if workspace_root == {
         .Val(root) -> root
         .None -> lsp_normalize_os_path(fallback)
     }
     // #6542: a `use {` line opens a block whose lines up to `}` are rows, and
-    // a row (or a one-line `use`) may name its alias first, `alias :: path`.
+    // a row (or a one-line `use`) may name its alias first, `alias: path`.
     in_block := false
     loop (line_index, span) in lsp_source_lines(src) {
         line := src.slice(span.start, span.end) // #4303
         trimmed := lsp_source_text.trim_start(line) // #4303
-        indent :: line.bytes().len() - trimmed.bytes().len()
+        indent: line.bytes().len() - trimmed.bytes().len()
         path_start := indent
         if in_block {
             if trimmed.starts_with("}}") {
@@ -42,66 +42,63 @@ fn lsp_document_links_for(path: OSPath, workspace_root: OSPath?, src: String, re
             path_start = indent + 4
         }
         end := lsp_use_path_end(line, path_start)
-        // `alias :: path` or `alias: path`: the link covers the path after the colon.
-        if end + 4 <= line.bytes().len() && line.slice(end, end + 4) == " :: " {
-            path_start = end + 4
-            end = lsp_use_path_end(line, path_start)
-        } else if end + 2 <= line.bytes().len() && line.slice(end, end + 2) == ": " {
+        // `alias: path`: the link covers the path after `:`.
+        if end + 2 <= line.bytes().len() && line.slice(end, end + 2) == ": " {
             path_start = end + 2
             end = lsp_use_path_end(line, path_start)
         }
         if end == path_start -> next
         import := line.slice(path_start, end) // #4303
-        target :: lsp_resolve_use_target(base, import, repository_root) ?? next
+        target: lsp_resolve_use_target(base, import, repository_root) ?? next
         // Rust's link columns are bytes (including multibyte indent/import),
         // not scalar counts and not Position's UTF-16 conversion.
-        range :: LSPRange{start: LSPPos{line: line_index.bit_and(4294967295), character: path_start.bit_and(4294967295)}, end: LSPPos{line: line_index.bit_and(4294967295), character: end.bit_and(4294967295)}}
+        range: LSPRange{start: LSPPos{line: line_index.bit_and(4294967295), character: path_start.bit_and(4294967295)}, end: LSPPos{line: line_index.bit_and(4294967295), character: end.bit_and(4294967295)}}
         &out.push("{{\"range\":{lsp_range_json(range)},\"target\":{foundation_json_quote(target)}}}")
     }
     out
 }
 // The end of the `use` path that starts at byte `start`: the first `{`, `:`
 // or whitespace.
-fn lsp_use_path_end(line: String, start: Int) -> Int Never! {
-    bytes :: line.bytes()
+lsp_use_path_end: fn(line: String, start: Int) -> Int Never! {
+    bytes: line.bytes()
     end := start
     loop end < bytes.len() {
-        width :: diagnostic_utf8_width(bytes, end)
+        width: diagnostic_utf8_width(bytes, end)
         ch := line.slice(end, end + width) // #4303
         if bytes[end] == (U8{123}) || bytes[end] == (U8{58}) || lsp_source_text.is_whitespace(ch) -> break
         end += width
     }
     end
 }
-fn lsp_reasoning_code_lenses(uri: String, path: String, src: String, db: SymbolDB) -> [String] Never! {
+lsp_reasoning_code_lenses: fn(uri: String, path: String, src: String, db: SymbolDB) -> [String] Never! {
     out := [String]{}
-    facts :: db.index.definition_facts()
+    facts: db.index.definition_facts()
     loop record in db.index.derivations() {
         loop fact in facts {
             if fact.stable_id != record.subject || fact.module_path != path -> next
-            range :: LSPRange{start: lsp_byte_offset_to_lsp(src, fact.span.start), end: lsp_byte_offset_to_lsp(src, fact.span.end)}
+            range: LSPRange{start: lsp_byte_offset_to_lsp(src, fact.span.start), end: lsp_byte_offset_to_lsp(src, fact.span.end)}
             &out.push(lsp_code_lens_range_json(range, "Explain reasoning", "jet.reasoning", [String]{uri, record.id, "true"}))
             break
         }
     }
     out
 }
-fn lsp_code_lenses_for(uri: String, src: String) -> [String] Never! {
+lsp_code_lenses_for: fn(uri: String, src: String) -> [String] Never! {
     out := [String]{}
     loop (index, span) in lsp_source_lines(src) {
         line := src.slice(span.start, span.end) // #4303
         trimmed := lsp_source_text.trim_start(line) // #4303
-        indent :: line.bytes().len() - trimmed.bytes().len()
-        if trimmed.starts_with("fn run") || trimmed.starts_with("run: fn") -> &out.push(lsp_code_lens_json(index, indent, line.bytes().len(), "Run file", "jet.runFile", ([String]{uri})))
+        indent: line.bytes().len() - trimmed.bytes().len()
+        if trimmed.starts_with("run: fn") -> &out.push(lsp_code_lens_json(index, indent, line.bytes().len(), "Run file", "jet.runFile", ([String]{uri})))
         else if trimmed.starts_with("#Test") -> &out.push(lsp_code_lens_json(index, indent, line.bytes().len(), "Run test", "jet.testFile", ([String]{uri, "{index}"})))
     }
     out
 }
-fn lsp_code_lens_json(line: Int, start: Int, end: Int, title: String, command: String, args: [String]) -> String Never! {
-    range :: LSPRange{start: LSPPos{line: line.bit_and(4294967295), character: start.bit_and(4294967295)}, end: LSPPos{line: line.bit_and(4294967295), character: end.bit_and(4294967295)}}
+lsp_code_lens_json: fn(line: Int, start: Int, end: Int, title: String, command: String, args: [String]) -> String Never! {
+    range: LSPRange{start: LSPPos{line: line.bit_and(4294967295), character: start.bit_and(4294967295)}, end: LSPPos{line: line.bit_and(4294967295), character: end.bit_and(4294967295)}}
     lsp_code_lens_range_json(range, title, command, args)
 }
-fn lsp_code_lens_range_json(range: LSPRange, title: String, command: String, args: [String]) -> String Never! {
+lsp_code_lens_range_json: fn(range: LSPRange, title: String, command: String, args: [String]) -> String Never! {
     arguments := [String]{}
     loop arg in args -> &arguments.push(foundation_json_quote(arg))
     "{{\"range\":{lsp_range_json(range)},\"command\":{{\"title\":{foundation_json_quote(title)},\"command\":{foundation_json_quote(command)},\"arguments\":[{arguments.join(",")}]}}}}"

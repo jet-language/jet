@@ -3,38 +3,38 @@
 // before its result: as a function tail or a bound value, with flat arms or
 // patterns nested inside a variant.
 #Error
-enum Fault {
+Fault: enum {
     Empty
     Busy
 }
 
-enum Tone {
+Tone: enum {
     Warm
     Cool
     Neutral
 }
 
-fn read(n: Int) -> Int Fault! {
+read: fn(n: Int) -> Int Fault! {
     print("read {n}")
     if n == 0 -> return Err(.Empty)
     if n < 0 -> return Err(.Busy)
     Ok(n)
 }
 
-fn tone(n: Int) -> Tone {
+tone: fn(n: Int) -> Tone {
     print("tone {n}")
     if n > 10 -> return Tone.Warm
     if n < 0 -> return Tone.Cool
     Tone.Neutral
 }
 
-fn size(n: Int) -> Int {
+size: fn(n: Int) -> Int {
     print("size {n}")
     n * 2
 }
 
 // Function tail with nested patterns.
-fn describe(n: Int) -> String {
+describe: fn(n: Int) -> String {
     if read(n) == {
         .Ok(v) -> "value {v}"
         .Err(.Empty) -> "empty"
@@ -43,7 +43,7 @@ fn describe(n: Int) -> String {
 }
 
 // Function tail with flat variant arms.
-fn label(n: Int) -> String {
+label: fn(n: Int) -> String {
     if tone(n) == {
         .Warm -> "warm"
         .Cool -> "cool"
@@ -51,12 +51,12 @@ fn label(n: Int) -> String {
     }
 }
 
-fn run() {
+run: fn() {
     loop n in [3, 0, -1] -> print(describe(n))
     loop n in [20, -5, 4] -> print(label(n))
     loop n in [1, 2, 5, 9] {
         // Bound value with flat value arms.
-        bucket :: if size(n) == {
+        bucket: if size(n) == {
             2 -> "two"
             4 -> "four"
             10 -> "ten"
@@ -66,7 +66,7 @@ fn run() {
     }
     loop n in [-2, 0, 7] {
         // Bound value with nested patterns.
-        outcome :: if read(n) == {
+        outcome: if read(n) == {
             .Err(.Busy) -> "busy"
             .Err(.Empty) -> "empty"
             .Ok(v) -> "got {v}"

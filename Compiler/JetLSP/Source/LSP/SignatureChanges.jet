@@ -6,26 +6,26 @@ use {
     core.encoding.[Dyn]
     jet_foundation.[foundation_json_quote]
     jet_driver.[JetDriverCompilerCheckResult, JetDriverCompilerQueries]
-    lsp_signature_path :: core.files.runtime.kernel_path_components
+    lsp_signature_path: core.files.runtime.kernel_path_components
     jet_devserver.[number]
 }
 
-fn lsp_signature_change_response(server: LSPServer, params: Dyn, id: Dyn) -> String {
-    usage :: "jet.changeSignature expects arguments [uri, identity, {{name, type, values}}]"
-    arguments :: params.field("arguments") ?? return lsp_error_response(id, -32602, usage)
+lsp_signature_change_response: fn(server: LSPServer, params: Dyn, id: Dyn) -> String {
+    usage: "jet.changeSignature expects arguments [uri, identity, {{name, type, values}}]"
+    arguments: params.field("arguments") ?? return lsp_error_response(id, -32602, usage)
     if arguments != .Array(_) -> return lsp_error_response(id, -32602, usage)
     if arguments == .Array(args) {
         if args.len() < 1 -> return lsp_error_response(id, -32602, usage)
-        uri :: lsp_data_tree_text(args[0]) ?? return lsp_error_response(id, -32602, usage)
+        uri: lsp_data_tree_text(args[0]) ?? return lsp_error_response(id, -32602, usage)
         if args.len() < 2 -> return lsp_error_response(id, -32602, usage)
-        identity :: lsp_data_tree_text(args[1]) ?? return lsp_error_response(id, -32602, usage)
+        identity: lsp_data_tree_text(args[1]) ?? return lsp_error_response(id, -32602, usage)
         if args.len() < 3 || args[2] != .Object(_) -> return lsp_error_response(id, -32602, "jet.changeSignature requires an explicit parameter object")
-        spec :: args[2]
+        spec: args[2]
         parameter := spec
         if spec.field("parameter") == .Val(value) { if value == .Object(_) -> parameter = value }
-        name :: lsp_data_tree_text(parameter.field("name") ?? return lsp_error_response(id, -32602, "jet.changeSignature requires parameter.name")) ?? return lsp_error_response(id, -32602, "jet.changeSignature requires parameter.name")
+        name: lsp_data_tree_text(parameter.field("name") ?? return lsp_error_response(id, -32602, "jet.changeSignature requires parameter.name")) ?? return lsp_error_response(id, -32602, "jet.changeSignature requires parameter.name")
         // Presence of `type`/`values` wins even for a wrong type, as Rust or_else.
-        ty :: lsp_data_tree_text(parameter.field("type") ?? parameter.field("ty") ?? return lsp_error_response(id, -32602, "jet.changeSignature requires parameter.type")) ?? return lsp_error_response(id, -32602, "jet.changeSignature requires parameter.type")
+        ty: lsp_data_tree_text(parameter.field("type") ?? parameter.field("ty") ?? return lsp_error_response(id, -32602, "jet.changeSignature requires parameter.type")) ?? return lsp_error_response(id, -32602, "jet.changeSignature requires parameter.type")
         values := [String:String]{}
         if (parameter.field("values") ?? spec.field("caller_values")) == .Val(value) {
             if value == .Object(entries) {
@@ -34,32 +34,32 @@ fn lsp_signature_change_response(server: LSPServer, params: Dyn, id: Dyn) -> Str
                 }
             }
         }
-        doc :: server.diagnostic_state.docs.get(uri) ?? return lsp_error_response(id, -32602, "document not open in LSP session")
-        checked :: server.check_with_bundle(doc)
-        permit :: checked.checked.guard_read()
-        result :: permit.value.result
+        doc: server.diagnostic_state.docs.get(uri) ?? return lsp_error_response(id, -32602, "document not open in LSP session")
+        checked: server.check_with_bundle(doc)
+        permit: checked.checked.guard_read()
+        result: permit.value.result
         if result.graph == None -> return lsp_error_response(id, -32603, "document did not check cleanly")
-        db :: lsp_build_symbol_db(result)
+        db: lsp_build_symbol_db(result)
         sources := [String:String]{}
         loop row in result.loaded_module_rows {
-            module_ref :: result.module_sources[row]
+            module_ref: result.module_sources[row]
             sources[module_ref.display] = module_ref.loaded_source
             // Insertion retains the FIRST physical-path alias, just Rust entry.
             if sources.get(module_ref.path) == None -> sources[module_ref.path] = module_ref.loaded_source
         }
-        preview_result :: lsp_compute_signature_change_preview(db, sources, identity, name, ty, values)
+        preview_result: lsp_compute_signature_change_preview(db, sources, identity, name, ty, values)
         if preview_result == .Err(reason) {
             return lsp_response(id, "{{\"kind\":\"jet.signature-change-preview/v1\",\"status\":\"unavailable\",\"identity\":{foundation_json_quote(identity)},\"reason\":{foundation_json_quote(reason)},\"source_scope\":\"checked_static\",\"runtime_observation\":\"not_run\"}}")
         }
         preview := preview_result ?? panic("preview error branch already returned")
         staged_sources := [lsp_signature_path.OSPath:String]{}
         loop row in result.loaded_module_rows {
-            module_ref :: result.module_sources[row]
+            module_ref: result.module_sources[row]
             if module_ref.physical_path == .Val(path) -> staged_sources[path] = module_ref.loaded_source.copy()
         }
         groups := [lsp_signature_path.OSPath:[Int]]{}
         loop (index, edit) in preview.edits {
-            path :: lsp_signature_module_path(result, edit.path, doc.path.platform) ?? {
+            path: lsp_signature_module_path(result, edit.path, doc.path.platform) ?? {
                 &preview.unknown.push("unavailable_edit_source:{edit.path}")
                 next
             }
@@ -72,7 +72,7 @@ fn lsp_signature_change_response(server: LSPServer, params: Dyn, id: Dyn) -> Str
         loop (path, _) in groups -> &paths.push(path)
         &paths.sort_by((a, b) -> a.encoded <=> b.encoded)
         loop path in paths {
-            canonical :: lsp_canonical_source_uri(lsp_signature_path.display(path), result.project_root, path.platform) ?? {
+            canonical: lsp_canonical_source_uri(lsp_signature_path.display(path), result.project_root, path.platform) ?? {
                 &preview.unknown.push("unversioned_source:{lsp_signature_path.display(path)}")
                 next
             }
@@ -83,7 +83,7 @@ fn lsp_signature_change_response(server: LSPServer, params: Dyn, id: Dyn) -> Str
                 &preview.unknown.push("unavailable_edit_source:{lsp_signature_path.display(path)}")
                 next
             }
-            indices :: groups[path]
+            indices: groups[path]
             if !lsp_apply_signature_edit_indices(&staged_sources[path], preview.edits, indices) -> &preview.unknown.push("invalid_checked_edit_span:{lsp_signature_path.display(path)}")
         }
         &preview.unknown.sort()
@@ -93,17 +93,17 @@ fn lsp_signature_change_response(server: LSPServer, params: Dyn, id: Dyn) -> Str
         if preview.can_apply() {
             root_path := doc.path
             loop row in result.loaded_module_rows {
-                module_ref :: result.module_sources[row]
+                module_ref: result.module_sources[row]
                 if module_ref.physical_path == .Val(path) {
                     if lsp_source_paths_equal(path, doc.path) { root_path = path; break }
                 }
             }
-            root_text :: staged_sources.get(root_path) ?? doc.text
+            root_text: staged_sources.get(root_path) ?? doc.text
             staged_queries := JetDriverCompilerQueries.new()
             loop (path, source) in staged_sources -> &staged_queries.set_document(server.snapshot.cwd, path, source)
-            staged_owner :: &staged_queries.check_text_lsp(server.snapshot, root_path, root_text)
-            staged_permit :: staged_owner.guard_read()
-            staged :: staged_permit.value.result
+            staged_owner: &staged_queries.check_text_lsp(server.snapshot, root_path, root_text)
+            staged_permit: staged_owner.guard_read()
+            staged: staged_permit.value.result
             staged_diagnostics = staged.diagnostics.len()
             staged_status = if staged.graph != None && staged.diagnostics.is_empty() -> "passed" else -> "failed"
         }
@@ -113,7 +113,7 @@ fn lsp_signature_change_response(server: LSPServer, params: Dyn, id: Dyn) -> Str
             if sources.get(caller.path) == .Val(source) {
                 if lsp_checked_byte_span_to_range(source, caller.span) == .Val(valid) -> range = lsp_range_json(valid)
             }
-            value :: if caller.value == {
+            value: if caller.value == {
                 .Val(text) -> foundation_json_quote(text)
                 .None -> "null"
             }
@@ -121,11 +121,11 @@ fn lsp_signature_change_response(server: LSPServer, params: Dyn, id: Dyn) -> Str
         }
         edits := [String]{}
         loop edit in preview.edits {
-            source :: sources.get(edit.path) ?? next
-            range :: lsp_checked_byte_span_to_range(source, edit.span) ?? next
-            path :: lsp_signature_module_path(result, edit.path, doc.path.platform) ?? next
-            uri :: lsp_path_to_uri(lsp_signature_path.display(path))
-            version :: if checked.checked_versions.get(uri) == {
+            source: sources.get(edit.path) ?? next
+            range: lsp_checked_byte_span_to_range(source, edit.span) ?? next
+            path: lsp_signature_module_path(result, edit.path, doc.path.platform) ?? next
+            uri: lsp_path_to_uri(lsp_signature_path.display(path))
+            version: if checked.checked_versions.get(uri) == {
                 .Val(number) -> "{number}"
                 .None -> "null"
             }
@@ -137,8 +137,8 @@ fn lsp_signature_change_response(server: LSPServer, params: Dyn, id: Dyn) -> Str
         unknown := [String]{}
         loop reason in preview.unknown -> &unknown.push(foundation_json_quote(reason))
         &unknown.sort()
-        can_apply :: preview.can_apply() && staged_status == "passed"
-        status :: if can_apply -> "ready" else -> "incomplete"
+        can_apply: preview.can_apply() && staged_status == "passed"
+        status: if can_apply -> "ready" else -> "incomplete"
         declaration_range := "null"
         if sources.get(preview.declaration_path) == .Val(source) {
             if lsp_checked_byte_span_to_range(source, preview.declaration_span) == .Val(range) -> declaration_range = lsp_range_json(range)
@@ -148,17 +148,17 @@ fn lsp_signature_change_response(server: LSPServer, params: Dyn, id: Dyn) -> Str
     lsp_error_response(id, -32602, usage)
 }
 
-fn lsp_data_tree_text(value: Dyn) -> String? Never! {
+lsp_data_tree_text: fn(value: Dyn) -> String? Never! {
     if value == {
         .Text(text) | .TypedText(text) -> Val(text)
         else -> None
     }
 }
 
-fn lsp_signature_module_path(result: JetDriverCompilerCheckResult, path: String, platform: lsp_signature_path.PathPlatform) -> lsp_signature_path.OSPath? Never! {
-    native :: lsp_signature_path.from_text(path, platform)
+lsp_signature_module_path: fn(result: JetDriverCompilerCheckResult, path: String, platform: lsp_signature_path.PathPlatform) -> lsp_signature_path.OSPath? Never! {
+    native: lsp_signature_path.from_text(path, platform)
     loop row in result.loaded_module_rows {
-        module_ref :: result.module_sources[row]
+        module_ref: result.module_sources[row]
         if module_ref.display == path -> return module_ref.physical_path
         if module_ref.physical_path == .Val(physical) {
             if lsp_source_paths_equal(physical, native) -> return Val(physical)
@@ -176,17 +176,17 @@ fn lsp_signature_module_path(result: JetDriverCompilerCheckResult, path: String,
 // RuntimeLead-8 confirmed no actual Core String replacement owner. The caller
 // above remains an explicit gate; no guessed Core API, stub or per-edit rebuild.
 // These reachable pure projections retain exactly its sorting/validation laws.
-fn lsp_signature_edit_order(edits: [SignatureChangeEdit], indices: [Int]) -> [Int] Never! {
+lsp_signature_edit_order: fn(edits: [SignatureChangeEdit], indices: [Int]) -> [Int] Never! {
     order := indices.copy()
     &order.sort_by((left: Int, right: Int) -> {
-        a :: edits[left].span
-        b :: edits[right].span
+        a: edits[left].span
+        b: edits[right].span
         if a.start != b.start -> b.start <=> a.start else -> b.end <=> a.end
     })
     order
 }
 
-fn lsp_signature_edit_valid(source: String, edit: SignatureChangeEdit) -> Bool Never! {
-    bytes :: source.bytes()
+lsp_signature_edit_valid: fn(source: String, edit: SignatureChangeEdit) -> Bool Never! {
+    bytes: source.bytes()
     edit.span.start >= 0 && edit.span.start <= edit.span.end && edit.span.end <= bytes.len() && lsp_format_char_boundary(bytes, edit.span.start) && lsp_format_char_boundary(bytes, edit.span.end)
 }

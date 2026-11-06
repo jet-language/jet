@@ -4,87 +4,87 @@
 // documented required-size formula. Every encoder returns a new owned value;
 // there is no caller-buffer or borrowed-view API.
 use {
-    base64 :: core.encoding.base64
-    base32 :: core.encoding.base32
-    hex :: core.encoding.hex
-    binary :: core.encoding.binary
+    base64: core.encoding.base64
+    base32: core.encoding.base32
+    hex: core.encoding.hex
+    binary: core.encoding.binary
 }
 
-fn b64(label: String, text: String) {
-    bytes :: base64.decode(text) ?? {
+b64: fn(label: String, text: String) {
+    bytes: base64.decode(text) ?? {
         print("base64 {label}: rejected: {err.reason}")
         return
     }
     print("base64 {label}: {bytes}")
 }
 
-fn b64url(label: String, text: String) {
-    bytes :: base64.decode_url(text) ?? {
+b64url: fn(label: String, text: String) {
+    bytes: base64.decode_url(text) ?? {
         print("base64url {label}: rejected: {err.reason}")
         return
     }
     print("base64url {label}: {bytes}")
 }
 
-fn b32(label: String, text: String) {
-    bytes :: base32.decode(text) ?? {
+b32: fn(label: String, text: String) {
+    bytes: base32.decode(text) ?? {
         print("base32 {label}: rejected: {err.reason}")
         return
     }
     print("base32 {label}: {bytes}")
 }
 
-fn b32hex(label: String, text: String) {
-    bytes :: base32.b32hexdecode(text) ?? {
+b32hex: fn(label: String, text: String) {
+    bytes: base32.b32hexdecode(text) ?? {
         print("base32hex {label}: rejected: {err.reason}")
         return
     }
     print("base32hex {label}: {bytes}")
 }
 
-fn hx(label: String, text: String) {
-    bytes :: hex.decode(text) ?? {
+hx: fn(label: String, text: String) {
+    bytes: hex.decode(text) ?? {
         print("hex {label}: rejected: {err.reason}")
         return
     }
     print("hex {label}: {bytes}")
 }
 
-fn packed_u8(n: Int) {
-    bytes :: binary.pack_u8(n) ?? {
+packed_u8: fn(n: Int) {
+    bytes: binary.pack_u8(n) ?? {
         print("pack_u8({n}): rejected")
         return
     }
     print("pack_u8({n}): {bytes}")
 }
 
-fn packed_i8(n: Int) {
-    bytes :: binary.pack_i8(n) ?? {
+packed_i8: fn(n: Int) {
+    bytes: binary.pack_i8(n) ?? {
         print("pack_i8({n}): rejected")
         return
     }
     print("pack_i8({n}): {bytes}")
 }
 
-fn packed_u16le(n: Int) {
-    bytes :: binary.pack_u16le(n) ?? {
+packed_u16le: fn(n: Int) {
+    bytes: binary.pack_u16le(n) ?? {
         print("pack_u16le({n}): rejected")
         return
     }
     print("pack_u16le({n}): {bytes}")
 }
 
-fn packed_u32be(n: Int) {
-    bytes :: binary.pack_u32be(n) ?? {
+packed_u32be: fn(n: Int) {
+    bytes: binary.pack_u32be(n) ?? {
         print("pack_u32be({n}): rejected")
         return
     }
     print("pack_u32be({n}): {bytes}")
 }
 
-fn ceil_div(a: Int, b: Int) -> Int { (a + b - 1) /% b }
+ceil_div: fn(a: Int, b: Int) -> Int { (a + b - 1) /% b }
 
-fn run() {
+run: fn() {
     b64("canonical Zg==", "Zg==")
     b64("missing padding Zg", "Zg")
     b64("extra padding Zg===", "Zg===")
@@ -118,7 +118,7 @@ fn run() {
 
     // Required size: the encoded length equals the documented formula.
     loop n in [0, 1, 2, 3, 4, 5, 6, 31, 32, 33] {
-        data :: "x".repeat(n).bytes()
+        data: "x".repeat(n).bytes()
         print("n={n}: base64 {base64.encode(data).len()}/{4 * ceil_div(n, 3)} base64url {base64.encode_url(data).len()}/{ceil_div(4 * n, 3)} base32 {base32.encode(data).len()}/{8 * ceil_div(n, 5)} hex {hex.encode(data).len()}/{2 * n}")
     }
 

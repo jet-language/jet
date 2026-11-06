@@ -1,29 +1,29 @@
 // D-TIME-INSTANT1=A: `time.instant()` is the compiler-owned monotonic Time
 // point on every tier. Point + delta is a point, point - point is a delta, and
 // the wall clock is the separate `time.unix_ns()` read.
-package {
+package: {
     name: "instant_point"
     authority: { allow: [IO, Time] }
 }
 
-use time :: core.time
+use time: core.time
 
-fn run() {
-    first :: time.unix_ns()
-    second :: time.unix_ns()
+run: fn() {
+    first: time.unix_ns()
+    second: time.unix_ns()
     print(first > 1700000000000000000)
     print(second >= first)
 
-    t :: time.instant()
-    deadline :: t + 5min
-    earlier :: t - 1s
+    t: time.instant()
+    deadline: t + 5min
+    earlier: t - 1s
     print(deadline > t)
     print(earlier < t)
     print((deadline - t).in(.Minutes))
     print(t.elapsed() >= 0ns)
 
-    watch :: time.start()
-    later :: time.start()
+    watch: time.start()
+    later: time.start()
     print(later.start_ns >= watch.start_ns)
     print(watch.elapsed_millis() >= 0)
     print(time.elapsed(watch).ns >= 0)

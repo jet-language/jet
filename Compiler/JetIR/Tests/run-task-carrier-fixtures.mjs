@@ -18,11 +18,11 @@ function item(path, head) {
 const handles = "Compiler/JetIR/Source/RouteHandle.jet";
 const taskgroups = "Compiler/JetSema/Source/Sema/Calls/TaskGroups.jet";
 const definitions = [
-  item(handles, "struct IRHandleRoute {"),
-  ...["fn ir_handle_route(", "fn ir_handle_core(", "fn ir_handle_type_without_tags(", "fn ir_handle_task_route("].map((head) => item(handles, head)),
-  item("Compiler/JetIR/Source/BuildHelpers.jet", "fn ir_failure_carrier_for_type("),
-  item(taskgroups, "fn sema_taskgroup_failure_result("),
-  item(taskgroups, "fn sema_taskgroup_task_element("),
+  item(handles, "IRHandleRoute: struct {"),
+  ...["ir_handle_route: fn(", "ir_handle_core: fn(", "ir_handle_type_without_tags: fn(", "ir_handle_task_route: fn("].map((head) => item(handles, head)),
+  item("Compiler/JetIR/Source/BuildHelpers.jet", "ir_failure_carrier_for_type: fn("),
+  item(taskgroups, "sema_taskgroup_failure_result: fn("),
+  item(taskgroups, "sema_taskgroup_task_element: fn("),
 ];
 const foundation = compilerFixtureUnit(repo, ["Compiler/JetFoundation"]);
 const fixtures = readFileSync(join(repo, "Compiler/JetIR/Tests/TaskCarrierFixtures.fixture/TaskCarrierFixtures.jet"), "utf8");

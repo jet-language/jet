@@ -1,10 +1,10 @@
 // Tests E0910: a `change` op with neither an inline `via` nor an `impl Old -> New`
 // in scope is rejected — the converter is required to read old data.
-struct Label {
+Label: struct {
     text: String
 }
 
-#PublishedSchema struct Order {
+#PublishedSchema Order: struct {
     id: Int
     note: Label
 }
@@ -13,7 +13,7 @@ migration Order {
     change note: String -> Label
 }
 
-fn run() {
-    o :: Order{id: 1, note: Label{text: "rush"}}
+run: fn() {
+    o: Order{id: 1, note: Label{text: "rush"}}
     print("{o.id}")
 }

@@ -3,9 +3,9 @@
 use {
     jet_foundation.[canonical_json_bytes]
     jet_driver.[JET_DRIVER_EXIT_OK]
-    cli_files :: core.files
+    cli_files: core.files
 }
-struct JetCLIProjectClaim {
+JetCLIProjectClaim: struct {
     name: String
     action: String
     state: String
@@ -16,7 +16,7 @@ struct JetCLIProjectClaim {
 
 // `target_arg` up to its default: the one explicit target, or None when the
 // caller must select the stock project entry.
-fn jet_cli_project_status_target(args: [String]) -> String? JetCLIReadError! {
+jet_cli_project_status_target: fn(args: [String]) -> String? JetCLIReadError! {
     target := String?{None}
     skip := false
     loop arg in args {
@@ -36,21 +36,21 @@ fn jet_cli_project_status_target(args: [String]) -> String? JetCLIReadError! {
     Ok(target)
 }
 
-fn jet_cli_project_status_matches(receipt: JetCLIReceipt, target: String, directory: Bool) -[FS]> Bool Never! {
+jet_cli_project_status_matches: fn(receipt: JetCLIReceipt, target: String, directory: Bool) -[FS]> Bool Never! {
     loop input in receipt.claim.inputs {
-        path :: cli_files.realpath(input.path) ?? input.path
+        path: cli_files.realpath(input.path) ?? input.path
         if path == target || (directory && (target == "/" || path.starts_with("{target}/"))) -> return true
     }
     false
 }
 
-fn jet_cli_project_status_sections(receipt: JetCLIReceipt) -> JetCLIStatusValue Never! {
-    value :: jet_cli_receipt_query_sections(receipt.sections, None) ?? return jet_cli_status_object([JetCLIStatusField]{})
-    text :: String.from_bytes(canonical_json_bytes(value)) ?? return jet_cli_status_object([JetCLIStatusField]{})
+jet_cli_project_status_sections: fn(receipt: JetCLIReceipt) -> JetCLIStatusValue Never! {
+    value: jet_cli_receipt_query_sections(receipt.sections, None) ?? return jet_cli_status_object([JetCLIStatusField]{})
+    text: String.from_bytes(canonical_json_bytes(value)) ?? return jet_cli_status_object([JetCLIStatusField]{})
     jet_cli_status_value_parse(text) ?? jet_cli_status_object([JetCLIStatusField]{})
 }
 
-fn jet_cli_project_status_summarize(root: String, receipts: [JetCLIReceipt], name: String, target: String) -[FS, Time.Wait]> JetCLIProjectClaim Never! {
+jet_cli_project_status_summarize: fn(root: String, receipts: [JetCLIReceipt], name: String, target: String) -[FS, Time.Wait]> JetCLIProjectClaim Never! {
     success := JetCLIReceipt?{None}
     failure := JetCLIReceipt?{None}
     stale := JetCLIReceipt?{None}
@@ -87,13 +87,13 @@ fn jet_cli_project_status_summarize(root: String, receipts: [JetCLIReceipt], nam
     JetCLIProjectClaim{name: name, action: "jet {name} {target}", state: state, receipt: receipt_id, sections: sections, reason: reason}
 }
 
-fn jet_cli_project_status_pad(text: String, width: Int) -> String Never! {
+jet_cli_project_status_pad: fn(text: String, width: Int) -> String Never! {
     padded := text
     loop _ in text.len()..<width -> padded = "{padded} "
     padded
 }
 
-fn jet_cli_project_status_render(target: String, rows: [JetCLIProjectClaim], error: String, json: Bool) -> JetCLIPlan Never! {
+jet_cli_project_status_render: fn(target: String, rows: [JetCLIProjectClaim], error: String, json: Bool) -> JetCLIPlan Never! {
     if json {
         claims := [JetCLIStatusValue]{}
         loop row in rows {
@@ -106,7 +106,7 @@ fn jet_cli_project_status_render(target: String, rows: [JetCLIProjectClaim], err
                 jet_cli_status_field("state", jet_cli_status_text(row.state)),
             }))
         }
-        fields :: [JetCLIStatusField]{jet_cli_status_field("claims", jet_cli_status_array(claims)), jet_cli_status_field("error", if error == "" -> JetCLIStatusValue.Null else -> jet_cli_status_text(error)), jet_cli_status_field("target", jet_cli_status_text(target))}
+        fields: [JetCLIStatusField]{jet_cli_status_field("claims", jet_cli_status_array(claims)), jet_cli_status_field("error", if error == "" -> JetCLIStatusValue.Null else -> jet_cli_status_text(error)), jet_cli_status_field("target", jet_cli_status_text(target))}
         return jet_cli_done("{jet_cli_status_render("status", true, fields)}\n", "", JET_DRIVER_EXIT_OK)
     }
     out := "target  {target}\n"
@@ -120,16 +120,16 @@ fn jet_cli_project_status_render(target: String, rows: [JetCLIProjectClaim], err
 
 // The host supplies the normal default project entry and ReceiptStore's
 // selected root for the parsed target, exactly as run_status does in Rust.
-fn jet_cli_project_status_at(root: String, cwd: String, target: String, json: Bool) -[FS, Time.Wait]> JetCLIPlan Never! {
-    receipts :: jet_cli_receipt_list(root) ?? return jet_cli_project_status_render(target, [JetCLIProjectClaim]{}, "receipt store is unreadable: {err.message}", json)
-    absolute :: if target.starts_with("/") -> target else -> jet_cli_entry_join(cwd, target)
-    canonical :: cli_files.realpath(absolute) ?? absolute
-    directory :: if cli_files.stat(canonical) == {.Ok(info) -> info.is_dir else -> false}
+jet_cli_project_status_at: fn(root: String, cwd: String, target: String, json: Bool) -[FS, Time.Wait]> JetCLIPlan Never! {
+    receipts: jet_cli_receipt_list(root) ?? return jet_cli_project_status_render(target, [JetCLIProjectClaim]{}, "receipt store is unreadable: {err.message}", json)
+    absolute: if target.starts_with("/") -> target else -> jet_cli_entry_join(cwd, target)
+    canonical: cli_files.realpath(absolute) ?? absolute
+    directory: if cli_files.stat(canonical) == {.Ok(info) -> info.is_dir else -> false}
     by_verb := [String:[JetCLIReceipt]]{}
     verbs := [String]{}
     loop receipt in receipts {
         if !jet_cli_project_status_matches(receipt, canonical, directory) -> next
-        name :: receipt.claim.verb
+        name: receipt.claim.verb
         if by_verb.get(name) == None {
             &verbs.push(name)
             by_verb[name] = [JetCLIReceipt]{}

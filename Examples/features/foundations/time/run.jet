@@ -1,15 +1,15 @@
-use time :: core.time
+use time: core.time
 
-trait BusinessCalendar {
-    fn is_business_day(self, date: LocalDate) -> Bool
+BusinessCalendar: trait {
+    is_business_day: fn(self, date: LocalDate) -> Bool
 }
 
-struct ExchangeCalendar {
+ExchangeCalendar: struct {
     holidays: [LocalDate]
 }
 
 impl ExchangeCalendar.BusinessCalendar {
-    fn is_business_day(self, date: LocalDate) -> Bool {
+    is_business_day: fn(self, date: LocalDate) -> Bool {
         if date.iso_weekday() > 5 -> return false
         loop holiday in self.holidays {
             if holiday == date -> return false
@@ -18,7 +18,7 @@ impl ExchangeCalendar.BusinessCalendar {
     }
 }
 
-fn add_business_days(cal: ExchangeCalendar, start: LocalDate, count: Int) -> LocalDate {
+add_business_days: fn(cal: ExchangeCalendar, start: LocalDate, count: Int) -> LocalDate {
     current := start
     remaining := count
     step := 1
@@ -32,15 +32,15 @@ fn add_business_days(cal: ExchangeCalendar, start: LocalDate, count: Int) -> Loc
     return current
 }
 
-struct DailySchedule {
+DailySchedule: struct {
     zone: Zone
     hour: Int
     minute: Int
 }
 
-fn occurrences(schedule: DailySchedule, start: LocalDate, days: Int) -> [ZonedDateTime] {
+occurrences: fn(schedule: DailySchedule, start: LocalDate, days: Int) -> [ZonedDateTime] {
     out := [ZonedDateTime]{}
-    local :: time.zoned_local(start, time.time(schedule.hour, schedule.minute, 0), schedule.zone) ?? panic("schedule start")
+    local: time.zoned_local(start, time.time(schedule.hour, schedule.minute, 0), schedule.zone) ?? panic("schedule start")
     current := local
     i := 0
     loop i < days {
@@ -51,25 +51,25 @@ fn occurrences(schedule: DailySchedule, start: LocalDate, days: Int) -> [ZonedDa
     return out
 }
 
-struct LeapEntry {
+LeapEntry: struct {
     key: Int
     offset_seconds: Int
 }
 
-struct AstroTime {
+AstroTime: struct {
     seconds: Int
     nanoseconds: Int
     scale: String
 }
 
-struct JulianDate {
+JulianDate: struct {
     day: Int
     nanoseconds: Int
 }
 
-fn date_key(date: LocalDate) -> Int { date.year() * 10000 + date.month() * 100 + date.day() }
+date_key: fn(date: LocalDate) -> Int { date.year() * 10000 + date.month() * 100 + date.day() }
 
-fn normalize(seconds: Int, nanoseconds: Int, scale: String) -> AstroTime {
+normalize: fn(seconds: Int, nanoseconds: Int, scale: String) -> AstroTime {
     s := seconds
     n := nanoseconds
     loop n >= 1_000_000_000 {
@@ -83,7 +83,7 @@ fn normalize(seconds: Int, nanoseconds: Int, scale: String) -> AstroTime {
     return AstroTime{seconds: s, nanoseconds: n, scale: scale}
 }
 
-fn leap_entries() -> [LeapEntry] {
+leap_entries: fn() -> [LeapEntry] {
     return [LeapEntry]{
         LeapEntry{key: 19720101, offset_seconds: 10},
         LeapEntry{key: 19720701, offset_seconds: 11},
@@ -116,9 +116,9 @@ fn leap_entries() -> [LeapEntry] {
     }
 }
 
-fn tai_minus_utc(date: LocalDate) -> Int {
+tai_minus_utc: fn(date: LocalDate) -> Int {
     offset := 0
-    entries :: leap_entries()
+    entries: leap_entries()
     loop entry in entries {
         if date_key(date) >= entry.key -> offset = entry.offset_seconds
     }
@@ -127,54 +127,54 @@ fn tai_minus_utc(date: LocalDate) -> Int {
 
 // #2764 leaves direct LocalDate trait ABI on the compiler gate, so this
 // package keeps the calendar trait path explicit and package-owned.
-fn utc_carrier(dt: DateTime) -> AstroTime { normalize(dt.to_unix_s(), dt.nanosecond(), "UTC") }
+utc_carrier: fn(dt: DateTime) -> AstroTime { normalize(dt.to_unix_s(), dt.nanosecond(), "UTC") }
 
-fn utc_to_tai(dt: DateTime) -> AstroTime {
+utc_to_tai: fn(dt: DateTime) -> AstroTime {
     return normalize(dt.to_unix_s() + tai_minus_utc(dt.date()), dt.nanosecond(), "TAI")
 }
 
-fn tai_to_utc(value: AstroTime) -> DateTime {
+tai_to_utc: fn(value: AstroTime) -> DateTime {
     offset := 0
     i := 0
     loop i < 3 {
-        candidate :: time.from_unix_seconds(value.seconds - offset)
+        candidate: time.from_unix_seconds(value.seconds - offset)
         offset = tai_minus_utc(candidate.date())
         i += 1
     }
-    total :: (value.seconds - offset) * 1_000_000_000 + value.nanoseconds
+    total: (value.seconds - offset) * 1_000_000_000 + value.nanoseconds
     return time.from_unix_nanoseconds(total)
 }
 
-fn tai_to_tt(value: AstroTime) -> AstroTime { normalize(value.seconds + 32, value.nanoseconds + 184_000_000, "TT") }
+tai_to_tt: fn(value: AstroTime) -> AstroTime { normalize(value.seconds + 32, value.nanoseconds + 184_000_000, "TT") }
 
-fn tt_to_tai(value: AstroTime) -> AstroTime { normalize(value.seconds - 32, value.nanoseconds - 184_000_000, "TAI") }
+tt_to_tai: fn(value: AstroTime) -> AstroTime { normalize(value.seconds - 32, value.nanoseconds - 184_000_000, "TAI") }
 
-fn utc_to_ut1(dt: DateTime, dut1_nanoseconds: Int) -> AstroTime {
+utc_to_ut1: fn(dt: DateTime, dut1_nanoseconds: Int) -> AstroTime {
     return normalize(dt.to_unix_s(), dt.nanosecond() + dut1_nanoseconds, "UT1")
 }
 
-fn ut1_to_utc(value: AstroTime, dut1_nanoseconds: Int) -> DateTime {
-    total :: value.seconds * 1_000_000_000 + value.nanoseconds - dut1_nanoseconds
+ut1_to_utc: fn(value: AstroTime, dut1_nanoseconds: Int) -> DateTime {
+    total: value.seconds * 1_000_000_000 + value.nanoseconds - dut1_nanoseconds
     return time.from_unix_nanoseconds(total)
 }
 
-fn to_julian(value: AstroTime) -> JulianDate {
-    days :: value.seconds /% 86400
-    seconds_of_day :: value.seconds - days * 86400
-    fraction :: seconds_of_day * 1_000_000_000 + value.nanoseconds + 43_200_000_000_000
+to_julian: fn(value: AstroTime) -> JulianDate {
+    days: value.seconds /% 86400
+    seconds_of_day: value.seconds - days * 86400
+    fraction: seconds_of_day * 1_000_000_000 + value.nanoseconds + 43_200_000_000_000
     if fraction >= 86_400_000_000_000 {
         return JulianDate{day: 2_440_588 + days, nanoseconds: fraction - 86_400_000_000_000}
     }
     return JulianDate{day: 2_440_587 + days, nanoseconds: fraction}
 }
 
-fn run() {
-    new_year :: time.new(2024, 1, 1)
-    christmas :: time.new(2024, 12, 25)
-    calendar :: ExchangeCalendar{holidays: [LocalDate]{new_year.copy(), christmas.copy()}}
-    start :: time.new(2023, 12, 29)
-    forward :: add_business_days(calendar.copy(), start.copy(), 2)
-    backward :: add_business_days(calendar.copy(), start.copy(), -2)
+run: fn() {
+    new_year: time.new(2024, 1, 1)
+    christmas: time.new(2024, 12, 25)
+    calendar: ExchangeCalendar{holidays: [LocalDate]{new_year.copy(), christmas.copy()}}
+    start: time.new(2023, 12, 29)
+    forward: add_business_days(calendar.copy(), start.copy(), 2)
+    backward: add_business_days(calendar.copy(), start.copy(), -2)
     if forward.to_string() != "2024-01-03" -> panic("business-day forward")
     if backward.to_string() != "2023-12-27" -> panic("business-day backward")
     print("business_forward={forward.to_string()}")
@@ -183,44 +183,44 @@ fn run() {
     print("holiday_is_business={calendar.is_business_day(new_year.copy())}")
     if calendar.is_business_day(christmas.copy()) -> panic("Christmas calendar holiday")
     print("christmas_is_business={calendar.is_business_day(christmas.copy())}")
-    weekend :: time.new(2023, 12, 30)
+    weekend: time.new(2023, 12, 30)
     if calendar.is_business_day(weekend.copy()) -> panic("weekend calendar")
     print("weekend_is_business={calendar.is_business_day(weekend.copy())}")
-    zone :: time.zone("America/New_York") ?? panic("zone")
-    schedule :: DailySchedule{zone: zone.copy(), hour: 9, minute: 30}
-    schedule_start :: time.new(2024, 3, 8)
-    scheduled :: occurrences(schedule.copy(), schedule_start.copy(), 5)
+    zone: time.zone("America/New_York") ?? panic("zone")
+    schedule: DailySchedule{zone: zone.copy(), hour: 9, minute: 30}
+    schedule_start: time.new(2024, 3, 8)
+    scheduled: occurrences(schedule.copy(), schedule_start.copy(), 5)
     loop item in scheduled {
-        text :: item.format("yyyy-MM-dd HH:mm:ss VV XXX")
-        offset :: item.offset_seconds()
+        text: item.format("yyyy-MM-dd HH:mm:ss VV XXX")
+        offset: item.offset_seconds()
         print("occurrence={text} offset={offset}")
     }
     if scheduled.len() != 5 -> panic("schedule occurrence count")
-    first :: scheduled[0]
-    last :: scheduled[4]
-    first_text :: first.format("yyyy-MM-dd HH:mm:ss VV XXX")
-    last_text :: last.format("yyyy-MM-dd HH:mm:ss VV XXX")
+    first: scheduled[0]
+    last: scheduled[4]
+    first_text: first.format("yyyy-MM-dd HH:mm:ss VV XXX")
+    last_text: last.format("yyyy-MM-dd HH:mm:ss VV XXX")
     if !first_text.starts_with("2024-03-08 09:30:00") -> panic("schedule local start")
     if !last_text.starts_with("2024-03-12 09:30:00") -> panic("schedule local recurrence")
     if first.offset_seconds() == last.offset_seconds() -> panic("schedule DST transition")
-    next_transition :: first.next_transition()
-    previous_transition :: first.previous_transition()
-    hours :: first.hours_in_day()
-    start_of_day :: first.start_of_day()
-    start_of_day_text :: start_of_day.to_string()
+    next_transition: first.next_transition()
+    previous_transition: first.previous_transition()
+    hours: first.hours_in_day()
+    start_of_day: first.start_of_day()
+    start_of_day_text: start_of_day.to_string()
     print("next_transition={next_transition}")
     print("previous_transition={previous_transition}")
     print("hours_in_day={hours}")
     print("start_of_day={start_of_day_text}")
 
-    gap_compatible :: time.zoned_local(time.new(2024, 3, 10), time.time(2, 30, 0), zone, "compatible") ?? panic("gap compatible")
-    gap_later :: time.zoned_local(time.new(2024, 3, 10), time.time(2, 30, 0), zone, "later") ?? panic("gap later")
-    overlap_earlier :: time.zoned_local(time.new(2024, 11, 3), time.time(1, 30, 0), zone, "earlier") ?? panic("overlap earlier")
-    overlap_later :: time.zoned_local(time.new(2024, 11, 3), time.time(1, 30, 0), zone, "later") ?? panic("overlap later")
-    gap_compatible_text :: gap_compatible.format("yyyy-MM-dd HH:mm:ss VV XXX")
-    gap_later_text :: gap_later.format("yyyy-MM-dd HH:mm:ss VV XXX")
-    overlap_earlier_text :: overlap_earlier.format("yyyy-MM-dd HH:mm:ss VV XXX")
-    overlap_later_text :: overlap_later.format("yyyy-MM-dd HH:mm:ss VV XXX")
+    gap_compatible: time.zoned_local(time.new(2024, 3, 10), time.time(2, 30, 0), zone, "compatible") ?? panic("gap compatible")
+    gap_later: time.zoned_local(time.new(2024, 3, 10), time.time(2, 30, 0), zone, "later") ?? panic("gap later")
+    overlap_earlier: time.zoned_local(time.new(2024, 11, 3), time.time(1, 30, 0), zone, "earlier") ?? panic("overlap earlier")
+    overlap_later: time.zoned_local(time.new(2024, 11, 3), time.time(1, 30, 0), zone, "later") ?? panic("overlap later")
+    gap_compatible_text: gap_compatible.format("yyyy-MM-dd HH:mm:ss VV XXX")
+    gap_later_text: gap_later.format("yyyy-MM-dd HH:mm:ss VV XXX")
+    overlap_earlier_text: overlap_earlier.format("yyyy-MM-dd HH:mm:ss VV XXX")
+    overlap_later_text: overlap_later.format("yyyy-MM-dd HH:mm:ss VV XXX")
     if !gap_compatible_text.starts_with("2024-03-10 03:30:00") -> panic("gap compatible resolution")
     if !gap_later_text.starts_with("2024-03-10 03:30:00") -> panic("gap later resolution")
     if overlap_earlier.offset_seconds() == overlap_later.offset_seconds() {
@@ -232,21 +232,21 @@ fn run() {
     print("overlap_later={overlap_later_text}")
 
     // Package-owned AstroTime is the honest carrier until direct leap-second labels land.
-    utc :: time.parse_rfc3339("2016-12-31T23:59:59Z") ?? panic("utc")
-    utc_after :: time.parse_rfc3339("2017-01-01T00:00:00Z") ?? panic("utc_after")
-    utc_value :: utc_carrier(utc.copy())
-    tai :: utc_to_tai(utc.copy())
-    tai_after :: utc_to_tai(utc_after.copy())
-    tt :: tai_to_tt(tai.copy())
-    ut1 :: utc_to_ut1(utc.copy(), 334_000_000)
-    tai_back :: tai_to_utc(tai.copy())
-    tt_back :: tt_to_tai(tt.copy())
-    ut1_back :: ut1_to_utc(ut1.copy(), 334_000_000)
-    tai_jd :: to_julian(tai.copy())
-    tt_jd :: to_julian(tt.copy())
-    ut1_jd :: to_julian(ut1.copy())
-    tai_back_text :: tai_back.format_rfc3339()
-    ut1_back_text :: ut1_back.format_rfc3339()
+    utc: time.parse_rfc3339("2016-12-31T23:59:59Z") ?? panic("utc")
+    utc_after: time.parse_rfc3339("2017-01-01T00:00:00Z") ?? panic("utc_after")
+    utc_value: utc_carrier(utc.copy())
+    tai: utc_to_tai(utc.copy())
+    tai_after: utc_to_tai(utc_after.copy())
+    tt: tai_to_tt(tai.copy())
+    ut1: utc_to_ut1(utc.copy(), 334_000_000)
+    tai_back: tai_to_utc(tai.copy())
+    tt_back: tt_to_tai(tt.copy())
+    ut1_back: ut1_to_utc(ut1.copy(), 334_000_000)
+    tai_jd: to_julian(tai.copy())
+    tt_jd: to_julian(tt.copy())
+    ut1_jd: to_julian(ut1.copy())
+    tai_back_text: tai_back.format_rfc3339()
+    ut1_back_text: ut1_back.format_rfc3339()
     print("utc={utc_value.seconds}s+{utc_value.nanoseconds}ns scale={utc_value.scale}")
     print("tai={tai.seconds}s+{tai.nanoseconds}ns scale={tai.scale}")
     print("tai_after={tai_after.seconds}s+{tai_after.nanoseconds}ns")
@@ -261,9 +261,9 @@ fn run() {
 
     // #2765 covers signed nanosecond extremes; this ordinary value proves the
     // lossless path without pretending the boundary defect is solved.
-    high :: time.parse_rfc3339("2024-03-29T15:30:00.123456789Z") ?? panic("high")
-    high_ns :: high.nanosecond()
-    high_roundtrip :: high.to_unix_ns()
+    high: time.parse_rfc3339("2024-03-29T15:30:00.123456789Z") ?? panic("high")
+    high_ns: high.nanosecond()
+    high_roundtrip: high.to_unix_ns()
     if high_ns != 123456789 -> panic("nanosecond precision")
     if high_roundtrip != 1711726200123456789 -> panic("nanosecond round trip")
     print("highres_ns={high_ns} roundtrip={high_roundtrip}")

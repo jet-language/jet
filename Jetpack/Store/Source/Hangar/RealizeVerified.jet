@@ -7,13 +7,13 @@
 // additive so parallel closure workers can report independently; the
 // terminal owns rendering, so callbacks carry its IO/Env/wait effects. Rust
 // installed it thread-locally; the provider context carries it explicitly here.
-struct ProgressHandle {
+ProgressHandle: struct {
     discovered_bytes: fn(Int) Never! -[IO, Env, Time.Wait]>
     transferred_bytes: fn(Int) Never! -[IO, Env, Time.Wait]>
     phase: fn(String) Never! -[IO, Env, Time.Wait]>
     object_progress: fn(Int, Int) Never! -[IO, Env, Time.Wait]>
 
-    fn silent() -> ProgressHandle Never! {
+    silent: fn() -> ProgressHandle Never! {
         ProgressHandle{
             discovered_bytes: (bytes: Int) -> {},
             transferred_bytes: (bytes: Int) -> {},
@@ -23,13 +23,13 @@ struct ProgressHandle {
     }
 }
 
-struct CacheExpectation {
+CacheExpectation: struct {
     identity: CacheIdentity
     owned_output: String?
     allow_unsigned_local: Bool
 }
 
-enum RealizeRequest {
+RealizeRequest: enum {
     Package(spec: RefSpec, table: SourceTable)
     Adapter(plan: AdapterPlan, table: SourceTable, expectation: CacheExpectation)
 }
@@ -37,44 +37,44 @@ enum RealizeRequest {
 // Controls a source-only independent-root reproducibility certification. A
 // retry always starts both builds in fresh roots. `cancelled` is polled
 // between build/promotion boundaries; a cancelled run never enters Hangar.
-struct IndependentRootOptions {
+IndependentRootOptions: struct {
     retries: Int
     cancelled: (fn() -[FS]> Bool)?
 
-    fn default() -> IndependentRootOptions Never! {
+    default: fn() -> IndependentRootOptions Never! {
         IndependentRootOptions{retries: 1, cancelled: None}
     }
 }
 
 // The durable result of a successful independent-root certification.
-struct IndependentRootCertification {
+IndependentRootCertification: struct {
     entry: StoreEntry
     action_key: String
     attestation: String
 }
 
-struct VerifiedRealization {
+VerifiedRealization: struct {
     priv entry: StoreEntry
     priv source_state_value: SourceState
     priv lease: CacheLease
 
-    fn metadata(self) -> StoreEntry Never! { self.entry }
+    metadata: fn(self) -> StoreEntry Never! { self.entry }
 
-    fn source_state(self) -> SourceState Never! { self.source_state_value }
+    source_state: fn(self) -> SourceState Never! { self.source_state_value }
 
-    fn consumption_status(self) -> ConsumptionStatus Never! { self.lease.status() }
+    consumption_status: fn(self) -> ConsumptionStatus Never! { self.lease.status() }
 
-    fn original_output(self) -> String Never! { self.lease.original_output() }
+    original_output: fn(self) -> String Never! { self.lease.original_output() }
 
-    fn original_reference(self) -> String Never! { self.lease.original_reference() }
+    original_reference: fn(self) -> String Never! { self.lease.original_reference() }
 
-    fn into_parts(^self) -> (entry: StoreEntry, source_state: SourceState, lease: CacheLease) Never! {
+    into_parts: fn(^self) -> (entry: StoreEntry, source_state: SourceState, lease: CacheLease) Never! {
         (entry: self.entry, source_state: self.source_state_value, lease: ^self.lease)
     }
 }
 
 #Error
-enum RealizeError {
+RealizeError: enum {
     Provider(ProviderError)
     // A project lock named the Nix closure, but its portable bytes or
     // identity could not be replayed. Kept distinct from generic Hangar
@@ -83,7 +83,7 @@ enum RealizeError {
     Store(StoreError)
     Integrity(IntegrityFailure)
 
-    fn message(self) -> String Never! {
+    message: fn(self) -> String Never! {
         if self == {
             .Provider(error) -> "{error}"
             .LockedNix(error) -> error.message()
@@ -93,7 +93,7 @@ enum RealizeError {
     }
 }
 
-struct IntegrityFailure {
+IntegrityFailure: struct {
     package: String
     version: String
     expected: String
@@ -102,34 +102,34 @@ struct IntegrityFailure {
     disposition: String
     priv fix_text: String
 
-    fn what(self) -> String Never! {
+    what: fn(self) -> String Never! {
         "Integrity check failed for `{self.package}` `{self.version}` — expected `{self.expected}`, got `{self.actual}`."
     }
 
-    fn why(self) -> String Never! {
+    why: fn(self) -> String Never! {
         "The cached artifact failed {self.reason}. {self.disposition}"
     }
 
-    fn fix(self) -> String Never! { self.fix_text }
+    fix: fn(self) -> String Never! { self.fix_text }
 }
 
-fn store_report_integrity(theme: Theme, failure: IntegrityFailure) Never! -[IO, Time.Wait]> {
+store_report_integrity: fn(theme: Theme, failure: IntegrityFailure) Never! -[IO, Time.Wait]> {
     theme.error_coded("E2604", failure.what(), failure.why(), failure.fix())
 }
 
 // Rehydrate a previously verified project environment after its composite
 // stamp still matches. This deliberately skips provider and per-entry
 // verification; any stamp mutation falls back to the unchanged cold path.
-fn store_reuse_verified_environment(verification: &StoreVerification, roots: HangarRoots, expected_stamp: String, project: String, definition_fingerprint: String, inherited_loader_path: String?, selections: [EnvironmentSelection], allow_local_nix_catalog: Bool) -> [VerifiedRealization]? StoreError! {
+store_reuse_verified_environment: fn(verification: &StoreVerification, roots: HangarRoots, expected_stamp: String, project: String, definition_fingerprint: String, inherited_loader_path: String?, selections: [EnvironmentSelection], allow_local_nix_catalog: Bool) -> [VerifiedRealization]? StoreError! {
     if selections.len() == 0 -> return Ok(None)
-    hangar_lock :: env_runtime_lock(roots.root, "hangar")
-    entries :: store_list_read_only(roots)
-    index :: EnvironmentEntryIndex.from_entries_for_selections(entries, selections)
-    actual_stamp :: store_environment_entry_stamp_with_index(roots, project, definition_fingerprint, inherited_loader_path, selections, index)
+    hangar_lock: env_runtime_lock(roots.root, "hangar")
+    entries: store_list_read_only(roots)
+    index: EnvironmentEntryIndex.from_entries_for_selections(entries, selections)
+    actual_stamp: store_environment_entry_stamp_with_index(roots, project, definition_fingerprint, inherited_loader_path, selections, index)
     if actual_stamp != expected_stamp -> return Ok(None)
     selected := [StoreEntry]{}
     loop selection in selections {
-        entry :: index.get(selection) ?? return Ok(None)
+        entry: index.get(selection) ?? return Ok(None)
         store_require_entry_catalog_permission(entry, allow_local_nix_catalog)
         &selected.push(entry)
     }
@@ -142,7 +142,7 @@ fn store_reuse_verified_environment(verification: &StoreVerification, roots: Han
             }
         }
     }
-    leases :: store_snapshot_leases_with_entries_unlocked(&verification, roots, selected, entries)
+    leases: store_snapshot_leases_with_entries_unlocked(&verification, roots, selected, entries)
     realizations := [VerifiedRealization]{}
     index_at := 0
     loop lease in ^leases {
@@ -154,28 +154,28 @@ fn store_reuse_verified_environment(verification: &StoreVerification, roots: Han
 
 // Record (or refresh) a store entry; returns the entry with its id filled
 // in. Test seam over the same admission transaction as realized recording.
-fn store_record(verification: &StoreVerification, roots: HangarRoots, name: String, version: String, reference: String, out: String, bin: String, rlib: String, envelope: Envelope) -> StoreEntry StoreError! {
+store_record: fn(verification: &StoreVerification, roots: HangarRoots, name: String, version: String, reference: String, out: String, bin: String, rlib: String, envelope: Envelope) -> StoreEntry StoreError! {
     store_record_verified(&verification, roots, name, version, reference, out, bin, rlib, envelope, CacheIdentity.empty())
 }
 
-fn store_record_verified(verification: &StoreVerification, roots: HangarRoots, name: String, version: String, reference: String, out: String, bin: String, rlib: String, envelope: Envelope, cache_identity: CacheIdentity) -> StoreEntry StoreError! {
+store_record_verified: fn(verification: &StoreVerification, roots: HangarRoots, name: String, version: String, reference: String, out: String, bin: String, rlib: String, envelope: Envelope, cache_identity: CacheIdentity) -> StoreEntry StoreError! {
     store_record_verified_mode(&verification, roots, name, version, reference, out, bin, rlib, envelope, cache_identity, false)
 }
 
-fn store_record_verified_mode(verification: &StoreVerification, roots: HangarRoots, name: String, version: String, reference: String, out: String, bin: String, rlib: String, envelope: Envelope, cache_identity: CacheIdentity, canonicalize_local: Bool) -> StoreEntry StoreError! {
-    hangar_lock :: env_runtime_lock(roots.root, "hangar")
-    paths :: if canonicalize_local -> store_canonicalize_local_output_unlocked(&verification, roots, out, bin, rlib, envelope.output_hash) else -> (out: out, bin: bin, rlib: rlib)
-    id :: store_entry_id(name, version, reference, paths.out)
-    dir :: files.join(roots.hangar_dir(), id)
-    now :: store_now_secs()
-    realized_at :: if store_read_meta(dir) == {
+store_record_verified_mode: fn(verification: &StoreVerification, roots: HangarRoots, name: String, version: String, reference: String, out: String, bin: String, rlib: String, envelope: Envelope, cache_identity: CacheIdentity, canonicalize_local: Bool) -> StoreEntry StoreError! {
+    hangar_lock: env_runtime_lock(roots.root, "hangar")
+    paths: if canonicalize_local -> store_canonicalize_local_output_unlocked(&verification, roots, out, bin, rlib, envelope.output_hash) else -> (out: out, bin: bin, rlib: rlib)
+    id: store_entry_id(name, version, reference, paths.out)
+    dir: files.join(roots.hangar_dir(), id)
+    now: store_now_secs()
+    realized_at: if store_read_meta(dir) == {
         .Val(meta) -> meta.realized_at ?? now
         .None -> now
     }
     producer := ProducerRecord.decode(store_canonical_producer("store-record", "cas:{cache_identity.source_fingerprint}", envelope.output_hash, cache_identity, [String: String]{"reference": reference}))
     &producer.bind_cache_provenance(reference, envelope.output_hash, cache_identity, [String]{})
     provider_refresh_provider_facts(&producer, reference) ?? return Err(StoreError.Other("{err}"))
-    entry :: StoreEntry{
+    entry: StoreEntry{
         id: id,
         name: name,
         version: version,
@@ -194,66 +194,66 @@ fn store_record_verified_mode(verification: &StoreVerification, roots: HangarRoo
         last_used_at: now,
     }
     store_pin_nix_gc_root(dir, paths.out)
-    _ :: AdmissionTransaction.recover_unlocked(roots)
+    _: AdmissionTransaction.recover_unlocked(roots)
     transaction := AdmissionTransaction.new(&verification, roots)
     batch := [StoreEntry]{entry}
-    _ :: &transaction.commit(&batch, [AdmissionReceipt]{}, None, RegistrationMode.Native, None)
+    _: &transaction.commit(&batch, [AdmissionReceipt]{}, None, RegistrationMode.Native, None)
     Ok(batch[0])
 }
 
-fn store_record_realized_mode(verification: &StoreVerification, roots: HangarRoots, realized: Realized) -> StoreEntry StoreError! {
-    hangar_lock :: env_runtime_lock(roots.root, "hangar")
+store_record_realized_mode: fn(verification: &StoreVerification, roots: HangarRoots, realized: Realized) -> StoreEntry StoreError! {
+    hangar_lock: env_runtime_lock(roots.root, "hangar")
     store_record_realized_mode_unlocked(&verification, roots, realized, None)
 }
 
-fn store_record_realized_mode_with_fresh_agreement(verification: &StoreVerification, roots: HangarRoots, action_key: String, realized: Realized) -> StoreEntry StoreError! {
-    hangar_lock :: env_runtime_lock(roots.root, "hangar")
+store_record_realized_mode_with_fresh_agreement: fn(verification: &StoreVerification, roots: HangarRoots, action_key: String, realized: Realized) -> StoreEntry StoreError! {
+    hangar_lock: env_runtime_lock(roots.root, "hangar")
     store_record_realized_mode_unlocked(&verification, roots, realized, Val(action_key))
 }
 
-fn store_record_realized_mode_unlocked(verification: &StoreVerification, roots: HangarRoots, realized: Realized, fresh_action_key: String?) -> StoreEntry StoreError! {
-    _ :: ProducerRecord.decode(realized.producer.encode())
+store_record_realized_mode_unlocked: fn(verification: &StoreVerification, roots: HangarRoots, realized: Realized, fresh_action_key: String?) -> StoreEntry StoreError! {
+    _: ProducerRecord.decode(realized.producer.encode())
     provider_validate_nix_build_facts(realized.producer) ?? return Err(StoreError.Other("{err}"))
-    graph :: store_closure_graph_structure_unlocked(&verification, roots)
+    graph: store_closure_graph_structure_unlocked(&verification, roots)
     store_validate_universe_references(realized.producer.provider, realized.references, graph)
     // Capture named-output identities before projection may move a local
     // staging path into Hangar. The bytes, not the transient source
     // spelling, are the durable output facts.
     named_outputs := [String: String]{}
     loop name in store_sorted_keys(realized.named_outputs) {
-        path :: realized.named_outputs[name]
-        digest :: store_canonical_graph_digest(roots, graph, path) ?? pkg_try_output_hash_of(path) ?? return Err(StoreError.Other(err.message()))
+        path: realized.named_outputs[name]
+        digest: store_canonical_graph_digest(roots, graph, path) ?? pkg_try_output_hash_of(path) ?? return Err(StoreError.Other(err.message()))
         if name == "out" && digest != realized.envelope.output_hash {
             return Err(StoreError.Other("Nix primary output changed during Store registration: expected {realized.envelope.output_hash}, got {digest}"))
         }
         named_outputs[name] = digest
     }
-    _ :: AdmissionTransaction.recover_unlocked(roots)
+    _: AdmissionTransaction.recover_unlocked(roots)
     transaction := AdmissionTransaction.new(&verification, roots)
-    entry :: if store_record_realized_in_transaction(roots, realized, graph, named_outputs, &transaction) == {
+    entry: if store_record_realized_in_transaction(roots, realized, graph, named_outputs, &transaction) == {
         .Ok(staged) -> staged
         .Err(error) -> {
             &transaction.rollback()
             return Err(error)
         }
     }
-    registration_mode :: if realized.producer.provider == "nix" -> RegistrationMode.AdmittedNix else -> RegistrationMode.Native
+    registration_mode: if realized.producer.provider == "nix" -> RegistrationMode.AdmittedNix else -> RegistrationMode.Native
     batch := [StoreEntry]{entry}
-    _ :: &transaction.commit(&batch, [AdmissionReceipt]{}, None, registration_mode, fresh_action_key)
+    _: &transaction.commit(&batch, [AdmissionReceipt]{}, None, registration_mode, fresh_action_key)
     Ok(batch[0])
 }
 
 // The staging half of realized recording: project or stage the outputs and
 // build the package record the transaction will commit.
-fn store_record_realized_in_transaction(roots: HangarRoots, realized: Realized, graph: ClosureGraph, captured_outputs: [String: String], transaction: &AdmissionTransaction) -> StoreEntry StoreError! {
-    paths :: if realized.producer.provider == "nix" -> store_project_nix_outputs_unlocked(roots, realized, graph, &transaction) else -> store_stage_local_output_unlocked(roots, realized.out, realized.bin, realized.rlib, realized.envelope.output_hash, &transaction)
+store_record_realized_in_transaction: fn(roots: HangarRoots, realized: Realized, graph: ClosureGraph, captured_outputs: [String: String], transaction: &AdmissionTransaction) -> StoreEntry StoreError! {
+    paths: if realized.producer.provider == "nix" -> store_project_nix_outputs_unlocked(roots, realized, graph, &transaction) else -> store_stage_local_output_unlocked(roots, realized.out, realized.bin, realized.rlib, realized.envelope.output_hash, &transaction)
     named_outputs := captured_outputs.copy()
     named_outputs["out"] = realized.envelope.output_hash
-    content_addressed :: realized.producer.provider == "nix" || realized.producer.provider == "jetpackage"
-    id :: if content_addressed -> store_content_addressed_entry_id(realized.name, realized.version, realized.reference, realized.envelope.output_hash) else -> store_entry_id(realized.name, realized.version, realized.reference, paths.out)
-    dir :: files.join(roots.hangar_dir(), id)
-    now :: store_now_secs()
-    realized_at :: if store_read_meta(dir) == {
+    content_addressed: realized.producer.provider == "nix" || realized.producer.provider == "jetpackage"
+    id: if content_addressed -> store_content_addressed_entry_id(realized.name, realized.version, realized.reference, realized.envelope.output_hash) else -> store_entry_id(realized.name, realized.version, realized.reference, paths.out)
+    dir: files.join(roots.hangar_dir(), id)
+    now: store_now_secs()
+    realized_at: if store_read_meta(dir) == {
         .Val(meta) -> meta.realized_at ?? now
         .None -> now
     }
@@ -269,12 +269,12 @@ fn store_record_realized_in_transaction(roots: HangarRoots, realized: Realized, 
     }
     cache_identity := realized.cache_identity
     if producer.provider == "nix" {
-        cache_key :: producer.facts.get("nix.cache.key")
+        cache_key: producer.facts.get("nix.cache.key")
         if cache_key == .Val(key) -> cache_identity.policy_fingerprint = key
     }
     &producer.bind_cache_provenance(realized.reference, realized.envelope.output_hash, cache_identity, realized.references)
     provider_refresh_provider_facts(&producer, realized.reference) ?? return Err(StoreError.Other("{err}"))
-    entry :: StoreEntry{
+    entry: StoreEntry{
         id: id,
         name: realized.name,
         version: realized.version,
@@ -299,7 +299,7 @@ fn store_record_realized_in_transaction(roots: HangarRoots, realized: Realized, 
 // Single realization boundary for every product consumer. Cache reuse,
 // quarantine, provider execution, and recording cannot be bypassed by CLI
 // callers.
-fn store_realize_verified(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, request: RealizeRequest) -> VerifiedRealization RealizeError! {
+store_realize_verified: fn(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, request: RealizeRequest) -> VerifiedRealization RealizeError! {
     if request == {
         .Package(spec, _) -> store_enforce_manifest_provenance_floor(ctx.project_dir, spec.package)
         else -> {}
@@ -308,16 +308,16 @@ fn store_realize_verified(verification: &StoreVerification, roots: HangarRoots, 
     // verification; selected-candidate proofs run below so invalid bytes can
     // be quarantined.
     store_closure_graph_structure(&verification, roots) ?? return Err(RealizeError.Store(err))
-    facts :: store_realize_request_facts(&verification, request, ctx)
-    reference :: facts.reference
-    expectation :: facts.expectation
-    locked_nix :: facts.locked_nix
-    indexed_nix_repair :: facts.indexed_nix_repair
+    facts: store_realize_request_facts(&verification, request, ctx)
+    reference: facts.reference
+    expectation: facts.expectation
+    locked_nix: facts.locked_nix
+    indexed_nix_repair: facts.indexed_nix_repair
 
     // A missing bindings directory means "no configured cache". A present
     // but malformed or unreadable binding is trust state, not a cache miss;
     // fail before any local, remote, or newly built result becomes usable.
-    cache_bindings :: store_list_cache_bindings(roots) ?? return Err(RealizeError.Store(err))
+    cache_bindings: store_list_cache_bindings(roots) ?? return Err(RealizeError.Store(err))
 
     // A complete Nix lock binds reuse and repair to the original admission.
     // Check it before considering shared candidates; neither damaged closure
@@ -325,7 +325,7 @@ fn store_realize_verified(verification: &StoreVerification, roots: HangarRoots, 
     if locked_nix {
         if request == {
             .Package(spec, _) -> {
-                replayed :: store_replay_locked_nix_package(&verification, roots, ctx, spec)
+                replayed: store_replay_locked_nix_package(&verification, roots, ctx, spec)
                 if replayed == {
                     .Val(hit) -> return Ok(^hit)
                     .None -> {}
@@ -335,10 +335,10 @@ fn store_realize_verified(verification: &StoreVerification, roots: HangarRoots, 
         }
     }
 
-    candidate :: store_find_by_reference(&verification, roots, reference)
+    candidate: store_find_by_reference(&verification, roots, reference)
     if candidate == .Val(found) {
     if expectation == .Val(wanted) {
-        hit :: if store_find_verified_by_reference(&verification, roots, reference, wanted) == {
+        hit: if store_find_verified_by_reference(&verification, roots, reference, wanted) == {
             .Ok(value) -> value
             .Err(error) -> { return Err(RealizeError.Store(error)) }
         }
@@ -349,11 +349,11 @@ fn store_realize_verified(verification: &StoreVerification, roots: HangarRoots, 
                 return Ok(VerifiedRealization{entry: verified.entry, source_state_value: SourceState.Cached, lease: ^verified.lease})
             }
             .None -> {
-                proof :: store_verify_cache_entry(&verification, roots, found, reference, wanted)
+                proof: store_verify_cache_entry(&verification, roots, found, reference, wanted)
                 if cache_bindings.len() > 0 {
-                    substituted :: store_try_substitute_invalid_candidate(&verification, roots, found, wanted, cache_bindings) ?? return Err(RealizeError.Store(err))
+                    substituted: store_try_substitute_invalid_candidate(&verification, roots, found, wanted, cache_bindings) ?? return Err(RealizeError.Store(err))
                     if substituted {
-                        again :: if store_find_verified_by_reference(&verification, roots, reference, wanted) == {
+                        again: if store_find_verified_by_reference(&verification, roots, reference, wanted) == {
                             .Ok(value) -> value
                             .Err(error) -> { return Err(RealizeError.Store(error)) }
                         }
@@ -390,12 +390,12 @@ fn store_realize_verified(verification: &StoreVerification, roots: HangarRoots, 
 
     if expectation == {
         .Val(wanted) -> {
-            shared :: if store_reuse_shared_entry(&verification, roots, reference, wanted) == {
+            shared: if store_reuse_shared_entry(&verification, roots, reference, wanted) == {
                 .Ok(value) -> value
                 .Err(error) -> { return Err(RealizeError.Store(error)) }
             }
             if shared != None {
-                hit :: if store_find_verified_by_reference(&verification, roots, reference, wanted) == {
+                hit: if store_find_verified_by_reference(&verification, roots, reference, wanted) == {
                     .Ok(value) -> value
                     .Err(error) -> { return Err(RealizeError.Store(error)) }
                 }
@@ -412,10 +412,10 @@ fn store_realize_verified(verification: &StoreVerification, roots: HangarRoots, 
         .None -> {}
     }
 
-    prepared :: store_build_for_cache(&verification, roots, ctx, request, IndependentRootOptions.default(), false)
+    prepared: store_build_for_cache(&verification, roots, ctx, request, IndependentRootOptions.default(), false)
     // The private build roots go on every exit once registration is decided
     // (Rust drops the workspace guards).
-    registered :: store_register_prepared(&verification, roots, ctx, prepared) ? value -> value ! error -> {
+    registered: store_register_prepared(&verification, roots, ctx, prepared) ? value -> value ! error -> {
         prepared.release()
         return Err(error)
     }
@@ -423,7 +423,7 @@ fn store_realize_verified(verification: &StoreVerification, roots: HangarRoots, 
     Ok(registered)
 }
 
-fn store_register_prepared(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, prepared: PreparedRealization) -> VerifiedRealization RealizeError! {
+store_register_prepared: fn(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, prepared: PreparedRealization) -> VerifiedRealization RealizeError! {
     realized := prepared.realized
     if prepared.attestation == {
         .Val(attestation) -> realized.producer.facts["cache.reproducibility"] = attestation
@@ -436,7 +436,7 @@ fn store_register_prepared(verification: &StoreVerification, roots: HangarRoots,
     provider_validate_nix_lock_before_store(ctx, realized) ?? return Err(RealizeError.Provider(err))
     store_require_catalog_permission(realized.producer.facts.get("nix.index.tier"), ctx.allow_local_nix_catalog) ?? return Err(RealizeError.LockedNix(err))
     store_progress_phase(ctx, "Registering")
-    recorded :: if prepared.action_key == {
+    recorded: if prepared.action_key == {
         .Val(action_key) -> store_record_realized_mode_with_fresh_agreement(&verification, roots, action_key, realized) ?? return Err(RealizeError.Store(err))
         .None -> store_record_realized_mode(&verification, roots, realized) ?? return Err(RealizeError.Store(err))
     }
@@ -451,7 +451,7 @@ fn store_register_prepared(verification: &StoreVerification, roots: HangarRoots,
         }
     }
     store_progress_phase(ctx, "Activating")
-    lease :: store_snapshot_lease(&verification, roots, entry) ?? return Err(RealizeError.Store(err))
+    lease: store_snapshot_lease(&verification, roots, entry) ?? return Err(RealizeError.Store(err))
     if prepared.action_key == {
         .Val(action_key) -> store_clear_reproducibility_report(roots, action_key) ?? return Err(RealizeError.Store(err))
         .None -> {}
@@ -460,7 +460,7 @@ fn store_register_prepared(verification: &StoreVerification, roots: HangarRoots,
 }
 
 // The cache reference, expectation, and Nix replay facts of one request.
-fn store_realize_request_facts(verification: &StoreVerification, request: RealizeRequest, ctx: ProviderCtx) -> (reference: String, expectation: CacheExpectation?, locked_nix: Bool, indexed_nix_repair: Bool) RealizeError! {
+store_realize_request_facts: fn(verification: &StoreVerification, request: RealizeRequest, ctx: ProviderCtx) -> (reference: String, expectation: CacheExpectation?, locked_nix: Bool, indexed_nix_repair: Bool) RealizeError! {
     if request == {
         .Package(spec, table) -> {
             provider_validate_cache_authority(spec, table, ctx) ?? return Err(RealizeError.Provider(err))
@@ -470,20 +470,20 @@ fn store_realize_request_facts(verification: &StoreVerification, request: Realiz
     }
 }
 
-fn store_progress_phase(ctx: ProviderCtx, phase: String) Never! -[IO, Env, Time.Wait]> {
+store_progress_phase: fn(ctx: ProviderCtx, phase: String) Never! -[IO, Env, Time.Wait]> {
     if ctx.progress == {
         .Val(progress) -> progress.phase(phase)
         .None -> {}
     }
 }
 
-fn store_project_has_locked_nix(project_dir: String?, raw: String) -> Bool Never! {
-    project :: project_dir ?? return false
+store_project_has_locked_nix: fn(project_dir: String?, raw: String) -> Bool Never! {
+    project: project_dir ?? return false
     if !files.is_dir(project) -> return false
     pkg_lock_locked_nix_package(project, raw) != None
 }
 
-fn store_validate_adapter_request_hook(request: RealizeRequest, entry: StoreEntry, expectation: CacheExpectation) RealizeError! {
+store_validate_adapter_request_hook: fn(request: RealizeRequest, entry: StoreEntry, expectation: CacheExpectation) RealizeError! {
     if request == {
         .Adapter(plan, table, _) -> store_validate_cached_adapter_hook(entry, plan, table, expectation) ?? return Err(RealizeError.Store(err))
         else -> {}
@@ -495,7 +495,7 @@ fn store_validate_adapter_request_hook(request: RealizeRequest, entry: StoreEntr
 // provider executions start in private roots and the first result is not
 // promoted until the second result agrees on action, output, and
 // provenance.
-fn store_certify_independent_root_build(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, request: RealizeRequest, options: IndependentRootOptions) -> IndependentRootCertification RealizeError! {
+store_certify_independent_root_build: fn(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, request: RealizeRequest, options: IndependentRootOptions) -> IndependentRootCertification RealizeError! {
     if request == {
         .Package(spec, table) -> {
             store_enforce_manifest_provenance_floor(ctx.project_dir, spec.package)
@@ -504,10 +504,10 @@ fn store_certify_independent_root_build(verification: &StoreVerification, roots:
         else -> {}
     }
     store_closure_graph_structure(&verification, roots) ?? return Err(RealizeError.Store(err))
-    prepared :: store_build_for_cache(&verification, roots, ctx, request, options, true)
+    prepared: store_build_for_cache(&verification, roots, ctx, request, options, true)
     // The private roots live until registration is decided, then go on every
     // exit (Rust drops the workspace guards).
-    certified :: store_certify_prepared(&verification, roots, ctx, options, prepared) ? value -> value ! error -> {
+    certified: store_certify_prepared(&verification, roots, ctx, options, prepared) ? value -> value ! error -> {
         prepared.release()
         return Err(error)
     }
@@ -515,15 +515,15 @@ fn store_certify_independent_root_build(verification: &StoreVerification, roots:
     Ok(certified)
 }
 
-fn store_certify_prepared(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, options: IndependentRootOptions, prepared: PreparedRealization) -> IndependentRootCertification RealizeError! {
-    action_key :: prepared.action_key ?? return Err(RealizeError.Store(StoreError.InvalidData("independent certification produced no action identity")))
+store_certify_prepared: fn(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, options: IndependentRootOptions, prepared: PreparedRealization) -> IndependentRootCertification RealizeError! {
+    action_key: prepared.action_key ?? return Err(RealizeError.Store(StoreError.InvalidData("independent certification produced no action identity")))
     if options.cancelled == {
         .Val(cancelled) -> {
             if cancelled() -> return Err(RealizeError.Store(StoreError.Interrupted("independent reproducibility certification cancelled")))
         }
         .None -> {}
     }
-    attestation :: prepared.attestation ?? return Err(RealizeError.Store(StoreError.InvalidData("independent certification has no agreeing attestation")))
+    attestation: prepared.attestation ?? return Err(RealizeError.Store(StoreError.InvalidData("independent certification has no agreeing attestation")))
     realized := prepared.realized
     realized.producer.facts["cache.reproducibility"] = attestation
     provider_validate_nix_lock_before_store(ctx, realized) ?? return Err(RealizeError.Provider(err))
@@ -542,37 +542,37 @@ fn store_certify_prepared(verification: &StoreVerification, roots: HangarRoots, 
 // Catalog approval belongs to this invocation, not to a persisted admission
 // or environment receipt. Call only after verifying the authority supplying
 // the tier; explicit local-byte replay can only supply an unverified tier.
-fn store_require_catalog_permission(tier: String?, allow_local_nix_catalog: Bool) StoreError! {
+store_require_catalog_permission: fn(tier: String?, allow_local_nix_catalog: Bool) StoreError! {
     if (tier ?? "") == "local-unofficial" && !allow_local_nix_catalog {
         return Err(StoreError.PermissionDenied("local-unofficial catalog admission requires --local-nix-catalog for this invocation"))
     }
 }
 
-fn store_require_entry_catalog_permission(entry: StoreEntry, allow_local_nix_catalog: Bool) StoreError! {
-    producer :: ProducerRecord.decode(entry.producer_record) ?? return Err(StoreError.InvalidData(err.message()))
+store_require_entry_catalog_permission: fn(entry: StoreEntry, allow_local_nix_catalog: Bool) StoreError! {
+    producer: ProducerRecord.decode(entry.producer_record) ?? return Err(StoreError.InvalidData(err.message()))
     store_require_catalog_permission(producer.facts.get("nix.index.tier"), allow_local_nix_catalog)
 }
 
-fn store_authorize_and_project_realization(ctx: ProviderCtx, entry: StoreEntry) RealizeError! {
-    producer :: ProducerRecord.decode(entry.producer_record) ?? return Err(RealizeError.Store(StoreError.Other(err.message())))
+store_authorize_and_project_realization: fn(ctx: ProviderCtx, entry: StoreEntry) RealizeError! {
+    producer: ProducerRecord.decode(entry.producer_record) ?? return Err(RealizeError.Store(StoreError.Other(err.message())))
     store_require_catalog_permission(producer.facts.get("nix.index.tier"), ctx.allow_local_nix_catalog) ?? return Err(RealizeError.LockedNix(err))
-    project :: ctx.project_dir ?? return
+    project: ctx.project_dir ?? return
     if !files.is_dir(project) -> return
     if entry.receipt == "" {
         return Err(RealizeError.Store(StoreError.InvalidData("Hangar entry `{entry.id}` has no connected receipt")))
     }
-    lock_path :: files.join(project, UNIFIED_LOCK_FILE)
-    present :: store_validate_project_lock_path(lock_path) ?? return Err(RealizeError.Store(err))
+    lock_path: files.join(project, UNIFIED_LOCK_FILE)
+    present: store_validate_project_lock_path(lock_path) ?? return Err(RealizeError.Store(err))
     if !present -> return
     store_project_receipt_under_lock(ctx, project, producer, entry) ?? return Err(RealizeError.Store(err))
 }
 
-fn store_project_receipt_under_lock(ctx: ProviderCtx, project: String, producer: ProducerRecord, entry: StoreEntry) StoreError! {
-    project_lock :: env_runtime_project_lock(project, "receipt-projection")
+store_project_receipt_under_lock: fn(ctx: ProviderCtx, project: String, producer: ProducerRecord, entry: StoreEntry) StoreError! {
+    project_lock: env_runtime_project_lock(project, "receipt-projection")
     if producer.provider == "nix" {
         if producer.facts.get("nix.lock.digest") == {
             .Val(expected) -> {
-                current :: provider_project_lock_digest(ctx.project_dir) ?? return Err(StoreError.Other("{err}"))
+                current: provider_project_lock_digest(ctx.project_dir) ?? return Err(StoreError.Other("{err}"))
                 if current != expected {
                     return Err(StoreError.InvalidData("Nix project lock changed before receipt projection: prepared `{expected}`, current `{current}`"))
                 }
@@ -580,19 +580,19 @@ fn store_project_receipt_under_lock(ctx: ProviderCtx, project: String, producer:
             .None -> {}
         }
     }
-    _ :: store_record_receipt_projection(project, entry.name, entry.version, entry.reference, entry.envelope.output_hash, entry.receipt)
+    _: store_record_receipt_projection(project, entry.name, entry.version, entry.reference, entry.envelope.output_hash, entry.receipt)
 }
 
-fn store_record_receipt_projection(project_root: String, package_name: String, package_version: String, reference: String, output_hash: String, receipt: String) -> Bool StoreError! {
+store_record_receipt_projection: fn(project_root: String, package_name: String, package_version: String, reference: String, output_hash: String, receipt: String) -> Bool StoreError! {
     if !store_valid_receipt_digest(receipt) -> return Err(StoreError.InvalidData("invalid Hangar receipt digest `{receipt}`"))
     if output_hash == "" && reference == "" -> return Err(StoreError.InvalidData("Hangar receipt projection has no package identity"))
-    lock_path :: files.join(project_root, UNIFIED_LOCK_FILE)
+    lock_path: files.join(project_root, UNIFIED_LOCK_FILE)
     if !store_validate_project_lock_path(lock_path) -> return Ok(false)
-    raw :: files.read(lock_path)
+    raw: files.read(lock_path)
     lock := pkg_lock_parse(raw) ?? return Err(StoreError.InvalidData("could not parse project lock `{lock_path}`: {err.message()}"))
     package_index := -1
     loop index in 0..<lock.packages.len() {
-        package :: lock.packages[index]
+        package: lock.packages[index]
         if package.name == package_name && package.version == package_version && store_receipt_source_matches(package, reference) && store_receipt_projection_envelope_matches(package, output_hash) {
             package_index = index
             break
@@ -608,8 +608,8 @@ fn store_record_receipt_projection(project_root: String, package_name: String, p
 
 // Whether the project lock exists as a real file under a real managed
 // directory; a missing directory or file is `false`.
-fn store_validate_project_lock_path(path: String) -> Bool StoreError! {
-    managed :: files.dirname(path)
+store_validate_project_lock_path: fn(path: String) -> Bool StoreError! {
+    managed: files.dirname(path)
     if managed == "" -> return Err(StoreError.Other("project lock has no managed directory"))
     if files.stat(managed) == {
         .Ok(metadata) -> {
@@ -632,7 +632,7 @@ fn store_validate_project_lock_path(path: String) -> Bool StoreError! {
     }
 }
 
-fn store_receipt_source_matches(package: LockedPackage, reference: String) -> Bool Never! {
+store_receipt_source_matches: fn(package: LockedPackage, reference: String) -> Bool Never! {
     if package.source == {
         .Root -> reference == "." || reference == "root"
         .Path(path) -> path == reference
@@ -646,13 +646,13 @@ fn store_receipt_source_matches(package: LockedPackage, reference: String) -> Bo
     }
 }
 
-fn store_receipt_envelope_matches(package: LockedPackage, output_hash: String) -> Bool Never! {
-    envelope :: package.envelope ?? return true
+store_receipt_envelope_matches: fn(package: LockedPackage, output_hash: String) -> Bool Never! {
+    envelope: package.envelope ?? return true
     output_hash == "" || envelope.output_hash == output_hash
 }
 
-fn store_receipt_projection_envelope_matches(package: LockedPackage, output_hash: String) -> Bool Never! {
-    envelope :: package.envelope ?? return false
+store_receipt_projection_envelope_matches: fn(package: LockedPackage, output_hash: String) -> Bool Never! {
+    envelope: package.envelope ?? return false
     output_hash != "" && envelope.output_hash == output_hash
 }
 
@@ -661,26 +661,26 @@ fn store_receipt_projection_envelope_matches(package: LockedPackage, output_hash
 // fail-closed local-integrity behavior. A bound but unavailable/corrupt
 // cache is a miss, so the deterministic provider path remains the source
 // fallback.
-fn store_try_substitute_invalid_candidate(verification: &StoreVerification, roots: HangarRoots, candidate: StoreEntry, expectation: CacheExpectation, bindings: [CacheBinding]) -> Bool StoreError! {
-    objects :: files.join(roots.hangar_dir(), STORE_OBJECTS_DIR)
+store_try_substitute_invalid_candidate: fn(verification: &StoreVerification, roots: HangarRoots, candidate: StoreEntry, expectation: CacheExpectation, bindings: [CacheBinding]) -> Bool StoreError! {
+    objects: files.join(roots.hangar_dir(), STORE_OBJECTS_DIR)
     if candidate.envelope.output_hash == "" || candidate.envelope.output_hash.contains("/") || candidate.out != files.join(objects, candidate.envelope.output_hash) {
         return Ok(false)
     }
-    sequence :: process_sequence_take(STORE_SUBSTITUTE_SEQUENCE)
-    stage :: files.join(objects, ".substitute-{process.current_pid()}-{sequence}")
+    sequence: process_sequence_take(STORE_SUBSTITUTE_SEQUENCE)
+    stage: files.join(objects, ".substitute-{process.current_pid()}-{sequence}")
     // Keep the verified private stage inside the Hangar object directory.
     // The production policy permits atomic publication within that sealed
     // tree; crossing from the cache scratch tree would be rejected.
     permissions := MovePathPermissions.default()
     &permissions.make_writable(objects, roots.hangar_dir())
-    result :: store_substitute_into_stage(&verification, roots, candidate, expectation, bindings, stage)
+    result: store_substitute_into_stage(&verification, roots, candidate, expectation, bindings, stage)
     &permissions.restore()
     result
 }
 
-STORE_SUBSTITUTE_SEQUENCE :: shared ProcessSequence{next: 0}
+STORE_SUBSTITUTE_SEQUENCE: shared ProcessSequence{next: 0}
 
-fn store_substitute_into_stage(verification: &StoreVerification, roots: HangarRoots, candidate: StoreEntry, expectation: CacheExpectation, bindings: [CacheBinding], stage: String) -> Bool StoreError! {
+store_substitute_into_stage: fn(verification: &StoreVerification, roots: HangarRoots, candidate: StoreEntry, expectation: CacheExpectation, bindings: [CacheBinding], stage: String) -> Bool StoreError! {
     substituted := false
     loop binding in bindings {
         store_discard_substitution_stage(stage)
@@ -699,30 +699,30 @@ fn store_substitute_into_stage(verification: &StoreVerification, roots: HangarRo
     // keeps the local action identity, closure edges, capabilities, and
     // provenance unchanged.
     store_quarantine_invalid_entry(&verification, roots, candidate, expectation) ?? {
-        failure :: err
+        failure: err
         store_discard_substitution_stage(stage)
         return Err(failure)
     }
-    restored :: store_restore_substituted_candidate(&verification, roots, candidate, stage)
+    restored: store_restore_substituted_candidate(&verification, roots, candidate, stage)
     if !restored -> store_discard_substitution_stage(stage)
     Ok(restored)
 }
 
-fn store_restore_substituted_candidate(verification: &StoreVerification, roots: HangarRoots, candidate: StoreEntry, stage: String) -> Bool StoreError! {
-    hangar_lock :: env_runtime_lock(roots.root, "hangar")
+store_restore_substituted_candidate: fn(verification: &StoreVerification, roots: HangarRoots, candidate: StoreEntry, stage: String) -> Bool StoreError! {
+    hangar_lock: env_runtime_lock(roots.root, "hangar")
     loop entry in store_list_unlocked(roots) {
         if entry.id == candidate.id -> return Ok(false)
     }
-    exists :: files.lexists(candidate.out)
-    output_is_valid :: exists && !files.is_symlink(candidate.out) && (store_try_entry_output_hash(&verification, roots, candidate) ?? "") == candidate.envelope.output_hash
+    exists: files.lexists(candidate.out)
+    output_is_valid: exists && !files.is_symlink(candidate.out) && (store_try_entry_output_hash(&verification, roots, candidate) ?? "") == candidate.envelope.output_hash
     if !output_is_valid && exists -> return Ok(false)
     entry := candidate.copy()
     entry.last_used_at = store_now_secs()
-    dir :: files.join(roots.hangar_dir(), entry.id)
+    dir: files.join(roots.hangar_dir(), entry.id)
     store_pin_nix_gc_root(dir, entry.out)
-    _ :: AdmissionTransaction.recover_unlocked(roots)
+    _: AdmissionTransaction.recover_unlocked(roots)
     transaction := AdmissionTransaction.new(&verification, roots)
-    size :: store_admission_size(stage) ? value -> value ! error -> {
+    size: store_admission_size(stage) ? value -> value ! error -> {
         &transaction.rollback()
         return Err(error)
     }
@@ -734,12 +734,12 @@ fn store_restore_substituted_candidate(verification: &StoreVerification, roots: 
         }
     }
     batch := [StoreEntry]{entry}
-    _ :: &transaction.commit(&batch, [AdmissionReceipt]{}, Val(stage), RegistrationMode.Native, None)
+    _: &transaction.commit(&batch, [AdmissionReceipt]{}, Val(stage), RegistrationMode.Native, None)
     Ok(true)
 }
 
-fn store_discard_substitution_stage(path: String) StoreError! {
-    metadata :: files.stat(path) ?? return
+store_discard_substitution_stage: fn(path: String) StoreError! {
+    metadata: files.stat(path) ?? return
     if metadata.is_symlink || metadata.is_file -> return files.remove(path)
     if !metadata.is_dir -> return Err(StoreError.Other("substitution stage is not removable"))
     store_make_tree_writable_for_removal(path)
@@ -749,10 +749,10 @@ fn store_discard_substitution_stage(path: String) StoreError! {
 // Publication is best-effort cache acceleration. The binding's write grant
 // authorizes the operation; a failed mirror never turns a successful source
 // build into a failed realization.
-fn store_publish_realized_to_bound_caches(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) Never! {
-    producer :: ProducerRecord.decode(entry.producer_record) ?? return
+store_publish_realized_to_bound_caches: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) Never! {
+    producer: ProducerRecord.decode(entry.producer_record) ?? return
     if store_is_private_untrusted_build(producer) -> return
-    bindings :: store_list_cache_bindings(roots) ?? return
+    bindings: store_list_cache_bindings(roots) ?? return
     loop binding in bindings {
         if !binding.allow_write -> next
         store_publish_cache_entry(&verification, roots, entry.id, binding.role).drop("cache publication is best-effort acceleration")
@@ -764,15 +764,15 @@ fn store_publish_realized_to_bound_caches(verification: &StoreVerification, root
 // recipe. Keeping the leases alive for the duration of the adapter build
 // prevents a dependency snapshot from disappearing while the child process
 // is using it.
-fn store_realize_adapter_tools(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, plan: AdapterPlan, table: SourceTable) -> (tools: [String: String], leases: [CacheLease]) RealizeError! {
+store_realize_adapter_tools: fn(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, plan: AdapterPlan, table: SourceTable) -> (tools: [String: String], leases: [CacheLease]) RealizeError! {
     tools := [String: String]{}
     dependency_leases := [CacheLease]{}
     loop dependency in plan.deps {
-        raw :: envmodel_pkg_ref(dependency)
+        raw: envmodel_pkg_ref(dependency)
         // `default` is the typed surface's name for the built-in Jetpack
         // provider. It is not a named SourceTable entry.
-        default_source :: dependency.source == "" || dependency.source == DEFAULT_SOURCE
-        spec :: if {
+        default_source: dependency.source == "" || dependency.source == DEFAULT_SOURCE
+        spec: if {
             default_source -> RefSpec{source: RefSource.Jetpack, package: dependency.name, raw: pkg_with_default_source(dependency.name)}
             else -> RefSpec.classify_in(raw, table) ?? return Err(RealizeError.Provider(ProviderError.Adapter("build dependency `{raw}` is not a resolvable package ref: {err}")))
         }
@@ -780,13 +780,13 @@ fn store_realize_adapter_tools(verification: &StoreVerification, roots: HangarRo
         // adapter is built in a private certification root. Its verified
         // lease owns the closure snapshot until the recipe finishes; other
         // tools keep their independent-root isolation.
-        uses_nix :: provider_uses_nix_provider_for_project(spec, table, ctx.offline, ctx.store_dir, ctx.project_dir)
-        dependency_roots :: if uses_nix -> ctx.nix_roots ?? roots else -> roots
-        realized :: store_realize_verified(&verification, dependency_roots, ctx, RealizeRequest.Package{spec: spec, table: table})
-        parts :: ^realized.into_parts()
-        bin_dir :: parts.entry.bin
+        uses_nix: provider_uses_nix_provider_for_project(spec, table, ctx.offline, ctx.store_dir, ctx.project_dir)
+        dependency_roots: if uses_nix -> ctx.nix_roots ?? roots else -> roots
+        realized: store_realize_verified(&verification, dependency_roots, ctx, RealizeRequest.Package{spec: spec, table: table})
+        parts: ^realized.into_parts()
+        bin_dir: parts.entry.bin
         lease := ^parts.lease
-        receipt :: lease.profile_install_receipt() ?? return Err(RealizeError.Provider(ProviderError.Adapter("build dependency `{dependency.name}` has no verified executable output: {err}")))
+        receipt: lease.profile_install_receipt() ?? return Err(RealizeError.Provider(ProviderError.Adapter("build dependency `{dependency.name}` has no verified executable output: {err}")))
         lease.validate() ?? return Err(RealizeError.Store(StoreError.IO(err)))
         loop member in receipt.executable_members {
             if lease.executable_for_command(member) == {
@@ -807,9 +807,9 @@ fn store_realize_adapter_tools(verification: &StoreVerification, roots: HangarRo
     Ok((tools: tools, leases: dependency_leases))
 }
 
-fn store_integrity_failure(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, expectation: CacheExpectation, proof: CacheVerification) -> IntegrityFailure Never! {
-    identity :: expectation.identity
-    facts :: if {
+store_integrity_failure: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, expectation: CacheExpectation, proof: CacheVerification) -> IntegrityFailure Never! {
+    identity: expectation.identity
+    facts: if {
         !proof.output_exists -> (reason: "output existence", expected: entry.envelope.output_hash, actual: "missing output")
         !proof.output_digest -> (reason: "content digest verification", expected: entry.envelope.output_hash, actual: store_try_entry_output_hash(&verification, roots, entry) ?? "unreadable output: {err.message()}")
         !proof.source -> (reason: "source identity verification", expected: identity.source_fingerprint, actual: entry.cache_identity.source_fingerprint)
@@ -832,25 +832,25 @@ fn store_integrity_failure(verification: &StoreVerification, roots: HangarRoots,
 
 // Whether every `bin`/`rlib` member of a record resolves strictly inside its
 // primary output or one of its named output objects.
-fn store_closure_is_reachable(roots: HangarRoots, entry: StoreEntry) -> Bool Never! {
+store_closure_is_reachable: fn(roots: HangarRoots, entry: StoreEntry) -> Bool Never! {
     if store_path_starts_with(entry.out, "/nix/store") {
-        root :: files.join(files.join(roots.hangar_dir(), entry.id), STORE_NIX_GC_ROOT)
+        root: files.join(files.join(roots.hangar_dir(), entry.id), STORE_NIX_GC_ROOT)
         if !files.exists(root) -> return false
         return (files.canonicalize(root) ?? "") == (files.canonicalize(entry.out) ?? "")
     }
-    canonical_out :: files.canonicalize(entry.out) ?? return false
+    canonical_out: files.canonicalize(entry.out) ?? return false
     // `bin`/`rlib` members may live inside the primary output or inside any
     // named output object of a multi-output Nix package.
     member_roots := [String]{canonical_out}
-    objects :: files.join(roots.hangar_dir(), STORE_OBJECTS_DIR)
+    objects: files.join(roots.hangar_dir(), STORE_OBJECTS_DIR)
     loop output in entry.named_outputs {
-        resolved :: files.canonicalize(files.join(objects, output.value)) ?? next
+        resolved: files.canonicalize(files.join(objects, output.value)) ?? next
         &member_roots.push(resolved)
     }
-    members :: [String]{entry.bin, entry.rlib}
+    members: [String]{entry.bin, entry.rlib}
     loop member in members {
         if member == "" -> next
-        canonical_member :: files.canonicalize(member) ?? return false
+        canonical_member: files.canonicalize(member) ?? return false
         inside := false
         loop root in member_roots {
             if canonical_member != root && store_path_starts_with(canonical_member, root) {

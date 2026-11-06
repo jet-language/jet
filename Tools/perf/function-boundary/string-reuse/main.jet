@@ -2,18 +2,18 @@
 // the callee refills it in place (`&` capacity reuse; pair: string-fresh).
 // `out = ""` empties the caller's String and keeps its buffer.
 #CLI
-struct Args {
+Args: struct {
     n: Int
 }
 
-fn render_into(out: &String, seed: Int) {
+render_into: fn(out: &String, seed: Int) {
     out = ""
     loop i in 0..<(32 + seed % 32) {
         if (seed + i) % 2 == 0 -> out += "ab" else -> out += "xyz"
     }
 }
 
-fn run(args: Args) {
+run: fn(args: Args) {
     acc := 0
     text := ""
     loop i in 0..<args.n {

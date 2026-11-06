@@ -23,8 +23,8 @@
 // lowering began skips the program's remaining levels (the front end is level-independent). Per run:
 // same metrics, run directly (no scope: its startup cost would swamp short programs), fixture restored
 // before every run. `--cpus` pins compiles, runs and peers to one CPU set.
-// `--cli-adapter argv` (default) rewrites a `#CLI struct Args` + `fn run(args: Args)` entry into a
-// plain `fn run()` that reads the same positional arguments from `process.args()`, because the native
+// `--cli-adapter argv` (default) rewrites a `#CLI Args: struct` + `run: fn(args: Args)` entry into a
+// plain `run: fn()` that reads the same positional arguments from `process.args()`, because the native
 // compilers reject the typed CLI entry (E1321); `literal` writes the spec arguments in as literals
 // instead (no core.process import). The body is untouched and both digests are recorded.
 //
@@ -119,15 +119,15 @@ function measure(command, { cwd, env = process.env, timeoutS, scopeMem = null, c
   });
 }
 
-// `#CLI struct Args {...}` + `fn run(args: Args) RET {` → plain `fn run() RET` that builds the same
+// `#CLI Args: struct {...}` + `run: fn(args: Args) RET {` → plain `run: fn() RET` that builds the same
 // Args. Mode `argv`: from the positional arguments (field order, as the gauntlet passes them) through
 // process.args(). Mode `literal`: the entry's spec args written in as literals (no core.process
 // import; the values become compile-time constants, which the table states).
 function adaptCli(source, mode, args) {
-  const runHead = /^fn run\(args: Args\)([^{\n]*)\{/m.exec(source);
+  const runHead = /^run: fn\(args: Args\)([^{\n]*)\{/m.exec(source);
   if (!runHead) return { source, adapted: null };
-  const struct = /#CLI\s+struct Args\s*\{([^}]*)\}/.exec(source);
-  if (!struct) throw new Error('fn run(args: Args) without a `#CLI struct Args`');
+  const struct = /#CLI\s+Args: struct\s*\{([^}]*)\}/.exec(source);
+  if (!struct) throw new Error('run: fn(args: Args) without a `#CLI Args: struct`');
   const fields = struct[1].split(/[\n,]/).map(s => s.trim()).filter(Boolean).map(f => {
     const m = /^(\w+)\s*:\s*(\w+)$/.exec(f);
     if (!m || !['Int', 'String'].includes(m[2])) throw new Error(`unsupported Args field \`${f}\``);
@@ -146,9 +146,9 @@ function adaptCli(source, mode, args) {
   });
   const ret = runHead[1];
   let out = source.replace(struct[0], struct[0].replace(/^#CLI\s+/, ''));
-  out = out.replace(runHead[0], `fn olevel_body(args: Args)${ret}{`);
-  out = `${argv ? 'use olevel_process :: core.process\n' : ''}${out.endsWith('\n') ? out : `${out}\n`}\n` +
-    `fn run()${ret}{\n${argv ? '    olevel_args :: olevel_process.args()\n' : ''}    olevel_body(Args{${values.join(', ')}})\n}\n`;
+  out = out.replace(runHead[0], `olevel_body: fn(args: Args)${ret}{`);
+  out = `${argv ? 'use olevel_process: core.process\n' : ''}${out.endsWith('\n') ? out : `${out}\n`}\n` +
+    `run: fn()${ret}{\n${argv ? '    olevel_args: olevel_process.args()\n' : ''}    olevel_body(Args{${values.join(', ')}})\n}\n`;
   return { source: out, adapted: mode };
 }
 
@@ -437,7 +437,7 @@ function writeTables(results, o) {
     '`compile wall s` is the whole measured command (scope, wrapper and toolchain environment startup included); `compiler traced s` is the timestamp of the compiler\'s last trace event (the compiler process alone; for `jet run`, the compile before the program starts).',
     `Runs: ${results.runs} measured after ${results.warmup} warmup; one compile at a time, each in a scope with MemoryMax=${results.scope_mem} and no swap${results.pinned_cpus ? `; compiles, runs and peers pinned to CPUs ${results.pinned_cpus}` : ''}. Machine: ${results.machine.cpus} CPUs, load ${results.machine.load_start} → ${results.machine.load_end}. Started ${results.started}, ${results.complete ? `finished ${results.finished}` : `PARTIAL as of ${results.finished}`}.`,
     `Rust ratio verdict: < 1 win, ≥ 1 loss (same-run \`rustc -O\`), the same rule as every other peer. Receipt ratios use the newest gauntlet receipt (older run, other load): context, not gate evidence.${results.toolchain_note ? ` Toolchain: ${results.toolchain_note}.` : ''}`,
-    results.cli_adapter === 'off' ? 'CLI adapter: off.' : `CLI adapter (${results.cli_adapter}): the native compiler rejects the typed \`#CLI struct Args\` + \`fn run(args: Args)\` entry (E1321), so such entries were measured as \`fn run()\` that ${results.cli_adapter === 'argv' ? 'reads the same positional arguments from `process.argv()`' : 'builds `Args` from the entry\'s spec arguments written as literals (no `core.process` import; the arguments become compile-time constants, unlike the peers)'}; the program body is unchanged (results.json keeps both source digests).`, '',
+    results.cli_adapter === 'off' ? 'CLI adapter: off.' : `CLI adapter (${results.cli_adapter}): the native compiler rejects the typed \`#CLI Args: struct\` + \`run: fn(args: Args)\` entry (E1321), so such entries were measured as \`run: fn()\` that ${results.cli_adapter === 'argv' ? 'reads the same positional arguments from `process.argv()`' : 'builds `Args` from the entry\'s spec arguments written as literals (no `core.process` import; the arguments become compile-time constants, unlike the peers)'}; the program body is unchanged (results.json keeps both source digests).`, '',
     `| ${header.join(' | ')} |`, `|${header.map(() => '---').join('|')}|`];
   const tsv = [header.join('\t')];
   for (const p of results.programs) {

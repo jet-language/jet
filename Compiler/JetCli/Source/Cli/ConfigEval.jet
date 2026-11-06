@@ -5,7 +5,7 @@
 // the compiler service build): every global it reads becomes an ALL_CAPS
 // module constant holding that value's literal, the source's own top-level
 // functions are carried by their exact text, and the value itself becomes
-// `JET_CONFIG_VALUE :: comptime { <expression> }`. Here the driver checks that
+// `JET_CONFIG_VALUE: comptime { <expression> }`. Here the driver checks that
 // program in `JetDriverCompileMode.Comptime`, whose comptime stage lowers the
 // `comptime` value to IR and runs it natively in the sealed comptime child
 // (JetEval IR/Native.jet); the checked value is read
@@ -13,7 +13,7 @@
 // `comptime_evaluate` below; `jetpack` reaches the same evaluator through
 // `jet __jetpack comptime-evaluate` (JetpackService.jet).
 use {
-    config_files :: core.files
+    config_files: core.files
     jet_driver.[
         JetDriverAuthorizedSourceFile,
         JetDriverAuthorizedSourceRoot,
@@ -47,28 +47,28 @@ use {
 // Evaluate `expr` (spelled in `source`) with `funcs` callable and `globals`
 // readable. A plain literal is already its value; every other expression
 // runs through the driver's comptime stage.
-fn comptime_evaluate(expr: Expr, source: String, funcs: [String: Func], base_dir: String, globals: [String: CtValue]) -> CtValue ComptimeEvalError! {
+comptime_evaluate: fn(expr: Expr, source: String, funcs: [String: Func], base_dir: String, globals: [String: CtValue]) -> CtValue ComptimeEvalError! {
     if jet_config_plain_literal(expr) == .Val(value) -> return Ok(value)
-    program :: jet_config_program(expr, source, funcs, globals) ?? return Err(err)
+    program: jet_config_program(expr, source, funcs, globals) ?? return Err(err)
     if jet_config_evaluate_program(program, base_dir) == {
         .Value(value) -> Ok(value)
         .Refused(diagnostic) -> Err(jet_config_eval_placed(expr, diagnostic))
     }
 }
 
-fn jet_config_evaluate_program(program: String, base_dir: String) -> JetConfigOutcome {
-    core_sources :: if jet_cli_core_sources(base_dir, false) == {
+jet_config_evaluate_program: fn(program: String, base_dir: String) -> JetConfigOutcome {
+    core_sources: if jet_cli_core_sources(base_dir, false) == {
         .Loaded(sources) -> sources
         .Missing(what, fix) -> { return JetConfigOutcome.Refused{diagnostic: diagnostic_from_registry("E2105", None, what, jet_cli_why("E2105"), fix)} }
     }
-    result :: jet_config_compile(program, core_sources, base_dir) ?? return JetConfigOutcome.Refused{diagnostic: jet_config_eval_diagnostic(None, "this config value could not be evaluated: {err}")}
+    result: jet_config_compile(program, core_sources, base_dir) ?? return JetConfigOutcome.Refused{diagnostic: jet_config_eval_diagnostic(None, "this config value could not be evaluated: {err}")}
     loop diagnostic in result.diagnostics {
         if diagnostic.severity == DIAGNOSTIC_ERROR -> return JetConfigOutcome.Refused{diagnostic: diagnostic_from_registry(diagnostic.code, None, diagnostic.what, diagnostic.why, diagnostic.fix)}
     }
     if result.internal_problem == .Val(problem) -> return JetConfigOutcome.Refused{diagnostic: jet_config_eval_diagnostic(None, "this config value could not be evaluated: {problem}")}
     loop value in result.comptime_values {
         if value.kind != SemaComptimeItemKind.Constant || !value.key.ends_with(":{JET_CONFIG_VALUE_NAME}") -> next
-        converted :: sema_user_template_ct_value(value.value) ?? return JetConfigOutcome.Refused{diagnostic: jet_config_eval_diagnostic(None, "this config value's result has a shape a config value can't hold")}
+        converted: sema_user_template_ct_value(value.value) ?? return JetConfigOutcome.Refused{diagnostic: jet_config_eval_diagnostic(None, "this config value's result has a shape a config value can't hold")}
         return JetConfigOutcome.Value{value: converted}
     }
     JetConfigOutcome.Refused{diagnostic: jet_config_eval_diagnostic(None, "this config value produced no build-time value")}
@@ -78,11 +78,11 @@ fn jet_config_evaluate_program(program: String, base_dir: String) -> JetConfigOu
 // directory (relative `embed_file` paths resolve there) and run its comptime
 // stage. The driver makes dynamic host calls with no effect bound, so this
 // stays unannotated like `jet_cli_compile_file`.
-fn jet_config_compile(program: String, core_sources: [JetDriverCoreSource], base_dir: String) -> JetDriverCompileResult {
-    root :: config_files.realpath(base_dir) ?? base_dir
-    path :: if root == "/" -> "/{JET_CONFIG_VALUE_FILE}" else -> "{root}/{JET_CONFIG_VALUE_FILE}"
-    identity :: "config-value-root:{root}"
-    snapshot :: JetDriverAuthorizedSourceSnapshot{
+jet_config_compile: fn(program: String, core_sources: [JetDriverCoreSource], base_dir: String) -> JetDriverCompileResult {
+    root: config_files.realpath(base_dir) ?? base_dir
+    path: if root == "/" -> "/{JET_CONFIG_VALUE_FILE}" else -> "{root}/{JET_CONFIG_VALUE_FILE}"
+    identity: "config-value-root:{root}"
+    snapshot: JetDriverAuthorizedSourceSnapshot{
         roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{
             canonical_path: root,
             identity: identity,

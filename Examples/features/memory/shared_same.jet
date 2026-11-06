@@ -1,4 +1,4 @@
-package {
+package: {
     name: "memory_shared_same"
     version: "0.1.0"
     authority: { allow: [IO, Mem.Alloc, Mem.Rc] }
@@ -6,17 +6,17 @@ package {
 // `a.same(b)` asks whether two Shared handles name one cell. It compares
 // identity only, like Rust's `Rc::ptr_eq`. `==` on `Shared<T>` stays an
 // error: two cells that hold equal values are still two cells.
-struct Counter {
+Counter: struct {
     hits: Int
 }
 
-fn same_cell(left: Shared<Counter>, right: Shared<Counter>) -> Bool {
+same_cell: fn(left: Shared<Counter>, right: Shared<Counter>) -> Bool {
     return left.same(right)
 }
 
-fn run() {
-    first :: shared Counter{hits: 0}
-    twin :: shared Counter{hits: 0}
+run: fn() {
+    first: shared Counter{hits: 0}
+    twin: shared Counter{hits: 0}
     print("self:{first.same(first)}")
     print("alias:{same_cell(first, first)}")
     print("twin:{same_cell(first, twin)}")

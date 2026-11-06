@@ -1,38 +1,38 @@
-fn show(r: Reader) Err! {
-    head :: r.take_pattern([U8]{"AB{x:U8}{y:U16le}{z:U16be}{w:U32be}{v:U24le}{u:U24be}{pad:U8}{q:U64le}{s:U64be}{t:U16be}"}) ?? return
+show: fn(r: Reader) Err! {
+    head: r.take_pattern([U8]{"AB{x:U8}{y:U16le}{z:U16be}{w:U32be}{v:U24le}{u:U24be}{pad:U8}{q:U64le}{s:U64be}{t:U16be}"}) ?? return
     print("{head.x} {head.y} {head.z} {head.w} {head.v} {head.u} {head.q} {head.s} {head.t}")
 }
 
-fn run() Err! {
-    bytes :: [U8]{65, 66, 7, 0x34, 0x12, 0x12, 0x34, 0xde, 0xad, 0xbe, 0xef, 1, 2, 3, 1, 2, 3, 99, 0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x01, 0x02, 9}
-    r :: Reader.over(bytes)
+run: fn() Err! {
+    bytes: [U8]{65, 66, 7, 0x34, 0x12, 0x12, 0x34, 0xde, 0xad, 0xbe, 0xef, 1, 2, 3, 1, 2, 3, 99, 0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x01, 0x02, 9}
+    r: Reader.over(bytes)
     show(r) ?? return
     // One byte left: too short for a U16, so the runtime reports the miss.
     if r.take_pattern([U8]{"{a:U16le}"}) == {
         .Ok(t) -> print("unexpected {t.a}")
         .Err(e) -> print("miss: {e}")
     }
-    last :: r.take_pattern([U8]{"{a:U8}"}) ?? return
+    last: r.take_pattern([U8]{"{a:U8}"}) ?? return
     print("last {last.a} remaining={r.remaining()}")
     // A literal mismatch leaves the position where it was.
-    again :: Reader.over([U8]{65, 67, 68, 69, 70, 5, 6})
+    again: Reader.over([U8]{65, 67, 68, 69, 70, 5, 6})
     if again.take_pattern([U8]{"ACDEG{a:U8}"}) == {
         .Ok(t) -> print("unexpected {t.a}")
         .Err(e) -> print("miss: {e}")
     }
-    hit :: again.take_pattern([U8]{"ACDEF{a:U8}{b:U8}"}) ?? return
+    hit: again.take_pattern([U8]{"ACDEF{a:U8}{b:U8}"}) ?? return
     print("hit {hit.a} {hit.b} remaining={again.remaining()}")
     // Off-boundary fields and rests stay with the runtime.
-    bits :: Reader.over([U8]{0xa5, 0x0f, 1, 2, 3})
-    split :: bits.take_pattern([U8]{"{h:U4}{l:U4}{n:U8}"}) ?? return
+    bits: Reader.over([U8]{0xa5, 0x0f, 1, 2, 3})
+    split: bits.take_pattern([U8]{"{h:U4}{l:U4}{n:U8}"}) ?? return
     print("bits {split.h} {split.l} {split.n}")
-    rest :: bits.take_pattern([U8]{"{p:U8}{tail:...}"}) ?? return
+    rest: bits.take_pattern([U8]{"{p:U8}{tail:...}"}) ?? return
     print("rest {rest.p} {rest.tail}")
-    skip :: Reader.over([U8]{1, 2, 3})
+    skip: Reader.over([U8]{1, 2, 3})
     skip.take_pattern([U8]{"{k:U16le}"}) ?? return
     print("skip remaining={skip.remaining()}")
     // A hole-free take only advances.
-    magic :: Reader.over([U8]{69, 68, 66, 49, 7})
+    magic: Reader.over([U8]{69, 68, 66, 49, 7})
     magic.take_pattern([U8]{"EDB1"}) ?? return
     print("magic remaining={magic.remaining()}")
 }

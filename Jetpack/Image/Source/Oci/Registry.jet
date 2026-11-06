@@ -5,42 +5,42 @@
 // credentials stay host-owned through curl's optional netrc lookup and never
 // enter Jet source, argv, logs, or receipts.
 
-IMAGE_MAX_REGISTRY_RESPONSE_BYTES :: 65536
-IMAGE_MAX_REGISTRY_DETAIL_BYTES :: 4096
+IMAGE_MAX_REGISTRY_RESPONSE_BYTES: 65536
+IMAGE_MAX_REGISTRY_DETAIL_BYTES: 4096
 
 // The result of one successful push.
-struct RegistryPushReport {
+RegistryPushReport: struct {
     reference: String
     manifest_digest: String
     blobs_uploaded: Int
     bytes_uploaded: Int
 }
 
-struct RegistryReference {
+RegistryReference: struct {
     origin: String
     api_root: String
     reference: String
 }
 
-struct RegistryBlob {
+RegistryBlob: struct {
     digest: String
     data: [U8]
 }
 
-struct RegistryManifest {
+RegistryManifest: struct {
     digest: String
     raw: [U8]
     blobs: [RegistryBlob]
 }
 
-struct RegistryResponse {
+RegistryResponse: struct {
     status: Int
     headers: [U8]
     stderr: String
 }
 
 // One registry request's method, target, headers, and optional body.
-struct RegistryRequest {
+RegistryRequest: struct {
     method: String
     url: String
     headers: [String]
@@ -49,13 +49,13 @@ struct RegistryRequest {
 }
 
 // Push the layout at `layout` to `reference`.
-fn image_push_registry(layout: String, reference: String) -[FS, Env, Exec, Time.Wait]> RegistryPushReport ImageError! {
-    registry :: image_parse_registry_reference(reference)
-    manifest :: image_load_registry_manifest(layout)
+image_push_registry: fn(layout: String, reference: String) -[FS, Env, Exec, Time.Wait]> RegistryPushReport ImageError! {
+    registry: image_parse_registry_reference(reference)
+    manifest: image_load_registry_manifest(layout)
     blobs_uploaded := 0
     bytes_uploaded := 0
     loop blob in manifest.blobs {
-        probe :: image_registry_request(RegistryRequest{method: "HEAD", url: "{registry.api_root}/blobs/{blob.digest}", headers: [String]{}, body: None, include_headers: false})
+        probe: image_registry_request(RegistryRequest{method: "HEAD", url: "{registry.api_root}/blobs/{blob.digest}", headers: [String]{}, body: None, include_headers: false})
         if {
             probe.status >= 200 && probe.status < 300 -> next
             probe.status == 404 -> {
@@ -66,7 +66,7 @@ fn image_push_registry(layout: String, reference: String) -[FS, Env, Exec, Time.
             else -> return Err(image_invalid("registry rejected blob probe with HTTP {probe.status}: {image_bounded_text(probe.stderr)}"))
         }
     }
-    response :: image_registry_request(RegistryRequest{
+    response: image_registry_request(RegistryRequest{
         method: "PUT",
         url: "{registry.api_root}/manifests/{registry.reference}",
         headers: [String]{"Content-Type: {IMAGE_MEDIA_TYPE_MANIFEST}"},
@@ -79,43 +79,43 @@ fn image_push_registry(layout: String, reference: String) -[FS, Env, Exec, Time.
     Ok(RegistryPushReport{reference, manifest_digest: manifest.digest, blobs_uploaded, bytes_uploaded})
 }
 
-fn image_parse_registry_reference(reference: String) -> RegistryReference ImageError! {
-    raw :: reference.bytes()
+image_parse_registry_reference: fn(reference: String) -> RegistryReference ImageError! {
+    raw: reference.bytes()
     if raw.len() == 0 -> return Err(image_invalid("OCI registry reference contains unsafe characters"))
     loop byte in raw {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if image_is_ascii_control(code) || trust_text_is_ascii_space(code) || code == 63 || code == 35 || code == 37 {
             return Err(image_invalid("OCI registry reference contains unsafe characters"))
         }
     }
-    split :: reference.split_once("://") ?? return Err(image_invalid("OCI registry reference must start with http:// or https://"))
-    scheme :: split.before
-    rest :: split.after
+    split: reference.split_once("://") ?? return Err(image_invalid("OCI registry reference must start with http:// or https://"))
+    scheme: split.before
+    rest: split.after
     if scheme != "http" && scheme != "https" -> return Err(image_invalid("OCI registry reference must use HTTP or HTTPS"))
-    host_split :: rest.split_once("/") ?? return Err(image_invalid("OCI registry reference has no repository"))
-    authority :: host_split.before
+    host_split: rest.split_once("/") ?? return Err(image_invalid("OCI registry reference has no repository"))
+    authority: host_split.before
     if !image_registry_authority_is_safe(authority) -> return Err(image_invalid("OCI registry reference has an unsafe host"))
     parts := host_split.after.split("/").to_list()
-    leaf :: &parts.pop() ?? ""
+    leaf: &parts.pop() ?? ""
     if leaf == "" -> return Err(image_invalid("OCI registry reference has no image name"))
     loop part in parts {
         if part == "" -> return Err(image_invalid("OCI registry repository has an empty path component"))
     }
-    target :: image_registry_leaf(leaf)
+    target: image_registry_leaf(leaf)
     image_validate_registry_component(target.name, "OCI registry image name")
     &parts.push(target.name)
     loop part in parts -> image_validate_registry_component(part, "OCI registry repository component")
-    origin :: "{scheme}://{authority}"
+    origin: "{scheme}://{authority}"
     Ok(RegistryReference{api_root: "{origin}/v2/{parts.join("/")}", origin, reference: target.reference})
 }
 
 // The image name and tag-or-digest of a reference's final path component.
-struct RegistryLeaf {
+RegistryLeaf: struct {
     name: String
     reference: String
 }
 
-fn image_registry_leaf(leaf: String) -> RegistryLeaf ImageError! {
+image_registry_leaf: fn(leaf: String) -> RegistryLeaf ImageError! {
     if leaf.split_once("@") == .Val(pinned) {
         if pinned.before == "" -> return Err(image_invalid("OCI registry reference has no image name"))
         image_validate_oci_digest(pinned.after)
@@ -130,79 +130,79 @@ fn image_registry_leaf(leaf: String) -> RegistryLeaf ImageError! {
     Ok(RegistryLeaf{name: leaf, reference: "latest"})
 }
 
-fn image_registry_authority_is_safe(authority: String) -> Bool Never! {
+image_registry_authority_is_safe: fn(authority: String) -> Bool Never! {
     if authority == "" || authority.contains("@") || authority.starts_with("-") -> return false
     loop byte in authority.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if !trust_text_is_alphanumeric(code) && code != 46 && code != 58 && code != 45 && code != 91 && code != 93 -> return false
     }
     true
 }
 
-fn image_validate_registry_component(value: String, label: String) ImageError! {
-    raw :: value.bytes()
+image_validate_registry_component: fn(value: String, label: String) ImageError! {
+    raw: value.bytes()
     if raw.len() == 0 || value == "." || value == ".." || raw.len() > 255 -> return Err(image_invalid("{label} is unsafe"))
     loop byte in raw {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if !trust_text_is_alphanumeric(code) && code != 46 && code != 95 && code != 45 -> return Err(image_invalid("{label} is unsafe"))
     }
 }
 
-fn image_validate_oci_tag(value: String) ImageError! {
-    raw :: value.bytes()
+image_validate_oci_tag: fn(value: String) ImageError! {
+    raw: value.bytes()
     if raw.len() == 0 || raw.len() > 128 -> return Err(image_invalid("OCI registry tag is unsafe"))
     loop index in 0..<raw.len() {
-        code :: Int.from_u8(raw[index])
-        allowed :: trust_text_is_alphanumeric(code) || code == 95 || (index > 0 && (code == 46 || code == 45))
+        code: Int.from_u8(raw[index])
+        allowed: trust_text_is_alphanumeric(code) || code == 95 || (index > 0 && (code == 46 || code == 45))
         if !allowed -> return Err(image_invalid("OCI registry tag is unsafe"))
     }
 }
 
-fn image_validate_oci_digest(digest: String) ImageError! {
+image_validate_oci_digest: fn(digest: String) ImageError! {
     if !digest.starts_with("sha256:") -> return Err(image_invalid("OCI registry digest must be sha256"))
-    _ :: image_digest_hex(digest)
+    _: image_digest_hex(digest)
 }
 
-fn image_is_ascii_control(code: Int) -> Bool Never! {
+image_is_ascii_control: fn(code: Int) -> Bool Never! {
     code < 32 || code == 127
 }
 
 // The manifest named by the layout's index plus its config and layer blobs,
 // every one checked against its descriptor.
-fn image_load_registry_manifest(root: String) -[FS, Env]> RegistryManifest ImageError! {
-    _ :: image_load_base(root)
-    index :: image_object(json.parse(image_read_text(files.join(root, "index.json"))), "OCI index")
-    descriptors :: image_array(index.get("manifests"), "OCI index manifests")
+image_load_registry_manifest: fn(root: String) -[FS, Env]> RegistryManifest ImageError! {
+    _: image_load_base(root)
+    index: image_object(json.parse(image_read_text(files.join(root, "index.json"))), "OCI index")
+    descriptors: image_array(index.get("manifests"), "OCI index manifests")
     if descriptors.len() == 0 -> return Err(image_invalid("OCI index has no manifest"))
-    descriptor :: image_object(descriptors[0], "OCI manifest descriptor")
-    digest :: image_string_field(descriptor, "digest")
-    manifest_size :: image_number_field(descriptor, "size")
-    raw :: image_read_blob(root, digest)
+    descriptor: image_object(descriptors[0], "OCI manifest descriptor")
+    digest: image_string_field(descriptor, "digest")
+    manifest_size: image_number_field(descriptor, "size")
+    raw: image_read_blob(root, digest)
     if raw.len() != manifest_size -> return Err(image_invalid("OCI manifest descriptor size mismatch"))
     if image_digest_for(raw) != digest -> return Err(image_invalid("OCI manifest descriptor digest mismatch"))
-    manifest_text :: String.from_bytes(raw) ?? return Err(image_invalid("OCI manifest is not UTF-8"))
-    manifest :: image_object(json.parse(manifest_text), "OCI manifest")
-    config_value :: manifest.get("config") ?? return Err(image_invalid("OCI manifest has no config"))
-    config :: image_object(config_value, "OCI config descriptor")
-    config_digest :: image_string_field(config, "digest")
-    config_size :: image_number_field(config, "size")
-    config_data :: image_read_blob(root, config_digest)
+    manifest_text: String.from_bytes(raw) ?? return Err(image_invalid("OCI manifest is not UTF-8"))
+    manifest: image_object(json.parse(manifest_text), "OCI manifest")
+    config_value: manifest.get("config") ?? return Err(image_invalid("OCI manifest has no config"))
+    config: image_object(config_value, "OCI config descriptor")
+    config_digest: image_string_field(config, "digest")
+    config_size: image_number_field(config, "size")
+    config_data: image_read_blob(root, config_digest)
     if config_data.len() != config_size -> return Err(image_invalid("OCI config descriptor size mismatch"))
     blobs := [RegistryBlob]{RegistryBlob{digest: config_digest, data: config_data}}
-    layers :: image_array(manifest.get("layers"), "OCI manifest layers")
+    layers: image_array(manifest.get("layers"), "OCI manifest layers")
     loop value in layers {
-        layer :: image_object(value, "OCI layer descriptor")
-        layer_digest :: image_string_field(layer, "digest")
-        size :: image_number_field(layer, "size")
-        data :: image_read_blob(root, layer_digest)
+        layer: image_object(value, "OCI layer descriptor")
+        layer_digest: image_string_field(layer, "digest")
+        size: image_number_field(layer, "size")
+        data: image_read_blob(root, layer_digest)
         if data.len() != size -> return Err(image_invalid("OCI layer descriptor size mismatch"))
         &blobs.push(RegistryBlob{digest: layer_digest, data})
     }
     Ok(RegistryManifest{digest, raw, blobs})
 }
 
-fn image_upload_registry_blob(registry: RegistryReference, blob: RegistryBlob) ImageError! -[Env, Exec, Time.Wait]> {
-    start :: image_registry_request(RegistryRequest{
+image_upload_registry_blob: fn(registry: RegistryReference, blob: RegistryBlob) ImageError! -[Env, Exec, Time.Wait]> {
+    start: image_registry_request(RegistryRequest{
         method: "POST",
         url: "{registry.api_root}/blobs/uploads/",
         headers: [String]{"Content-Length: 0"},
@@ -212,10 +212,10 @@ fn image_upload_registry_blob(registry: RegistryReference, blob: RegistryBlob) I
     if start.status < 200 || start.status >= 300 {
         return Err(image_invalid("registry rejected blob upload start with HTTP {start.status}: {image_bounded_text(start.stderr)}"))
     }
-    location :: image_header_value(start.headers, "location") ?? return Err(image_invalid("registry upload response has no Location"))
-    resolved :: image_resolve_registry_location(registry.origin, location)
-    separator :: if resolved.contains("?") -> "&" else -> "?"
-    response :: image_registry_request(RegistryRequest{
+    location: image_header_value(start.headers, "location") ?? return Err(image_invalid("registry upload response has no Location"))
+    resolved: image_resolve_registry_location(registry.origin, location)
+    separator: if resolved.contains("?") -> "&" else -> "?"
+    response: image_registry_request(RegistryRequest{
         method: "PUT",
         url: "{resolved}{separator}digest={blob.digest}",
         headers: [String]{"Content-Type: application/octet-stream"},
@@ -229,7 +229,7 @@ fn image_upload_registry_blob(registry: RegistryReference, blob: RegistryBlob) I
 
 // One bounded `curl` exchange. The HTTP status arrives as the final stdout
 // line (`--write-out`); with `include_headers` the response headers precede it.
-fn image_registry_request(request: RegistryRequest) -[Env, Exec, Time.Wait]> RegistryResponse ImageError! {
+image_registry_request: fn(request: RegistryRequest) -[Env, Exec, Time.Wait]> RegistryResponse ImageError! {
     if request.method == "" || request.url == "" -> return Err(image_invalid("registry request has no method or URL"))
     argv := [String]{"curl", "--silent", "--show-error", "--max-time", "120", "--netrc-optional", "--request", request.method}
     loop header in request.headers {
@@ -262,7 +262,7 @@ fn image_registry_request(request: RegistryRequest) -[Env, Exec, Time.Wait]> Reg
     }
     stdout := [U8]{}
     loop {
-        chunk :: child.stdout.read(65536) ?? {
+        chunk: child.stdout.read(65536) ?? {
             image_abandon_registry_child(&child)
             return Err(ImageError.IO(err))
         }
@@ -273,42 +273,42 @@ fn image_registry_request(request: RegistryRequest) -[Env, Exec, Time.Wait]> Reg
             return Err(image_invalid("OCI registry response exceeded its bound"))
         }
     }
-    receipt :: child.wait()
-    stderr :: image_bounded_bytes_text(receipt.errors.bytes())
+    receipt: child.wait()
+    stderr: image_bounded_bytes_text(receipt.errors.bytes())
     if !receipt.success && stdout.len() == 0 -> return Ok(RegistryResponse{status: 0, headers: [U8]{}, stderr})
     separator := stdout.len() - 1
     loop separator >= 0 && Int.from_u8(stdout[separator]) != 10 -> separator -= 1
     if separator < 0 -> return Err(image_invalid("OCI registry response has no HTTP status"))
-    status_text :: String.from_bytes(stdout[(separator + 1)..<stdout.len()]) ?? return Err(image_invalid("OCI registry response has an invalid HTTP status"))
-    status :: Int.parse(status_text.trim()) ?? return Err(image_invalid("OCI registry response has an invalid HTTP status"))
+    status_text: String.from_bytes(stdout[(separator + 1)..<stdout.len()]) ?? return Err(image_invalid("OCI registry response has an invalid HTTP status"))
+    status: Int.parse(status_text.trim()) ?? return Err(image_invalid("OCI registry response has an invalid HTTP status"))
     if status < 0 || status > 65535 -> return Err(image_invalid("OCI registry response has an invalid HTTP status"))
-    headers :: if request.include_headers -> stdout[0..<separator] else -> [U8]{}
+    headers: if request.include_headers -> stdout[0..<separator] else -> [U8]{}
     Ok(RegistryResponse{status, headers, stderr})
 }
 
 // Rust `child.kill(); child.wait()` after an abandoned exchange.
-fn image_abandon_registry_child(child: &ProcessChild) -[Exec, Time.Wait]> {
+image_abandon_registry_child: fn(child: &ProcessChild) -[Exec, Time.Wait]> {
     image_kill_quiet(&child)
-    _ :: child.wait() ?? return
+    _: child.wait() ?? return
 }
 
-fn image_kill_quiet(child: &ProcessChild) -[Exec]> {
+image_kill_quiet: fn(child: &ProcessChild) -[Exec]> {
     child.kill() ?? return
 }
 
 // The trimmed value of the first header line named `wanted` (ASCII
 // case-insensitive), lossily decoded.
-fn image_header_value(headers: [U8], wanted: String) -> String? Never! {
-    wanted_lower :: pkg_ascii_lower(wanted)
+image_header_value: fn(headers: [U8], wanted: String) -> String? Never! {
+    wanted_lower: pkg_ascii_lower(wanted)
     start := 0
     loop index in 0..<(headers.len() + 1) {
         if index < headers.len() && Int.from_u8(headers[index]) != 10 -> next
-        line :: headers[start..<index]
+        line: headers[start..<index]
         start = index + 1
         colon := 0
         loop colon < line.len() && Int.from_u8(line[colon]) != 58 -> colon += 1
         if colon >= line.len() -> next
-        name :: String.from_bytes(line[0..<colon].copy()) ?? next
+        name: String.from_bytes(line[0..<colon].copy()) ?? next
         if pkg_ascii_lower(name.trim()) != wanted_lower -> next
         return Val(String.from_bytes_lossy(line[(colon + 1)..<line.len()].copy()).trim())
     }
@@ -317,11 +317,11 @@ fn image_header_value(headers: [U8], wanted: String) -> String? Never! {
 
 // An upload `Location` resolved against the registry origin; an absolute
 // location must stay on the same authority.
-fn image_resolve_registry_location(origin: String, location: String) -> String ImageError! {
-    raw :: location.bytes()
+image_resolve_registry_location: fn(origin: String, location: String) -> String ImageError! {
+    raw: location.bytes()
     if raw.len() == 0 -> return Err(image_invalid("registry upload Location is unsafe"))
     loop byte in raw {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if image_is_ascii_control(code) || trust_text_is_ascii_space(code) || code == 39 || code == 34 || code == 37 || code == 35 {
             return Err(image_invalid("registry upload Location is unsafe"))
         }
@@ -334,17 +334,17 @@ fn image_resolve_registry_location(origin: String, location: String) -> String I
     Ok("{origin}/{location}")
 }
 
-fn image_bounded_text(text: String) -> String Never! {
+image_bounded_text: fn(text: String) -> String Never! {
     image_bounded_bytes_text(text.bytes())
 }
 
 // Rust `bounded_text`: at most 4096 bytes, lossily decoded and trimmed.
-fn image_bounded_bytes_text(bytes: [U8]) -> String Never! {
-    end :: if bytes.len() < IMAGE_MAX_REGISTRY_DETAIL_BYTES -> bytes.len() else -> IMAGE_MAX_REGISTRY_DETAIL_BYTES
+image_bounded_bytes_text: fn(bytes: [U8]) -> String Never! {
+    end: if bytes.len() < IMAGE_MAX_REGISTRY_DETAIL_BYTES -> bytes.len() else -> IMAGE_MAX_REGISTRY_DETAIL_BYTES
     String.from_bytes_lossy(bytes[0..<end]).trim()
 }
 
-fn image_null_device() -[Env]> String Never! {
+image_null_device: fn() -[Env]> String Never! {
     if sys.is_windows() -> return "NUL"
     "/dev/null"
 }

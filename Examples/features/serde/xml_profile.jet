@@ -4,9 +4,9 @@
 // parser never fetches external resources, expands undeclared entities, or
 // executes markup; it is a data parser, not an HTML parser and not a renderer.
 // Rejections report the closed `XMLReason`.
-use xml :: core.encoding.xml
+use xml: core.encoding.xml
 
-fn reason_name(kind: xml.XMLReason) -> String {
+reason_name: fn(kind: xml.XMLReason) -> String {
     if kind == {
         .InvalidEncoding -> "InvalidEncoding"
         .Malformed -> "Malformed"
@@ -23,23 +23,23 @@ fn reason_name(kind: xml.XMLReason) -> String {
     }
 }
 
-fn show(label: String, text: String) {
-    tree :: xml.parse(text) ?? {
-        kind :: reason_name(err.kind)
+show: fn(label: String, text: String) {
+    tree: xml.parse(text) ?? {
+        kind: reason_name(err.kind)
         print("{label}: rejected {kind}: {err.reason}")
         return
     }
-    rendered :: xml.to_string(tree) ?? panic(err.reason)
+    rendered: xml.to_string(tree) ?? panic(err.reason)
     print("{label}: accepted {rendered}")
 }
 
-fn nested(depth: Int) -> String {
-    open :: "<a>".repeat(depth)
-    close :: "</a>".repeat(depth)
+nested: fn(depth: Int) -> String {
+    open: "<a>".repeat(depth)
+    close: "</a>".repeat(depth)
     "{open}{close}"
 }
 
-fn run() {
+run: fn() {
     show("doctype", "<!DOCTYPE note SYSTEM \"http://example.com/note.dtd\"><note/>")
     show("internal entity decl", "<!DOCTYPE r [<!ENTITY x \"boom\">]><r>&x;</r>")
     show("unknown entity", "<r>&unknown;</r>")
@@ -51,12 +51,12 @@ fn run() {
     show("xml declaration", "<?xml version=\"1.0\" encoding=\"UTF-8\"?><r>ok</r>")
     show("html void tag", "<p>line<br>next</p>")
     loop depth in [256, 257, 10000] {
-        tree :: xml.parse(nested(depth)) ?? {
-            kind :: reason_name(err.kind)
+        tree: xml.parse(nested(depth)) ?? {
+            kind: reason_name(err.kind)
             print("depth {depth}: rejected {kind}: {err.reason}")
             next
         }
-        rendered :: xml.to_string(tree) ?? panic(err.reason)
+        rendered: xml.to_string(tree) ?? panic(err.reason)
         print("depth {depth}: accepted {rendered.len()} bytes")
     }
 }

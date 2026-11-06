@@ -2,21 +2,21 @@
 // root impl items, and interpolated test declarations.
 derive T.FieldNames {
     comptime loop field in T.$fields {
-        method :: "field_{field.$name}"
-        fn $method(self) -> String { field.$name }
+        method: "field_{field.$name}"
+        $method: fn(self) -> String { field.$name }
     }
 }
 
-struct AddMarkerFields {
+AddMarkerFields: struct {
     impl Marker {
-        sites :: [.Type]
+        sites: [.Type]
 
-        fn expand(self, target: Target) {
-            type_name :: target.$name
+        expand: fn(self, target: Target) {
+            type_name: target.$name
             comptime loop field in target.$fields {
-                method :: "marked_{field.$name}"
+                method: "marked_{field.$name}"
                 impl $type_name {
-                    fn $method(self) -> String { field.$name }
+                    $method: fn(self) -> String { field.$name }
                 }
             }
         }
@@ -24,20 +24,20 @@ struct AddMarkerFields {
 }
 
 #[FieldNames, AddMarkerFields]
-struct Point {
+Point: struct {
     x: Int
     y: Int
 }
 
-struct Case {
+Case: struct {
     n: Int
 }
 
-CASES :: [Case]{Case{n: 1}, Case{n: 2}}
+CASES: [Case]{Case{n: 1}, Case{n: 2}}
 
 comptime loop T in [Point] {
     impl T {
-        fn generated(self) -> String { "generated" }
+        generated: fn(self) -> String { "generated" }
     }
 }
 
@@ -49,7 +49,7 @@ comptime loop case in CASES {
     }
 }
 
-fn run() {
+run: fn() {
     point := Point{x: 1, y: 2}
     print(point.field_x())
     print(point.field_y())

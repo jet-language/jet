@@ -5,11 +5,11 @@
 // sorted and hashed. It opens no content files. The Store area's seal owns
 // the format and decisions; this home owns only the walk. Inode and
 // nanosecond mtime are the ratified Stat identity.
-use files :: core.files
+use files: core.files
 
 
 // One node's identity row.
-struct SealTuple {
+SealTuple: struct {
     relative: String
     kind: U8
     inode: Int
@@ -18,13 +18,13 @@ struct SealTuple {
 }
 
 // The walk's node count and `sha256-…` digest of the sorted tuple table.
-struct SealTupleTable {
+SealTupleTable: struct {
     node_count: Int
     digest: String
 }
 
 // Stat-walk `path` and hash the sorted identity-tuple table.
-fn pkg_seal_tuple_table(path: String) -[FS]> SealTupleTable IOError! {
+pkg_seal_tuple_table: fn(path: String) -[FS]> SealTupleTable IOError! {
     tuples := [SealTuple]{}
     pkg_seal_collect_tuples(path, "", &tuples)
     // Stable passes from the least significant key: (relative, kind).
@@ -40,10 +40,10 @@ fn pkg_seal_tuple_table(path: String) -[FS]> SealTupleTable IOError! {
     Ok(SealTupleTable{node_count: tuples.len(), digest: "sha256-{pkg_sha256_hex(table)}"})
 }
 
-fn pkg_seal_collect_tuples(path: String, relative: String, tuples: &[SealTuple]) IOError! -[FS]> {
-    info :: files.stat(path)
+pkg_seal_collect_tuples: fn(path: String, relative: String, tuples: &[SealTuple]) IOError! -[FS]> {
+    info: files.stat(path)
     if info.is_symlink || info.is_file {
-        kind :: if info.is_symlink -> U8{108} else -> U8{102}
+        kind: if info.is_symlink -> U8{108} else -> U8{102}
         &tuples.push(SealTuple{relative: relative, kind: kind, inode: info.id.inode, size: info.size, mtime_ns: info.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")})
         return
     }
@@ -53,7 +53,7 @@ fn pkg_seal_collect_tuples(path: String, relative: String, tuples: &[SealTuple])
     entries := files.list_dir(path)
     &entries.sort_by(entry -> entry.name)
     loop entry in entries {
-        child :: if relative == "" -> entry.name else -> "{relative}/{entry.name}"
+        child: if relative == "" -> entry.name else -> "{relative}/{entry.name}"
         pkg_seal_collect_tuples(entry.path, child, &tuples)
     }
 }

@@ -6,15 +6,15 @@
 // names the one command that fixes it.
 
 // Objects unused for longer than this are stale (30 days, in seconds).
-DOCTOR_STALE_AFTER :: 2592000
+DOCTOR_STALE_AFTER: 2592000
 
 // Overall health, ordered: the report takes the worst check.
-enum DoctorHealth {
+DoctorHealth: enum {
     Healthy
     Degraded
     Broken
 
-    fn word(self) -> String Never! {
+    word: fn(self) -> String Never! {
         if self == {
             .Healthy -> "healthy"
             .Degraded -> "degraded"
@@ -22,7 +22,7 @@ enum DoctorHealth {
         }
     }
 
-    fn mark(self) -> String Never! {
+    mark: fn(self) -> String Never! {
         if self == {
             .Healthy -> "OK"
             .Degraded -> "Warn"
@@ -30,7 +30,7 @@ enum DoctorHealth {
         }
     }
 
-    fn rank(self) -> Int Never! {
+    rank: fn(self) -> Int Never! {
         if self == {
             .Healthy -> 0
             .Degraded -> 1
@@ -40,31 +40,31 @@ enum DoctorHealth {
 }
 
 // One named finding with its detail and the fix to run (empty when healthy).
-struct DoctorCheck {
+DoctorCheck: struct {
     name: String
     health: DoctorHealth
     detail: String
     fix: String
 
-    fn ok(name: String, detail: String) -> DoctorCheck Never! {
+    ok: fn(name: String, detail: String) -> DoctorCheck Never! {
         DoctorCheck{name: name, health: DoctorHealth.Healthy, detail: detail, fix: ""}
     }
 
-    fn degraded(name: String, detail: String, fix: String) -> DoctorCheck Never! {
+    degraded: fn(name: String, detail: String, fix: String) -> DoctorCheck Never! {
         DoctorCheck{name: name, health: DoctorHealth.Degraded, detail: detail, fix: fix}
     }
 
-    fn broken(name: String, detail: String, fix: String) -> DoctorCheck Never! {
+    broken: fn(name: String, detail: String, fix: String) -> DoctorCheck Never! {
         DoctorCheck{name: name, health: DoctorHealth.Broken, detail: detail, fix: fix}
     }
 }
 
-struct DoctorReport {
+DoctorReport: struct {
     checks: [DoctorCheck]
 
     // Run every check against the resolved Jetpack root and `project`.
-    fn run(verification: &StoreVerification, project: String, online: Bool) -[FS, Env, Exec, Time, Time.Wait]> DoctorReport Never! {
-        roots :: pkg_resolve_roots()
+    run: fn(verification: &StoreVerification, project: String, online: Bool) -[FS, Env, Exec, Time, Time.Wait]> DoctorReport Never! {
+        roots: pkg_resolve_roots()
         DoctorReport{checks: [DoctorCheck]{
             cli_doctor_check_hangar(&verification, roots),
             cli_doctor_check_leases(roots),
@@ -76,7 +76,7 @@ struct DoctorReport {
     }
 
     // The worst check's health; an empty report is healthy.
-    fn health(self) -> DoctorHealth Never! {
+    health: fn(self) -> DoctorHealth Never! {
         worst := DoctorHealth.Healthy
         loop check in self.checks {
             if check.health.rank() > worst.rank() -> worst = check.health
@@ -84,11 +84,11 @@ struct DoctorReport {
         worst
     }
 
-    fn exit_code(self) -> Int Never! {
+    exit_code: fn(self) -> Int Never! {
         self.health().rank()
     }
 
-    fn to_human(self) -> String Never! {
+    to_human: fn(self) -> String Never! {
         out := "jetpack doctor — checking package-manager health\n"
         loop check in self.checks {
             out = "{out}  [{cli_doctor_pad_start(check.health.mark(), 4)}] {cli_doctor_pad_end(check.name, 12)} — {check.detail}\n"
@@ -97,7 +97,7 @@ struct DoctorReport {
         "{out}Result: {self.health().word()}\n"
     }
 
-    fn to_json(self) -> String ReportError! {
+    to_json: fn(self) -> String ReportError! {
         checks := [Dyn]{}
         loop check in self.checks {
             fields := [String: Dyn]{}
@@ -111,27 +111,27 @@ struct DoctorReport {
         document["kind"] = Dyn.Text("jetpack.doctor")
         document["status"] = Dyn.Text(self.health().word())
         document["checks"] = Dyn.Array(checks)
-        text :: json.to_string(Dyn.Object(document)) ?? return Err(ReportError.new(err.reason))
+        text: json.to_string(Dyn.Object(document)) ?? return Err(ReportError.new(err.reason))
         Ok(text)
     }
 }
 
 // `text` right-aligned in `width` columns (Rust `{:>width}`).
-fn cli_doctor_pad_start(text: String, width: Int) -> String Never! {
+cli_doctor_pad_start: fn(text: String, width: Int) -> String Never! {
     out := text
     loop out.chars().len() < width -> out = " {out}"
     out
 }
 
 // `text` left-aligned in `width` columns (Rust `{:<width}`).
-fn cli_doctor_pad_end(text: String, width: Int) -> String Never! {
+cli_doctor_pad_end: fn(text: String, width: Int) -> String Never! {
     out := text
     loop out.chars().len() < width -> out = "{out} "
     out
 }
 
 // The Rust `io::ErrorKind` debug name of an IOError, as doctor prints it.
-fn cli_doctor_io_kind(error: IOError) -> String Never! {
+cli_doctor_io_kind: fn(error: IOError) -> String Never! {
     if error == {
         .InvalidInput(_) -> "InvalidInput"
         .NotFound(_) -> "NotFound"
@@ -149,8 +149,8 @@ fn cli_doctor_io_kind(error: IOError) -> String Never! {
 
 // ── Hangar ──
 
-fn cli_doctor_check_hangar(verification: &StoreVerification, roots: HangarRoots) -[FS, Env]> DoctorCheck Never! {
-    hangar :: roots.hangar_dir()
+cli_doctor_check_hangar: fn(verification: &StoreVerification, roots: HangarRoots) -[FS, Env]> DoctorCheck Never! {
+    hangar: roots.hangar_dir()
     // A fresh machine has no Hangar yet; that is normal, not a health
     // problem — the first realize creates it.
     if !files.exists(hangar) -> return DoctorCheck.ok("hangar", "absent; nothing realized yet")
@@ -160,7 +160,7 @@ fn cli_doctor_check_hangar(verification: &StoreVerification, roots: HangarRoots)
         }
         .Err(error) -> return DoctorCheck.degraded("hangar", "lock state could not be inspected ({cli_doctor_io_kind(error)})", "restore read access to the Hangar lock")
     }
-    entries :: files.list_dir(hangar) ?? return DoctorCheck.broken("hangar", "unreadable ({cli_doctor_io_kind(err)})", "restore read access to the Jetpack root")
+    entries: files.list_dir(hangar) ?? return DoctorCheck.broken("hangar", "unreadable ({cli_doctor_io_kind(err)})", "restore read access to the Jetpack root")
     // A journal that needs recovery must not shadow the per-object scan: a
     // specific finding (corrupt digest, missing output) is the actionable
     // diagnosis, so scan first and report the journal only when the objects
@@ -176,18 +176,18 @@ fn cli_doctor_check_hangar(verification: &StoreVerification, roots: HangarRoots)
         }
     }
     known := [String: StoreEntry]{}
-    listed :: store_list_read_only(roots)
+    listed: store_list_read_only(roots)
     loop entry in listed -> known[entry.id] = entry
     objects := 0
     loop listing in entries {
-        path :: listing.path
+        path: listing.path
         if !files.is_dir(path) -> next
         if store_is_hangar_internal_directory(listing.name) -> next
         objects = objects + 1
-        id :: listing.name
-        meta_path :: files.join(path, "meta.json")
+        id: listing.name
+        meta_path: files.join(path, "meta.json")
         if !files.is_file(meta_path) -> return DoctorCheck.degraded("hangar", "object `{id}` has no metadata", "run `jetpack hangar recover`, then realize it again if no committed record exists")
-        entry :: known.get(id) ?? return DoctorCheck.degraded("hangar", "object `{id}` has malformed metadata", "run `jetpack hangar recover`, then realize the package again")
+        entry: known.get(id) ?? return DoctorCheck.degraded("hangar", "object `{id}` has malformed metadata", "run `jetpack hangar recover`, then realize the package again")
         if graph.records.get(id) == {
             .Val(record) -> {
                 if files.read(meta_path) == {
@@ -211,13 +211,13 @@ fn cli_doctor_check_hangar(verification: &StoreVerification, roots: HangarRoots)
     DoctorCheck.ok("hangar", "{objects} object(s) readable and content-verified")
 }
 
-fn cli_doctor_stale_projection(id: String) -> DoctorCheck Never! {
+cli_doctor_stale_projection: fn(id: String) -> DoctorCheck Never! {
     DoctorCheck.degraded("hangar", "object `{id}` has a stale or corrupt metadata projection", "run `jetpack hangar recover` to restore the committed projection")
 }
 
 // ── Leases ──
 
-fn cli_doctor_check_leases(roots: HangarRoots) -[FS, Env]> DoctorCheck Never! {
+cli_doctor_check_leases: fn(roots: HangarRoots) -[FS, Env]> DoctorCheck Never! {
     if store_inspect_leases(roots) == {
         .Ok(inventory) -> {
             if {
@@ -234,7 +234,7 @@ fn cli_doctor_check_leases(roots: HangarRoots) -[FS, Env]> DoctorCheck Never! {
 
 // Why a configured registry endpoint is unusable.
 #Error
-enum DoctorRegistryFailure {
+DoctorRegistryFailure: enum {
     EmbeddedCredentials
     LocalIndexMissing
     ClientUnavailable
@@ -242,7 +242,7 @@ enum DoctorRegistryFailure {
     TimedOut
     ProbeFailed
 
-    fn reason(self) -> String Never! {
+    reason: fn(self) -> String Never! {
         if self == {
             .EmbeddedCredentials -> "embedded registry credentials or URL parameters are not allowed"
             .LocalIndexMissing -> "local index missing"
@@ -257,17 +257,17 @@ enum DoctorRegistryFailure {
 // Configured registries by name, sorted: `JET_REGISTRY_URL` is `jet`, and
 // each `JET_REGISTRY_<NAME>_URL` is `<name>` in lowercase. With nothing
 // configured the default Jet registry is used.
-fn cli_doctor_registry_endpoints() -[Env]> [(name: String, url: String)] Never! {
+cli_doctor_registry_endpoints: fn() -[Env]> [(name: String, url: String)] Never! {
     found := [String: String]{}
-    default_url :: sys.get("JET_REGISTRY_URL") ?? ""
+    default_url: sys.get("JET_REGISTRY_URL") ?? ""
     if default_url != "" -> found["jet"] = default_url
-    names :: sys.vars() ?? [String]{}
+    names: sys.vars() ?? [String]{}
     loop key in names {
         if !key.starts_with("JET_REGISTRY_") -> next
-        rest :: key.removeprefix("JET_REGISTRY_")
+        rest: key.removeprefix("JET_REGISTRY_")
         if !rest.ends_with("_URL") -> next
-        name :: rest.removesuffix("_URL")
-        url :: sys.get(key) ?? ""
+        name: rest.removesuffix("_URL")
+        url: sys.get(key) ?? ""
         if name != "" && url != "" -> found[name.lower()] = url
     }
     if found.len() == 0 -> found["jet"] = "https://github.com/jet-lang/registry"
@@ -278,8 +278,8 @@ fn cli_doctor_registry_endpoints() -[Env]> [(name: String, url: String)] Never! 
     endpoints
 }
 
-fn cli_doctor_check_registry(online: Bool) -[FS, Env, Exec, Time, Time.Wait]> DoctorCheck Never! {
-    endpoints :: cli_doctor_registry_endpoints()
+cli_doctor_check_registry: fn(online: Bool) -[FS, Env, Exec, Time, Time.Wait]> DoctorCheck Never! {
+    endpoints: cli_doctor_registry_endpoints()
     skipped := 0
     loop endpoint in endpoints {
         if cli_doctor_endpoint_reachable(endpoint.url, online) == {
@@ -292,7 +292,7 @@ fn cli_doctor_check_registry(online: Bool) -[FS, Env, Exec, Time, Time.Wait]> Do
 }
 
 // Whether `url` answered; false when the network probe was skipped offline.
-fn cli_doctor_endpoint_reachable(url: String, online: Bool) -[FS, Env, Exec, Time, Time.Wait]> Bool DoctorRegistryFailure! {
+cli_doctor_endpoint_reachable: fn(url: String, online: Bool) -[FS, Env, Exec, Time, Time.Wait]> Bool DoctorRegistryFailure! {
     if cli_doctor_registry_url_has_credentials(url) -> return Err(DoctorRegistryFailure.EmbeddedCredentials)
     if url.starts_with("file://") {
         if files.exists(url.removeprefix("file://")) -> return Ok(true)
@@ -309,27 +309,27 @@ fn cli_doctor_endpoint_reachable(url: String, online: Bool) -[FS, Env, Exec, Tim
 
 // `git ls-remote <url> HEAD` without prompts, without the registry
 // variables, and within four seconds.
-fn cli_doctor_git_registry_probe(url: String) DoctorRegistryFailure! -[Env, Exec, Time, Time.Wait]> {
+cli_doctor_git_registry_probe: fn(url: String) DoctorRegistryFailure! -[Env, Exec, Time, Time.Wait]> {
     spec := process.cmd([String]{"git", "-c", "credential.useHttpPath=true", "ls-remote", url, "HEAD"})
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdout(.Capture)
         .stderr(.Capture)
         .timeout(4s)
-    names :: sys.vars() ?? [String]{}
+    names: sys.vars() ?? [String]{}
     loop key in names {
         if key.starts_with("JET_REGISTRY_") -> spec = spec.env_remove(key)
     }
-    receipt :: process.run_spec(spec) ?? return Err(DoctorRegistryFailure.ClientUnavailable)
+    receipt: process.run_spec(spec) ?? return Err(DoctorRegistryFailure.ClientUnavailable)
     if receipt.timed_out -> return Err(DoctorRegistryFailure.TimedOut)
     if !receipt.success -> return Err(DoctorRegistryFailure.Rejected)
 }
 
 // Query strings, fragments, and user-info in the authority are refused.
-fn cli_doctor_registry_url_has_credentials(value: String) -> Bool Never! {
+cli_doctor_registry_url_has_credentials: fn(value: String) -> Bool Never! {
     if value.contains("?") || value.contains("#") -> return true
-    halves :: value.split_once("://") ?? return false
+    halves: value.split_once("://") ?? return false
     authority := halves.after
-    separators :: [String]{"/", "?", "#"}
+    separators: [String]{"/", "?", "#"}
     loop separator in separators {
         authority = authority.split_once(separator)?.before ?? authority
     }
@@ -338,12 +338,12 @@ fn cli_doctor_registry_url_has_credentials(value: String) -> Bool Never! {
 
 // ── Locks ──
 
-fn cli_doctor_check_locks(project: String, roots: HangarRoots) -[FS, Env]> DoctorCheck Never! {
-    dirs :: [String]{files.join(roots.root, ".locks"), files.join(pkg_managed_dir(project), ".locks")}
+cli_doctor_check_locks: fn(project: String, roots: HangarRoots) -[FS, Env]> DoctorCheck Never! {
+    dirs: [String]{files.join(roots.root, ".locks"), files.join(pkg_managed_dir(project), ".locks")}
     unknown := [String]{}
     held := [String]{}
     loop dir in dirs {
-        entries :: if files.list_dir(dir) == {
+        entries: if files.list_dir(dir) == {
             .Ok(listed) -> listed
             .Err(error) -> {
                 if store_io_is_not_found(error) -> next
@@ -359,8 +359,8 @@ fn cli_doctor_check_locks(project: String, roots: HangarRoots) -[FS, Env]> Docto
             }
         }
     }
-    unknown_sorted :: cli_sorted_unique(unknown)
-    held_sorted :: cli_sorted_unique(held)
+    unknown_sorted: cli_sorted_unique(unknown)
+    held_sorted: cli_sorted_unique(held)
     if {
         unknown_sorted.len() > 0 -> DoctorCheck.degraded("locks", "{unknown_sorted.len()} lock(s) could not be probed: {unknown_sorted.join(", ")}", "restore lock-file access and filesystem advisory-lock support")
         held_sorted.len() > 0 -> DoctorCheck.degraded("locks", "{held_sorted.len()} lock(s) currently held: {held_sorted.join(", ")}", "wait for active Jetpack operations, then rerun `jetpack doctor`")
@@ -370,10 +370,10 @@ fn cli_doctor_check_locks(project: String, roots: HangarRoots) -[FS, Env]> Docto
 
 // ── Cache ──
 
-fn cli_doctor_check_cache(roots: HangarRoots) -[FS, Env, Time]> DoctorCheck Never! {
-    now :: time.unix_seconds(time.now())
+cli_doctor_check_cache: fn(roots: HangarRoots) -[FS, Env, Time]> DoctorCheck Never! {
+    now: time.unix_seconds(time.now())
     stale := 0
-    entries :: store_list_read_only(roots)
+    entries: store_list_read_only(roots)
     loop entry in entries {
         if entry.last_used_at == 0 || now - entry.last_used_at > DOCTOR_STALE_AFTER -> stale = stale + 1
     }
@@ -384,21 +384,21 @@ fn cli_doctor_check_cache(roots: HangarRoots) -[FS, Env, Time]> DoctorCheck Neve
 // ── Signing key ──
 
 // `JET_KEYS_DIR`, else `<home>/.jet/keys` (HOME, then USERPROFILE, then `.`).
-fn cli_doctor_keys_dir() -[Env]> String Never! {
-    explicit :: sys.get("JET_KEYS_DIR") ?? ""
+cli_doctor_keys_dir: fn() -[Env]> String Never! {
+    explicit: sys.get("JET_KEYS_DIR") ?? ""
     if explicit != "" -> return explicit
-    home :: sys.get("HOME") ?? sys.get("USERPROFILE") ?? "."
+    home: sys.get("HOME") ?? sys.get("USERPROFILE") ?? "."
     files.join(home, ".jet/keys")
 }
 
-fn cli_doctor_check_signing_key() -[FS, Env]> DoctorCheck Never! {
-    registry :: sys.get("JET_REGISTRY_NAME") ?? "jet"
-    secret :: files.join(cli_doctor_keys_dir(), "{registry}.ed25519")
-    public :: files.join(cli_doctor_keys_dir(), "{registry}.ed25519.pub")
+cli_doctor_check_signing_key: fn() -[FS, Env]> DoctorCheck Never! {
+    registry: sys.get("JET_REGISTRY_NAME") ?? "jet"
+    secret: files.join(cli_doctor_keys_dir(), "{registry}.ed25519")
+    public: files.join(cli_doctor_keys_dir(), "{registry}.ed25519.pub")
     if !files.is_file(secret) || !files.is_file(public) -> return DoctorCheck.degraded("signing", "signing key for `{registry}` is missing or incomplete", "run `jet registry keygen` before publishing")
-    malformed :: DoctorCheck.broken("signing", "signing key for `{registry}` is malformed", "restore the key pair from backup or rotate it deliberately with `jet registry keygen --force`")
-    size :: files.getsize(secret) ?? return malformed
-    key :: (files.read(public) ?? return malformed).trim()
+    malformed: DoctorCheck.broken("signing", "signing key for `{registry}` is malformed", "restore the key pair from backup or rotate it deliberately with `jet registry keygen --force`")
+    size: files.getsize(secret) ?? return malformed
+    key: (files.read(public) ?? return malformed).trim()
     if size != 32 || key.bytes().len() != 64 || !cli_doctor_is_ascii_hex(key) -> return malformed
     if cli_doctor_key_pair_matches(secret, key) == {
         .Ok(matches) -> {
@@ -409,9 +409,9 @@ fn cli_doctor_check_signing_key() -[FS, Env]> DoctorCheck Never! {
     }
 }
 
-fn cli_doctor_is_ascii_hex(value: String) -> Bool Never! {
+cli_doctor_is_ascii_hex: fn(value: String) -> Bool Never! {
     loop byte in value.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if !((code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102)) -> return false
     }
     true
@@ -419,17 +419,17 @@ fn cli_doctor_is_ascii_hex(value: String) -> Bool Never! {
 
 // The key pair could not be read into Core Ed25519 keys.
 #Error
-struct DoctorSigningKeyError {
+DoctorSigningKeyError: struct {
     detail: String
 }
 
 // Derive the public key from the secret seed with Core Ed25519 and compare
 // it with the stored public key.
-fn cli_doctor_key_pair_matches(secret: String, public_hex: String) -[FS]> Bool DoctorSigningKeyError! {
-    seed :: files.read_bytes(secret) ?? return Err(DoctorSigningKeyError{detail: "{err}"})
-    public :: hex.decode(public_hex) ?? return Err(DoctorSigningKeyError{detail: "{err}"})
-    key :: crypto.SigningKey.from_bytes(seed) ?? return Err(DoctorSigningKeyError{detail: "{err}"})
-    matches :: key.public_key().bytes == public
+cli_doctor_key_pair_matches: fn(secret: String, public_hex: String) -[FS]> Bool DoctorSigningKeyError! {
+    seed: files.read_bytes(secret) ?? return Err(DoctorSigningKeyError{detail: "{err}"})
+    public: hex.decode(public_hex) ?? return Err(DoctorSigningKeyError{detail: "{err}"})
+    key: crypto.SigningKey.from_bytes(seed) ?? return Err(DoctorSigningKeyError{detail: "{err}"})
+    matches: key.public_key().bytes == public
     close(^key)
     Ok(matches)
 }

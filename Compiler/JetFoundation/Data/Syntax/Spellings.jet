@@ -2,20 +2,20 @@
 // Tools/agent/lexical-ledger.mjs renders LEXICAL_LEDGER (with each spelling's
 // ratified decision ID, empty when none exists) into Docs/spec/syntax-decisions.md.
 
-struct LexicalEntry {
+LexicalEntry: struct {
     spelling: String
     meaning: String
     decision: String
 }
 
-LEXICAL_LEDGER :: [LexicalEntry]{
-    { spelling: "::", meaning: "immutable binding", decision: "D-BIND1" },
+LEXICAL_LEDGER: [LexicalEntry]{
+    { spelling: ":", meaning: "immutable binding and declaration: `name: value`, `name: fn(…)`, `Name: struct {{…}}`, `name: module {{…}}`", decision: "D-BIND1; D-DECL-COLON1=A" },
     { spelling: ":=", meaning: "mutable binding", decision: "D-BIND1" },
-    { spelling: "use {{ … }} / use alias :: path", meaning: "import block (#6542): one row per line, each a module path, `alias :: path`, a \"file\" path or `alias :: \"file\"`; `alias :: owner.x` where `owner.x` names no module binds the member `x` that `owner` declares; several blocks per scope, `pub use {{ … }}` re-exports every row", decision: "" },
+    { spelling: "use {{ … }} / use alias: path", meaning: "import block (#6542): one row per line, each a module path, `alias: path`, a \"file\" path or `alias: \"file\"`; `alias: owner.x` where `owner.x` names no module binds the member `x` that `owner` declares; several blocks per scope, `pub use {{ … }}` re-exports every row", decision: "" },
     { spelling: "x.copy()", meaning: "the one deliberate copy: a compiler-owned method returning an independent owned value", decision: "D-COPY-WORD1=A" },
     { spelling: "#", meaning: "attached marker; #[A, B] stacks", decision: "D-VERDICT-732-1; D-MARK-STACK1" },
     { spelling: ".expect_fail(message: \"text\")", meaning: "test region requires a stop with an optional E30xx code and non-empty case-sensitive raw-message substring", decision: "D-TEST-STOPMSG1=A" },
-    { spelling: "struct Name {{ impl Marker {{ group :: #[A, B] }} }}", meaning: "fixed named marker-group declaration; expands at each use without hiding gates or refusals", decision: "D-MARKER-GROUP1=A" },
+    { spelling: "Name: struct {{ impl Marker {{ group: #[A, B] }} }}", meaning: "fixed named marker-group declaration; expands at each use without hiding gates or refusals", decision: "D-MARKER-GROUP1=A" },
     { spelling: "#module.Marker / #[module.Marker, Other]", meaning: "library marker through the import's local name; pub exports its declaration", decision: "D-MARKER-MODULE1=A" },
     { spelling: "#Inline / #Scalar / #Kernel / #Static", meaning: "separate callable promise, scalar hint, kernel proof and constant storage rules", decision: "D-CODEGEN-HINTS1=A" },
     { spelling: "#DevPanel", meaning: "exported typed devtools panel marker", decision: "D-DX-PLUGIN1=D" },
@@ -24,12 +24,12 @@ LEXICAL_LEDGER :: [LexicalEntry]{
     { spelling: "#Align", meaning: "retired standalone alignment marker", decision: "D-PLACE1=A" },
     { spelling: "Atomic<T>", meaning: "safe lock-free scalar cell", decision: "D-PLACE1=A; D-ATOMIC-WIDTH1=A" },
     { spelling: "@", meaning: "live link (D-MEMREF1); the retired compile-time `@NAME` constant, `@` template name splices and `@` fact spellings are not Jet syntax", decision: "D-MEMREF1=A; D-AT-INFIX1=A; D-PREP-SURFACE2=A; D-COMPILER-NS1=A; D-NAME-SPLICE1=B" },
-    { spelling: KW_COMPTIME, meaning: "compile-time block `comptime {{ … }}`; `NAME :: comptime {{ value }}` is the only binding that forces compile time (a plain `NAME :: value` folds while building when it can); `@ {{ … }}` and `prep` are retired", decision: "D-PREP-SURFACE2=A" },
+    { spelling: KW_COMPTIME, meaning: "compile-time block `comptime {{ … }}`; `NAME: comptime {{ value }}` is the only binding that forces compile time (a plain `NAME: value` folds while building when it can); `@ {{ … }}` and `prep` are retired", decision: "D-PREP-SURFACE2=A" },
     { spelling: "comptime if", meaning: "build-time branch; unchosen arms are name-checked only", decision: "D-PREP-BRANCH1=A" },
     { spelling: "comptime loop", meaning: "build-time loop over statements or declarations", decision: "D-PREP-BRANCH1=A; D-STRUCT-ONCE1=A" },
     { spelling: "comptime fn", meaning: "build-time literal-hook method", decision: "D-PREP-FN1=A; D-FOUND-LITERAL1=A" },
     { spelling: "<comptime N: Int>", meaning: "compile-time number parameter declaration", decision: "D-CONSTGEN2=A" },
-    { spelling: "$", meaning: "compiler fact: `T.$layout`, `f.$effects`, `value.$origin`; fact declaration metadata `$holds:`; template name splice `fn $method`, `self.$field`, `.$left`", decision: "D-COMPILER-NS1=A; D-META-ROOT3=A; D-DECL-META1=A; D-NAME-SPLICE1=B" },
+    { spelling: "$", meaning: "compiler fact: `T.$layout`, `f.$effects`, `value.$origin`; fact declaration metadata `$holds:`; template name splice `$method: fn`, `self.$field`, `.$left`", decision: "D-COMPILER-NS1=A; D-META-ROOT3=A; D-DECL-META1=A; D-NAME-SPLICE1=B" },
     { spelling: "$build", meaning: "build fact root: `$build.os`, `.profile`, `.settings.*`, `.stamp.*`, `.cpu.cache_line` (an `Int`, also accepted in `#Layout(c, align(…))`)", decision: "D-BUILD-FACT3=A; D-CACHE-CONTROL1=A" },
     { spelling: "$package", meaning: "package fact root: `$package.name`, `.version`", decision: "D-BUILD-FACT3=A; D-META-REFLECT2=A" },
     { spelling: "$phase", meaning: "total evaluation-site phase fact", decision: "D-PREP-SURFACE2=A; D-META-ROOT3=A" },
@@ -57,7 +57,7 @@ LEXICAL_LEDGER :: [LexicalEntry]{
     { spelling: "[first, ..rest]", meaning: "list pattern with a read-only zero-copy rest window; exact without the rest marker", decision: "D-PAT-RECORD1=A" },
     { spelling: "[key: pattern, key?: optional, ..]", meaning: "map pattern; required and optional keys, exact unless it ends with rest", decision: "D-PAT-MAP1=A" },
     { spelling: "if T == {{ Int -> … else -> … }}", meaning: "type table: a generic function branches on its type parameter; each arm reads `T` as its type, `else` is required, each instance keeps one arm; `if T == Int {{ … }}` is the one-arm test; `.Int -> …` names a union member without binding it", decision: "D-TYPESWITCH1=A" },
-    { spelling: "trait T {{ name: Type }} / name: Type{{default}} / impl X.T {{ name :: value }} / T.name", meaning: "trait constant: a compile-time literal, enum case or list each implementation supplies (or takes the default), read from the type", decision: "D-DECL-TYPES1=A" },
+    { spelling: "T: trait {{ name: Type }} / name: Type{{default}} / impl X.T {{ name: value }} / T.name", meaning: "trait constant: a compile-time literal, enum case or list each implementation supplies (or takes the default), read from the type", decision: "D-DECL-TYPES1=A" },
     { spelling: "r\"…\", raw\"…\", $\"…\"", meaning: "unclaimed raw-string prefixes", decision: "" },
     { spelling: ";", meaning: "retired explicit statement terminator", decision: "D-SEMI1" },
     { spelling: "_name", meaning: "ordinary identifier", decision: "" },
@@ -71,33 +71,33 @@ LEXICAL_LEDGER :: [LexicalEntry]{
 /// `$phase`, `$program` and `$package` are the fact roots; type, function,
 /// method, closure and value facts are `$` members of their subject
 /// (`T.$fields`).
-META_QUERY_SOURCE :: "@SOURCE"
+META_QUERY_SOURCE: "@SOURCE"
 
-META_QUERY_TYPES :: "@TYPES"
+META_QUERY_TYPES: "@TYPES"
 
 /// Publication remains explicit and uses the existing Generated value.
-COMPILER_GENERATE :: "compiler.generate"
+COMPILER_GENERATE: "compiler.generate"
 
 /// Advanced providers are root-opted-in and target-registered.
-COMPILER_ADVANCED_REGISTER :: "compiler.advanced.register"
+COMPILER_ADVANCED_REGISTER: "compiler.advanced.register"
 
-COMPILER_ADVANCED_REGISTER_EXPANSION :: "compiler.advanced.register_expansion"
+COMPILER_ADVANCED_REGISTER_EXPANSION: "compiler.advanced.register_expansion"
 
-COMPILER_ADVANCED_REGISTER_SPECIALIZATION :: "compiler.advanced.register_specialization"
+COMPILER_ADVANCED_REGISTER_SPECIALIZATION: "compiler.advanced.register_specialization"
 
 /// A session is available only inside an authorized registered provider.
-COMPILER_ADVANCED_SESSION :: "compiler.advanced.session"
+COMPILER_ADVANCED_SESSION: "compiler.advanced.session"
 
 /// The old standalone marker; it is not part of the active marker registry
 /// and no rule accepts it.
-MARKER_ALIGN_LEGACY :: "Align"
+MARKER_ALIGN_LEGACY: "Align"
 
 // The native library edge uses matching `#Import(c)` and
 // `#Export(c)` spellings. The C ABI and the sema-owned guest surface are one
 // contract in both directions.
-MARKER_IMPORT :: "Import"
+MARKER_IMPORT: "Import"
 
-MARKER_EXPORT :: "Export"
+MARKER_EXPORT: "Export"
 
 // Concurrency surface — thirteen ratified -* outcomes on card #1505.
 // Rows for forms that implementation cards will make parseable belong here
@@ -107,11 +107,11 @@ MARKER_EXPORT :: "Export"
 // This rule keeps yield/Stream. Is retired by
 // TaskOutcome, TaskStatus, trace, and exception have no rows.
 /// The one reserved word for structured task spawning.
-KW_CONC_TASK :: "task"
+KW_CONC_TASK: "task"
 
 /// (ratified 2026-08-12, card #1889): prefix verb that
 /// creates a deeply immutable owned snapshot for a task crossing.
-KW_FREEZE :: "freeze"
+KW_FREEZE: "freeze"
 
 // This rule adds no second token for consuming captures: `task ^name`
 // reuses SIGIL_MOVE (`^`) as task-capture syntax on a group child.
@@ -119,73 +119,73 @@ KW_FREEZE :: "freeze"
 /// `task.all` is the one fan-out
 /// selector that accepts either positional branches or uniformly named
 /// branches; named branches return the existing anonymous tuple carrier.
-TASK_ALL :: "task.all"
+TASK_ALL: "task.all"
 
 /// Qualified fan-out selector.
-TASK_RACE :: "task.race"
+TASK_RACE: "task.race"
 
 /// Qualified fan-out selector.
-TASK_ANY :: "task.any"
+TASK_ANY: "task.any"
 
 /// Qualified fan-out selector.
-TASK_GROUP :: "task.group"
+TASK_GROUP: "task.group"
 
 /// The nameable child-handle type.
-TYPE_TASK :: "Task"
+TYPE_TASK: "Task"
 
 /// Builtin channel constructor.
-BUILTIN_CHANNEL :: "channel"
+BUILTIN_CHANNEL: "channel"
 
 /// Receiver endpoint type is nameable in signatures.
-TYPE_RECEIVER :: "Receiver"
+TYPE_RECEIVER: "Receiver"
 
 /// Sender endpoint type is nameable in signatures.
-TYPE_SENDER :: "Sender"
+TYPE_SENDER: "Sender"
 
 /// Loop source form for channel draining.
-LOOP_CHANNEL_DRAIN :: "loop value in receiver"
+LOOP_CHANNEL_DRAIN: "loop value in receiver"
 
 /// Contextual timeout arm in a readiness table.
-READINESS_AFTER :: "after"
+READINESS_AFTER: "after"
 
 /// Compiler-private field used while a readiness arm is carried through the
 /// existing one-field tuple AST node. It cannot be written by source code.
-INTERNAL_SELECT_AFTER_FIELD :: String.from_bytes([U8]{0, 106, 101, 116, 46, 115, 101, 108, 101, 99, 116, 46, 97, 102, 116, 101, 114})
+INTERNAL_SELECT_AFTER_FIELD: String.from_bytes([U8]{0, 106, 101, 116, 46, 115, 101, 108, 101, 99, 116, 46, 97, 102, 116, 101, 114})
 
 /// Prefix for construction of a shared cell.
-KW_SHARED :: "shared"
+KW_SHARED: "shared"
 
 /// Consuming task result operation.
-TASK_JOIN :: "join"
+TASK_JOIN: "join"
 
 /// One error type for joined task failures.
-TYPE_TASK_FAILURE :: "TaskFailure"
+TYPE_TASK_FAILURE: "TaskFailure"
 
 /// Cancellation failure variant.
-TASK_FAILURE_CANCELLED :: "Cancelled"
+TASK_FAILURE_CANCELLED: "Cancelled"
 
 /// Deadline failure variant.
-TASK_FAILURE_DEADLINE_BLOWN :: "DeadlineBlown"
+TASK_FAILURE_DEADLINE_BLOWN: "DeadlineBlown"
 
 /// Panic failure variant.
-TASK_FAILURE_PANICKED :: "Panicked"
+TASK_FAILURE_PANICKED: "Panicked"
 
-HTTP_ROUTE_PARAM_PREFIX :: ":"
+HTTP_ROUTE_PARAM_PREFIX: ":"
 
-HTTP_ROUTE_CATCH_ALL_PREFIX :: "*"
+HTTP_ROUTE_CATCH_ALL_PREFIX: "*"
 
 // (ratified 2026-07-20): every explicit parallel collection
 // adapter uses the owner-selected `para_` prefix. These are a clean break from
 // 's provisional `par_` spellings; there are no aliases.
-METHOD_PARA_MAP :: "para_map"
+METHOD_PARA_MAP: "para_map"
 
-METHOD_PARA_FILTER :: "para_filter"
+METHOD_PARA_FILTER: "para_filter"
 
-METHOD_PARA_PARTITION :: "para_partition"
+METHOD_PARA_PARTITION: "para_partition"
 
-METHOD_PARA_FOLD :: "para_fold"
+METHOD_PARA_FOLD: "para_fold"
 
-PARA_METHODS :: [String]{
+PARA_METHODS: [String]{
     METHOD_PARA_MAP,
     METHOD_PARA_FILTER,
     METHOD_PARA_PARTITION,
@@ -196,14 +196,14 @@ PARA_METHODS :: [String]{
 // registered at the syntax authority before sema or an engine accepts them.
 // `cut_last` is the terminal-boundary root; the Euclidean quotient and
 // remainder are separate operations, so neither grows a variant sibling.
-METHOD_CUT_LAST :: "cut_last"
+METHOD_CUT_LAST: "cut_last"
 
-METHOD_DIV_EUCLID :: "div_euclid"
+METHOD_DIV_EUCLID: "div_euclid"
 
-METHOD_REM_EUCLID :: "rem_euclid"
+METHOD_REM_EUCLID: "rem_euclid"
 
 /// Compiler-owned numeric source names for.
-NUMERIC_CONVERSION_SOURCES :: [(field_0: String, field_1: String)]{
+NUMERIC_CONVERSION_SOURCES: [(field_0: String, field_1: String)]{
     (field_0: "from_i8", field_1: "I8"),
     (field_0: "from_i64", field_1: "I64"),
     (field_0: "from_i16", field_1: "I16"),
@@ -224,7 +224,7 @@ NUMERIC_CONVERSION_SOURCES :: [(field_0: String, field_1: String)]{
 /// (card #2310/#2312, 2026-08-28): the
 /// completeness-pack names are registered here before they enter sema or an
 /// engine. Their implementations remain in the shared Prelude seams.
-W4310_SURFACE_NAMES :: [String]{
+W4310_SURFACE_NAMES: [String]{
     "read_i8",
     "read_i16_le",
     "read_i16_be",
@@ -259,20 +259,20 @@ W4310_SURFACE_NAMES :: [String]{
 }
 
 /// The sole source-written quantity-bound constructor.
-BOUND_QUANTITY :: "Quantity"
+BOUND_QUANTITY: "Quantity"
 
 /// The closed explicit unit-rounding policies.
-ROUND_TOWARD_ZERO :: "TowardZero"
+ROUND_TOWARD_ZERO: "TowardZero"
 
-ROUND_FLOOR :: "Floor"
+ROUND_FLOOR: "Floor"
 
-ROUND_CEILING :: "Ceiling"
+ROUND_CEILING: "Ceiling"
 
-ROUND_NEAREST_EVEN :: "NearestEven"
+ROUND_NEAREST_EVEN: "NearestEven"
 
 /// One compiler-owned category table. Parser/sema callers select the grammar
 /// category; spelling policy never gets reimplemented at individual sites.
-NAME_CASE_CATEGORIES :: [(field_0: String, field_1: NameCase)]{
+NAME_CASE_CATEGORIES: [(field_0: String, field_1: NameCase)]{
     (field_0: "associated type", field_1: NameCase.Pascal),
     (field_0: "distinct type", field_1: NameCase.Pascal),
     (field_0: "enum", field_1: NameCase.Pascal),
@@ -312,4 +312,4 @@ NAME_CASE_CATEGORIES :: [(field_0: String, field_1: NameCase)]{
     (field_0: "variant field", field_1: NameCase.Snake),
 }
 
-COMPUTED_FIELD_GETTER_STEM :: "__computed_"
+COMPUTED_FIELD_GETTER_STEM: "__computed_"

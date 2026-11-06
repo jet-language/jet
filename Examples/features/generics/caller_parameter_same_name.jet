@@ -3,22 +3,22 @@
 // `T` to the caller's `T?`; the shared spelling is not a cycle. A generic
 // call in tail position returns its inferred optional result as it is.
 
-fn keep<T>(value: T) -> T { value }
+keep: fn<T>(value: T) -> T { value }
 
-fn pick<T>(x: T?) -> T? {
+pick: fn<T>(x: T?) -> T? {
     keep(x)
 }
 
-fn pick_inner<T>(x: T?) -> T? {
-    inner :: keep(x?)
+pick_inner: fn<T>(x: T?) -> T? {
+    inner: keep(x?)
     Val(inner)
 }
 
-fn concrete(x: Int?) -> Int? {
+concrete: fn(x: Int?) -> Int? {
     return keep(x)
 }
 
-fn run() {
+run: fn() {
     print(pick(Int?{Val(4)}) ?? 0)
     print(pick(Int?{None}) ?? 0)
     print(pick_inner(Int?{Val(5)}) ?? 0)

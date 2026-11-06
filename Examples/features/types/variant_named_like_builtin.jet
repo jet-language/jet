@@ -3,7 +3,7 @@
 // the enum's own variant table, never as the builtin type or as a prelude enum
 // (`Dyn`, `Key`) that spells a variant the same way.
 #Comparable
-enum Ty {
+Ty: enum {
     Int
     Float
     Bool
@@ -17,14 +17,14 @@ enum Ty {
     Leaf
 }
 
-enum Literal {
+Literal: enum {
     Int(value: Int)
     Text(value: String)
     Null
     Pair(lo: Int, hi: Int)
 }
 
-fn show(ty: Ty) -> String {
+show: fn(ty: Ty) -> String {
     if ty == {
         .Int -> "Int"
         .Float -> "Float"
@@ -40,7 +40,7 @@ fn show(ty: Ty) -> String {
     }
 }
 
-fn is_scalar(ty: Ty) -> Bool {
+is_scalar: fn(ty: Ty) -> Bool {
     if ty == {
         .Int -> true
         .Float -> true
@@ -49,7 +49,7 @@ fn is_scalar(ty: Ty) -> Bool {
     }
 }
 
-fn describe(literal: Literal) -> String {
+describe: fn(literal: Literal) -> String {
     if literal == {
         .Int(value) -> "int {value}"
         .Text(value) -> "text {value}"
@@ -58,7 +58,7 @@ fn describe(literal: Literal) -> String {
     }
 }
 
-fn order(ordering: Ordering) -> String {
+order: fn(ordering: Ordering) -> String {
     if ordering == {
         .Less -> "less"
         .Greater -> "greater"
@@ -66,17 +66,17 @@ fn order(ordering: Ordering) -> String {
     }
 }
 
-fn run() {
-    all :: [Ty]{Ty.Int, Ty.Float, Ty.Bool, Ty.String, Ty.Char, Ty.U8, Ty.Unit, Ty.Never, Ty.Leaf}
+run: fn() {
+    all: [Ty]{Ty.Int, Ty.Float, Ty.Bool, Ty.String, Ty.Char, Ty.U8, Ty.Unit, Ty.Never, Ty.Leaf}
     loop ty in all {
         print(show(ty))
     }
     print(show(Ty.List{element: Ty.Int}))
     print(show(Ty.Map{key: Ty.String, value: Ty.List{element: Ty.Bool}}))
 
-    int :: Ty.Int
-    float :: Ty.Float
-    leaf :: Ty.Leaf
+    int: Ty.Int
+    float: Ty.Float
+    leaf: Ty.Leaf
     print(Ty.Int == Ty.Int)
     print(Ty.Int == Ty.Float)
     print(Ty.Float == Ty.Bool)
@@ -86,7 +86,7 @@ fn run() {
     print(order(int.compare(float)))
     print(order(leaf.compare(int)))
 
-    ty :: Ty.Bool
+    ty: Ty.Bool
     if ty == .Bool {
         print("bool test")
     }

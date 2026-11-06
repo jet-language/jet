@@ -25,8 +25,8 @@ The input directory contains exactly this, with small files shown inline:
       | This anonymized tree represents a small agent-maintained project.
       | 
     src/
-    src/main.txt  (134 bytes)
-      | fn prepare() {
+    src/main.txt  (135 bytes)
+      | prepare: fn() {
       |     // agent_workload: locate the stale behavior.
       |     fix_root_cause()
       |     // agent_workload: run the focused proof.

@@ -1,22 +1,22 @@
 
 use {
-    ui :: core.ui
-    reactive :: core.reactive
+    ui: core.ui
+    reactive: core.reactive
 }
 
-fn view(title: String) -> UINode {
+view: fn(title: String) -> UINode {
     ui.box([
         ui.text(title),
         ui.node_role("notes", 30.0, 3.0, ui.aria_role_text_input())
     ])
 }
 
-fn run() {
+run: fn() {
     selected := reactive.signal(0)
     backend := ui.tui_backend()
-    render_backend :: backend.copy()
+    render_backend: backend.copy()
     ui.reactive_render(() -> {
-        marker :: if selected.get() == 0 -> "* " else -> "  "
+        marker: if selected.get() == 0 -> "* " else -> "  "
         ui.mount(render_backend, view("{marker}Meeting"))
     })
     print("initial: {backend.render_count()}")

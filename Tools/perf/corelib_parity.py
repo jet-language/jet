@@ -105,11 +105,11 @@ def source_modules() -> dict[str, set[str]]:
         if module != "app" and not module.startswith("core."):
             module = f"core.{module}"
         text = path.read_text(encoding="utf-8", errors="replace")
-        names = set(re.findall(r"\bpub\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)", text))
+        names = set(re.findall(r"\bpub\s+([A-Za-z_][A-Za-z0-9_]*):\s*fn\b", text))
         names.update(
-            re.findall(r"\bpub\s+(?:struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)", text)
+            re.findall(r"\bpub\s+([A-Za-z_][A-Za-z0-9_]*):\s*(?:struct|enum)\b", text)
         )
-        names.update(re.findall(r"(?m)^@([A-Za-z_][A-Za-z0-9_]*)\s*::", text))
+        names.update(re.findall(r"(?m)^@([A-Za-z_][A-Za-z0-9_]*):", text))
         result.setdefault(module, set()).update(names)
     return result
 
@@ -226,9 +226,9 @@ def aot_run_matrix() -> dict[str, object]:
         scratch = Path(raw)
         entry = scratch / f"{stem}.jet"
         entry.write_text(
-            """use b64 :: core.encoding.base64
+            """use b64: core.encoding.base64
 
-fn run() {
+run: fn() {
     print(b64.encode([U8]{102, 111, 111}))
 }
 """,

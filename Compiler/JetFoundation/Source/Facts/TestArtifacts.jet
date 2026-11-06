@@ -1,6 +1,6 @@
-enum TTestKind { Unit Property }
+TTestKind: enum { Unit Property }
 
-struct TTestParamFact {
+TTestParamFact: struct {
     index: Int
     name: String
     span: Span
@@ -12,7 +12,7 @@ struct TTestParamFact {
     default_present: Bool
 }
 
-struct TTestFact {
+TTestFact: struct {
     key: String
     function: TFunctionRef
     name: String
@@ -26,19 +26,19 @@ struct TTestFact {
     generation_unavailable_reason: String?
 }
 
-struct TOutputCheckFact {
+TOutputCheckFact: struct {
     key: String
     name: String
     function: TFunctionRef
 }
 
-fn checked_test_artifact_key(module_identity: String, test: TestDef) -> String Never! {
+checked_test_artifact_key: fn(module_identity: String, test: TestDef) -> String Never! {
     name := test.name ?? "anonymous"
     local := "test::{name}@{test.span.start}..{test.span.end}"
     if module_identity == "" -> local else -> "{module_identity}::{local}"
 }
 
-fn checked_test_artifact_function_ref(module_identity: String, test: TestDef) -> TFunctionRef Never! {
+checked_test_artifact_function_ref: fn(module_identity: String, test: TestDef) -> TFunctionRef Never! {
     key := checked_test_artifact_key(module_identity, test)
     TFunctionRef{
         key: key,
@@ -52,7 +52,7 @@ fn checked_test_artifact_function_ref(module_identity: String, test: TestDef) ->
 // D-TEST-XFAIL1=A (materialize_test_expected_fail): the checked
 // `expected_fail:` marker argument is the test's flag. As with the test name,
 // only a literal argument is materialized here.
-fn checked_test_expected_fail(test: TestDef) -> Bool Never! {
+checked_test_expected_fail: fn(test: TestDef) -> Bool Never! {
     if test.expected_fail_expr == .Val(expression) {
         if expression == .Bool(value, _, _) -> return value
     }
@@ -62,7 +62,7 @@ fn checked_test_expected_fail(test: TestDef) -> Bool Never! {
 // D-TESTFAULT1=A: the checked `faults:` marker list's effect paths (`Rand`,
 // `FS.Read`) are the test's selectors. Sema reports E0119 for an unknown
 // root, so each checked element is an effect path.
-fn checked_test_faults(test: TestDef) -> [String] Never! {
+checked_test_faults: fn(test: TestDef) -> [String] Never! {
     if test.faults_expr == .Val(expression) {
         if expression == .ListLit(elements, _, _) {
             faults := [String]{}
@@ -75,18 +75,18 @@ fn checked_test_faults(test: TestDef) -> [String] Never! {
     test.faults
 }
 
-fn checked_test_fault_path(expression: Expr) -> String? Never! {
+checked_test_fault_path: fn(expression: Expr) -> String? Never! {
     if expression == {
         .Ident(name, _, _) -> Val(name)
         .Field(base, member, _, _) -> {
-            path :: checked_test_fault_path(base) ?? return None
+            path: checked_test_fault_path(base) ?? return None
             Val("{path}.{member}")
         }
         else -> None
     }
 }
 
-fn checked_test_artifact_fact(module_identity: String, test: TestDef) -> TTestFact Never! {
+checked_test_artifact_fact: fn(module_identity: String, test: TestDef) -> TTestFact Never! {
     parameters := [TTestParamFact]{}
     index := 0
     loop parameter in test.params {

@@ -4,11 +4,11 @@
 // (e2b4feaae), on the Jet inspect parser.
 use jet_cli.[JET_CLI_INSPECT_PLANES, JetCLIInspectScope, jet_cli_inspect_parse]
 
-fn inspect_parse_require(ok: Bool, name: String) Never! {
+inspect_parse_require: fn(ok: Bool, name: String) Never! {
     if !ok -> panic(name)
 }
 
-fn inspect_parse_target(argv: [String], options: [String], name: String) Never! {
+inspect_parse_target: fn(argv: [String], options: [String], name: String) Never! {
     if jet_cli_inspect_parse(argv) == {
         .Parsed(request) -> {
             inspect_parse_require(request.scope == JetCLIInspectScope.Target{target: "input.jet"}, "{name}: target")
@@ -18,7 +18,7 @@ fn inspect_parse_target(argv: [String], options: [String], name: String) Never! 
     }
 }
 
-fn inspect_parse_error(argv: [String], expected: String) Never! {
+inspect_parse_error: fn(argv: [String], expected: String) Never! {
     if jet_cli_inspect_parse(argv) == {
         .Parsed(_) -> panic("expected `{expected}`")
         .Failed(message) -> inspect_parse_require(message == expected, "wanted `{expected}`, got `{message}`")
@@ -26,7 +26,7 @@ fn inspect_parse_error(argv: [String], expected: String) Never! {
 }
 
 #Test("inspect_parse") {
-    flags :: [String]{"--before", "--color", "--facts", "--gate", "--kind", "--output", "--profile", "--scope", "--set", "--target", "--topic"}
+    flags: [String]{"--before", "--color", "--facts", "--gate", "--kind", "--output", "--profile", "--scope", "--set", "--target", "--topic"}
     loop plane in JET_CLI_INSPECT_PLANES {
         inspect_parse_target([String]{"inspect", plane, "--threads", "1", "input.jet"}, [String]{"--threads", "1"}, "{plane} --threads 1 before target")
         inspect_parse_target([String]{"inspect", plane, "input.jet", "--threads", "1"}, [String]{"--threads", "1"}, "{plane} --threads 1 after target")

@@ -8,7 +8,7 @@ use {
 }
 
 // tests/fixtures/nix-compat/stage-a-derivation.json
-NIX_TEST_STAGE_A_DERIVATION_JSON :: comptime { ``{
+NIX_TEST_STAGE_A_DERIVATION_JSON: comptime { ``{
   "schema": 1,
   "oracle": {
     "nix_version": "2.34.8",
@@ -98,7 +98,7 @@ NIX_TEST_STAGE_A_DERIVATION_JSON :: comptime { ``{
 `` }
 
 // tests/fixtures/nix-compat/breadth.json
-NIX_TEST_BREADTH_JSON :: comptime { ``{
+NIX_TEST_BREADTH_JSON: comptime { ``{
   "schema": 1,
   "oracle": {
     "nix_version": "2.34.8",
@@ -298,41 +298,41 @@ NIX_TEST_BREADTH_JSON :: comptime { ``{
 }
 `` }
 
-fn nix_test_boundary() -> NixNativeBoundary {
+nix_test_boundary: fn() -> NixNativeBoundary {
     NixNativeBoundary.embedded() ?? panic("committed manifest must validate")
 }
 
-fn nix_test_json(text: String) -> NixEvalJSON {
+nix_test_json: fn(text: String) -> NixEvalJSON {
     NixEvalJSON.parse(text) ?? panic("fixture JSON must parse")
 }
 
-fn nix_test_object(document: NixEvalJSON, index: Int) -> [String: Int] {
+nix_test_object: fn(document: NixEvalJSON, index: Int) -> [String: Int] {
     document.object(index) ?? panic("expected a JSON object")
 }
 
-fn nix_test_array(document: NixEvalJSON, index: Int) -> [Int] {
+nix_test_array: fn(document: NixEvalJSON, index: Int) -> [Int] {
     document.array(index) ?? panic("expected a JSON array")
 }
 
-fn nix_test_string(document: NixEvalJSON, index: Int) -> String {
+nix_test_string: fn(document: NixEvalJSON, index: Int) -> String {
     document.string(index) ?? panic("expected a JSON string")
 }
 
-fn nix_test_get(fields: [String: Int], key: String) -> Int {
+nix_test_get: fn(fields: [String: Int], key: String) -> Int {
     fields.get(key) ?? panic("missing fixture field {key}")
 }
 
-fn nix_test_text(document: NixEvalJSON, fields: [String: Int], key: String) -> String {
+nix_test_text: fn(document: NixEvalJSON, fields: [String: Int], key: String) -> String {
     nix_test_string(document, nix_test_get(fields, key))
 }
 
-fn nix_test_strings(document: NixEvalJSON, index: Int) -> [String] {
+nix_test_strings: fn(document: NixEvalJSON, index: Int) -> [String] {
     strings := [String]{}
     loop item in nix_test_array(document, index) -> &strings.push(nix_test_string(document, item))
     strings
 }
 
-fn nix_test_derivation(source: String) -> NixNativeDerivation {
+nix_test_derivation: fn(source: String) -> NixNativeDerivation {
     nix_evaluate_derivation(source, "x86_64-linux") ?? panic("private production boundary must materialize a derivation")
 }
 
@@ -341,8 +341,8 @@ fn nix_test_derivation(source: String) -> NixNativeDerivation {
 }
 
 #Test("nix private integration projects lazy flake without external nix") {
-    boundary :: nix_test_boundary()
-    evaluated :: boundary.evaluate_devshell(`let make = packages: pkgs.mkShell { packages = packages; }; in { outputs = { devShells.x86_64-linux.default = make [ pkgs.fd ]; }; }`, "x86_64-linux") ?? panic("private production boundary must evaluate supported lazy syntax")
+    boundary: nix_test_boundary()
+    evaluated: boundary.evaluate_devshell(`let make = packages: pkgs.mkShell { packages = packages; }; in { outputs = { devShells.x86_64-linux.default = make [ pkgs.fd ]; }; }`, "x86_64-linux") ?? panic("private production boundary must evaluate supported lazy syntax")
     assert_eq(evaluated.packages, [String]{"fd"})
     if boundary.evaluate_devshell(`{ outputs = { devShells.x86_64-linux.default = pkgs.mkShell { packages = /tmp/package; }; }; }`, "x86_64-linux") == {
         .Ok(_) -> panic("private production boundary must reject ambient path authority")
@@ -351,40 +351,40 @@ fn nix_test_derivation(source: String) -> NixNativeDerivation {
 }
 
 #Test("nix private devshell path is independent of nix on path") {
-    evaluated :: nix_test_boundary().evaluate_devshell(`{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ pkgs.fd ]; }; }`, "x86_64-linux") ?? panic("native devShell evaluator must not need Nix")
+    evaluated: nix_test_boundary().evaluate_devshell(`{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ pkgs.fd ]; }; }`, "x86_64-linux") ?? panic("native devShell evaluator must not need Nix")
     assert_eq(evaluated.packages, [String]{"fd"})
 }
 
 #Test("nix private integration materializes derivation without external nix") {
-    evaluated :: nix_test_derivation(`builtins.derivationStrict { name = "hello"; system = "x86_64-linux"; builder = "/bin/sh"; args = [ "-c" "echo hi > $out" ]; }`)
+    evaluated: nix_test_derivation(`builtins.derivationStrict { name = "hello"; system = "x86_64-linux"; builder = "/bin/sh"; args = [ "-c" "echo hi > $out" ]; }`)
     assert_eq(evaluated.drv_path, "/nix/store/76w21n1f03fs5kw8fnffphx7qrqffw6r-hello.drv")
     assert_eq(evaluated.output_path("out"), Val("/nix/store/mjs27ix6ig2bkbi3s3sm470vrv4lf7ic-hello"))
 }
 
 #Test("nix private integration materializes fixed output derivation") {
-    evaluated :: nix_test_derivation(`builtins.derivationStrict { name = "fixed"; system = "x86_64-linux"; builder = "/bin/sh"; args = [ "-c" "echo hi > $out" ]; outputHashAlgo = "sha256"; outputHashMode = "flat"; outputHash = "0000000000000000000000000000000000000000000000000000000000000000"; }`)
+    evaluated: nix_test_derivation(`builtins.derivationStrict { name = "fixed"; system = "x86_64-linux"; builder = "/bin/sh"; args = [ "-c" "echo hi > $out" ]; outputHashAlgo = "sha256"; outputHashMode = "flat"; outputHash = "0000000000000000000000000000000000000000000000000000000000000000"; }`)
     assert_eq(evaluated.drv_path, "/nix/store/24mj56f9sfhlf0bd7x0h9xgfc709a1fn-fixed.drv")
     assert_eq(evaluated.output_path("out"), Val("/nix/store/ap9h69qwrm5060ldi96axyklh3pr3yjn-fixed"))
 }
 
 #Test("nix private integration materializes all declared non fixed outputs") {
-    evaluated :: nix_test_derivation(`builtins.derivationStrict { name = "many"; system = "x86_64-linux"; builder = "/bin/sh"; outputs = [ "out" "dev" ]; }`)
+    evaluated: nix_test_derivation(`builtins.derivationStrict { name = "many"; system = "x86_64-linux"; builder = "/bin/sh"; outputs = [ "out" "dev" ]; }`)
     assert_eq(evaluated.outputs.len(), 2)
     assert((evaluated.output_path("out") ?? "").ends_with("-many"))
     assert((evaluated.output_path("dev") ?? "").ends_with("-many-dev"))
 }
 
 #Test("nix private derivation materializer matches pinned fixture and errors") {
-    document :: nix_test_json(NIX_TEST_STAGE_A_DERIVATION_JSON)
-    root :: nix_test_object(document, document.root)
+    document: nix_test_json(NIX_TEST_STAGE_A_DERIVATION_JSON)
+    root: nix_test_object(document, document.root)
     loop value_index in nix_test_array(document, nix_test_get(root, "values")) {
-        fixture :: nix_test_object(document, value_index)
-        actual :: nix_evaluate_derivation(nix_test_text(document, fixture, "source"), nix_test_text(document, fixture, "system")) ?? panic("native derivation")
-        expected :: nix_test_object(document, nix_test_get(fixture, "nix_value"))
+        fixture: nix_test_object(document, value_index)
+        actual: nix_evaluate_derivation(nix_test_text(document, fixture, "source"), nix_test_text(document, fixture, "system")) ?? panic("native derivation")
+        expected: nix_test_object(document, nix_test_get(fixture, "nix_value"))
         assert_eq(actual.drv_path, nix_test_text(document, expected, "drvPath"))
         if {
             expected.get("outputs") != None -> {
-                outputs :: nix_test_object(document, nix_test_get(expected, "outputs"))
+                outputs: nix_test_object(document, nix_test_get(expected, "outputs"))
                 assert_eq(actual.outputs.len(), outputs.len())
                 loop entry in outputs -> assert_eq(actual.output_path(entry.key), Val(nix_test_string(document, entry.value)))
             }
@@ -401,7 +401,7 @@ fn nix_test_derivation(source: String) -> NixNativeDerivation {
         }
     }
     loop error_index in nix_test_array(document, nix_test_get(root, "errors")) {
-        fixture :: nix_test_object(document, error_index)
+        fixture: nix_test_object(document, error_index)
         if nix_evaluate_derivation(nix_test_text(document, fixture, "source"), nix_test_text(document, fixture, "system")) == {
             .Ok(_) -> panic("native evaluator must reject fixture error")
             .Err(error) -> assert(error.message().contains(nix_test_text(document, fixture, "jet_error_contains")))
@@ -410,37 +410,37 @@ fn nix_test_derivation(source: String) -> NixNativeDerivation {
 }
 
 #Test("nix private integration matches pinned breadth fixture") {
-    document :: nix_test_json(NIX_TEST_BREADTH_JSON)
-    root :: nix_test_object(document, document.root)
-    boundary :: nix_test_boundary()
+    document: nix_test_json(NIX_TEST_BREADTH_JSON)
+    root: nix_test_object(document, document.root)
+    boundary: nix_test_boundary()
     loop value_index in nix_test_array(document, nix_test_get(root, "values")) {
-        fixture :: nix_test_object(document, value_index)
+        fixture: nix_test_object(document, value_index)
         output := "default"
         if fixture.get("output") == {
             .Val(output_index) -> output = document.string(output_index) ?? "default"
             else -> {}
         }
-        evaluated :: boundary.evaluate_devshell_output(nix_test_text(document, fixture, "source"), nix_test_text(document, fixture, "system"), output) ?? panic("breadth value must evaluate through Jetpack")
-        expected :: nix_test_strings(document, nix_test_get(fixture, "jet_packages"))
-        nix_value :: nix_test_object(document, nix_test_get(fixture, "nix_value"))
+        evaluated: boundary.evaluate_devshell_output(nix_test_text(document, fixture, "source"), nix_test_text(document, fixture, "system"), output) ?? panic("breadth value must evaluate through Jetpack")
+        expected: nix_test_strings(document, nix_test_get(fixture, "jet_packages"))
+        nix_value: nix_test_object(document, nix_test_get(fixture, "nix_value"))
         assert_eq(nix_test_strings(document, nix_test_get(nix_value, "packages")), expected)
         assert_eq(evaluated.packages, expected)
         assert_eq(evaluated.unsupported, nix_test_strings(document, nix_test_get(fixture, "jet_unsupported")))
     }
     loop error_index in nix_test_array(document, nix_test_get(root, "errors")) {
-        fixture :: nix_test_object(document, error_index)
-        expected :: nix_test_text(document, fixture, "jet_error")
+        fixture: nix_test_object(document, error_index)
+        expected: nix_test_text(document, fixture, "jet_error")
         if boundary.evaluate_devshell(nix_test_text(document, fixture, "source"), nix_test_text(document, fixture, "system")) == {
             .Ok(_) -> panic("breadth error must fail through Jetpack")
             .Err(error) -> assert(error.message().contains(expected))
         }
     }
     loop derivation_index in nix_test_array(document, nix_test_get(root, "derivations")) {
-        fixture :: nix_test_object(document, derivation_index)
-        evaluated :: boundary.evaluate_derivation(nix_test_text(document, fixture, "source"), nix_test_text(document, fixture, "system")) ?? panic("breadth derivation must materialize through Jetpack")
-        nix_value :: nix_test_object(document, nix_test_get(fixture, "nix_value"))
+        fixture: nix_test_object(document, derivation_index)
+        evaluated: boundary.evaluate_derivation(nix_test_text(document, fixture, "source"), nix_test_text(document, fixture, "system")) ?? panic("breadth derivation must materialize through Jetpack")
+        nix_value: nix_test_object(document, nix_test_get(fixture, "nix_value"))
         assert_eq(evaluated.drv_path, nix_test_text(document, nix_value, "drvPath"))
-        output_names :: [String]{"out", "dev", "doc"}
+        output_names: [String]{"out", "dev", "doc"}
         loop name in output_names {
             assert_eq(evaluated.output_path(name), Val(nix_test_text(document, nix_value, name)))
         }
@@ -448,6 +448,6 @@ fn nix_test_derivation(source: String) -> NixNativeDerivation {
 }
 
 #Test("nix private derivation path is independent of nix on path") {
-    evaluated :: nix_evaluate_derivation(`builtins.derivation { name = "no-path"; system = "x86_64-linux"; builder = "/bin/sh"; }`, "x86_64-linux") ?? panic("native derivation evaluator must not need Nix")
+    evaluated: nix_evaluate_derivation(`builtins.derivation { name = "no-path"; system = "x86_64-linux"; builder = "/bin/sh"; }`, "x86_64-linux") ?? panic("native derivation evaluator must not need Nix")
     assert(evaluated.drv_path.ends_with("-no-path.drv"))
 }

@@ -1,4 +1,4 @@
-use files :: core.files
+use files: core.files
 
 // An aggregate holding a handle has no clone, so sema reads a variable that
 // holds one as a move (E0121 on a later use): returning a local or a taken
@@ -8,26 +8,26 @@ use files :: core.files
 // shape). Each handle closes exactly once, when its last owner ends, so the
 // process's open descriptors return to the count they had before.
 
-struct Checked {
+Checked: struct {
     relative: String
     handle: FileReader
 }
 
-struct Shelf {
+Shelf: struct {
     name: String
     items: [Checked]
 }
 
-fn open_fds() -> Int {
-    entries :: files.list_dir("/proc/self/fd") ?? panic("list fds")
+open_fds: fn() -> Int {
+    entries: files.list_dir("/proc/self/fd") ?? panic("list fds")
     entries.len()
 }
 
-fn checked(relative: String) -> Checked {
+checked: fn(relative: String) -> Checked {
     Checked{relative: relative, handle: files.open("run.jet") ?? panic("open run.jet")}
 }
 
-fn gathered() -> [Checked] {
+gathered: fn() -> [Checked] {
     out := [Checked]{}
     &out.push(checked("b"))
     &out.push(checked("c"))
@@ -35,48 +35,48 @@ fn gathered() -> [Checked] {
     out
 }
 
-fn passed_through(input: ^[Checked]) -> [Checked] {
+passed_through: fn(input: ^[Checked]) -> [Checked] {
     input
 }
 
-fn rebound(input: ^[Checked]) -> [Checked] {
+rebound: fn(input: ^[Checked]) -> [Checked] {
     out := ^input
     out
 }
 
-fn sorted(input: ^[Checked]) -> [Checked] {
+sorted: fn(input: ^[Checked]) -> [Checked] {
     out := input
     &out.sort_by((a, b) -> a.relative <=> b.relative)
     out
 }
 
-fn shelved(input: ^[Checked]) -> Shelf {
+shelved: fn(input: ^[Checked]) -> Shelf {
     shelf := Shelf{name: "shelf", items: input}
     again := shelf
     again
 }
 
-fn paired(input: ^Shelf) -> (shelf: Shelf, count: Int) {
-    count :: input.items.len()
+paired: fn(input: ^Shelf) -> (shelf: Shelf, count: Int) {
+    count: input.items.len()
     pair := (shelf: input, count: count)
     pair
 }
 
-fn nested() -> [[Checked]] {
+nested: fn() -> [[Checked]] {
     inner := [Checked]{checked("x"), checked("y")}
     outer := [[Checked]]{}
     &outer.push(inner)
     outer
 }
 
-fn names(list: [Checked]) -> String {
+names: fn(list: [Checked]) -> String {
     text := ""
     loop index in 0..<list.len() -> text = "{text}{list[index].relative}"
     text
 }
 
-fn run() {
-    before :: open_fds()
+run: fn() {
+    before: open_fds()
     list := gathered()
     print("gathered {names(list)} open {open_fds() - before}")
     through := passed_through(^list)
@@ -97,10 +97,10 @@ fn run() {
     print("nested leaked {open_fds() - before}")
 }
 
-fn drop_pair(pair: ^(shelf: Shelf, count: Int)) {
+drop_pair: fn(pair: ^(shelf: Shelf, count: Int)) {
     print("dropping {pair.shelf.name}")
 }
 
-fn drop_lists(lists: ^[[Checked]]) {
+drop_lists: fn(lists: ^[[Checked]]) {
     print("dropping {lists.len()}")
 }

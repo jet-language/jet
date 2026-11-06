@@ -7,54 +7,54 @@ use {
 // GATE #4494: actual native process/pipe/mutex/filesystem providers.
 
 // Run a transcript test against a live server process.
-fn run_transcript(source: &String, steps: &[TranscriptStep]) {
-    jet :: jet_bin()
+run_transcript: fn(source: &String, steps: &[TranscriptStep]) {
+    jet: jet_bin()
     if !jet.exists() -> return
-    _guard :: lock_lsp_process()
+    _guard: lock_lsp_process()
     child := Command.new(jet).args(["self", "lsp"]).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().expect("spawn jet self lsp")
     stdin := child.stdin.take().expect("stdin")
     stdout := child.stdout.take().expect("stdout")
-    tmp_path :: OSPath.from("/tmp/lsp_transcript_{process.id()}.jet")
+    tmp_path: OSPath.from("/tmp/lsp_transcript_{process.id()}.jet")
     loop step in steps {
         if step == {
             .Send{msg, expect_contains} -> {
                 send_msg(&stdin, msg)
                 if expect_contains == .Val(expects) {
-                    resp :: read_msg(&stdout)
+                    resp: read_msg(&stdout)
                     loop expect in expects {
                         assert(resp.contains(expect), "transcript step: expected {expect} in response, got:\n{resp}")
                     }
                 }
             }
             .Open{uri, expect_notification} -> {
-                open :: "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(source)}}}}}}}"
+                open: "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(source)}}}}}}}"
                 send_msg(&stdin, open)
                 if expect_notification {
-                    notif :: read_msg(&stdout)
+                    notif: read_msg(&stdout)
                     assert(notif.contains("publishDiagnostics"), "expected publishDiagnostics after open, got: {notif}")
                 }
             }
         }
     }
     drop(^stdin)
-    _ :: child.wait()
-    _ :: fs.remove_file(tmp_path)
+    _: child.wait()
+    _: fs.remove_file(tmp_path)
 }
 
-enum TranscriptStep {
+TranscriptStep: enum {
     Send(msg: String, expect_contains: [String]?)
     Open(uri: String, expect_notification: Bool)
 }
 
-fn costly_source(marker: String, callers: USize) -> String {
-    source := "fn target(value: Int) -> Int {{ return value }}\nfn {marker}() -> Int {{ return target(1) }}\n"
+costly_source: fn(marker: String, callers: USize) -> String {
+    source := "target: fn(value: Int) -> Int {{ return value }}\n{marker}: fn() -> Int {{ return target(1) }}\n"
     loop index in 0..callers {
-        source.push_str("fn caller_{index}() -> Int {{ return target({index}) }}\n")
+        source.push_str("caller_{index}: fn() -> Int {{ return target({index}) }}\n")
     }
     ^source
 }
 
-fn percentile(samples: [Duration], pct: USize) -> Duration {
+percentile: fn(samples: [Duration], pct: USize) -> Duration {
     samples.sort()
     samples[((samples.len() - 1) * pct) / 100]
 }

@@ -23,40 +23,40 @@
 // Tasks are written by every writer (the run's root task is one). The
 // channel, value and event sections are written through code words their
 // producers install, so a program pays for a section only with its feature.
-OBSERVE_RAW_MAGIC :: I64{3550338754064696650}
+OBSERVE_RAW_MAGIC: I64{3550338754064696650}
 observe_values_code := I64{0}
 observe_events_code := I64{0}
 
-fn observe_text_clone(value: I64) -> I64 {
+observe_text_clone: fn(value: I64) -> I64 {
     if value == (I64{0}) -> return I64{0}
     rt_text_copy(rt_text_data(value), rt_text_len(value))
 }
-fn observe_text_cmp(a: I64, b: I64) -> I64 {
-    al :: rt_text_len(a)
-    bl :: rt_text_len(b)
+observe_text_cmp: fn(a: I64, b: I64) -> I64 {
+    al: rt_text_len(a)
+    bl: rt_text_len(b)
     at := I64{0}
     loop at < al && at < bl {
-        av :: trap_byte(wrapping(rt_text_data(a) + at))
-        bv :: trap_byte(wrapping(rt_text_data(b) + at))
+        av: trap_byte(wrapping(rt_text_data(a) + at))
+        bv: trap_byte(wrapping(rt_text_data(b) + at))
         if av != bv -> return av - bv
         at += I64{1}
     }
     al - bl
 }
-fn observe_text_controls(value: I64) -> Bool {
+observe_text_controls: fn(value: I64) -> Bool {
     if value == (I64{0}) -> return false
     at := I64{0}
     loop at < rt_text_len(value) {
-        cp :: rt_text_decode(wrapping(rt_text_data(value) + at))
+        cp: rt_text_decode(wrapping(rt_text_data(value) + at))
         if cp < (I64{32}) || (cp >= I64{127} && cp <= I64{159}) -> return true
         at += rt_text_width(wrapping(rt_text_data(value) + at))
     }
     false
 }
-fn observe_value_drop(node: I64) {
+observe_value_drop: fn(node: I64) {
     at := I64{8}
     loop at <= (I64{40}) {
-        text :: sync_load(wrapping(node + at))
+        text: sync_load(wrapping(node + at))
         if text != (I64{0}) -> jet_rt_string_drop(text)
         at += I64{8}
     }
@@ -65,7 +65,7 @@ fn observe_value_drop(node: I64) {
 // The source carrier has exactly Foundation's JetLiveValueDecision fields:
 // value_id/type_identity/disposition/reason/rendered_value. Retain by copying
 // E4 text; the producer continues owning its source and optional text owner.
-#Export(c) fn jet_observe_record_live_value(source: I64) {
+#Export(c) jet_observe_record_live_value: fn(source: I64) {
     if observe_values_code == (I64{0}) {
         #Unsafe("an idempotent install: every writer stores the same code address") {
             observe_values_code = rt_observe_raw_values_address()
@@ -73,11 +73,11 @@ fn observe_value_drop(node: I64) {
     }
     sync_mutex_lock(observe_root)
     link := observe_root + I64{112}
-    id :: sync_load(source)
+    id: sync_load(source)
     previous := I64{0}
     loop sync_load(link) != (I64{0}) {
-        node :: sync_load(link)
-        order :: observe_text_cmp(sync_load(wrapping(node + I64{8})), id)
+        node: sync_load(link)
+        order: observe_text_cmp(sync_load(wrapping(node + I64{8})), id)
         if order >= (I64{0}) {
             if order == (I64{0}) -> previous = node
             break
@@ -88,7 +88,7 @@ fn observe_value_drop(node: I64) {
         sync_mutex_unlock(observe_root)
         return
     }
-    node :: jet_rt_alloc(I64{48}, I64{8})
+    node: jet_rt_alloc(I64{48}, I64{8})
     sync_store(node, if previous == (I64{0}) -> sync_load(link) else -> sync_load(previous))
     at := I64{0}
     loop at < (I64{40}) {
@@ -100,10 +100,10 @@ fn observe_value_drop(node: I64) {
     sync_mutex_unlock(observe_root)
     if previous != (I64{0}) -> observe_value_drop(previous)
 }
-fn observe_event_text_field(offset: I64) -> Bool {
+observe_event_text_field: fn(offset: I64) -> Bool {
     offset == I64{8} || offset == I64{48} || offset == I64{88} || offset == I64{104} || offset == I64{112}
 }
-fn observe_event_drop(node: I64) {
+observe_event_drop: fn(node: I64) {
     at := I64{0}
     loop at < (I64{120}) {
         if observe_event_text_field(at) -> jet_rt_string_drop(sync_load(wrapping(wrapping(node + at) + I64{8})))
@@ -113,23 +113,23 @@ fn observe_event_drop(node: I64) {
 }
 // Source has canonical Event fields:49-65 order; sequence is assigned under the
 // same lock as append, as the Rust VecDeque producer does.
-#Export(c) fn jet_observe_event(source: I64) {
+#Export(c) jet_observe_event: fn(source: I64) {
     if observe_events_code == (I64{0}) {
         #Unsafe("an idempotent install: every writer stores the same code address") {
             observe_events_code = rt_observe_raw_events_address()
         }
     }
-    node :: jet_rt_alloc(I64{128}, I64{8})
+    node: jet_rt_alloc(I64{128}, I64{8})
     sync_store(node, I64{0})
     at := I64{8}
     loop at < (I64{120}) {
-        word :: sync_load(wrapping(source + at))
+        word: sync_load(wrapping(source + at))
         sync_store(wrapping(wrapping(node + at) + I64{8}), if observe_event_text_field(at) -> observe_text_clone(word) else -> word)
         at += I64{8}
     }
     sync_mutex_lock(observe_root)
     sync_store(wrapping(node + I64{8}), sync_add(wrapping(observe_root + I64{80}), I64{1}))
-    tail :: sync_load(wrapping(observe_root + I64{96}))
+    tail: sync_load(wrapping(observe_root + I64{96}))
     if tail == (I64{0}) -> sync_store(wrapping(observe_root + I64{88}), node) else -> sync_store(tail, node)
     sync_store(wrapping(observe_root + I64{96}), node)
     retired := I64{0}
@@ -143,16 +143,16 @@ fn observe_event_drop(node: I64) {
     sync_mutex_unlock(observe_root)
     if retired != (I64{0}) -> observe_event_drop(retired)
 }
-fn observe_raw_word(builder: I64, word: I64) {
+observe_raw_word: fn(builder: I64, word: I64) {
     rt_text_append_raw_word(builder, word, I64{8})
 }
-fn observe_raw_text(builder: I64, value: I64) {
+observe_raw_text: fn(builder: I64, value: I64) {
     if value == (I64{0}) {
         observe_raw_word(builder, I64{-1})
         return
     }
-    data :: rt_text_data(value)
-    length :: rt_text_len(value)
+    data: rt_text_data(value)
+    length: rt_text_len(value)
     at := I64{0}
     scalars := I64{0}
     loop at < length && scalars < (I64{160}) {
@@ -163,7 +163,7 @@ fn observe_raw_text(builder: I64, value: I64) {
     rt_text_append(builder, data, at)
 }
 // The section writers run with the registry mutex held (observe_snapshot).
-fn observe_raw_tasks(builder: I64) {
+observe_raw_tasks: fn(builder: I64) {
     observe_raw_word(builder, I64{1})
     observe_raw_word(builder, sync_load(wrapping(observe_root + I64{32})))
     node := sync_load(wrapping(observe_root + I64{24}))
@@ -179,16 +179,16 @@ fn observe_raw_tasks(builder: I64) {
     }
 }
 // RuntimeLower resolves these checked function-address entries, never the bodies.
-fn rt_observe_raw_channels_address() -> I64 {
+rt_observe_raw_channels_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
-fn rt_observe_raw_values_address() -> I64 {
+rt_observe_raw_values_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
-fn rt_observe_raw_events_address() -> I64 {
+rt_observe_raw_events_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
-#Export(c) fn jet_rt_observe_raw_channels(builder: I64) -> I64 {
+#Export(c) jet_rt_observe_raw_channels: fn(builder: I64) -> I64 {
     count := I64{0}
     node := sync_load(wrapping(observe_root + I64{40}))
     loop node != (I64{0}) {
@@ -208,7 +208,7 @@ fn rt_observe_raw_events_address() -> I64 {
     }
     I64{0}
 }
-#Export(c) fn jet_rt_observe_raw_values(builder: I64) -> I64 {
+#Export(c) jet_rt_observe_raw_values: fn(builder: I64) -> I64 {
     observe_raw_word(builder, I64{3})
     observe_raw_word(builder, sync_load(wrapping(observe_root + I64{120})))
     node := sync_load(wrapping(observe_root + I64{112}))
@@ -222,7 +222,7 @@ fn rt_observe_raw_events_address() -> I64 {
     }
     I64{0}
 }
-#Export(c) fn jet_rt_observe_raw_events(builder: I64) -> I64 {
+#Export(c) jet_rt_observe_raw_events: fn(builder: I64) -> I64 {
     observe_raw_word(builder, I64{4})
     observe_raw_word(builder, sync_load(wrapping(observe_root + I64{104})))
     node := sync_load(wrapping(observe_root + I64{88}))
@@ -236,23 +236,23 @@ fn rt_observe_raw_events_address() -> I64 {
     }
     I64{0}
 }
-fn observe_cstring(text: I64) -> I64 {
-    length :: rt_text_len(text)
-    buffer :: jet_rt_alloc(length + I64{1}, I64{1})
+observe_cstring: fn(text: I64) -> I64 {
+    length: rt_text_len(text)
+    buffer: jet_rt_alloc(length + I64{1}, I64{1})
     rt_text_bytes_copy(buffer, rt_text_data(text), length)
     trap_put(wrapping(buffer + length), I64{0})
     buffer
 }
-fn observe_syscall(number: I64, a: I64, b: I64, c: I64, d: I64) -> I64 {
+observe_syscall: fn(number: I64, a: I64, b: I64, c: I64, d: I64) -> I64 {
     #Unsafe("vetted Observe Linux file/clock syscalls borrow native buffers only for their duration") {
         return os_syscall_i64(number, a, b, c, d, I64{0}, I64{0})
     }
 }
 // The raw snapshot (layout at the top of this file). The writer's lock is
 // held by the caller.
-fn observe_snapshot(writer: I64, exit: I64) -> I64 {
-    text :: jet_rt_string_builder_new()
-    scratch :: jet_rt_alloc(I64{24}, I64{8})
+observe_snapshot: fn(writer: I64, exit: I64) -> I64 {
+    text: jet_rt_string_builder_new()
+    scratch: jet_rt_alloc(I64{24}, I64{8})
     observe_raw_word(text, OBSERVE_RAW_MAGIC)
     observe_raw_word(text, sync_load(wrapping(writer + I64{16})))
     observe_raw_word(text, observe_syscall(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}))
@@ -287,8 +287,8 @@ fn observe_snapshot(writer: I64, exit: I64) -> I64 {
     observe_raw_word(text, I64{0})
     text
 }
-fn observe_append_directory(target: I64, directory: I64) {
-    length :: rt_text_len(directory)
+observe_append_directory: fn(target: I64, directory: I64) {
+    length: rt_text_len(directory)
     rt_text_append(target, rt_text_data(directory), length)
     if length != (I64{0}) && trap_byte(wrapping(wrapping(rt_text_data(directory) + length) - I64{1})) != (I64{47}) -> rt_text_push_scalar(target, I64{47})
 }
@@ -296,17 +296,17 @@ fn observe_append_directory(target: I64, directory: I64) {
 // Holds the run mutex through staging+rename. A periodic publication that loses
 // to final publication cannot overwrite it; failed publication still closes
 // this run.
-fn observe_publish(writer: I64, exit: I64) {
+observe_publish: fn(writer: I64, exit: I64) {
     sync_mutex_lock(writer)
     if sync_load(wrapping(writer + I64{8})) != (I64{0}) {
         sync_mutex_unlock(writer)
         return
     }
-    sequence :: wrapping(sync_load(wrapping(writer + I64{16})) + I64{1})
+    sequence: wrapping(sync_load(wrapping(writer + I64{16})) + I64{1})
     sync_store(wrapping(writer + I64{16}), sequence)
-    snapshot :: observe_snapshot(writer, exit)
-    stage :: jet_rt_string_builder_new()
-    directory :: sync_load(wrapping(writer + I64{96}))
+    snapshot: observe_snapshot(writer, exit)
+    stage: jet_rt_string_builder_new()
+    directory: sync_load(wrapping(writer + I64{96}))
     observe_append_directory(stage, directory)
     observe_msg_stage_head(stage)
     observe_decimal_unsigned(stage, observe_syscall(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}))
@@ -315,19 +315,19 @@ fn observe_publish(writer: I64, exit: I64) {
     rt_text_push_scalar(stage, I64{45})
     observe_decimal_unsigned(stage, sequence)
     observe_msg_stage_tail(stage)
-    name :: observe_cstring(stage)
+    name: observe_cstring(stage)
     if rt_text_len(snapshot) <= (I64{1048576}) {
-        fd :: observe_syscall(I64{257}, I64{-100}, name, I64{524481}, I64{384})
+        fd: observe_syscall(I64{257}, I64{-100}, name, I64{524481}, I64{384})
         if fd >= (I64{0}) {
             at := I64{0}
             loop at < rt_text_len(snapshot) {
-                written :: observe_syscall(I64{1}, fd, rt_text_data(snapshot) + at, rt_text_len(snapshot) - at, I64{0})
+                written: observe_syscall(I64{1}, fd, rt_text_data(snapshot) + at, rt_text_len(snapshot) - at, I64{0})
                 if written == (I64{-4}) -> next
                 if written <= (I64{0}) -> break
                 at += written
             }
             if at == rt_text_len(snapshot) && observe_syscall(I64{74}, fd, I64{0}, I64{0}, I64{0}) == (I64{0}) {
-                target :: observe_cstring(sync_load(wrapping(writer + I64{104})))
+                target: observe_cstring(sync_load(wrapping(writer + I64{104})))
                 _ := observe_syscall(I64{82}, name, target, I64{0}, I64{0})
                 jet_rt_free(target, rt_text_len(sync_load(wrapping(writer + I64{104}))) + I64{1}, I64{1})
             }
@@ -341,30 +341,30 @@ fn observe_publish(writer: I64, exit: I64) {
     sync_store(wrapping(writer + I64{8}), exit)
     sync_mutex_unlock(writer)
 }
-fn observe_publish_exit() {
-    writer :: sync_load(wrapping(observe_root + I64{72}))
+observe_publish_exit: fn() {
+    writer: sync_load(wrapping(observe_root + I64{72}))
     if writer != (I64{0}) -> observe_publish(writer, I64{1})
 }
 // Accepted startup identity is the five canonical nonempty control-free E4
 // fields, not an inferred identity. Directory is the host's actual temp_dir.
 // The caller performs JET_OBSERVE=1/environment identity agreement before entry.
-fn observe_live_start(identity: I64, directory: I64) -> I64 {
+observe_live_start: fn(identity: I64, directory: I64) -> I64 {
     at := I64{0}
     loop at < (I64{40}) {
-        value :: sync_load(wrapping(identity + at))
+        value: sync_load(wrapping(identity + at))
         if value == (I64{0}) || rt_text_len(value) == (I64{0}) || observe_text_controls(value) -> return I64{0}
         at += I64{8}
     }
     // The process facts `jet inspect` compares with /proc/<pid>/stat: CPU
     // ticks so far (times(2) counts the clock that file shows; AT_CLKTCK
     // below) and the boot clock, which bounds the process start time.
-    facts :: jet_rt_alloc(I64{32}, I64{8})
+    facts: jet_rt_alloc(I64{32}, I64{8})
     _ := observe_syscall(I64{100}, facts, I64{0}, I64{0}, I64{0})
-    cpu :: wrapping(sync_load(facts) + sync_load(wrapping(facts + I64{8})))
-    boot :: if observe_syscall(I64{228}, I64{7}, facts, I64{0}, I64{0}) == (I64{0}) -> wrapping(sync_load(facts) * I64{1000000000} + sync_load(wrapping(facts + I64{8}))) else -> I64{0}
+    cpu: wrapping(sync_load(facts) + sync_load(wrapping(facts + I64{8})))
+    boot: if observe_syscall(I64{228}, I64{7}, facts, I64{0}, I64{0}) == (I64{0}) -> wrapping(sync_load(facts) * I64{1000000000} + sync_load(wrapping(facts + I64{8}))) else -> I64{0}
     sync_mutex_lock(observe_root)
     writer := sync_load(wrapping(observe_root + I64{72}))
-    fresh :: writer == I64{0}
+    fresh: writer == I64{0}
     if fresh {
         writer = jet_rt_alloc(I64{120}, I64{8})
         thread_zero(writer, I64{120})
@@ -375,7 +375,7 @@ fn observe_live_start(identity: I64, directory: I64) -> I64 {
         }
         sync_store(wrapping(writer + I64{96}), observe_text_clone(directory))
         sync_store(wrapping(writer + I64{48}), boot)
-        path :: jet_rt_string_builder_new()
+        path: jet_rt_string_builder_new()
         observe_append_directory(path, directory)
         observe_msg_path_head(path)
         observe_decimal_unsigned(path, observe_syscall(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}))
@@ -387,7 +387,7 @@ fn observe_live_start(identity: I64, directory: I64) -> I64 {
             thread_zero(root, I64{88})
             sync_store(root, sync_load(wrapping(observe_root + I64{24})))
             sync_store(wrapping(root + I64{8}), I64{1})
-            label :: jet_rt_string_builder_new()
+            label: jet_rt_string_builder_new()
             observe_msg_root_label(label)
             sync_store(wrapping(root + I64{32}), label)
             sync_store(wrapping(root + I64{40}), I64{1})
@@ -410,15 +410,15 @@ fn observe_live_start(identity: I64, directory: I64) -> I64 {
 }
 
 // RuntimeLower resolves this checked function-address entry, never the body.
-fn rt_observe_writer_address() -> I64 {
+rt_observe_writer_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
 
 // The periodic writer shares the same run lock and never publishes after
 // final publication until a resident host restarts the run.
-#Export(c) fn jet_rt_observe_writer(argument: I64) -> I64 {
-    writer :: argument
-    slot :: sync_park_new()
+#Export(c) jet_rt_observe_writer: fn(argument: I64) -> I64 {
+    writer: argument
+    slot: sync_park_new()
     loop {
         observe_publish(writer, I64{0})
         sync_park(slot, I64{100000000})
@@ -426,8 +426,8 @@ fn rt_observe_writer_address() -> I64 {
     I64{0}
 }
 
-fn observe_env_key(index: I64) -> I64 {
-    key :: jet_rt_string_builder_new()
+observe_env_key: fn(index: I64) -> I64 {
+    key: jet_rt_string_builder_new()
     if {
         index == (I64{0}) -> observe_msg_env_session(key)
         index == (I64{1}) -> observe_msg_env_source(key)
@@ -440,22 +440,22 @@ fn observe_env_key(index: I64) -> I64 {
 
 // Read the ONE logical Env cell, not startup environ. All five supplied
 // components must be present, nonempty, <=16KiB and Cc-free.
-#Export(c) fn jet_rt_observe_runtime_start_from_env() {
-    key :: jet_rt_string_builder_new()
+#Export(c) jet_rt_observe_runtime_start_from_env: fn() {
+    key: jet_rt_string_builder_new()
     observe_msg_env_observe(key)
-    enabled :: jet_rt_logical_env_get(key)
+    enabled: jet_rt_logical_env_get(key)
     jet_rt_string_drop(key)
     if enabled == (I64{0}) -> return
-    live :: rt_text_len(enabled) == I64{1} && trap_byte(rt_text_data(enabled)) == I64{49}
+    live: rt_text_len(enabled) == I64{1} && trap_byte(rt_text_data(enabled)) == I64{49}
     jet_rt_string_drop(enabled)
     if !live -> return
-    inputs :: jet_rt_alloc(I64{56}, I64{8})
+    inputs: jet_rt_alloc(I64{56}, I64{8})
     thread_zero(inputs, I64{56})
     at := I64{0}
     valid := true
     loop at < (I64{5}) {
-        name :: observe_env_key(at)
-        value :: jet_rt_logical_env_get(name)
+        name: observe_env_key(at)
+        value: jet_rt_logical_env_get(name)
         jet_rt_string_drop(name)
         sync_store(wrapping(inputs + at * I64{8}), value)
         if {
@@ -467,9 +467,9 @@ fn observe_env_key(index: I64) -> I64 {
         at += I64{1}
     }
     if valid {
-        name :: jet_rt_string_builder_new()
+        name: jet_rt_string_builder_new()
         observe_msg_env_tmpdir(name)
-        present :: jet_rt_logical_env_get_os(name, wrapping(inputs + I64{40}), wrapping(inputs + I64{48}))
+        present: jet_rt_logical_env_get_os(name, wrapping(inputs + I64{40}), wrapping(inputs + I64{48}))
         jet_rt_string_drop(name)
         directory := I64{0}
         if {
@@ -480,23 +480,23 @@ fn observe_env_key(index: I64) -> I64 {
             else -> {
                 // OS path bytes can be non-UTF8. This private buffer is used
                 // only for Linux path syscalls, never as a public String.
-                data :: sync_load(wrapping(inputs + I64{40}))
-                length :: sync_load(wrapping(inputs + I64{48}))
+                data: sync_load(wrapping(inputs + I64{40}))
+                length: sync_load(wrapping(inputs + I64{48}))
                 directory = rt_text_copy(data, length)
                 if length != (I64{0}) -> jet_rt_free(data, length, I64{1})
             }
         }
-        writer :: observe_live_start(inputs, directory)
+        writer: observe_live_start(inputs, directory)
         jet_rt_string_drop(directory)
         if writer != (I64{0}) && sync_cas(wrapping(writer + I64{112}), I64{0}, I64{1}) == (I64{0}) {
-            handle :: thread_spawn(rt_observe_writer_address(), writer)
+            handle: thread_spawn(rt_observe_writer_address(), writer)
             if handle < (I64{0}) -> scheduler_start_failed()
             _ := thread_detach(handle)
         }
     }
     at = I64{0}
     loop at < (I64{5}) {
-        value :: sync_load(wrapping(inputs + at * I64{8}))
+        value: sync_load(wrapping(inputs + at * I64{8}))
         if value != (I64{0}) -> jet_rt_string_drop(value)
         at += I64{1}
     }
@@ -511,7 +511,7 @@ fn observe_env_key(index: I64) -> I64 {
 observe_start_code := I64{0}
 
 // runtime-init: 4 when observe_task_linked,observe_channels_code,observe_values_code,observe_events_code
-#Export(c) fn jet_rt_observe_start_init() {
+#Export(c) jet_rt_observe_start_init: fn() {
     #Unsafe("runtime-init runs before any other thread exists") {
         observe_start_code = rt_observe_start_address()
     }
@@ -521,12 +521,12 @@ observe_start_code := I64{0}
 // whether a task registered before this start (Observe.jet
 // observe_task_linked): 0 at a process start, 1 when a resident host starts
 // another run after one that spawned tasks.
-#Export(c) fn jet_rt_observe_start(argument: I64) -> I64 {
+#Export(c) jet_rt_observe_start: fn(argument: I64) -> I64 {
     jet_rt_observe_runtime_start_from_env()
     observe_task_linked
 }
 
 // RuntimeLower resolves this checked function-address entry, never the body.
-fn rt_observe_start_address() -> I64 {
+rt_observe_start_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }

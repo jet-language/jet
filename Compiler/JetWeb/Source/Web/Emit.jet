@@ -14,22 +14,22 @@ use {
 }
 
 // The globals every module imports from `env`, then the program module's own.
-WEB_GLOBAL_SP :: 0
-WEB_GLOBAL_TLS :: 1
-WEB_GLOBAL_EDX :: 2
+WEB_GLOBAL_SP: 0
+WEB_GLOBAL_TLS: 1
+WEB_GLOBAL_EDX: 2
 
 // Bytes below the stack pointer a leaf may use for its stack words.
-WEB_SCRATCH :: 1024
+WEB_SCRATCH: 1024
 
 // A callee that is not one of the module's IR functions: an import from
 // `space` "rt", "c" or "host", or a helper the module defines (`space` "").
-struct WebRef {
+WebRef: struct {
     space: String
     name: String
     sig: String
 }
 
-struct WebState {
+WebState: struct {
     // The program's module: it keeps the stop protocol (WEB_GLOBAL_EDX).
     app: Bool
     stop_points: Bool
@@ -60,12 +60,12 @@ struct WebState {
 // One function's code (locals, instructions, `end`) and its function-index
 // fields to patch: pairs of byte offset and callee (an IR function row, or
 // -1 - k for refs[k]).
-struct WebBody {
+WebBody: struct {
     code: [U8]
     fixups: [Int]
 }
 
-struct WebEmitter {
+WebEmitter: struct {
     code: [U8]
     fixups: [Int]
     // Per slot: its local, -1 for a Unit slot.
@@ -100,16 +100,16 @@ struct WebEmitter {
     wired: Bool
 }
 
-fn web_type_index(st: &WebState, key: String) -> Int Never! {
-    found :: st.type_rows.get(key) ?? -1
+web_type_index: fn(st: &WebState, key: String) -> Int Never! {
+    found: st.type_rows.get(key) ?? -1
     if found >= 0 -> return found
-    id :: st.types.len()
+    id: st.types.len()
     &st.types.push(key.copy())
     st.type_rows[key.copy()] = id
     id
 }
 
-fn web_table_index(st: &WebState, row: Int) -> Int Never! {
+web_table_index: fn(st: &WebState, row: Int) -> Int Never! {
     if st.slots[row] < 0 {
         st.slots[row] = st.slot_rows.len()
         &st.slot_rows.push(row)
@@ -118,18 +118,18 @@ fn web_table_index(st: &WebState, row: Int) -> Int Never! {
 }
 
 // The callee of ref (`space`, `name`, `sig`), added once.
-fn web_ref(st: &WebState, space: String, name: String, sig: String) -> Int Never! {
-    key :: "{space}\t{name}\t{sig}"
-    found :: st.ref_rows.get(key) ?? -1
+web_ref: fn(st: &WebState, space: String, name: String, sig: String) -> Int Never! {
+    key: "{space}\t{name}\t{sig}"
+    found: st.ref_rows.get(key) ?? -1
     if found >= 0 -> return 0 - found - 1
-    id :: st.refs.len()
+    id: st.refs.len()
     &st.refs.push(WebRef{space: space.copy(), name: name.copy(), sig: sig.copy()})
     st.ref_rows[key.copy()] = id
     0 - id - 1
 }
 
 // The signatures of the C memory routines every module defines itself.
-fn web_helper_sig(symbol: String) -> String Never! {
+web_helper_sig: fn(symbol: String) -> String Never! {
     if symbol == "memcpy" || symbol == "memmove" || symbol == "memset" || symbol == "memcmp" -> return "lll:l"
     ""
 }
@@ -137,13 +137,13 @@ fn web_helper_sig(symbol: String) -> String Never! {
 // The callee and signature of runtime symbol `symbol` called with the
 // arguments and result of `site`: the module's own function, a helper, the
 // runtime's export (program module), else a C function the host provides.
-fn web_symbol(st: &WebState, symbol: String, site: String) -> (callee: Int, sig: String) Never! {
-    row :: st.internal.get(symbol) ?? -1
+web_symbol: fn(st: &WebState, symbol: String, site: String) -> (callee: Int, sig: String) Never! {
+    row: st.internal.get(symbol) ?? -1
     if row >= 0 -> return (callee: row, sig: st.sigs[row].copy())
-    helper :: web_helper_sig(symbol)
+    helper: web_helper_sig(symbol)
     if helper != "" -> return (callee: web_ref(&st, "", symbol, helper), sig: helper)
     if st.app {
-        exported :: st.exports.get(symbol) ?? ""
+        exported: st.exports.get(symbol) ?? ""
         if exported != "" -> return (callee: web_ref(&st, "rt", symbol, exported), sig: exported)
     }
     if st.hosts.get(symbol) == None -> &st.errors.push("the web host provides no `{symbol}`")
@@ -154,7 +154,7 @@ fn web_symbol(st: &WebState, symbol: String, site: String) -> (callee: Int, sig:
 // Value types.
 
 // The value type of a slot kind, 0 for Unit (no value).
-fn web_kind_type(kind: IRTypeKind) -> Int Never! {
+web_kind_type: fn(kind: IRTypeKind) -> Int Never! {
     if kind == {
         .Unit -> 0
         .Float -> WASM_F64
@@ -163,44 +163,44 @@ fn web_kind_type(kind: IRTypeKind) -> Int Never! {
     }
 }
 
-fn web_slot_kind(m: IRModule, f: IRFunction, slot: Int) -> IRTypeKind Never! {
+web_slot_kind: fn(m: IRModule, f: IRFunction, slot: Int) -> IRTypeKind Never! {
     m.types[f.slot_type[slot]].kind
 }
 
-fn web_slot_type(m: IRModule, f: IRFunction, slot: Int) -> Int Never! {
+web_slot_type: fn(m: IRModule, f: IRFunction, slot: Int) -> Int Never! {
     web_kind_type(m.types[f.slot_type[slot]].kind)
 }
 
-fn web_returns_aggregate(m: IRModule, f: IRFunction) -> Bool Never! {
+web_returns_aggregate: fn(m: IRModule, f: IRFunction) -> Bool Never! {
     f.result >= 0 && m.types[f.result].kind == .Aggregate
 }
 
 // The result letter of `f`, "" for none (Unit, an Aggregate's hidden pointer).
-fn web_result_letter(m: IRModule, f: IRFunction) -> String Never! {
+web_result_letter: fn(m: IRModule, f: IRFunction) -> String Never! {
     if f.result < 0 -> return ""
-    ty :: web_kind_type(m.types[f.result].kind)
+    ty: web_kind_type(m.types[f.result].kind)
     if ty == 0 || m.types[f.result].kind == .Aggregate -> return ""
     web_type_letter(ty)
 }
 
 // The signature of IR function `f`.
-fn web_function_sig(m: IRModule, f: IRFunction) -> String Never! {
+web_function_sig: fn(m: IRModule, f: IRFunction) -> String Never! {
     params := if web_returns_aggregate(m, f) -> "l" else -> ""
     loop slot in 0..<f.param_count {
-        ty :: web_slot_type(m, f, slot)
+        ty: web_slot_type(m, f, slot)
         if ty != 0 -> params = "{params}{web_type_letter(ty)}"
     }
     "{params}:{web_result_letter(m, f)}"
 }
 
 // The width of a fixed-width integer's carrier bits (64 for a whole word).
-fn web_bits(ty: IRType) -> Int Never! {
+web_bits: fn(ty: IRType) -> Int Never! {
     if ty.kind == .Word && ty.bits > 0 && ty.bits < 64 -> return ty.bits
     64
 }
 
 // Bytes a value of `ty` occupies in memory (X64Select ir_x64_value_width).
-fn web_value_width(ty: IRType) -> Int Never! {
+web_value_width: fn(ty: IRType) -> Int Never! {
     if ty.kind == {
         .Bool -> 1
         .Float32 -> 4
@@ -210,7 +210,7 @@ fn web_value_width(ty: IRType) -> Int Never! {
 }
 
 // Whether comparisons and shifts of `ty` are unsigned.
-fn web_unsigned(ty: IRType) -> Bool Never! {
+web_unsigned: fn(ty: IRType) -> Bool Never! {
     if ty.kind == {
         .Word -> !ty.signed
         .Bool | .Char | .Pointer | .String -> true
@@ -221,7 +221,7 @@ fn web_unsigned(ty: IRType) -> Bool Never! {
 // ---------------------------------------------------------------------------
 // The emitter.
 
-fn web_emitter(m: IRModule, f: IRFunction) -> WebEmitter Never! {
+web_emitter: fn(m: IRModule, f: IRFunction) -> WebEmitter Never! {
     locals := [Int]{}
     types := [Int]{}
     sret := -1
@@ -231,22 +231,22 @@ fn web_emitter(m: IRModule, f: IRFunction) -> WebEmitter Never! {
     }
     loop _ in 0..<f.slot_type.len() -> &locals.push(-1)
     loop slot in 0..<f.param_count {
-        ty :: web_slot_type(m, f, slot)
+        ty: web_slot_type(m, f, slot)
         if ty != 0 {
             locals[slot] = types.len()
             &types.push(ty)
         }
     }
-    params :: types.len()
+    params: types.len()
     loop slot in f.param_count..<f.slot_type.len() {
-        ty :: web_slot_type(m, f, slot)
+        ty: web_slot_type(m, f, slot)
         if ty != 0 {
             locals[slot] = types.len()
             &types.push(ty)
         }
     }
-    base :: types.len()
-    scratch :: [Int]{WASM_I64, WASM_I64, WASM_I64, WASM_I64, WASM_F64, WASM_F32, WASM_I64, WASM_I32, WASM_I32}
+    base: types.len()
+    scratch: [Int]{WASM_I64, WASM_I64, WASM_I64, WASM_I64, WASM_F64, WASM_F32, WASM_I64, WASM_I32, WASM_I32}
     loop ty in scratch -> &types.push(ty)
     areas := [Int]{}
     loop _ in 0..<f.op.len() -> &areas.push(-1)
@@ -259,11 +259,11 @@ fn web_emitter(m: IRModule, f: IRFunction) -> WebEmitter Never! {
 
 // The function's code: its local declarations (runs of one type), its
 // instructions and `end`, with the fixups moved past the declarations.
-fn web_finish(e: WebEmitter) -> WebBody Never! {
+web_finish: fn(e: WebEmitter) -> WebBody Never! {
     runs := [Int]{}
     at := e.params
     loop at < e.local_types.len() {
-        ty :: e.local_types[at]
+        ty: e.local_types[at]
         count := 0
         loop at < e.local_types.len() && e.local_types[at] == ty {
             count += 1
@@ -278,7 +278,7 @@ fn web_finish(e: WebEmitter) -> WebBody Never! {
         wasm_put_unsigned(&code, runs[2 * index])
         &code.push(U8{runs[2 * index + 1]})
     }
-    shift :: code.len()
+    shift: code.len()
     &code.extend(e.code)
     &code.push(0x0b)
     fixups := [Int]{}
@@ -289,127 +289,127 @@ fn web_finish(e: WebEmitter) -> WebBody Never! {
     WebBody{code: code, fixups: fixups}
 }
 
-fn web_op(e: &WebEmitter, byte: Int) Never! {
+web_op: fn(e: &WebEmitter, byte: Int) Never! {
     &e.code.push(U8{byte})
 }
 
-fn web_get(e: &WebEmitter, local: Int) Never! {
+web_get: fn(e: &WebEmitter, local: Int) Never! {
     web_op(&e, 0x20)
     wasm_put_unsigned(&e.code, local)
 }
 
-fn web_set(e: &WebEmitter, local: Int) Never! {
+web_set: fn(e: &WebEmitter, local: Int) Never! {
     web_op(&e, 0x21)
     wasm_put_unsigned(&e.code, local)
 }
 
-fn web_tee(e: &WebEmitter, local: Int) Never! {
+web_tee: fn(e: &WebEmitter, local: Int) Never! {
     web_op(&e, 0x22)
     wasm_put_unsigned(&e.code, local)
 }
 
-fn web_global_get(e: &WebEmitter, global: Int) Never! {
+web_global_get: fn(e: &WebEmitter, global: Int) Never! {
     web_op(&e, 0x23)
     wasm_put_unsigned(&e.code, global)
 }
 
-fn web_global_set(e: &WebEmitter, global: Int) Never! {
+web_global_set: fn(e: &WebEmitter, global: Int) Never! {
     web_op(&e, 0x24)
     wasm_put_unsigned(&e.code, global)
 }
 
-fn web_i64(e: &WebEmitter, value: Int) Never! {
+web_i64: fn(e: &WebEmitter, value: Int) Never! {
     web_op(&e, 0x42)
     wasm_put_signed(&e.code, wasm_signed(wasm_unsigned(value, 64), 64))
 }
 
-fn web_i32(e: &WebEmitter, value: Int) Never! {
+web_i32: fn(e: &WebEmitter, value: Int) Never! {
     web_op(&e, 0x41)
     wasm_put_signed(&e.code, wasm_signed(wasm_unsigned(value, 32), 32))
 }
 
 // f64.const of the IEEE bits `bits`.
-fn web_f64_bits(e: &WebEmitter, bits: Int) Never! {
+web_f64_bits: fn(e: &WebEmitter, bits: Int) Never! {
     web_op(&e, 0x44)
     wasm_put_fixed(&e.code, bits, 8)
 }
 
 // f32.const of the IEEE bits `bits`.
-fn web_f32_bits(e: &WebEmitter, bits: Int) Never! {
+web_f32_bits: fn(e: &WebEmitter, bits: Int) Never! {
     web_op(&e, 0x43)
     wasm_put_fixed(&e.code, bits, 4)
 }
 
 // A load or store: opcode, alignment hint 0 (any address), byte offset.
-fn web_mem(e: &WebEmitter, op: Int, offset: Int) Never! {
+web_mem: fn(e: &WebEmitter, op: Int, offset: Int) Never! {
     web_op(&e, op)
     wasm_put_unsigned(&e.code, 0)
     wasm_put_unsigned(&e.code, offset)
 }
 
 // A 0xfc-prefixed instruction.
-fn web_misc(e: &WebEmitter, sub: Int) Never! {
+web_misc: fn(e: &WebEmitter, sub: Int) Never! {
     web_op(&e, 0xfc)
     wasm_put_unsigned(&e.code, sub)
 }
 
 // memory.copy of (destination, source, length), all i32, on the stack.
-fn web_memory_copy(e: &WebEmitter) Never! {
+web_memory_copy: fn(e: &WebEmitter) Never! {
     web_misc(&e, 10)
     web_op(&e, 0)
     web_op(&e, 0)
 }
 
 // memory.fill of (destination, byte, length), all i32, on the stack.
-fn web_memory_fill(e: &WebEmitter) Never! {
+web_memory_fill: fn(e: &WebEmitter) Never! {
     web_misc(&e, 11)
     web_op(&e, 0)
 }
 
-fn web_wrap(e: &WebEmitter) Never! {
+web_wrap: fn(e: &WebEmitter) Never! {
     web_op(&e, 0xa7)
 }
 
 // `if` with no result.
-fn web_if(e: &WebEmitter) Never! {
+web_if: fn(e: &WebEmitter) Never! {
     web_op(&e, 0x04)
     web_op(&e, WEB_VOID)
 }
 
 // `if` producing one value of type `ty`.
-fn web_if_value(e: &WebEmitter, ty: Int) Never! {
+web_if_value: fn(e: &WebEmitter, ty: Int) Never! {
     web_op(&e, 0x04)
     web_op(&e, ty)
 }
 
-fn web_else(e: &WebEmitter) Never! {
+web_else: fn(e: &WebEmitter) Never! {
     web_op(&e, 0x05)
 }
 
-fn web_end(e: &WebEmitter) Never! {
+web_end: fn(e: &WebEmitter) Never! {
     web_op(&e, 0x0b)
 }
 
 // A call of `callee` (an IR function row or a ref), its index patched later.
-fn web_call(e: &WebEmitter, callee: Int) Never! {
+web_call: fn(e: &WebEmitter, callee: Int) Never! {
     web_op(&e, 0x10)
     web_call_field(&e, callee)
 }
 
 // `return_call` of IR function `callee`.
-fn web_return_call(e: &WebEmitter, callee: Int) Never! {
+web_return_call: fn(e: &WebEmitter, callee: Int) Never! {
     web_op(&e, 0x12)
     web_call_field(&e, callee)
 }
 
-fn web_call_field(e: &WebEmitter, callee: Int) Never! {
+web_call_field: fn(e: &WebEmitter, callee: Int) Never! {
     &e.fixups.push(e.code.len())
     &e.fixups.push(callee)
     loop _ in 0..<WEB_PADDED -> web_op(&e, 0)
 }
 
 // call_indirect through table 0 with the code (a table index, i64) on top.
-fn web_call_indirect(e: &WebEmitter, st: &WebState, sig: String) Never! {
+web_call_indirect: fn(e: &WebEmitter, st: &WebState, sig: String) Never! {
     web_wrap(&e)
     web_op(&e, 0x11)
     wasm_put_unsigned(&e.code, web_type_index(&st, sig))
@@ -417,7 +417,7 @@ fn web_call_indirect(e: &WebEmitter, st: &WebState, sig: String) Never! {
 }
 
 // The zero value of type `ty`.
-fn web_zero(e: &WebEmitter, ty: Int) Never! {
+web_zero: fn(e: &WebEmitter, ty: Int) Never! {
     if ty == WASM_F64 -> return web_f64_bits(&e, 0)
     if ty == WASM_F32 -> return web_f32_bits(&e, 0)
     if ty == WASM_I32 -> return web_i32(&e, 0)
@@ -425,28 +425,28 @@ fn web_zero(e: &WebEmitter, ty: Int) Never! {
 }
 
 // Pushes slot `slot`'s value (a Unit slot has none).
-fn web_load(e: &WebEmitter, slot: Int) Never! {
-    local :: e.locals[slot]
+web_load: fn(e: &WebEmitter, slot: Int) Never! {
+    local: e.locals[slot]
     if local >= 0 -> web_get(&e, local)
 }
 
 // Pops the value on top into slot `slot` (a Unit slot drops it).
-fn web_store(e: &WebEmitter, slot: Int) Never! {
-    local :: e.locals[slot]
+web_store: fn(e: &WebEmitter, slot: Int) Never! {
+    local: e.locals[slot]
     if local >= 0 -> return web_set(&e, local)
     web_op(&e, 0x1a)
 }
 
 // i32: whether slot `slot` (i64) is nonzero.
-fn web_truth(e: &WebEmitter, slot: Int) Never! {
+web_truth: fn(e: &WebEmitter, slot: Int) Never! {
     web_load(&e, slot)
     web_op(&e, 0x50)
     web_op(&e, 0x45)
 }
 
 // The i64 frame address `offset` bytes into the frame.
-fn web_frame_address(e: &WebEmitter, offset: Int) Never! {
-    frame :: e.frame
+web_frame_address: fn(e: &WebEmitter, offset: Int) Never! {
+    frame: e.frame
     web_get(&e, frame)
     if offset != 0 {
         web_i64(&e, offset)
@@ -456,7 +456,7 @@ fn web_frame_address(e: &WebEmitter, offset: Int) Never! {
 
 // Pushes the i32 address of local `local` (i64) + `offset`; returns the
 // memarg offset still to add (an offset outside u32 is added first).
-fn web_address(e: &WebEmitter, local: Int, offset: Int) -> Int Never! {
+web_address: fn(e: &WebEmitter, local: Int, offset: Int) -> Int Never! {
     web_get(&e, local)
     if offset >= 0 && offset < (1 << 32) {
         web_wrap(&e)
@@ -469,7 +469,7 @@ fn web_address(e: &WebEmitter, local: Int, offset: Int) -> Int Never! {
 }
 
 // Sign- or zero-extends the low `bits` of the i64 on top to the whole word.
-fn web_narrow(e: &WebEmitter, signed: Bool, bits: Int) Never! {
+web_narrow: fn(e: &WebEmitter, signed: Bool, bits: Int) Never! {
     if bits <= 0 || bits >= 64 -> return
     if signed {
         if bits == 8 -> return web_op(&e, 0xc2)
@@ -487,7 +487,7 @@ fn web_narrow(e: &WebEmitter, signed: Bool, bits: Int) Never! {
 
 // A call result in the carrier of `ty` (X64Select ir_x64_normalize): a
 // Bool's low byte, a narrow integer's low bits.
-fn web_normalize(e: &WebEmitter, ty: IRType) Never! {
+web_normalize: fn(e: &WebEmitter, ty: IRType) Never! {
     if ty.kind == .Bool {
         web_i64(&e, 255)
         web_op(&e, 0x83)
@@ -497,7 +497,7 @@ fn web_normalize(e: &WebEmitter, ty: IRType) Never! {
 }
 
 // The i32 test that the i64 in `local` is an inline Int (bits 63 and 62 agree).
-fn web_inline_test(e: &WebEmitter, local: Int) Never! {
+web_inline_test: fn(e: &WebEmitter, local: Int) Never! {
     web_get(&e, local)
     web_get(&e, local)
     web_i64(&e, 1)

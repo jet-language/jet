@@ -1,17 +1,17 @@
 
-use time :: core.time
+use time: core.time
 
-fn slow_text() -> String {
+slow_text: fn() -> String {
     time.sleep(25ms)
     return "slow"
 }
 
-fn late_text() -> String {
+late_text: fn() -> String {
     time.sleep(1000ms)
     return "late"
 }
 
-fn failure_label(error: TaskFailure) -> String {
+failure_label: fn(error: TaskFailure) -> String {
     if error == {
         .Cancelled -> { return "cancelled" }
         .DeadlineBlown -> { return "deadline" }
@@ -19,26 +19,26 @@ fn failure_label(error: TaskFailure) -> String {
     }
 }
 
-fn run() {
+run: fn() {
     task.group workers {
-        child :: task { "child" }
+        child: task { "child" }
         print(child.join() ?? "child-fallback")
 
-        all_result :: task.all { "left", "right" } ?? []
+        all_result: task.all { "left", "right" } ?? []
         print(all_result[0], all_result[1])
         print((task.race { slow_text(), "race" }) ?? "race-fallback")
         print((task.any { slow_text(), "any" }) ?? "any-fallback")
 
-        cancelled :: task late_text()
+        cancelled: task late_text()
         cancelled.cancel()
-        cancelled_result :: cancelled.join()
+        cancelled_result: cancelled.join()
         if cancelled_result == {
             .Err(error) -> { print(failure_label(error)) }
             .Ok(_) -> { print("wrong cancellation") }
         }
 
-        failed :: task { panic("boom") }
-        failed_result :: failed.join()
+        failed: task { panic("boom") }
+        failed_result: failed.join()
         if failed_result == {
             .Err(error) -> { print(failure_label(error)) }
             .Ok(_) -> { print("wrong panic") }

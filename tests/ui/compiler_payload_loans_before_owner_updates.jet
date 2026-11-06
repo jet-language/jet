@@ -1,15 +1,15 @@
-struct LoanBinding { name: String, transferred: Bool }
-enum LoanStatement {
+LoanBinding: struct { name: String, transferred: Bool }
+LoanStatement: enum {
     Val(binding: LoanBinding)
     Unit
 }
-struct LoanFields { values: [String] }
-enum LoanItem {
+LoanFields: struct { values: [String] }
+LoanItem: enum {
     Fields(fields: LoanFields)
     Unit
 }
 
-fn update_statements(statements: &[LoanStatement]) -> Int Never! {
+update_statements: fn(statements: &[LoanStatement]) -> Int Never! {
     total := 0
     index := 0
     loop index < statements.len() {
@@ -30,7 +30,7 @@ fn update_statements(statements: &[LoanStatement]) -> Int Never! {
     total
 }
 
-fn read_then_append(items: &[LoanItem]) -> Int Never! {
+read_then_append: fn(items: &[LoanItem]) -> Int Never! {
     total := 0
     boundary := items.len()
     index := 0
@@ -44,7 +44,7 @@ fn read_then_append(items: &[LoanItem]) -> Int Never! {
     total
 }
 
-fn owned_loop_metadata(rounds: [Int]) -> Int Never! {
+owned_loop_metadata: fn(rounds: [Int]) -> Int Never! {
     total := 0
     loop round in rounds {
         operation := LoanFields{values: [String]{"a", "bc"}}
@@ -53,7 +53,7 @@ fn owned_loop_metadata(rounds: [Int]) -> Int Never! {
     total
 }
 
-fn run() Never! {
+run: fn() Never! {
     statements := [LoanStatement]{
         LoanStatement.Val{binding: LoanBinding{name: "one", transferred: false}},
         LoanStatement.Val{binding: LoanBinding{name: "four", transferred: false}},

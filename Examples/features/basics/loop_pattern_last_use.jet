@@ -3,35 +3,35 @@
 // subject is a call made in the loop, a local bound in the loop body, or an
 // Option or enum. The unmatched path never runs the arm, so the binding is
 // not live around the loop's back edge.
-struct Blob {
+Blob: struct {
     data: [Int]
     text: String
 }
 
-enum Shape {
+Shape: enum {
     Circle(blob: Blob, size: Int)
     Line(size: Int)
     Empty
 }
 
-fn make(k: Int) -> Shape {
+make: fn(k: Int) -> Shape {
     if k % 3 == 0 -> return Shape.Circle{blob: Blob{data: [Int]{k, k + 1}, text: "c{k}"}, size: k}
     if k % 3 == 1 -> return Shape.Line{size: k}
     Shape.Empty
 }
 
-fn maybe(k: Int) -> Blob? {
+maybe: fn(k: Int) -> Blob? {
     if k % 2 == 0 -> return Val(Blob{data: [Int]{k}, text: "b{k}"})
     None
 }
 
-fn texts(blobs: [Blob]) -> String {
+texts: fn(blobs: [Blob]) -> String {
     out := ""
     loop blob in blobs -> out = "{out}{blob.text}:{blob.data.len()} "
     out
 }
 
-fn run() {
+run: fn() {
     from_calls := [Blob]{}
     loop k in 0..<5 {
         if maybe(k) == .Val(blob) -> &from_calls.push(blob)
@@ -51,7 +51,7 @@ fn run() {
     print(texts(from_locals))
     sizes := 0
     loop k in 0..<4 {
-        value :: maybe(k)
+        value: maybe(k)
         if value == {
             .Val(blob) -> sizes += blob.data.len() + blob.text.len()
             .None -> sizes += 100

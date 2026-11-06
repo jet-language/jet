@@ -1,15 +1,15 @@
-use client :: core.http.client
+use client: core.http.client
 
-fn text(row: [U8]) -> String {
+text: fn(row: [U8]) -> String {
     out := ""
     loop byte in row {
-        n :: Int.from_u8(byte)
+        n: Int.from_u8(byte)
         out = if n >= 32 && n < 127 -> "{out}{String.from_bytes([U8]{byte}) ?? "?"}" else -> "{out}\\x{n}"
     }
     out
 }
 
-fn fetch(host: String) {
+fetch: fn(host: String) {
     if client.jet_http_build_get(host, "{host}:{free-port:tls}", "/hello.txt", true, [[U8]]{[U8]{127, 0, 0, 1}}, {free-port:tls}, 5000, 1024) == {
         .Ok(rows) -> {
             out := ""
@@ -20,7 +20,7 @@ fn fetch(host: String) {
     }
 }
 
-fn run() {
+run: fn() {
     fetch("localhost")
     fetch("fixture.test")
 }

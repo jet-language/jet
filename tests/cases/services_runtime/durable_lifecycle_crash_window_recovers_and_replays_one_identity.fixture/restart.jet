@@ -1,13 +1,13 @@
 
 use {
-    service :: core.service
-    env :: core.sys
+    service: core.service
+    env: core.sys
 }
 
-fn worker() -[]> {}
+worker: fn() -[]> {}
 
-fn state_name(delivery: ^Delivery) -> String {
-    state :: delivery.status() ?? panic("status")
+state_name: fn(delivery: ^Delivery) -> String {
+    state: delivery.status() ?? panic("status")
     if state == {
         .Pending -> { return "Pending" }
         .Accepted -> { return "Accepted" }
@@ -19,45 +19,45 @@ fn state_name(delivery: ^Delivery) -> String {
     return "unknown"
 }
 
-fn run() {
-    store :: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
-    phase :: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
-    retention :: Duration.seconds(3600) ?? panic("retention")
+run: fn() {
+    store: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
+    phase: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
+    retention: Duration.seconds(3600) ?? panic("retention")
     runtime := service.runtime("{store}.delivery", retention: retention)
     tree := service.tree("durable-crash")
-    state_store :: service.state_store(store) ?? panic("state")
+    state_store: service.state_store(store) ?? panic("state")
     &tree.set_state_event_log(state_store, "events", 1, "reversible") ?? panic("state adapter")
     &tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
-    endpoint :: &tree.worker("api", worker, capacity: 1) ?? panic("worker")
+    endpoint: &tree.worker("api", worker, capacity: 1) ?? panic("worker")
     &tree.start() ?? panic("start")
 
     if phase == "accept" {
-        accepted :: runtime.send(endpoint, "crash", key: "crash") ?? panic("accept")
-        id :: accepted.show()
+        accepted: runtime.send(endpoint, "crash", key: "crash") ?? panic("accept")
+        id: accepted.show()
         print("accepted:{id}")
     } else if phase == "deliver" {
-        delivery :: runtime.send(endpoint, "crash", key: "crash") ?? panic("deliver lookup")
-        id :: (delivery.copy()).show()
-        state :: state_name(^delivery)
+        delivery: runtime.send(endpoint, "crash", key: "crash") ?? panic("deliver lookup")
+        id: (delivery.copy()).show()
+        state: state_name(^delivery)
         print("before:{id}:{state}")
-        received :: &tree.receive(endpoint) ?? panic("receive")
+        received: &tree.receive(endpoint) ?? panic("receive")
         print("received:{received}")
         print("crash_window:open")
     } else {
-        recovered :: runtime.send(endpoint, "crash", key: "crash") ?? panic("recover lookup")
-        recovered_id :: (recovered.copy()).show()
-        recovered_state :: state_name(recovered.copy())
+        recovered: runtime.send(endpoint, "crash", key: "crash") ?? panic("recover lookup")
+        recovered_id: (recovered.copy()).show()
+        recovered_state: state_name(recovered.copy())
         print("recovered:{recovered_id}:{recovered_state}")
-        retry :: runtime.retry(recovered) ?? panic("recover retry")
-        retry_id :: (retry.copy()).show()
-        retry_state :: state_name(retry.copy())
-        retry_copy :: retry.copy()
+        retry: runtime.retry(recovered) ?? panic("recover retry")
+        retry_id: (retry.copy()).show()
+        retry_state: state_name(retry.copy())
+        retry_copy: retry.copy()
         print("retry:{retry_id}:{retry_state}")
-        received :: &tree.receive(endpoint) ?? panic("replay receive")
+        received: &tree.receive(endpoint) ?? panic("replay receive")
         print("received:{received}")
         runtime.commit(retry) ?? panic("replay commit")
-        history :: (retry_copy.copy()).events() ?? panic("replay history")
-        replayed_state :: state_name(^retry_copy)
+        history: (retry_copy.copy()).events() ?? panic("replay history")
+        replayed_state: state_name(^retry_copy)
         print("replayed:{replayed_state}:{history.len()}")
         print("same_identity:{recovered_id == retry_id}")
     }

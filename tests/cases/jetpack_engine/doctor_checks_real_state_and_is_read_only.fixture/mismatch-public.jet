@@ -1,10 +1,10 @@
 // SETUP-PORT jetpack_engine.rs:2502-2510; no assertions.
 use {
-    files :: core.files
-    process :: core.process
+    files: core.files
+    process: core.process
 }
-fn run() {
-    args :: process.args()
+run: fn() {
+    args: process.args()
     bytes := files.read_bytes(args[0]) ?? panic("public key")
     bytes[0] = if bytes[0] == (U8{48}) -> U8{49} else -> U8{48}
     files.write_bytes(args[0], bytes) ?? panic("mismatched key")

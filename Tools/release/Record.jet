@@ -7,17 +7,17 @@
 // Publish derives the record again from disk and refuses any difference.
 
 use {
-    json :: core.encoding.json
+    json: core.encoding.json
     jetpack_publication.[publication_sign, publication_verify]
 }
 
-CANDIDATE_SCHEMA :: "jet.release.candidate.v1"
-CANDIDATE_FILE :: "CANDIDATE.json"
-SIGNATURE_FILE :: "CANDIDATE.json.sig"
-NOTES_FILE :: "NOTES.md"
+CANDIDATE_SCHEMA: "jet.release.candidate.v1"
+CANDIDATE_FILE: "CANDIDATE.json"
+SIGNATURE_FILE: "CANDIDATE.json.sig"
+NOTES_FILE: "NOTES.md"
 
 // Everything a record is derived from.
-struct Candidate {
+Candidate: struct {
     name: String
     release: Release
     receipts: [Receipt]
@@ -29,13 +29,13 @@ struct Candidate {
     signer: String
 }
 
-fn seed_asset_name(name: String, target: String) -> String Never! {
+seed_asset_name: fn(name: String, target: String) -> String Never! {
     "jet-{name}-{target}.tar.gz"
 }
 
-fn text(value: String) -> Dyn Never! { Dyn.Text(value.copy()) }
+text: fn(value: String) -> Dyn Never! { Dyn.Text(value.copy()) }
 
-fn artifacts_dyn(artifacts: [Artifact]) -> Dyn Never! {
+artifacts_dyn: fn(artifacts: [Artifact]) -> Dyn Never! {
     out := [Dyn]{}
     loop artifact in artifacts {
         &out.push(Dyn.Object([String: Dyn]{"path": text(artifact.path), "sha256": text(artifact.sha256), "size": Dyn.Int(artifact.size)}))
@@ -43,7 +43,7 @@ fn artifacts_dyn(artifacts: [Artifact]) -> Dyn Never! {
     Dyn.Array(out)
 }
 
-fn receipt_dyn(receipt: Receipt) -> Dyn Never! {
+receipt_dyn: fn(receipt: Receipt) -> Dyn Never! {
     rows := [Dyn]{}
     loop row in receipt.rows {
         entry := [String: Dyn]{"scope": text(row.scope), "status": text(row.status)}
@@ -65,7 +65,7 @@ fn receipt_dyn(receipt: Receipt) -> Dyn Never! {
     })
 }
 
-fn upload_names(candidate: Candidate) -> [String] Never! {
+upload_names: fn(candidate: Candidate) -> [String] Never! {
     names := [String]{}
     loop artifact in candidate.staged -> &names.push(artifact.path.copy())
     &names.extend([String]{CANDIDATE_FILE, SIGNATURE_FILE})
@@ -73,8 +73,8 @@ fn upload_names(candidate: Candidate) -> [String] Never! {
 }
 
 // The record of `candidate`, without its content digest.
-fn record_of(candidate: Candidate) -> Dyn Never! {
-    release :: candidate.release
+record_of: fn(candidate: Candidate) -> Dyn Never! {
+    release: candidate.release
     receipts := [Dyn]{}
     loop receipt in candidate.receipts -> &receipts.push(receipt_dyn(receipt))
     matrix := [Dyn]{}
@@ -123,7 +123,7 @@ fn record_of(candidate: Candidate) -> Dyn Never! {
     })
 }
 
-fn without_digest(tree: Dyn) -> Dyn Never! {
+without_digest: fn(tree: Dyn) -> Dyn Never! {
     kept := [String: Dyn]{}
     if tree == .Object(entries) {
         loop entry in entries {
@@ -134,28 +134,28 @@ fn without_digest(tree: Dyn) -> Dyn Never! {
 }
 
 // sha256 of the canonical JSON of `tree` without its content_digest.
-fn content_digest(tree: Dyn) -> String Problem! {
-    canonical :: json.canonical(without_digest(tree)) ?? return Err(problem(MISMATCH, "the record has no canonical form: {err}"))
+content_digest: fn(tree: Dyn) -> String Problem! {
+    canonical: json.canonical(without_digest(tree)) ?? return Err(problem(MISMATCH, "the record has no canonical form: {err}"))
     Ok("sha256:{sha256_hex(canonical.bytes())}")
 }
 
 // The record with its content digest, as stored.
-fn sealed_record(record: Dyn) -> String Problem! {
-    digest :: content_digest(record) ?? return Err(err)
+sealed_record: fn(record: Dyn) -> String Problem! {
+    digest: content_digest(record) ?? return Err(err)
     kept := [String: Dyn]{}
     if record == .Object(entries) {
         loop entry in entries -> kept[entry.key.copy()] = entry.value.copy()
     }
     kept["content_digest"] = text(digest)
-    sealed :: json.canonical(Dyn.Object(kept)) ?? return Err(problem(MISMATCH, "the record has no canonical form: {err}"))
+    sealed: json.canonical(Dyn.Object(kept)) ?? return Err(problem(MISMATCH, "the record has no canonical form: {err}"))
     Ok("{sealed}\n")
 }
 
-fn canonical_or_empty(tree: Dyn) -> String Never! {
+canonical_or_empty: fn(tree: Dyn) -> String Never! {
     json.canonical(tree) ?? ""
 }
 
-fn keys_of(tree: Dyn) -> [String] Never! {
+keys_of: fn(tree: Dyn) -> [String] Never! {
     keys := [String]{}
     if tree == .Object(entries) {
         loop entry in entries -> &keys.push(entry.key.copy())
@@ -166,15 +166,15 @@ fn keys_of(tree: Dyn) -> [String] Never! {
 
 // Every section, and every field of an object section, where the stored
 // record and the record derived from disk differ.
-fn record_mismatches(stored: Dyn, fresh: Dyn) -> [Problem] Never! {
+record_mismatches: fn(stored: Dyn, fresh: Dyn) -> [Problem] Never! {
     problems := [Problem]{}
     names := keys_of(without_digest(stored))
     loop name in keys_of(fresh) {
         if !contains_text(names, name) -> &names.push(name.copy())
     }
     loop name in names {
-        left :: field(stored, name)
-        right :: field(fresh, name)
+        left: field(stored, name)
+        right: field(fresh, name)
         if canonical_or_empty(left) == canonical_or_empty(right) -> next
         if !is_object(left) || !is_object(right) {
             &problems.push(problem(MISMATCH, "the record's `{name}` does not match the release directory"))
@@ -194,21 +194,21 @@ fn record_mismatches(stored: Dyn, fresh: Dyn) -> [Problem] Never! {
 // Signs `digest` with the Ed25519 seed at `seed_path` and checks the result
 // against `public_key` at once, so a key pair that does not match never
 // leaves a signature behind.
-fn sign_digest(seed_path: String, public_key: String, digest: String) -[FS, Env]> String Problem! {
-    signature :: publication_sign(seed_path, digest) ?? return Err(problem(SIGNING, "signing with {seed_path} failed: {err.diagnostic.what} {err.diagnostic.why}"))
+sign_digest: fn(seed_path: String, public_key: String, digest: String) -[FS, Env]> String Problem! {
+    signature: publication_sign(seed_path, digest) ?? return Err(problem(SIGNING, "signing with {seed_path} failed: {err.diagnostic.what} {err.diagnostic.why}"))
     if !verify_digest(public_key, digest, signature) -> return Err(problem(SIGNING, "the signature does not verify with the signer's public key {public_key}: the key pair does not match"))
     Ok(signature)
 }
 
-fn verify_digest(public_key: String, digest: String, signature: String) -> Bool Never! {
+verify_digest: fn(public_key: String, digest: String, signature: String) -> Bool Never! {
     publication_verify(public_key, digest, signature) ?? false
 }
 
-fn release_notes(candidate: Candidate, gate: String) -> String Never! {
-    release :: candidate.release
-    asset :: seed_asset_name(candidate.name, release.target)
-    short :: if release.commit.len() >= 10 -> release.commit.slice(0..<10) else -> release.commit
-    lines :: [String]{
+release_notes: fn(candidate: Candidate, gate: String) -> String Never! {
+    release: candidate.release
+    asset: seed_asset_name(candidate.name, release.target)
+    short: if release.commit.len() >= 10 -> release.commit.slice(0..<10) else -> release.commit
+    lines: [String]{
         "{candidate.name}: the jet compiler of dev {short}.",
         "",
         "- Identity: `{release.identity}`",
@@ -228,14 +228,14 @@ fn release_notes(candidate: Candidate, gate: String) -> String Never! {
 }
 
 // The gate line of the notes.
-fn gate_text(release: Release, receipts: [Receipt]) -> String Never! {
+gate_text: fn(release: Release, receipts: [Receipt]) -> String Never! {
     checks := 0
     loop receipt in receipts -> checks += receipt.rows.len()
     if release.kind == "admitted" {
-        seed_name :: text_field(field(release.admission, "seed"), "name")
-        gains :: int_field(field(release.admission, "gains"), "total") ?? 0
+        seed_name: text_field(field(release.admission, "seed"), "name")
+        gains: int_field(field(release.admission, "gains"), "total") ?? 0
         return "`Tools/agent/release-compiler.mjs` admitted it from seed {seed_name} ({checks} checks, {gains} rows gained)"
     }
-    runners :: if receipts.len() == 1 -> "1 runner" else -> "{receipts.len()} runners"
+    runners: if receipts.len() == 1 -> "1 runner" else -> "{receipts.len()} runners"
     "`Tools/agent/VerifyFull.jet` passed on this commit with this binary ({checks} checks from {runners})"
 }

@@ -5,21 +5,21 @@
 // be reused. The tuple table is represented by its digest so the seal stays
 // small; rebuilding the table never opens a content file.
 
-STORE_SEALS_DIR :: "seals"
-STORE_SEAL_MAGIC :: "jet-hangar-seal-v1"
-STORE_SEAL_SCHEMA :: "1"
-STORE_MAX_SEAL_BYTES :: 512
-STORE_SEAL_PARTIAL_SUFFIX :: ".partial"
+STORE_SEALS_DIR: "seals"
+STORE_SEAL_MAGIC: "jet-hangar-seal-v1"
+STORE_SEAL_SCHEMA: "1"
+STORE_MAX_SEAL_BYTES: 512
+STORE_SEAL_PARTIAL_SUFFIX: ".partial"
 
-STORE_SEAL_SEQUENCE :: shared ProcessSequence{next: 0}
+STORE_SEAL_SEQUENCE: shared ProcessSequence{next: 0}
 
 // One command/library invocation owns this state. Copies of the owner retain
 // the same shared ledger; no request copies the memo, census, digest, or
 // proven-member maps.
-struct StoreVerification {
+StoreVerification: struct {
     state: Shared<StoreVerificationState>
 
-    fn new() -[Env]> StoreVerification Never! {
+    new: fn() -[Env]> StoreVerification Never! {
         StoreVerification{state: shared StoreVerificationState{
             seal_memo_armed: false,
             seal_memo: [String: String]{},
@@ -33,7 +33,7 @@ struct StoreVerification {
     }
 }
 
-struct StoreVerificationState {
+StoreVerificationState: struct {
     seal_memo_armed: Bool
     seal_memo: [String: String]
     seal_census_enabled: Bool
@@ -48,12 +48,12 @@ struct StoreVerificationState {
     planned_narinfos: [String: [String: FetchedInfo]]
 }
 
-enum SealRootKind {
+SealRootKind: enum {
     Directory
     File
     Symlink
 
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         if self == {
             .Directory -> "directory"
             .File -> "file"
@@ -61,7 +61,7 @@ enum SealRootKind {
         }
     }
 
-    fn parse(value: String) -> SealRootKind? Never! {
+    parse: fn(value: String) -> SealRootKind? Never! {
         if value == {
             "directory" -> Val(SealRootKind.Directory)
             "file" -> Val(SealRootKind.File)
@@ -71,15 +71,15 @@ enum SealRootKind {
     }
 }
 
-struct SealRecord {
+SealRecord: struct {
     digest: String
     root_kind: SealRootKind
     tuple_count: Int
     tuple_digest: String
 }
 
-fn store_seal_census_note(verification: &StoreVerification, path: String) Never! {
-    state :: verification.state
+store_seal_census_note: fn(verification: &StoreVerification, path: String) Never! {
+    state: verification.state
     permit := state.guard_edit()
     if !permit.value.seal_census_enabled -> return
     permit.value.seal_census[path] = (permit.value.seal_census.get(path) ?? 0) + 1
@@ -87,11 +87,11 @@ fn store_seal_census_note(verification: &StoreVerification, path: String) Never!
 
 // Render the census when enabled: total checks, distinct objects, and the
 // most re-walked objects. `None` unless `JETPACK_SEAL_CENSUS` is set.
-fn store_seal_census_report(verification: &StoreVerification) -> String? Never! {
-    state :: verification.state
-    permit :: state.guard_read()
+store_seal_census_report: fn(verification: &StoreVerification) -> String? Never! {
+    state: verification.state
+    permit: state.guard_read()
     if !permit.value.seal_census_enabled -> return None
-    counts :: permit.value.seal_census
+    counts: permit.value.seal_census
     total := 0
     loop count in counts.values() -> total += count
     rows := [(path: String, count: Int)]{}
@@ -107,13 +107,13 @@ fn store_seal_census_report(verification: &StoreVerification) -> String? Never! 
     Val(out)
 }
 
-fn store_sorted_keys_int(map: [String: Int]) -> [String] Never! {
+store_sorted_keys_int: fn(map: [String: Int]) -> [String] Never! {
     keys := map.keys().to_list()
     &keys.sort()
     keys
 }
 
-fn store_seal_pad_left(text: String, width: Int) -> String Never! {
+store_seal_pad_left: fn(text: String, width: Int) -> String Never! {
     out := text
     loop out.len() < width -> out = " {out}"
     out
@@ -121,28 +121,28 @@ fn store_seal_pad_left(text: String, width: Int) -> String Never! {
 
 // Rust arm_command_memo/memo_get/memo_put/memo_forget: one owner keeps the
 // armed view until command exit; library owners begin strictly disarmed.
-fn store_arm_command_memo(verification: &StoreVerification) Never! {
-    state :: verification.state
+store_arm_command_memo: fn(verification: &StoreVerification) Never! {
+    state: verification.state
     permit := state.guard_edit()
     permit.value.seal_memo_armed = true
 }
 
-fn store_seal_memo_get(verification: &StoreVerification, path: String) -> String? Never! {
-    state :: verification.state
-    permit :: state.guard_read()
+store_seal_memo_get: fn(verification: &StoreVerification, path: String) -> String? Never! {
+    state: verification.state
+    permit: state.guard_read()
     if !permit.value.seal_memo_armed -> return None
     permit.value.seal_memo.get(path)
 }
 
-fn store_seal_memo_put(verification: &StoreVerification, path: String, digest: String) Never! {
-    state :: verification.state
+store_seal_memo_put: fn(verification: &StoreVerification, path: String, digest: String) Never! {
+    state: verification.state
     permit := state.guard_edit()
     if !permit.value.seal_memo_armed -> return
     permit.value.seal_memo[path] = digest
 }
 
-fn store_seal_memo_forget(verification: &StoreVerification, path: String) Never! {
-    state :: verification.state
+store_seal_memo_forget: fn(verification: &StoreVerification, path: String) Never! {
+    state: verification.state
     permit := state.guard_edit()
     if !permit.value.seal_memo_armed -> return
     &permit.value.seal_memo.remove(path).drop("an absent seal memo is already forgotten")
@@ -150,19 +150,19 @@ fn store_seal_memo_forget(verification: &StoreVerification, path: String) Never!
 
 // The sealed digest when `path` is the direct canonical object named by its
 // digest and every recorded filesystem tuple still matches.
-fn store_check_seal(verification: &StoreVerification, path: String, hangar: String) -> String? StoreError! {
+store_check_seal: fn(verification: &StoreVerification, path: String, hangar: String) -> String? StoreError! {
     store_seal_census_note(&verification, path)
     if store_seal_memo_get(&verification, path) == {
         .Val(digest) -> return Ok(Val(digest))
         .None -> {}
     }
-    digest :: store_object_digest_for_path(path, hangar) ?? return Ok(None)
-    seal_path :: files.join(files.join(hangar, STORE_SEALS_DIR), digest)
-    record :: store_seal_read_record(seal_path) ?? return Ok(None)
+    digest: store_object_digest_for_path(path, hangar) ?? return Ok(None)
+    seal_path: files.join(files.join(hangar, STORE_SEALS_DIR), digest)
+    record: store_seal_read_record(seal_path) ?? return Ok(None)
     if record.digest != digest -> return Ok(None)
-    root_kind :: store_seal_root_kind(path) ?? return Ok(None)
+    root_kind: store_seal_root_kind(path) ?? return Ok(None)
     if record.root_kind != root_kind -> return Ok(None)
-    table :: pkg_seal_tuple_table(path) ?? return Ok(None)
+    table: pkg_seal_tuple_table(path) ?? return Ok(None)
     if table.node_count == record.tuple_count && table.digest == record.tuple_digest {
         store_seal_memo_put(&verification, path, record.digest)
         return Ok(Val(record.digest))
@@ -173,18 +173,18 @@ fn store_check_seal(verification: &StoreVerification, path: String, hangar: Stri
 
 // Write or replace the seal for one canonical Hangar object. Callers hold
 // the Hangar lock; the temporary file and rename make the metadata atomic.
-fn store_write_seal(verification: &StoreVerification, path: String, hangar: String, digest: String) StoreError! {
+store_write_seal: fn(verification: &StoreVerification, path: String, hangar: String, digest: String) StoreError! {
     if store_object_digest_for_path(path, hangar) != Val(digest) {
         return Err(StoreError.InvalidInput("cannot seal a non-canonical Hangar object"))
     }
-    root_kind :: store_seal_root_kind(path) ?? return Err(StoreError.InvalidData("cannot seal an unsupported Hangar object root"))
-    table :: pkg_seal_tuple_table(path)
-    record :: "{STORE_SEAL_MAGIC}\nschema={STORE_SEAL_SCHEMA}\ndigest={digest}\nroot-kind={root_kind.as_str()}\ntuples={table.node_count}:{table.digest}\n"
-    seals :: files.join(hangar, STORE_SEALS_DIR)
+    root_kind: store_seal_root_kind(path) ?? return Err(StoreError.InvalidData("cannot seal an unsupported Hangar object root"))
+    table: pkg_seal_tuple_table(path)
+    record: "{STORE_SEAL_MAGIC}\nschema={STORE_SEAL_SCHEMA}\ndigest={digest}\nroot-kind={root_kind.as_str()}\ntuples={table.node_count}:{table.digest}\n"
+    seals: files.join(hangar, STORE_SEALS_DIR)
     store_seal_ensure_real_directory(seals, "Hangar seal directory")
-    target :: files.join(seals, digest)
-    sequence :: process_sequence_take(STORE_SEAL_SEQUENCE)
-    temporary :: files.join(seals, ".{digest}-{process.current_pid()}-{sequence}{STORE_SEAL_PARTIAL_SUFFIX}")
+    target: files.join(seals, digest)
+    sequence: process_sequence_take(STORE_SEAL_SEQUENCE)
+    temporary: files.join(seals, ".{digest}-{process.current_pid()}-{sequence}{STORE_SEAL_PARTIAL_SUFFIX}")
     store_seal_publish(temporary, target, record.bytes()) ?? {
         files.remove(temporary).drop("the seal partial may never have been created")
         return Err(err)
@@ -195,21 +195,21 @@ fn store_write_seal(verification: &StoreVerification, path: String, hangar: Stri
     store_seal_memo_put(&verification, path, digest)
 }
 
-fn store_seal_publish(temporary: String, target: String, bytes: [U8]) StoreError! {
-    file :: files.create(temporary, if_exists: .Refuse)
+store_seal_publish: fn(temporary: String, target: String, bytes: [U8]) StoreError! {
+    file: files.create(temporary, if_exists: .Refuse)
     file.write_all(bytes)
     file.fsync()
     files.rename(temporary, target)
 }
 
 // Remove a seal when its canonical object is rolled back or quarantined.
-fn store_remove_seal(verification: &StoreVerification, path: String, hangar: String) StoreError! {
+store_remove_seal: fn(verification: &StoreVerification, path: String, hangar: String) StoreError! {
     store_seal_memo_forget(&verification, path)
-    digest :: store_object_digest_for_path(path, hangar) ?? return
+    digest: store_object_digest_for_path(path, hangar) ?? return
     // A removed seal means the object is quarantined or replaced; drop the
     // owner's closure-member proof with it.
     store_invalidate_proven_member(&verification, hangar, digest)
-    seal :: files.join(files.join(hangar, STORE_SEALS_DIR), digest)
+    seal: files.join(files.join(hangar, STORE_SEALS_DIR), digest)
     if files.stat(seal) == {
         .Ok(metadata) -> {
             if metadata.is_symlink || !metadata.is_file -> return Err(StoreError.InvalidData("Hangar seal is not a regular file: {seal}"))
@@ -220,9 +220,9 @@ fn store_remove_seal(verification: &StoreVerification, path: String, hangar: Str
 }
 
 // Sweep interrupted atomic seal writes without creating a missing seal dir.
-fn store_recover_seals(hangar: String) -> Int StoreError! {
-    seals :: files.join(hangar, STORE_SEALS_DIR)
-    metadata :: if files.stat(seals) == {
+store_recover_seals: fn(hangar: String) -> Int StoreError! {
+    seals: files.join(hangar, STORE_SEALS_DIR)
+    metadata: if files.stat(seals) == {
         .Ok(metadata) -> metadata
         .Err(error) -> {
             if StoreError.IO(error).is_not_found() -> return Ok(0)
@@ -235,7 +235,7 @@ fn store_recover_seals(hangar: String) -> Int StoreError! {
     swept := 0
     loop entry in files.list_dir(seals) {
         if !entry.name.starts_with(".") || !entry.name.ends_with(STORE_SEAL_PARTIAL_SUFFIX) -> next
-        node :: files.stat(entry.path)
+        node: files.stat(entry.path)
         if node.is_symlink || !node.is_file {
             return Err(StoreError.InvalidData("Hangar seal partial is not a regular file: {entry.path}"))
         }
@@ -248,19 +248,19 @@ fn store_recover_seals(hangar: String) -> Int StoreError! {
 // Identify only `hangar/objects/<digest>`, including callers that use a
 // symlinked path to the Hangar root. The object itself is never
 // canonicalized because a symlink root is a valid admitted object shape.
-fn store_object_digest_for_path(path: String, hangar: String) -> String? Never! {
-    objects :: files.canonicalize(files.join(hangar, STORE_OBJECTS_DIR)) ?? return None
-    parent_path :: files.dirname(path)
+store_object_digest_for_path: fn(path: String, hangar: String) -> String? Never! {
+    objects: files.canonicalize(files.join(hangar, STORE_OBJECTS_DIR)) ?? return None
+    parent_path: files.dirname(path)
     if parent_path == "" -> return None
-    parent :: files.canonicalize(parent_path) ?? return None
+    parent: files.canonicalize(parent_path) ?? return None
     if parent != objects -> return None
-    name :: files.basename(path)
+    name: files.basename(path)
     if !store_seal_valid_digest(name) -> return None
     Val(name)
 }
 
-fn store_seal_read_record(path: String) -> SealRecord? StoreError! {
-    metadata :: if files.stat(path) == {
+store_seal_read_record: fn(path: String) -> SealRecord? StoreError! {
+    metadata: if files.stat(path) == {
         .Ok(metadata) -> metadata
         .Err(error) -> {
             if StoreError.IO(error).is_not_found() -> return Ok(None)
@@ -268,38 +268,38 @@ fn store_seal_read_record(path: String) -> SealRecord? StoreError! {
         }
     }
     if metadata.is_symlink || !metadata.is_file || metadata.size > STORE_MAX_SEAL_BYTES -> return Ok(None)
-    bytes :: files.read_bytes(path)
+    bytes: files.read_bytes(path)
     if bytes.len() > STORE_MAX_SEAL_BYTES -> return Ok(None)
-    text :: String.from_bytes(bytes) ?? ""
+    text: String.from_bytes(bytes) ?? ""
     Ok(store_seal_parse_record(text))
 }
 
-fn store_seal_parse_record(text: String) -> SealRecord? Never! {
-    lines :: store_text_lines(text)
+store_seal_parse_record: fn(text: String) -> SealRecord? Never! {
+    lines: store_text_lines(text)
     if lines.len() != 5 || lines[0] != STORE_SEAL_MAGIC || lines[1] != "schema=1" -> return None
     if !lines[2].starts_with("digest=") || !lines[3].starts_with("root-kind=") || !lines[4].starts_with("tuples=") -> return None
-    digest :: lines[2].removeprefix("digest=")
+    digest: lines[2].removeprefix("digest=")
     if !store_seal_valid_digest(digest) -> return None
-    root_kind :: SealRootKind.parse(lines[3].removeprefix("root-kind=")) ?? return None
-    tuples :: lines[4].removeprefix("tuples=")
-    pair :: tuples.split_once(":") ?? return None
+    root_kind: SealRootKind.parse(lines[3].removeprefix("root-kind=")) ?? return None
+    tuples: lines[4].removeprefix("tuples=")
+    pair: tuples.split_once(":") ?? return None
     if !store_seal_all_digits(pair.before) -> return None
-    tuple_count :: Int.parse(pair.before) ?? return None
+    tuple_count: Int.parse(pair.before) ?? return None
     if !store_seal_valid_digest(pair.after) -> return None
     Val(SealRecord{digest: digest, root_kind: root_kind, tuple_count: tuple_count, tuple_digest: pair.after})
 }
 
-fn store_seal_all_digits(text: String) -> Bool Never! {
+store_seal_all_digits: fn(text: String) -> Bool Never! {
     if text == "" -> return false
     loop byte in text.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if code < 48 || code > 57 -> return false
     }
     true
 }
 
-fn store_seal_root_kind(path: String) -> SealRootKind? Never! {
-    metadata :: files.stat(path) ?? return None
+store_seal_root_kind: fn(path: String) -> SealRootKind? Never! {
+    metadata: files.stat(path) ?? return None
     if {
         metadata.is_symlink -> Val(SealRootKind.Symlink)
         metadata.is_dir -> Val(SealRootKind.Directory)
@@ -308,12 +308,12 @@ fn store_seal_root_kind(path: String) -> SealRootKind? Never! {
     }
 }
 
-fn store_seal_valid_digest(value: String) -> Bool Never! {
+store_seal_valid_digest: fn(value: String) -> Bool Never! {
     if !value.starts_with("sha256-") -> return false
     store_is_lower_hex(value.removeprefix("sha256-"), 64)
 }
 
-fn store_seal_ensure_real_directory(path: String, label: String) StoreError! {
+store_seal_ensure_real_directory: fn(path: String, label: String) StoreError! {
     if files.stat(path) == {
         .Ok(metadata) -> {
             if metadata.is_symlink || !metadata.is_dir {
@@ -323,7 +323,7 @@ fn store_seal_ensure_real_directory(path: String, label: String) StoreError! {
         .Err(error) -> {
             if !StoreError.IO(error).is_not_found() -> return Err(StoreError.IO(error))
             files.create_dir_all(path)
-            created :: files.stat(path)
+            created: files.stat(path)
             if created.is_symlink || !created.is_dir {
                 return Err(StoreError.InvalidData("{label} is not a real directory; repair the path before writing"))
             }
@@ -333,8 +333,8 @@ fn store_seal_ensure_real_directory(path: String, label: String) StoreError! {
 
 // Test seam for the thread-local memo lifetime: a fresh Rust thread starts
 // disarmed, which the port models by disarming and clearing the memo.
-fn store_disarm_command_memo(verification: &StoreVerification) Never! {
-    state :: verification.state
+store_disarm_command_memo: fn(verification: &StoreVerification) Never! {
+    state: verification.state
     permit := state.guard_edit()
     permit.value.seal_memo_armed = false
     &permit.value.seal_memo.clear()

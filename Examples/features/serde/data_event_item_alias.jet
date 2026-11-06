@@ -1,8 +1,8 @@
 // An item alias names Core's `DataEvent` under a local spelling; the alias
 // keeps Core's owner, variants, and payload types.
-use WireEvent :: core.encoding.DataEvent
+use WireEvent: core.encoding.DataEvent
 
-fn describe(event: WireEvent) -> String {
+describe: fn(event: WireEvent) -> String {
     if event == {
         .Number(text) -> return "number {text}"
         .Key(name) -> return "key {name}"
@@ -11,7 +11,7 @@ fn describe(event: WireEvent) -> String {
     }
 }
 
-fn run() {
-    events :: [WireEvent]{WireEvent.ObjectStart, WireEvent.Key("n"), WireEvent.Number("1e400"), WireEvent.Null}
+run: fn() {
+    events: [WireEvent]{WireEvent.ObjectStart, WireEvent.Key("n"), WireEvent.Number("1e400"), WireEvent.Null}
     loop event in events -> print(describe(event))
 }

@@ -42,7 +42,7 @@ function finding(overrides = {}) {
     hardeningRelation: overrides.hardeningRelation || 'value relation holds',
     hardeningWrongTierMask: overrides.hardeningWrongTierMask || ['aot', 'jet_run'],
     hardeningInputPartition: overrides.hardeningInputPartition || 'minimum',
-    source: overrides.source || `fn run() { print("${seed}") }`,
+    source: overrides.source || `run: fn() { print("${seed}") }`,
     commands: overrides.commands || ['Tools/agent/jet-env jet run repro.jet', 'Tools/agent/jet-env jet run --release repro.jet'],
     expectedRelation: overrides.expectedRelation || 'equal',
     actualRelation: overrides.actualRelation || 'different',
@@ -238,7 +238,7 @@ test('hardening card cannot close without a fixture naming its finding and recur
     assert.equal(fixed.hardeningState, 'fixed');
     const reopened = JSON.parse(add(b.data, {
       ...payload,
-      source: 'fn run() { print("recurrence") }',
+      source: 'run: fn() { print("recurrence") }',
       seed: 'recurrence',
     }).out);
     assert.equal(reopened.id, first.id);

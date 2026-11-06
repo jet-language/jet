@@ -10,20 +10,20 @@ use {
 }
 // GATE #4494: actual native child-process pipes, mutexes, threads and filesystem.
 
-fn jet_bin() -> OSPath { OSPath.from(env.binary_path("jet")) }
-fn lsp_process_lock() -> Mutex<()> {
-    LOCK :: OnceLock<Mutex<()>>.new()
+jet_bin: fn() -> OSPath { OSPath.from(env.binary_path("jet")) }
+lsp_process_lock: fn() -> Mutex<()> {
+    LOCK: OnceLock<Mutex<()>>.new()
     LOCK.get_or_init(() -> Mutex.new(_))
 }
-fn lock_unpoisoned<T>(mutex: Mutex<T>) -> MutexGuard<T> {
+lock_unpoisoned: fn<T>(mutex: Mutex<T>) -> MutexGuard<T> {
     mutex.lock().unwrap_or_else(poisoned -> poisoned.into_inner())
 }
-fn lock_lsp_process() -> MutexGuard<()> { lock_unpoisoned(lsp_process_lock()) }
-fn send_msg(stdin: &Write, json: &String) {
+lock_lsp_process: fn() -> MutexGuard<()> { lock_unpoisoned(lsp_process_lock()) }
+send_msg: fn(stdin: &Write, json: &String) {
     stdin.write_all("Content-Length: {json.len()}{Char{13}}\n{Char{13}}\n{json}".as_bytes()).unwrap()
     stdin.flush().unwrap()
 }
-fn read_msg(stdout: Read) -> String {
+read_msg: fn(stdout: Read) -> String {
     header := String.new()
     buf := [0u8]
     loop {
@@ -31,39 +31,39 @@ fn read_msg(stdout: Read) -> String {
         header.push(Char{buf[0]})
         if header.ends_with("{Char{13}}\n{Char{13}}\n") -> break
     }
-    len :: header.lines().find_map(line -> line.strip_prefix("Content-Length:").map(n -> n.trim()))
+    len: header.lines().find_map(line -> line.strip_prefix("Content-Length:").map(n -> n.trim()))
         .expect("Content-Length").parse<USize>().unwrap()
     body := [U8].repeat(0, len)
     stdout.read_exact(&body).unwrap()
     String.from_utf8(^body).unwrap()
 }
-fn request_lsp(stdin: Write, stdout: Read, id: I64, method: String, params: String) -> String {
+request_lsp: fn(stdin: Write, stdout: Read, id: I64, method: String, params: String) -> String {
     send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"id\":{id},\"method\":\"{method}\",\"params\":{params}}}")
     loop {
-        body :: read_msg(stdout)
-        parsed :: parse_json(body).expect("valid LSP response")
+        body: read_msg(stdout)
+        parsed: parse_json(body).expect("valid LSP response")
         if json_get(parsed, "id") == Dyn.Int(id) -> return ^body
     }
 }
 // Keep every message preceding the matching response, preserving arrival order.
-fn request_lsp_collect(stdin: Write, stdout: Read, id: I64, method: String, params: String) -> (Dyn, [Dyn]) {
+request_lsp_collect: fn(stdin: Write, stdout: Read, id: I64, method: String, params: String) -> (Dyn, [Dyn]) {
     send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"id\":{id},\"method\":\"{method}\",\"params\":{params}}}")
     before := [Dyn]()
     loop {
-        parsed :: parse_json(read_msg(stdout)).expect("valid LSP message")
+        parsed: parse_json(read_msg(stdout)).expect("valid LSP message")
         if json_get(parsed, "id") == Dyn.Int(id) -> return (_0: ^parsed, _1: ^before)
         before.push(^parsed)
     }
 }
-fn published_diagnostics_for(messages: [Dyn], uri: String) -> [&Dyn] {
+published_diagnostics_for: fn(messages: [Dyn], uri: String) -> [&Dyn] {
     messages.iter().filter(message -> json_get(message, "method").and_then(json_str) == "textDocument/publishDiagnostics")
         .filter_map(message -> json_get(message, "params"))
         .filter(params -> json_get(params, "uri").and_then(json_str) == uri).collect()
 }
-fn error_count(published: Dyn) -> USize {
+error_count: fn(published: Dyn) -> USize {
     json_array_field(published, "diagnostics").iter().filter(diagnostic -> json_get(diagnostic, "severity") == Dyn.Int(1)).count()
 }
-fn json_string(s: String) -> String {
+json_string: fn(s: String) -> String {
     out := String.from("\"")
     loop c in s.chars() {
         if c == {
@@ -78,17 +78,17 @@ fn json_string(s: String) -> String {
     out.push('"')
     ^out
 }
-fn json_object_field(value: Dyn, key: String) -> Dyn {
+json_object_field: fn(value: Dyn, key: String) -> Dyn {
     json_get(value, key).unwrap_or_else(() -> panic("missing JSON field `{key}`"))
 }
-fn json_array(value: Dyn, context: String) -> [Dyn] {
+json_array: fn(value: Dyn, context: String) -> [Dyn] {
     if value == {
         .Array(values) -> values
         else -> { panic("{context} is not an array: {value}") }
     }
 }
-fn json_array_field(value: Dyn, key: String) -> [Dyn] { json_array(json_object_field(value, key), "JSON field `{key}`") }
-fn json_values_equal(left: Dyn, right: Dyn) -> Bool {
+json_array_field: fn(value: Dyn, key: String) -> [Dyn] { json_array(json_object_field(value, key), "JSON field `{key}`") }
+json_values_equal: fn(left: Dyn, right: Dyn) -> Bool {
     if {
         left == Dyn.Null && right == Dyn.Null -> true
         left == Dyn.Bool(left) && right == Dyn.Bool(right) -> left == right
@@ -102,42 +102,42 @@ fn json_values_equal(left: Dyn, right: Dyn) -> Bool {
         else -> false
     }
 }
-fn assert_json_values_equal(label: &String, actual: &Dyn, expected: &Dyn) {
+assert_json_values_equal: fn(label: &String, actual: &Dyn, expected: &Dyn) {
     assert(json_values_equal(actual, expected), "{label}: actual={actual}, expected={expected}")
 }
-struct DecodedSemanticToken { text: String, token_type: U32, modifiers: U32 }
-fn semantic_data_from_response(resp: String) -> [U32] {
-    data_key :: "\"data\""
-    start :: resp.find(data_key).expect("semantic token data")
+DecodedSemanticToken: struct { text: String, token_type: U32, modifiers: U32 }
+semantic_data_from_response: fn(resp: String) -> [U32] {
+    data_key: "\"data\""
+    start: resp.find(data_key).expect("semantic token data")
     after_key := resp[start + data_key.len()..<resp.len()] // #4303
-    array_start :: after_key.find('[').expect("data array")
+    array_start: after_key.find('[').expect("data array")
     after_array := after_key[array_start + 1..<after_key.len()] // #4303
-    array_end :: after_array.find(']').expect("data array end")
+    array_end: after_array.find(']').expect("data array end")
     after_array[0..<array_end].split(',').filter_map(n -> n.trim().parse<U32>().ok()).collect()
 }
-fn decode_semantic_tokens(src: String, resp: String) -> [DecodedSemanticToken] {
-    data :: semantic_data_from_response(resp)
-    lines :: src.lines().collect()
+decode_semantic_tokens: fn(src: String, resp: String) -> [DecodedSemanticToken] {
+    data: semantic_data_from_response(resp)
+    lines: src.lines().collect()
     out := [DecodedSemanticToken]()
     line := 0u32
     start := 0u32
     loop chunk in data.chunks_exact(5) {
         line += chunk[0]
         start = if chunk[0] == 0 -> start + chunk[1] else -> chunk[1]
-        len :: chunk[2]
-        text :: lines.get(USize{line}).and_then(line_text -> {
-            s :: USize{start}
-            e :: s + USize{len}
+        len: chunk[2]
+        text: lines.get(USize{line}).and_then(line_text -> {
+            s: USize{start}
+            e: s + USize{len}
             line_text.get(s..e)
         }).unwrap_or("").to_string()
         out.push(DecodedSemanticToken{text: ^text, token_type: chunk[3], modifiers: chunk[4]})
     }
     ^out
 }
-fn assert_semantic_token(tokens: &[DecodedSemanticToken], text: &String, token_type: U32, modifier: U32) {
+assert_semantic_token: fn(tokens: &[DecodedSemanticToken], text: &String, token_type: U32, modifier: U32) {
     assert(tokens.iter().any(t -> t.text == text && t.token_type == token_type && (t.modifiers.bit_and(modifier)) != 0), "missing semantic token `{text}` type {token_type} modifier {modifier}; got {tokens}")
 }
-LSP_CAPABILITY_COVERAGE :: [
+LSP_CAPABILITY_COVERAGE: [
     (_0: "textDocumentSync", _1: "lsp_incremental_sync_range_edit_updates_document"),
     (_0: "documentFormattingProvider", _1: "lsp_formatting_and_range_formatting_return_edits"),
     (_0: "documentRangeFormattingProvider", _1: "lsp_formatting_and_range_formatting_return_edits"),
@@ -168,10 +168,10 @@ LSP_CAPABILITY_COVERAGE :: [
     (_0: "executeCommandProvider", _1: "lsp_execute_command_impact_returns_report"),
     (_0: "resources", _1: "lsp_mcp_environment_resources_are_read_only")
 ]
-fn advertised_capabilities(init: String) -> [String] {
-    cap_start :: init.find("\"capabilities\"")
+advertised_capabilities: fn(init: String) -> [String] {
+    cap_start: init.find("\"capabilities\"")
     if cap_start == none -> return []
-    open_rel :: init[cap_start.unwrap()..<init.len()].find('{')
+    open_rel: init[cap_start.unwrap()..<init.len()].find('{')
     if open_rel == none -> return []
     out := [String]()
     depth := 0usize
@@ -179,10 +179,10 @@ fn advertised_capabilities(init: String) -> [String] {
     escape := false
     string_start := 0usize
     last_string := String?{none}
-    bytes :: init.as_bytes()
+    bytes: init.as_bytes()
     i := cap_start.unwrap() + open_rel.unwrap()
     loop i < bytes.len() {
-        b :: bytes[i]
+        b: bytes[i]
         if in_string {
             if escape -> escape = false
             else if b == (U8{92}) -> escape = true
@@ -197,7 +197,7 @@ fn advertised_capabilities(init: String) -> [String] {
             34 -> { in_string = true; string_start = i + 1 }
             123 -> depth += 1
             125 -> { depth = depth.saturating_sub(1); if depth == 0 -> break }
-            58 -> if depth == 1 { key :: last_string.take(); if key != none -> out.push(^key.unwrap()) } else -> {}
+            58 -> if depth == 1 { key: last_string.take(); if key != none -> out.push(^key.unwrap()) } else -> {}
         }
         i += 1
     }
@@ -213,14 +213,14 @@ fn advertised_capabilities(init: String) -> [String] {
 }
 
 // Minimal transcript JSON extractor; all byte offsets and original malformed-input behavior retained.
-module transcript_parser {
-    struct Step { send_raw: String?, open_uri: String?, expect_contains: [String], expect_notification: Bool }
-    struct Transcript { description: String, source: String, steps: [Step] }
-    fn unescape(s: String) -> String {
+transcript_parser: module {
+    Step: struct { send_raw: String?, open_uri: String?, expect_contains: [String], expect_notification: Bool }
+    Transcript: struct { description: String, source: String, steps: [Step] }
+    unescape: fn(s: String) -> String {
         out := String.with_capacity(s.len())
         chars := s.chars()
         loop {
-            c :: chars.next()
+            c: chars.next()
             if c == none -> break
             if c.unwrap() != '\\' { out.push(c.unwrap()); next }
             if chars.next() == {
@@ -233,9 +233,9 @@ module transcript_parser {
                 some('b') -> out.push(Char{8})
                 some('f') -> out.push(Char{12})
                 some('u') -> {
-                    hex :: chars.by_ref().take(4).collect<String>()
+                    hex: chars.by_ref().take(4).collect<String>()
                     if U32.from_str_radix(hex, 16) == {
-                        .Ok(n) -> { c :: Char.from_u32(n); if c != none -> out.push(c.unwrap()) }
+                        .Ok(n) -> { c: Char.from_u32(n); if c != none -> out.push(c.unwrap()) }
                         .Err(_) -> {}
                     }
                 }
@@ -245,14 +245,14 @@ module transcript_parser {
         }
         ^out
     }
-    fn extract_string_field(json: String, key: String) -> String? {
-        needle :: "\"{key}\""
-        pos :: json.find(needle)
+    extract_string_field: fn(json: String, key: String) -> String? {
+        needle: "\"{key}\""
+        pos: json.find(needle)
         after := json[pos + needle.len()..<json.len()].trim_start() // #4303
         after := after.strip_prefix(':')?.trim_start() // #4303
         after := after.strip_prefix('"')? // #4303
         end := 0usize
-        bytes :: after.as_bytes()
+        bytes: after.as_bytes()
         loop {
             if end >= bytes.len() -> return none
             if bytes[end] == (U8{92}) { end += 2; next }
@@ -261,19 +261,19 @@ module transcript_parser {
         }
         unescape(after[0..<end])
     }
-    fn skip_ws(s: String) -> String { s.trim_start_matches(c -> c.is_ascii_whitespace()) }
-    fn find_matching_close(s: String, open: Char, close: Char) -> USize? {
+    skip_ws: fn(s: String) -> String { s.trim_start_matches(c -> c.is_ascii_whitespace()) }
+    find_matching_close: fn(s: String, open: Char, close: Char) -> USize? {
         depth := 0usize
         in_str := false
-        bytes :: s.as_bytes()
+        bytes: s.as_bytes()
         i := 0usize
         loop i < bytes.len() {
-            b :: bytes[i]
+            b: bytes[i]
             if in_str {
                 if b == (U8{92}) { i += 2; next }
                 if b == (U8{34}) -> in_str = false
             } else {
-                c :: s[i..<s.len()].chars().next().unwrap()
+                c: s[i..<s.len()].chars().next().unwrap()
                 if c == '"' -> in_str = true
                 else if c == open -> depth += 1
                 else if c == close { depth -= 1; if depth == 0 -> { return i } }
@@ -282,14 +282,14 @@ module transcript_parser {
         }
         none
     }
-    fn c_len(bytes: [U8], i: USize) -> USize {
-        b :: bytes[i]
+    c_len: fn(bytes: [U8], i: USize) -> USize {
+        b: bytes[i]
         if b < 0x80 -> 1 else if b < 0xE0 -> 2 else if b < 0xF0 -> 3 else -> 4
     }
-    fn extract_string_array(s: String) -> [String] {
+    extract_string_array: fn(s: String) -> [String] {
         s := skip_ws(s) // #4303
         if !s.starts_with('[') -> return []
-        close :: find_matching_close(s, '[', ']')
+        close: find_matching_close(s, '[', ']')
         if close == none -> return []
         inner := s[1..close.unwrap()] // #4303
         result := [String]()
@@ -300,7 +300,7 @@ module transcript_parser {
             if remaining.starts_with('"') {
                 rest := remaining[1..<remaining.len()] // #4303
                 end := 0usize
-                bytes :: rest.as_bytes()
+                bytes: rest.as_bytes()
                 loop {
                     if end >= bytes.len() -> break
                     if bytes[end] == (U8{92}) { end += 2; next }
@@ -314,61 +314,61 @@ module transcript_parser {
         }
         ^result
     }
-    fn extract_object(s: String) -> (String, String)? {
+    extract_object: fn(s: String) -> (String, String)? {
         s := skip_ws(s) // #4303
         if !s.starts_with('{') -> return none
-        close :: find_matching_close(s, '{', '}')
+        close: find_matching_close(s, '{', '}')
         (_0: s[0..<close + 1].to_string(), _1: s[close + 1..<s.len()])
     }
-    fn parse(content: String) -> Transcript {
-        description :: extract_string_field(content, "description").unwrap_or_default()
-        source :: extract_string_field(content, "source").expect("transcript must have 'source'")
-        steps_needle :: "\"steps\""
-        steps_pos :: content.find(steps_needle).expect("transcript must have 'steps'")
+    parse: fn(content: String) -> Transcript {
+        description: extract_string_field(content, "description").unwrap_or_default()
+        source: extract_string_field(content, "source").expect("transcript must have 'source'")
+        steps_needle: "\"steps\""
+        steps_pos: content.find(steps_needle).expect("transcript must have 'steps'")
         after_steps := content[steps_pos + steps_needle.len()..<content.len()].trim_start() // #4303
         after_colon := after_steps.strip_prefix(':').unwrap().trim_start() // #4303
-        close_bracket :: find_matching_close(after_colon, '[', ']').expect("steps array must close")
+        close_bracket: find_matching_close(after_colon, '[', ']').expect("steps array must close")
         steps_inner := after_colon[1..close_bracket] // #4303
         steps := [Step]()
         remaining := skip_ws(steps_inner) // #4303
         loop !remaining.is_empty() {
             remaining = skip_ws(remaining)
             if remaining.is_empty() -> break
-            extracted :: extract_object(remaining)
+            extracted: extract_object(remaining)
             if extracted == none -> break
-            (step_obj, rest) :: extracted.unwrap()
+            (step_obj, rest): extracted.unwrap()
             remaining = skip_ws(rest.trim_start_matches(','))
             steps.push(parse_step(step_obj))
         }
         Transcript{description: ^description, source: ^source, steps: ^steps}
     }
-    fn parse_step(obj: String) -> Step {
-        send_needle :: "\"send\""
-        open_needle :: "\"open\""
-        ec_needle :: "\"expect_contains\""
-        en_needle :: "\"expect_notification\""
-        send_pos :: obj.find(send_needle)
-        send_raw :: if send_pos != none {
+    parse_step: fn(obj: String) -> Step {
+        send_needle: "\"send\""
+        open_needle: "\"open\""
+        ec_needle: "\"expect_contains\""
+        en_needle: "\"expect_notification\""
+        send_pos: obj.find(send_needle)
+        send_raw: if send_pos != none {
             after := skip_ws(obj[send_pos.unwrap() + send_needle.len()..<obj.len()]) // #4303
             after := after.strip_prefix(':').unwrap_or(after).trim_start() // #4303
             extract_object(after).map((o, _) -> ^o)
         } else -> none
-        open_uri :: if send_raw == none {
-            open_pos :: obj.find(open_needle)
+        open_uri: if send_raw == none {
+            open_pos: obj.find(open_needle)
             if open_pos != none {
                 after := skip_ws(obj[open_pos.unwrap() + open_needle.len()..<obj.len()]) // #4303
                 after := after.strip_prefix(':').unwrap_or(after).trim_start() // #4303
                 extract_object(after).and_then((open_obj, _) -> extract_string_field(open_obj, "uri"))
             } else { none }
         } else -> none
-        ec_pos :: obj.find(ec_needle)
-        expect_contains :: if ec_pos != none {
+        ec_pos: obj.find(ec_needle)
+        expect_contains: if ec_pos != none {
             after := skip_ws(obj[ec_pos.unwrap() + ec_needle.len()..<obj.len()]) // #4303
             after := after.strip_prefix(':').unwrap_or(after).trim_start() // #4303
             extract_string_array(after)
         } else -> []
-        en_pos :: obj.find(en_needle)
-        expect_notification :: if en_pos != none {
+        en_pos: obj.find(en_needle)
+        expect_notification: if en_pos != none {
             after := skip_ws(obj[en_pos.unwrap() + en_needle.len()..<obj.len()]) // #4303
             after := after.strip_prefix(':').unwrap_or(after).trim_start() // #4303
             !after.starts_with("null")
@@ -376,31 +376,31 @@ module transcript_parser {
         Step{send_raw: ^send_raw, open_uri: ^open_uri, expect_contains: ^expect_contains, expect_notification: expect_notification}
     }
 }
-fn run_json_transcript_file(jet: &OSPath, path: &OSPath) {
-    _guard :: lock_lsp_process()
-    content :: fs.read_to_string(path).unwrap_or_else(e -> panic("read {path}: {e}"))
-    transcript :: transcript_parser.parse(content)
+run_json_transcript_file: fn(jet: &OSPath, path: &OSPath) {
+    _guard: lock_lsp_process()
+    content: fs.read_to_string(path).unwrap_or_else(e -> panic("read {path}: {e}"))
+    transcript: transcript_parser.parse(content)
     child := Command.new(jet).args(["self", "lsp"]).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().expect("spawn jet self lsp")
     stdin := child.stdin.take().expect("stdin")
     stdout := child.stdout.take().expect("stdout")
     loop step in transcript.steps {
         if step.open_uri != none {
-            uri :: step.open_uri.unwrap()
-            open :: "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(transcript.source)}}}}}}}"
+            uri: step.open_uri.unwrap()
+            open: "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(transcript.source)}}}}}}}"
             send_msg(&stdin, open)
             if step.expect_notification {
-                notif :: read_msg(&stdout)
+                notif: read_msg(&stdout)
                 assert(notif.contains("publishDiagnostics"), "[{path.display()}] open step: expected publishDiagnostics, got: {notif}")
                 loop expect in step.expect_contains -> assert(notif.contains(expect.as_str()), "[{path.display()}] expected {expect} in notification, got:\n{notif}")
             }
         } else if step.send_raw != none {
             send_msg(&stdin, step.send_raw.unwrap())
             if !step.expect_contains.is_empty() {
-                resp :: read_msg(&stdout)
+                resp: read_msg(&stdout)
                 loop expect in step.expect_contains -> assert(resp.contains(expect.as_str()), "[{path.display()}] expected {expect} in response, got:\n{resp}")
             }
         }
     }
     drop(^stdin)
-    _ :: child.wait()
+    _: child.wait()
 }

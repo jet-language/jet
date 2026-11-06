@@ -13,7 +13,7 @@
 // the owner's explicit type arguments; the rest bind from the checked
 // arguments, then the expected result, and otherwise default to `Int`.
 
-enum BuiltinStaticLowering {
+BuiltinStaticLowering: enum {
     // The first value argument becomes the builtin receiver.
     ArgumentBuiltin(operation: TBuiltinOp)
     // `Int.from_radix(text, base)`: the text is the receiver; the op carries the call line.
@@ -32,13 +32,13 @@ enum BuiltinStaticLowering {
     Precise(type_name: String, function: String)
 }
 
-enum BuiltinStaticOwnerRule {
+BuiltinStaticOwnerRule: enum {
     Inferred
     // `Atomic<T>`: the owner names T explicitly and T is a lock-free scalar.
     AtomicScalar
 }
 
-struct BuiltinStaticRow {
+BuiltinStaticRow: struct {
     // "" is an ambient built-in owner; otherwise the Core module exporting it.
     module_name: String
     owner: String
@@ -55,7 +55,7 @@ struct BuiltinStaticRow {
     arity_code: String
 }
 
-struct BuiltinNumericKind {
+BuiltinNumericKind: struct {
     name: String
     ty: Type
     rust: String
@@ -65,12 +65,12 @@ struct BuiltinNumericKind {
     bits: Int
 }
 
-struct BuiltinNumericSource {
+BuiltinNumericSource: struct {
     method: String
     source: String
 }
 
-fn builtin_static(owner: String, method: String, parameters: [Type], return_type: Type, lowering: BuiltinStaticLowering) -> BuiltinStaticRow Never! {
+builtin_static: fn(owner: String, method: String, parameters: [Type], return_type: Type, lowering: BuiltinStaticLowering) -> BuiltinStaticRow Never! {
     BuiltinStaticRow{
         module_name: "",
         owner: owner,
@@ -90,7 +90,7 @@ fn builtin_static(owner: String, method: String, parameters: [Type], return_type
 // execution host. A `parameter_convention: AccessConvention.Move` row owns its
 // arguments: each one moves into the constructed value.
 
-BUILTIN_STATIC_ROWS :: comptime { [BuiltinStaticRow]{
+BUILTIN_STATIC_ROWS: comptime { [BuiltinStaticRow]{
     {module_name: "", owner: "Int", method: "parse", type_params: [String]{}, owner_type_params: 0, owner_rule: BuiltinStaticOwnerRule.Inferred, parameters: [Type]{Type.String}, parameter_convention: AccessConvention.Read, return_type: Type.Result{ok: Type.Int, err: Type.Named{name: "ParseError"}}, lowering: BuiltinStaticLowering.ArgumentBuiltin{operation: TBuiltinOp.ParseInt}, arity_code: "E0104"},
     {module_name: "", owner: "Int", method: "from_radix", type_params: [String]{}, owner_type_params: 0, owner_rule: BuiltinStaticOwnerRule.Inferred, parameters: [Type]{Type.String, Type.Int}, parameter_convention: AccessConvention.Read, return_type: Type.Result{ok: Type.Int, err: Type.Named{name: "ParseError"}}, lowering: BuiltinStaticLowering.IntFromRadix, arity_code: "E0104"},
     {module_name: "", owner: "Float", method: "parse", type_params: [String]{}, owner_type_params: 0, owner_rule: BuiltinStaticOwnerRule.Inferred, parameters: [Type]{Type.String}, parameter_convention: AccessConvention.Read, return_type: Type.Result{ok: Type.Float, err: Type.Named{name: "ParseError"}}, lowering: BuiltinStaticLowering.ArgumentBuiltin{operation: TBuiltinOp.ParseFloat}, arity_code: "E0104"},
@@ -157,7 +157,7 @@ BUILTIN_STATIC_ROWS :: comptime { [BuiltinStaticRow]{
 } }
 
 // Numeric destination owners (`numeric_type_from_name`) and their host words.
-BUILTIN_NUMERIC_KINDS :: comptime { [BuiltinNumericKind]{
+BUILTIN_NUMERIC_KINDS: comptime { [BuiltinNumericKind]{
     {name: "Int", ty: Type.Int, rust: "i64", integer: true, fixed: false, signed: true, bits: 64},
     {name: "I8", ty: Type.IntN{signed: true, bits: 8}, rust: "i8", integer: true, fixed: true, signed: true, bits: 8},
     {name: "I16", ty: Type.IntN{signed: true, bits: 16}, rust: "i16", integer: true, fixed: true, signed: true, bits: 16},
@@ -174,7 +174,7 @@ BUILTIN_NUMERIC_KINDS :: comptime { [BuiltinNumericKind]{
 
 // Destination-owned `from_<source>` spellings (`NUMERIC_CONVERSION_SOURCES`;
 // the semantic symbol catalog reads it too).
-BUILTIN_NUMERIC_SOURCES :: comptime { [BuiltinNumericSource]{
+BUILTIN_NUMERIC_SOURCES: comptime { [BuiltinNumericSource]{
     {method: "from_i8", source: "I8"},
     {method: "from_i64", source: "I64"},
     {method: "from_i16", source: "I16"},
@@ -190,14 +190,14 @@ BUILTIN_NUMERIC_SOURCES :: comptime { [BuiltinNumericSource]{
     {method: "from_fraction", source: "Fraction"}
 } }
 
-fn builtin_numeric_kind(name: String) -> BuiltinNumericKind? {
+builtin_numeric_kind: fn(name: String) -> BuiltinNumericKind? {
     loop kind in BUILTIN_NUMERIC_KINDS {
         if kind.name == name -> return Val(kind)
     }
     None
 }
 
-fn builtin_numeric_source(method: String) -> String? {
+builtin_numeric_source: fn(method: String) -> String? {
     loop row in BUILTIN_NUMERIC_SOURCES {
         if row.method == method -> return Val(row.source)
     }
@@ -205,13 +205,13 @@ fn builtin_numeric_source(method: String) -> String? {
 }
 
 // The target's value range contains every source value.
-fn builtin_numeric_widening(source: BuiltinNumericKind, target: BuiltinNumericKind) -> Bool Never! {
+builtin_numeric_widening: fn(source: BuiltinNumericKind, target: BuiltinNumericKind) -> Bool Never! {
     if source.signed && !target.signed -> return false
     if !source.signed && target.signed -> return source.bits < target.bits
     source.bits <= target.bits
 }
 
-fn builtin_numeric_return(source: BuiltinNumericKind, target: BuiltinNumericKind) -> Type Never! {
+builtin_numeric_return: fn(source: BuiltinNumericKind, target: BuiltinNumericKind) -> Type Never! {
     checked := Type.Result{ok: target.ty, err: Type.String}
     if source.name == "Int" && target.fixed -> return checked
     if source.fixed && target.name == "Int" -> return target.ty
@@ -223,13 +223,13 @@ fn builtin_numeric_return(source: BuiltinNumericKind, target: BuiltinNumericKind
     target.ty
 }
 
-fn builtin_numeric_host_kind(kind: BuiltinNumericKind) -> Int Never! {
+builtin_numeric_host_kind: fn(kind: BuiltinNumericKind) -> Int Never! {
     offset := if kind.signed -> 0 else -> 4
     step := if kind.bits == 8 -> 0 else -> if kind.bits == 16 -> 1 else -> if kind.bits == 32 -> 2 else -> 3
     offset + step
 }
 
-fn builtin_numeric_operation(source: BuiltinNumericKind, target: BuiltinNumericKind) -> TNumericOp Never! {
+builtin_numeric_operation: fn(source: BuiltinNumericKind, target: BuiltinNumericKind) -> TNumericOp Never! {
     if !target.integer {
         if target.ty == Type.Float32 && source.ty == Type.Float -> return TNumericOp.FloatNarrow
         // A whole number crosses into Float or F32 by the one checked rule
@@ -237,7 +237,7 @@ fn builtin_numeric_operation(source: BuiltinNumericKind, target: BuiltinNumericK
         // no exact value there, and `approx(n)` is the rounding spelling. A
         // fixed source narrower than the target's precision is always exact.
         if source.integer {
-            precision :: if target.ty == Type.Float32 -> 24 else -> 53
+            precision: if target.ty == Type.Float32 -> 24 else -> 53
             if source.fixed && source.bits <= precision -> return TNumericOp.CastAs{dst_rust: target.rust}
             return TNumericOp.CheckedIntToFloat{source_signed: source.signed, target_f32: target.ty == Type.Float32, line: 0}
         }
@@ -253,23 +253,23 @@ fn builtin_numeric_operation(source: BuiltinNumericKind, target: BuiltinNumericK
     TNumericOp.FloatToInt{host_kind: builtin_numeric_host_kind(target)}
 }
 
-fn builtin_static_numeric_row(owner: String, method: String) -> BuiltinStaticRow? {
-    target :: builtin_numeric_kind(owner) ?? return None
-    source_name :: builtin_numeric_source(method) ?? return None
-    source :: builtin_numeric_kind(source_name) ?? return None
+builtin_static_numeric_row: fn(owner: String, method: String) -> BuiltinStaticRow? {
+    target: builtin_numeric_kind(owner) ?? return None
+    source_name: builtin_numeric_source(method) ?? return None
+    source: builtin_numeric_kind(source_name) ?? return None
     Val(builtin_static(owner, method, [Type]{source.ty}, builtin_numeric_return(source, target), BuiltinStaticLowering.Numeric{operation: builtin_numeric_operation(source, target)}))
 }
 
 // Every row for `owner.method`, across modules; the caller admits the one
 // whose module matches how the owner was named.
-fn builtin_static_rows(owner: String, method: String) -> [BuiltinStaticRow] Never! {
+builtin_static_rows: fn(owner: String, method: String) -> [BuiltinStaticRow] Never! {
     rows := builtin_static_rows_in(BUILTIN_STATIC_ROWS, owner, method)
     if builtin_static_numeric_row(owner, method) == .Val(row) -> &rows.push(row)
     rows
 }
 
 // The table is a read parameter, so the scan reads its rows in place.
-fn builtin_static_rows_in(table: [BuiltinStaticRow], owner: String, method: String) -> [BuiltinStaticRow] Never! {
+builtin_static_rows_in: fn(table: [BuiltinStaticRow], owner: String, method: String) -> [BuiltinStaticRow] Never! {
     rows := [BuiltinStaticRow]{}
     loop row in table {
         if row.owner == owner && row.method == method -> &rows.push(row)
@@ -277,7 +277,7 @@ fn builtin_static_rows_in(table: [BuiltinStaticRow], owner: String, method: Stri
     rows
 }
 
-fn builtin_static_is_type_param(row: BuiltinStaticRow, name: String) -> Bool Never! {
+builtin_static_is_type_param: fn(row: BuiltinStaticRow, name: String) -> Bool Never! {
     loop param in row.type_params {
         if param == name -> return true
     }

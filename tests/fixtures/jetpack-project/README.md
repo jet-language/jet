@@ -12,7 +12,7 @@ fixtures so the commands run without Nix or a network.
   indexes live in `workspace.jet` in monorepos, not here.
 - `jet-pkgs/` — a first-party Jet package repo (no Nix) whose `package.jet`
   `packages:` block declares the `hello` package (an `executable`) that
-  `hello@mine` resolves to; the package is the `module hello` discovered by name
+  `hello@mine` resolves to; the package is the `hello: module` discovered by name
   in its source tree (U10).
 - `functional-env.jet` — an alternative, fully functional sketch of the same
   environment (a runnable Jet program that prints the directive list).

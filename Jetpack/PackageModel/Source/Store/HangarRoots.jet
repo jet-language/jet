@@ -5,45 +5,45 @@
 use {
     jet_foundation.[authority_holds]
     jetpack_foundation.[SOURCE_ROOT_DIR]
-    json :: core.encoding.json
-    sys :: core.sys
-    files :: core.files
+    json: core.encoding.json
+    sys: core.sys
+    files: core.files
 }
 
 // The native data-directory leaf (macOS/Windows spell it
 // `Hangar`); explicit roots keep the historical lower-case child.
-HANGAR_NATIVE_SUBDIR_TITLE :: "Hangar"
-HANGAR_LEGACY_SUBDIR :: "hangar"
-HANGAR_SHARED_CAS_ENV :: "JETPACK_SHARED_CAS"
-HANGAR_MAX_STORE_OBJECTS :: 1000000
-HANGAR_MAX_STORE_META_BYTES :: 1048576
+HANGAR_NATIVE_SUBDIR_TITLE: "Hangar"
+HANGAR_LEGACY_SUBDIR: "hangar"
+HANGAR_SHARED_CAS_ENV: "JETPACK_SHARED_CAS"
+HANGAR_MAX_STORE_OBJECTS: 1000000
+HANGAR_MAX_STORE_META_BYTES: 1048576
 
 // The native leaf of the resolved root's content-addressed store.
-fn pkg_hangar_subdir() -[Env]> String Never! {
+pkg_hangar_subdir: fn() -[Env]> String Never! {
     if sys.is_macos() || sys.is_windows() -> return HANGAR_NATIVE_SUBDIR_TITLE
     HANGAR_LEGACY_SUBDIR
 }
 
 // The resolved root, and whether it is the default user-owned root.
-struct HangarRoots {
+HangarRoots: struct {
     root: String
     dev_mode: Bool
 
     // An explicit non-default root for an isolated operation; it never
     // inherits the native user-data spelling.
-    fn at(root: String) -> HangarRoots Never! {
+    at: fn(root: String) -> HangarRoots Never! {
         HangarRoots{root: root, dev_mode: false}
     }
 
     // The global content-addressed store (hangar) under this root.
-    fn hangar_dir(self) -[Env]> String Never! {
-        leaf :: if self.dev_mode -> pkg_hangar_subdir() else -> HANGAR_LEGACY_SUBDIR
+    hangar_dir: fn(self) -[Env]> String Never! {
+        leaf: if self.dev_mode -> pkg_hangar_subdir() else -> HANGAR_LEGACY_SUBDIR
         files.join(self.root, leaf)
     }
 
     // The immutable payload pool this root shares: the machine-wide pool for
     // the default user root or an explicit JETPACK_SHARED_CAS, else its own.
-    fn shared_cas_dir(self) -[Env]> String Never! {
+    shared_cas_dir: fn(self) -[Env]> String Never! {
         if self.root == pkg_user_data_root() || pkg_environment_path(HANGAR_SHARED_CAS_ENV) != None {
             return pkg_shared_cas_dir()
         }
@@ -52,9 +52,9 @@ struct HangarRoots {
 
     // User and custom Hangar roots visible from this machine. Discovery stays
     // bounded to known parents; it never walks an arbitrary tree.
-    fn machine_roots() -[FS, Env]> [HangarRoots] Never! {
+    machine_roots: fn() -[FS, Env]> [HangarRoots] Never! {
         roots := [HangarRoots]{}
-        candidates :: [HangarRoots]{
+        candidates: [HangarRoots]{
             pkg_resolve_roots(),
             {root: pkg_user_data_root(), dev_mode: true},
             HangarRoots.at(pkg_legacy_user_root())
@@ -64,16 +64,16 @@ struct HangarRoots {
         loop root in roots {
             if root.root != "/" && root.root != "" -> &parents.push(files.dirname(root.root))
         }
-        name_values :: [String]{"XDG_DATA_HOME", "XDG_STATE_HOME", "LOCALAPPDATA"}
+        name_values: [String]{"XDG_DATA_HOME", "XDG_STATE_HOME", "LOCALAPPDATA"}
         loop name in name_values {
-            parent :: pkg_environment_path(name) ?? next
+            parent: pkg_environment_path(name) ?? next
             &parents.push(parent)
         }
         &parents.push(pkg_environment_path("XDG_CACHE_HOME") ?? files.join(pkg_home_dir(), ".cache"))
         loop parent in authority_holds(parents) {
-            entries :: files.list_dir(parent) ?? next
+            entries: files.list_dir(parent) ?? next
             loop entry in entries {
-                info :: files.stat(entry.path) ?? next
+                info: files.stat(entry.path) ?? next
                 if info.is_symlink || !info.is_dir -> next
                 if pkg_hangar_real_directory(files.join(entry.path, pkg_hangar_subdir())) {
                     pkg_hangar_add_machine_root(&roots, HangarRoots{root: entry.path, dev_mode: true})
@@ -87,42 +87,42 @@ struct HangarRoots {
 }
 
 // The machine/user shared immutable payload pool.
-fn pkg_shared_cas_dir() -[Env]> String Never! {
-    explicit :: pkg_environment_path(HANGAR_SHARED_CAS_ENV) ?? return files.join(files.join(pkg_user_data_root(), pkg_hangar_subdir()), "cas")
+pkg_shared_cas_dir: fn() -[Env]> String Never! {
+    explicit: pkg_environment_path(HANGAR_SHARED_CAS_ENV) ?? return files.join(files.join(pkg_user_data_root(), pkg_hangar_subdir()), "cas")
     explicit
 }
 
-fn pkg_hangar_add_machine_root(roots: &[HangarRoots], candidate: HangarRoots) -[Env]> {
+pkg_hangar_add_machine_root: fn(roots: &[HangarRoots], candidate: HangarRoots) -[Env]> {
     loop root in roots {
         if root.root == candidate.root && root.hangar_dir() == candidate.hangar_dir() -> return
     }
     &roots.push(candidate)
 }
 
-fn pkg_hangar_real_directory(path: String) -[FS]> Bool Never! {
-    info :: files.stat(path) ?? return false
+pkg_hangar_real_directory: fn(path: String) -[FS]> Bool Never! {
+    info: files.stat(path) ?? return false
     !info.is_symlink && info.is_dir
 }
 
 // The project-local `.jet/` managed folder (lockfile, caches, GC roots).
 // Never holds realized packages; those live in the shared hangar.
-fn pkg_managed_dir(project: String) -> String Never! {
+pkg_managed_dir: fn(project: String) -> String Never! {
     files.join(project, SOURCE_ROOT_DIR)
 }
 
 // The single unified lockfile path for `project` (`.jet/lock`, U2).
-fn pkg_lock_path(project: String) -> String Never! {
+pkg_lock_path: fn(project: String) -> String Never! {
     files.join(pkg_managed_dir(project), "lock")
 }
 
 // Resolve the Jetpack root: `JETPACK_ROOT` when set, else the platform data
 // directory from.
-fn pkg_resolve_roots() -[Env]> HangarRoots Never! {
-    explicit :: pkg_environment_path("JETPACK_ROOT") ?? return HangarRoots{root: pkg_user_data_root(), dev_mode: true}
+pkg_resolve_roots: fn() -[Env]> HangarRoots Never! {
+    explicit: pkg_environment_path("JETPACK_ROOT") ?? return HangarRoots{root: pkg_user_data_root(), dev_mode: true}
     HangarRoots{root: explicit, dev_mode: false}
 }
 
-fn pkg_home_dir() -[Env]> String Never! {
+pkg_home_dir: fn() -[Env]> String Never! {
     if sys.is_windows() {
         if pkg_environment_path("USERPROFILE") == .Val(home) -> return home
     }
@@ -130,54 +130,54 @@ fn pkg_home_dir() -[Env]> String Never! {
 }
 
 // A non-empty environment value.
-fn pkg_environment_path(name: String) -[Env]> String? Never! {
-    value :: sys.get(name) ?? return None
+pkg_environment_path: fn(name: String) -[Env]> String? Never! {
+    value: sys.get(name) ?? return None
     if value == "" -> return None
     Val(value)
 }
 
 // An environment directory honoured only when absolute.
-fn pkg_absolute_environment_path(name: String) -[Env]> String? Never! {
-    value :: pkg_environment_path(name) ?? return None
+pkg_absolute_environment_path: fn(name: String) -[Env]> String? Never! {
+    value: pkg_environment_path(name) ?? return None
     if !files.is_abs(value) -> return None
     Val(value)
 }
 
-fn pkg_user_data_root() -[Env]> String Never! {
+pkg_user_data_root: fn() -[Env]> String Never! {
     if sys.is_macos() -> return files.join(files.join(files.join(pkg_home_dir(), "Library"), "Application Support"), "Jet")
     if sys.is_windows() {
-        local :: pkg_environment_path("LOCALAPPDATA") ?? files.join(files.join(pkg_home_dir(), "AppData"), "Local")
+        local: pkg_environment_path("LOCALAPPDATA") ?? files.join(files.join(pkg_home_dir(), "AppData"), "Local")
         return files.join(local, "Jet")
     }
-    data :: pkg_absolute_environment_path("XDG_DATA_HOME") ?? files.join(files.join(pkg_home_dir(), ".local"), "share")
+    data: pkg_absolute_environment_path("XDG_DATA_HOME") ?? files.join(files.join(pkg_home_dir(), ".local"), "share")
     files.join(data, "jet")
 }
 
 // The pre- user root, kept only as a migration source.
-fn pkg_legacy_user_root() -[Env]> String Never! {
-    state :: pkg_absolute_environment_path("XDG_STATE_HOME") ?? files.join(files.join(pkg_home_dir(), ".local"), "state")
+pkg_legacy_user_root: fn() -[Env]> String Never! {
+    state: pkg_absolute_environment_path("XDG_STATE_HOME") ?? files.join(files.join(pkg_home_dir(), ".local"), "state")
     files.join(state, "jet")
 }
 
 // The old Hangar path of the pre- resolver.
-fn pkg_legacy_user_hangar_dir() -[Env]> String Never! {
+pkg_legacy_user_hangar_dir: fn() -[Env]> String Never! {
     files.join(pkg_legacy_user_root(), HANGAR_LEGACY_SUBDIR)
 }
 
 // JP0 cache identity. Legacy records have empty fields and can never hit.
-struct CacheIdentity {
+CacheIdentity: struct {
     source_fingerprint: String
     recipe_fingerprint: String
     policy_fingerprint: String
     platform: String
 
-    fn empty() -> CacheIdentity Never! {
+    empty: fn() -> CacheIdentity Never! {
         CacheIdentity{source_fingerprint: "", recipe_fingerprint: "", policy_fingerprint: "", platform: ""}
     }
 }
 
 // A realized package recorded under the Jetpack store.
-struct StoreEntry {
+StoreEntry: struct {
     // Directory name under the hangar, e.g. `fastfetch-2.1.0-<fp>` (
     // name and version first, fingerprint last).
     id: String
@@ -211,8 +211,8 @@ struct StoreEntry {
     last_used_at: Int
 
     // The `meta.json` text the engine writes when recording an entry.
-    fn meta_json(self) -> String Never! {
-        fields :: [(key: String, value: String, raw: Bool)]{
+    meta_json: fn(self) -> String Never! {
+        fields: [(key: String, value: String, raw: Bool)]{
             (key: "name", value: self.name, raw: false),
             (key: "version", value: self.version, raw: false),
             (key: "ref", value: self.reference, raw: false),
@@ -236,7 +236,7 @@ struct StoreEntry {
         }
         out := "{{\n"
         loop field in fields {
-            rendered :: if field.raw -> field.value else -> pkg_json_quote(field.value)
+            rendered: if field.raw -> field.value else -> pkg_json_quote(field.value)
             out = "{out}  {pkg_json_quote(field.key)}: {rendered},\n"
         }
         // The last field carries no trailing comma.
@@ -245,17 +245,17 @@ struct StoreEntry {
 }
 
 // A JSON string literal for `text`.
-fn pkg_json_quote(text: String) -> String Never! {
+pkg_json_quote: fn(text: String) -> String Never! {
     pkg_json_render(Dyn.Text(text.copy()))
 }
 
-fn pkg_hangar_json_string_array(items: [String]) -> String Never! {
+pkg_hangar_json_string_array: fn(items: [String]) -> String Never! {
     quoted := [String]{}
     loop item in items -> &quoted.push(pkg_json_quote(item))
     "[{quoted.join(", ")}]"
 }
 
-fn pkg_hangar_json_string_object(map: [String: String]) -> String Never! {
+pkg_hangar_json_string_object: fn(map: [String: String]) -> String Never! {
     keys := map.keys().to_list()
     &keys.sort()
     parts := [String]{}
@@ -265,7 +265,7 @@ fn pkg_hangar_json_string_object(map: [String: String]) -> String Never! {
 
 // A `meta.json` record parsed back into typed fields; the engine's
 // `read_meta` shares this parser.
-struct ParsedMeta {
+ParsedMeta: struct {
     name: String
     version: String
     reference: String
@@ -283,19 +283,19 @@ struct ParsedMeta {
     last_used_at: Int?
 }
 
-fn pkg_parse_meta(text: String) -> ParsedMeta? Never! {
-    tree :: json.parse(text) ?? return None
-    object :: pkg_json_object(tree) ?? return None
-    name :: pkg_meta_text(object, "name") ?? return None
-    reference :: pkg_meta_text(object, "ref") ?? return None
-    out :: pkg_meta_text(object, "out") ?? return None
-    bin :: pkg_meta_text(object, "bin") ?? return None
+pkg_parse_meta: fn(text: String) -> ParsedMeta? Never! {
+    tree: json.parse(text) ?? return None
+    object: pkg_json_object(tree) ?? return None
+    name: pkg_meta_text(object, "name") ?? return None
+    reference: pkg_meta_text(object, "ref") ?? return None
+    out: pkg_meta_text(object, "out") ?? return None
+    bin: pkg_meta_text(object, "bin") ?? return None
     references := [String]{}
     if object.get("references") == {
         .Val(value) -> {
-            items :: pkg_json_array(value) ?? [Dyn]{}
+            items: pkg_json_array(value) ?? [Dyn]{}
             loop item in items {
-                reference_text :: pkg_json_text(item) ?? next
+                reference_text: pkg_json_text(item) ?? next
                 &references.push(reference_text)
             }
         }
@@ -304,9 +304,9 @@ fn pkg_parse_meta(text: String) -> ParsedMeta? Never! {
     named_outputs := [String: String]{}
     if object.get("named_outputs") == {
         .Val(value) -> {
-            fields :: pkg_json_object(value) ?? [String: Dyn]{}
+            fields: pkg_json_object(value) ?? [String: Dyn]{}
             loop field in fields {
-                digest :: pkg_json_text(field.value) ?? next
+                digest: pkg_json_text(field.value) ?? next
                 named_outputs[field.key] = digest
             }
         }
@@ -341,31 +341,31 @@ fn pkg_parse_meta(text: String) -> ParsedMeta? Never! {
     })
 }
 
-fn pkg_meta_text(object: [String: Dyn], key: String) -> String? Never! {
-    value :: object.get(key) ?? return None
+pkg_meta_text: fn(object: [String: Dyn], key: String) -> String? Never! {
+    value: object.get(key) ?? return None
     pkg_json_text(value)
 }
 
 // A decimal u64 text field.
-fn pkg_meta_unsigned(object: [String: Dyn], key: String) -> Int? Never! {
-    text :: pkg_meta_text(object, key) ?? return None
-    digits :: text.removeprefix("+")
+pkg_meta_unsigned: fn(object: [String: Dyn], key: String) -> Int? Never! {
+    text: pkg_meta_text(object, key) ?? return None
+    digits: text.removeprefix("+")
     if digits == "" -> return None
     loop byte in digits.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if code < 48 || code > 57 -> return None
     }
-    value :: Int.parse(digits) ?? return None
+    value: Int.parse(digits) ?? return None
     Val(value)
 }
 
 // A malformed or over-budget read of the recorded store projection.
 #Error
-enum HangarReadError {
+HangarReadError: enum {
     IO(IOError)
     InvalidData(String)
 
-    fn message(self) -> String Never! {
+    message: fn(self) -> String Never! {
         if self == {
             .IO(error) -> "{error}"
             .InvalidData(detail) -> detail
@@ -375,26 +375,26 @@ enum HangarReadError {
 
 // Every recorded store entry, skipping malformed ones quietly: the driver's
 // read-only compatibility view.
-fn pkg_store_list(roots: HangarRoots) -[FS, Env]> [StoreEntry] Never! {
+pkg_store_list: fn(roots: HangarRoots) -[FS, Env]> [StoreEntry] Never! {
     pkg_store_list_impl(roots, false) ?? [StoreEntry]{}
 }
 
 // Every recorded store entry, failing closed on a malformed or over-budget
 // projection; integrity-sensitive engine operations use this boundary.
-fn pkg_store_list_checked(roots: HangarRoots) -[FS, Env]> [StoreEntry] HangarReadError! {
+pkg_store_list_checked: fn(roots: HangarRoots) -[FS, Env]> [StoreEntry] HangarReadError! {
     pkg_store_list_impl(roots, true)
 }
 
-fn pkg_store_list_impl(roots: HangarRoots, strict: Bool) -[FS, Env]> [StoreEntry] HangarReadError! {
+pkg_store_list_impl: fn(roots: HangarRoots, strict: Bool) -[FS, Env]> [StoreEntry] HangarReadError! {
     out := [StoreEntry]{}
-    store :: roots.hangar_dir()
-    entries :: files.list_dir(store) ? listed -> listed ! error -> {
+    store: roots.hangar_dir()
+    entries: files.list_dir(store) ? listed -> listed ! error -> {
         if pkg_io_is_not_found(error) || !strict -> return Ok(out)
         return Err(HangarReadError.IO(error))
     }
     object_count := 0
     loop entry in entries {
-        kind :: if files.stat(entry.path) == {
+        kind: if files.stat(entry.path) == {
             .Ok(info) -> info
             .Err(error) -> {
                 if !strict -> next
@@ -402,8 +402,8 @@ fn pkg_store_list_impl(roots: HangarRoots, strict: Bool) -[FS, Env]> [StoreEntry
             }
         }
         if !kind.is_dir -> next
-        meta :: files.join(entry.path, "meta.json")
-        info :: files.stat(meta) ? found -> found ! error -> {
+        meta: files.join(entry.path, "meta.json")
+        info: files.stat(meta) ? found -> found ! error -> {
             if pkg_io_is_not_found(error) || !strict -> next
             return Err(HangarReadError.IO(error))
         }
@@ -415,14 +415,14 @@ fn pkg_store_list_impl(roots: HangarRoots, strict: Bool) -[FS, Env]> [StoreEntry
         if object_count > HANGAR_MAX_STORE_OBJECTS {
             return Err(HangarReadError.InvalidData("Hangar contains more than {HANGAR_MAX_STORE_OBJECTS} store objects"))
         }
-        text :: if pkg_hangar_read_bounded_text(meta, HANGAR_MAX_STORE_META_BYTES) == {
+        text: if pkg_hangar_read_bounded_text(meta, HANGAR_MAX_STORE_META_BYTES) == {
             .Ok(read) -> read
             .Err(error) -> {
                 if !strict -> next
                 return Err(error)
             }
         }
-        parsed :: if pkg_parse_meta(text) == {
+        parsed: if pkg_parse_meta(text) == {
             .Val(found) -> found
             .None -> {
                 if !strict -> next
@@ -453,11 +453,11 @@ fn pkg_store_list_impl(roots: HangarRoots, strict: Bool) -[FS, Env]> [StoreEntry
 }
 
 // A metadata file of at most `limit` bytes, as UTF-8.
-fn pkg_hangar_read_bounded_text(path: String, limit: Int) -[FS]> String HangarReadError! {
-    info :: files.stat(path) ?? return Err(HangarReadError.IO(err))
+pkg_hangar_read_bounded_text: fn(path: String, limit: Int) -[FS]> String HangarReadError! {
+    info: files.stat(path) ?? return Err(HangarReadError.IO(err))
     if info.size > limit -> return Err(HangarReadError.InvalidData("Hangar metadata `{path}` exceeds {limit} bytes"))
-    bytes :: files.read_at(path, 0, limit + 1) ?? return Err(HangarReadError.IO(err))
+    bytes: files.read_at(path, 0, limit + 1) ?? return Err(HangarReadError.IO(err))
     if bytes.len() > limit -> return Err(HangarReadError.InvalidData("Hangar metadata `{path}` exceeds {limit} bytes"))
-    text :: String.from_bytes(bytes) ?? return Err(HangarReadError.InvalidData("Hangar metadata `{path}` is not UTF-8"))
+    text: String.from_bytes(bytes) ?? return Err(HangarReadError.InvalidData("Hangar metadata `{path}` is not UTF-8"))
     Ok(text)
 }

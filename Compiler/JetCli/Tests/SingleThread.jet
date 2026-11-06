@@ -7,51 +7,51 @@ use {
     jet_ir.[IRAsmLeaf, IRFunction, IRLibraryExport, IRModule, IROp, IR_PLUGIN_GUEST_PREFIX, ir_emit, ir_function_new, ir_intern_name, ir_module_new, ir_thread_exports]
 }
 
-fn single_thread_test_fn(m: &IRModule, name: String, runtime: [String], calls: [Int], addresses: [Int]) -> IRFunction {
+single_thread_test_fn: fn(m: &IRModule, name: String, runtime: [String], calls: [Int], addresses: [Int]) -> IRFunction {
     f := ir_function_new(name, name, name, "main.jet", 1)
     loop symbol in runtime {
-        row :: ir_intern_name(&m, symbol)
-        _ :: ir_emit(&f, IROp.CallRuntime, -1, row, 0, 0, 1)
+        row: ir_intern_name(&m, symbol)
+        _: ir_emit(&f, IROp.CallRuntime, -1, row, 0, 0, 1)
     }
     loop callee in calls -> _ := ir_emit(&f, IROp.Call, -1, callee, 0, 0, 1)
     loop callee in addresses -> _ := ir_emit(&f, IROp.FunctionAddress, -1, callee, -1, -1, 1)
     f
 }
 
-fn single_thread_test_program(runtime: [String]) -> IRModule {
+single_thread_test_program: fn(runtime: [String]) -> IRModule {
     m := ir_module_new()
-    f :: single_thread_test_fn(&m, "run", runtime, [Int]{}, [Int]{})
+    f: single_thread_test_fn(&m, "run", runtime, [Int]{}, [Int]{})
     &m.functions.push(f)
     m
 }
 
-fn single_thread_test_runtime(receipt: String?) -> JetCLIRuntimeExports {
+single_thread_test_runtime: fn(receipt: String?) -> JetCLIRuntimeExports {
     threads := [U8]?{None}
     if receipt == .Val(text) -> threads = Val(text.bytes())
     JetCLIRuntimeExports{key: "test", exports: [U8]{}, threads: threads, failure: None}
 }
 
-fn single_thread_test_export(function: Int, symbol: String, init_priority: Int) -> IRLibraryExport {
+single_thread_test_export: fn(function: Int, symbol: String, init_priority: Int) -> IRLibraryExport {
     IRLibraryExport{function: function, symbol: symbol, init_priority: init_priority, fini_priority: -1, guards: [Int]{}}
 }
 
 #Test("the thread receipt names each export that reaches a thread start, a signal handler or a library load") {
     m := ir_module_new()
-    start :: single_thread_test_fn(&m, "start", ["pthread_create"], [Int]{}, [Int]{})
+    start: single_thread_test_fn(&m, "start", ["pthread_create"], [Int]{}, [Int]{})
     &m.functions.push(start)
-    spawn :: single_thread_test_fn(&m, "spawn", [String]{}, [Int]{0}, [Int]{})
+    spawn: single_thread_test_fn(&m, "spawn", [String]{}, [Int]{0}, [Int]{})
     &m.functions.push(spawn)
-    plain :: single_thread_test_fn(&m, "plain", ["jet_rt_alloc"], [Int]{}, [Int]{})
+    plain: single_thread_test_fn(&m, "plain", ["jet_rt_alloc"], [Int]{}, [Int]{})
     &m.functions.push(plain)
-    address :: single_thread_test_fn(&m, "address", [String]{}, [Int]{}, [Int]{0})
+    address: single_thread_test_fn(&m, "address", [String]{}, [Int]{}, [Int]{0})
     &m.functions.push(address)
-    routed :: single_thread_test_fn(&m, "routed", ["jet_rt_spawn"], [Int]{}, [Int]{})
+    routed: single_thread_test_fn(&m, "routed", ["jet_rt_spawn"], [Int]{}, [Int]{})
     &m.functions.push(routed)
-    handler :: single_thread_test_fn(&m, "handler", ["signal"], [Int]{}, [Int]{})
+    handler: single_thread_test_fn(&m, "handler", ["signal"], [Int]{}, [Int]{})
     &m.functions.push(handler)
-    load :: single_thread_test_fn(&m, "load", ["dlopen"], [Int]{}, [Int]{})
+    load: single_thread_test_fn(&m, "load", ["dlopen"], [Int]{}, [Int]{})
     &m.functions.push(load)
-    exports :: [IRLibraryExport]{
+    exports: [IRLibraryExport]{
         single_thread_test_export(1, "jet_rt_spawn", -1),
         single_thread_test_export(2, "jet_rt_plain", 0),
         single_thread_test_export(3, "jet_rt_address", -1),
@@ -61,7 +61,7 @@ fn single_thread_test_export(function: Int, symbol: String, init_priority: Int) 
     }
     assert_eq(ir_thread_exports(m, exports), ["jet_rt_address", "jet_rt_handler", "jet_rt_load", "jet_rt_routed", "jet_rt_spawn"])
     // An unguarded lifecycle hook runs in every program that links the runtime.
-    hooked :: [IRLibraryExport]{single_thread_test_export(2, "jet_rt_plain", 0), single_thread_test_export(5, "jet_rt_handler", 0)}
+    hooked: [IRLibraryExport]{single_thread_test_export(2, "jet_rt_plain", 0), single_thread_test_export(5, "jet_rt_handler", 0)}
     assert_eq(ir_thread_exports(m, hooked), ["*"])
     // A guarded one runs when the program keeps its guard storage (data row
     // 7): every export that can reach that storage is listed.
@@ -71,7 +71,7 @@ fn single_thread_test_export(function: Int, symbol: String, init_priority: Int) 
     other := single_thread_test_fn(&m, "other", [String]{}, [Int]{}, [Int]{})
     _ := ir_emit(&other, IROp.DataAddress, -1, 8, -1, -1, 1)
     &m.functions.push(other)
-    guarded :: [IRLibraryExport]{
+    guarded: [IRLibraryExport]{
         IRLibraryExport{function: 5, symbol: "jet_rt_handler", init_priority: 3, fini_priority: -1, guards: [Int]{7}},
         single_thread_test_export(7, "jet_rt_keeper", -1),
         single_thread_test_export(8, "jet_rt_other", -1),
@@ -80,13 +80,13 @@ fn single_thread_test_export(function: Int, symbol: String, init_priority: Int) 
 }
 
 #Test("a program without a readable thread receipt keeps the locked RC forms") {
-    m :: single_thread_test_program(["jet_rt_alloc"])
+    m: single_thread_test_program(["jet_rt_alloc"])
     assert(!jet_cli_single_thread(m, single_thread_test_runtime(None), [String:Bool]{}))
     assert(jet_cli_single_thread(m, single_thread_test_runtime(Val("jet_rt_native_task_spawn")), [String:Bool]{}))
 }
 
 #Test("a call of an export the receipt names, its main's or any under `*` keeps the locked RC forms") {
-    receipt :: "jet_rt_native_task_spawn\njet_rt_process_signal_install"
+    receipt: "jet_rt_native_task_spawn\njet_rt_process_signal_install"
     assert(!jet_cli_single_thread(single_thread_test_program(["jet_rt_alloc", "jet_rt_native_task_spawn"]), single_thread_test_runtime(Val(receipt)), [String:Bool]{}))
     assert(!jet_cli_single_thread(single_thread_test_program(["jet_rt_process_signal_install"]), single_thread_test_runtime(Val(receipt)), [String:Bool]{}))
     assert(!jet_cli_single_thread(single_thread_test_program(["jet_rt_alloc"]), single_thread_test_runtime(Val("*")), [String:Bool]{}))

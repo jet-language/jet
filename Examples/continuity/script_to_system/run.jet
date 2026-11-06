@@ -2,21 +2,21 @@
 // The same functions and types remain the package, service, executable, and
 // native Library surface after package metadata is added.
 #CLI
-struct TimerArgs {
+TimerArgs: struct {
     #Doc("minutes to convert") minutes: Int{1}
 }
 
-fn seconds(minutes: Int) -> Int { minutes * 60 }
+seconds: fn(minutes: Int) -> Int { minutes * 60 }
 
-fn run(args: TimerArgs) {
+run: fn(args: TimerArgs) {
     print(seconds(args.minutes))
 }
 
-fn serve() {
+serve: fn() {
     print(seconds(1))
 }
 
-fn dev() {
+dev: fn() {
     serve()
 }
 
@@ -24,6 +24,6 @@ fn dev() {
     assert_eq(seconds(1), 60)
 }
 
-APP :: Output.Executable{ name: "pulse", entry: run }
-API :: Output.Service{ name: "pulse-api", entry: serve }
+APP: Output.Executable{ name: "pulse", entry: run }
+API: Output.Service{ name: "pulse-api", entry: serve }
 defaults: { run: APP }

@@ -1,22 +1,22 @@
 // E2421: a public fallible function must expose every named failure-carrier
 // member through a public declaration.
 #Error
-struct PublicFailure {
+PublicFailure: struct {
     priv detail: String
 }
 
-fn load() -> String PublicFailure! {
+load: fn() -> String PublicFailure! {
     return Err(PublicFailure{detail: "missing"})
 }
 
-priv module internal {
+priv internal: module {
     #Error
-    enum PrivateFailure { Missing }
+    PrivateFailure: enum { Missing }
 }
 
-fn private_load() -> String internal.PrivateFailure! {
+private_load: fn() -> String internal.PrivateFailure! {
     return Err(internal.PrivateFailure.Missing)
 }
 
-fn run() {
+run: fn() {
 }

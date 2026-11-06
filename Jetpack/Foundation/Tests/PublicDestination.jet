@@ -4,14 +4,14 @@ use {
     jetpack_foundation.[
         FoundationFetchError, foundation_addresses_are_public, foundation_resolve_public_addresses,
     ]
-    net :: core.net
-    ip :: core.net.ip
+    net: core.net
+    ip: core.net.ip
 }
 
-fn foundation_test_public_v4(a: Int, b: Int, c: Int, d: Int) -> Bool Never! {
+foundation_test_public_v4: fn(a: Int, b: Int, c: Int, d: Int) -> Bool Never! {
     ip.is_public_destination(IPv4{a: a, b: b, c: c, d: d})
 }
-fn foundation_test_public_v6(words: [Int]) -> Bool Never! {
+foundation_test_public_v6: fn(words: [Int]) -> Bool Never! {
     ip.ipv6_is_public_destination(IPv6{words: words})
 }
 
@@ -102,11 +102,11 @@ fn foundation_test_public_v6(words: [Int]) -> Bool Never! {
 }
 
 #Test("foundation all DNS answers must be public including mapped IPv6") {
-    public :: net.socket_addr("8.8.8.8", 443) ?? panic("public socket")
-    private :: net.socket_addr("127.0.0.1", 443) ?? panic("private socket")
-    mapped :: net.socket_addr("::ffff:127.0.0.1", 443) ?? panic("mapped socket")
-    mapped_public :: net.socket_addr("::ffff:8.8.8.8", 443) ?? panic("mapped public socket")
-    public_v6 :: net.socket_addr("2001:4860:4860::8888", 443) ?? panic("public IPv6 socket")
+    public: net.socket_addr("8.8.8.8", 443) ?? panic("public socket")
+    private: net.socket_addr("127.0.0.1", 443) ?? panic("private socket")
+    mapped: net.socket_addr("::ffff:127.0.0.1", 443) ?? panic("mapped socket")
+    mapped_public: net.socket_addr("::ffff:8.8.8.8", 443) ?? panic("mapped public socket")
+    public_v6: net.socket_addr("2001:4860:4860::8888", 443) ?? panic("public IPv6 socket")
     assert(!foundation_addresses_are_public([SocketAddr]{}))
     assert(foundation_addresses_are_public([SocketAddr]{public}))
     assert(foundation_addresses_are_public([SocketAddr]{public, mapped_public, public_v6}))
@@ -115,12 +115,12 @@ fn foundation_test_public_v6(words: [Int]) -> Bool Never! {
     assert(!foundation_addresses_are_public([SocketAddr]{public, mapped}))
 }
 #Test("foundation resolve public addresses returns the checked numeric endpoint") {
-    addresses :: foundation_resolve_public_addresses("[2001:4860:4860::8888]", 443) ?? panic("numeric IPv6 endpoint")
+    addresses: foundation_resolve_public_addresses("[2001:4860:4860::8888]", 443) ?? panic("numeric IPv6 endpoint")
     assert_eq(addresses.len(), 1)
     assert(foundation_addresses_are_public(addresses))
     assert_eq(net.socket_host(addresses[0]), "2001:4860:4860::8888")
     assert_eq(net.socket_port(addresses[0]), 443)
-    v4 :: foundation_resolve_public_addresses("8.8.8.8", 53) ?? panic("numeric IPv4 endpoint")
+    v4: foundation_resolve_public_addresses("8.8.8.8", 53) ?? panic("numeric IPv4 endpoint")
     assert_eq(net.socket_to_string(v4[0]), "8.8.8.8:53")
 }
 #Test("foundation resolve public addresses refuses private and invalid endpoints") {

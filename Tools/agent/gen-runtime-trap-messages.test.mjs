@@ -46,7 +46,7 @@ function unchanged(root, path, old) {
   assert.equal(statSync(join(root, path), { bigint: true }).mtimeNs, old.mtime);
 }
 function row(source, name, sink) {
-  const body = new RegExp(`^fn ${name}\\(\\) \\{\\n([\\s\\S]*?)^\\}`, 'm').exec(source)?.[1];
+  const body = new RegExp(`^${name}: fn\\(\\) \\{\\n([\\s\\S]*?)^\\}`, 'm').exec(source)?.[1];
   assert.notEqual(body, undefined, name);
   const bytes = [];
   const chunks = [];
@@ -74,7 +74,7 @@ test('real source facts produce only canonical raw prefix/LF; frozen bytes and m
   assert.deepEqual(newline.bytes, row(ordinary, 'trap_msg_newline', 'trap_write_word').bytes);
   assert.deepEqual(prefix.chunks, [8, 8, 8, 8, 8, 2]);
   assert.deepEqual(newline.chunks, [1]);
-  assert.equal((generated.match(/^fn /gm) ?? []).length, 2);
+  assert.equal((generated.match(/^\w+: fn\(/gm) ?? []).length, 2);
   console.log(JSON.stringify({ inputs: inputs.map(path => ({ path, sha256: hash(readFileSync(join(root, path))) })), generatedSha256: hash(Buffer.from(generated)), prefixBytes: prefix.bytes.length, prefixChunks: prefix.chunks, newlineBytes: newline.bytes.length, generatedSource: generated }));
 }));
 

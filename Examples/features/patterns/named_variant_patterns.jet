@@ -4,23 +4,23 @@
 // skips the fields a pattern leaves out, entries may come in any order, and
 // the positional form keeps working.
 #Error
-enum FetchError {
+FetchError: enum {
     BadURL(String)
     Timeout(seconds: Int, retries: Int)
 }
 
 #Error
-enum AppError {
+AppError: enum {
     FailedToFetch(url: String, cause: FetchError)
     Offline
 }
 
-enum Shape {
+Shape: enum {
     Rect(w: Int, h: Int)
     Circle(r: Int)
 }
 
-fn fetch(raw: String) -> String AppError! {
+fetch: fn(raw: String) -> String AppError! {
     if raw == "ftp://b" -> return Err(AppError.FailedToFetch{url: raw, cause: FetchError.BadURL("ftp is not supported")})
     if raw == "slow" -> return Err(AppError.FailedToFetch{url: raw, cause: FetchError.Timeout{seconds: 30, retries: 2}})
     if raw == "" -> return Err(.Offline)
@@ -30,7 +30,7 @@ fn fetch(raw: String) -> String AppError! {
 // Named patterns inside `.Err(…)`, nested two deep, with shorthand, `..`,
 // and entries in a different order from the declaration. The table covers
 // every state without `else`.
-fn report(raw: String) -> String {
+report: fn(raw: String) -> String {
     if fetch(raw) == {
         .Ok(page) -> page
         .Err(.FailedToFetch{url, cause: .BadURL(why)}) -> "could not fetch {url}: {why}"
@@ -40,7 +40,7 @@ fn report(raw: String) -> String {
 }
 
 // Top level: shorthand in any order, and a renamed binding.
-fn area(shape: Shape) -> Int {
+area: fn(shape: Shape) -> Int {
     if shape == {
         .Rect{h, w} -> w * h
         .Circle{r: radius} -> 3 * radius * radius
@@ -48,7 +48,7 @@ fn area(shape: Shape) -> Int {
 }
 
 // Inside `.Val(…)`, with a range pattern on one field and `_` on another.
-fn width(shape: Shape?) -> Int {
+width: fn(shape: Shape?) -> Int {
     if shape == {
         .Val(.Rect{w, h: 1..1}) -> w
         .Val(.Rect{w, ..}) -> w + 100
@@ -58,7 +58,7 @@ fn width(shape: Shape?) -> Int {
 }
 
 // The positional and named forms test the same payload slots.
-fn same(shape: Shape) -> Bool {
+same: fn(shape: Shape) -> Bool {
     positional := false
     named := false
     if shape == .Rect(w, h) -> positional = w < h
@@ -67,7 +67,7 @@ fn same(shape: Shape) -> Bool {
 }
 
 
-fn run() {
+run: fn() {
     print(report("https://a"))
     print(report("ftp://b"))
     print(report("slow"))

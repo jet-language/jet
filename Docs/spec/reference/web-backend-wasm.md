@@ -32,7 +32,7 @@ node Examples/features/basics/.jet/build/app.js
 ```
 
 `jet run`, `jet dev` and `jet test` run Linux x86-64 images only and refuse
-`os: web`; a package's `fn build` targets refuse it too. Under node the host
+`os: web`; a package's `build: fn` targets refuse it too. Under node the host
 file system is the program's; a page has none, so file calls fail with
 ENOSYS. The host runs one thread: a program that starts a `task` stops with
 E3001 (`tasks are not available on the web target yet`).

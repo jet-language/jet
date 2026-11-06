@@ -8,7 +8,7 @@ use {
     jet_ir.[IRLibraryExport, IRModule]
 }
 
-struct WebRuntime {
+WebRuntime: struct {
     bytes: [U8]
     // The receipt: `layout\t<data end>\t<slots>`, then an `export\t<symbol>\t<sig>`
     // row per export and an `import\t<space>\t<name>\t<sig>` row per import.
@@ -22,7 +22,7 @@ struct WebRuntime {
 // out the checked heap's exports (CHECKED_ALLOC_RUNTIME_EXPORTS), as the
 // prelinked native image does (JetBackend Image/RuntimePack.jet): their hook
 // would turn checked mode on in every web program.
-fn web_runtime_partition(m: IRModule, exports: [IRLibraryExport]) -> WebRuntime Never! {
+web_runtime_partition: fn(m: IRModule, exports: [IRLibraryExport]) -> WebRuntime Never! {
     rows := [String:Int]{}
     hooks := [WebHook]{}
     loop row in exports {
@@ -39,7 +39,7 @@ fn web_runtime_partition(m: IRModule, exports: [IRLibraryExport]) -> WebRuntime 
     WebRuntime{bytes: ^built.bytes, receipt: lines.join("\n"), errors: ^built.errors}
 }
 
-struct WebProgram {
+WebProgram: struct {
     bytes: [U8]
     manifest: String
     errors: [String]
@@ -48,12 +48,12 @@ struct WebProgram {
 // The program partition of built module `program` (its entry `program.entry`)
 // against the runtime partition's receipt `receipt`, and the manifest of the
 // two.
-fn web_program(program: ^IRModule, receipt: String) -> WebProgram Never! {
+web_program: fn(program: ^IRModule, receipt: String) -> WebProgram Never! {
     runtime_end := -1
     runtime_slots := -1
     runtime := [String:String]{}
     loop line in receipt.split("\n").to_list() {
-        fields :: line.split("\t").to_list()
+        fields: line.split("\t").to_list()
         if fields.len() == 3 && fields[0] == "layout" {
             runtime_end = Int.parse(fields[1]) ?? -1
             runtime_slots = Int.parse(fields[2]) ?? -1
@@ -66,17 +66,17 @@ fn web_program(program: ^IRModule, receipt: String) -> WebProgram Never! {
     }
     m := ^program
     web_lower(&m)
-    base :: web_align_up(runtime_end, 16)
+    base: web_align_up(runtime_end, 16)
     built := web_module(m, true, WebLayout{data_base: base, table_base: runtime_slots}, runtime, web_host_functions(), [String:Int]{}, [WebHook]{})
-    manifest :: web_manifest(runtime_end, runtime_slots, base, built.data_end, built.slots)
+    manifest: web_manifest(runtime_end, runtime_slots, base, built.data_end, built.slots)
     WebProgram{bytes: ^built.bytes, manifest: manifest, errors: ^built.errors}
 }
 
 // The generated host files of a web build: `app.js`, `jet_dom_runtime.js`.
-fn web_app_js() -> String Never! {
+web_app_js: fn() -> String Never! {
     WEB_APP_JS
 }
 
-fn web_dom_runtime_js() -> String Never! {
+web_dom_runtime_js: fn() -> String Never! {
     WEB_DOM_RUNTIME_JS
 }

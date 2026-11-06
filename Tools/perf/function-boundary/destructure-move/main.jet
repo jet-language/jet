@@ -1,21 +1,21 @@
 // Function-boundary cell destructure-move (#4567): two owned lists come back
 // as one tuple and are destructured on every call; the fields must move.
-#CLI struct Args { n: Int }
+#CLI Args: struct { n: Int }
 
-fn partition(seed: Int) -> (evens: [Int], odds: [Int]) {
+partition: fn(seed: Int) -> (evens: [Int], odds: [Int]) {
     evens := [Int]{}
     odds := [Int]{}
     loop i in 0..<64 {
-        v :: seed + i
+        v: seed + i
         if v % 2 == 0 -> &evens.push(v) else -> &odds.push(v)
     }
     (evens: evens, odds: odds)
 }
 
-fn run(args: Args) {
+run: fn(args: Args) {
     acc := 0
     loop i in 0..<args.n {
-        (evens, odds) :: partition(i)
+        (evens, odds): partition(i)
         acc += evens.len() + odds[0] + evens[31]
     }
     print(acc)

@@ -6,52 +6,52 @@
 use {
     jet_env_model.[ReloadPolicy, env_hook_read_nofollow, envmodel_evaluate_env_with_selections]
     jetpack_foundation.[CONFIG_DEFAULT_DIR, ENV_FILE, MAX_TREE_FILE_BYTES]
-    files :: core.files
-    sys :: core.sys
-    time :: core.time
+    files: core.files
+    sys: core.sys
+    time: core.time
 }
 
-ENV_HOOK_RELOAD_STATE_FILE :: "env-hook-reload"
+ENV_HOOK_RELOAD_STATE_FILE: "env-hook-reload"
 
 // The typed reload policy, read without realizing packages or executing
 // project code. Legacy `pkg.*` env files use the normal prompt policy.
-fn env_hook_reload_policy(root: String) -[FS, Env, Exec, Time.Wait]> ReloadPolicy Never! {
+env_hook_reload_policy: fn(root: String) -[FS, Env, Exec, Time.Wait]> ReloadPolicy Never! {
     env_hook_reload_policy_with_environment(root, None)
 }
 
 // The reload policy of the selected `env.<name>` environment module.
-fn env_hook_reload_policy_with_environment(root: String, requested_environment: String?) -[FS, Env, Exec, Time.Wait]> ReloadPolicy Never! {
-    bytes :: env_hook_read_nofollow(files.join(root, ENV_FILE), MAX_TREE_FILE_BYTES) ?? return ReloadPolicy.Prompt
-    source :: String.from_bytes(bytes) ?? return ReloadPolicy.Prompt
-    plan :: envmodel_evaluate_env_with_selections(source, root, None, requested_environment) ?? return ReloadPolicy.Prompt
+env_hook_reload_policy_with_environment: fn(root: String, requested_environment: String?) -[FS, Env, Exec, Time.Wait]> ReloadPolicy Never! {
+    bytes: env_hook_read_nofollow(files.join(root, ENV_FILE), MAX_TREE_FILE_BYTES) ?? return ReloadPolicy.Prompt
+    source: String.from_bytes(bytes) ?? return ReloadPolicy.Prompt
+    plan: envmodel_evaluate_env_with_selections(source, root, None, requested_environment) ?? return ReloadPolicy.Prompt
     plan.lifecycle.reload
 }
 
 // Coalesce a watched definition change until its debounce window expires.
 // State is project-local and holds only the definition hash and a clock
 // value; it never stores environment values or secrets.
-fn env_hook_watch_reload_ready(root: String, hash: String, debounce_ms: Int) -[FS, Env, Time]> Bool EnvironmentError! {
+env_hook_watch_reload_ready: fn(root: String, hash: String, debounce_ms: Int) -[FS, Env, Time]> Bool EnvironmentError! {
     if debounce_ms == 0 -> return Ok(true)
-    state_dir :: files.join(root, CONFIG_DEFAULT_DIR)
-    state_path :: files.join(state_dir, ENV_HOOK_RELOAD_STATE_FILE)
-    now :: time.unix_ms(time.now())
+    state_dir: files.join(root, CONFIG_DEFAULT_DIR)
+    state_path: files.join(state_dir, ENV_HOOK_RELOAD_STATE_FILE)
+    now: time.unix_ms(time.now())
     if files.read(state_path) == .Ok(state) {
-        lines :: state.lines()
+        lines: state.lines()
         if lines.len() >= 2 && lines[0] == hash {
             if Int.parse(lines[1]) == .Ok(started) {
-                elapsed :: if now > started -> now - started else -> 0
+                elapsed: if now > started -> now - started else -> 0
                 return Ok(elapsed >= debounce_ms)
             }
         }
     }
     files.create_dir_all(state_dir) ?? return Err(EnvironmentError.Activation("couldn't create {state_dir}: {err}"))
-    temporary :: files.join(state_dir, ".env-hook-reload.{sys.pid()}.tmp")
+    temporary: files.join(state_dir, ".env-hook-reload.{sys.pid()}.tmp")
     files.write(temporary, "{hash}\n{now}\n") ?? return Err(EnvironmentError.Activation("couldn't write {state_path}: {err}"))
     files.rename(temporary, state_path) ?? return Err(EnvironmentError.Activation("couldn't commit {state_path}: {err}"))
     Ok(false)
 }
 
 // Remove the debounce marker after a watched definition has activated.
-fn env_hook_clear_watch_reload(root: String) -[FS]> {
+env_hook_clear_watch_reload: fn(root: String) -[FS]> {
     files.remove(files.join(files.join(root, CONFIG_DEFAULT_DIR), ENV_HOOK_RELOAD_STATE_FILE)).drop("an absent debounce marker needs no removal")
 }

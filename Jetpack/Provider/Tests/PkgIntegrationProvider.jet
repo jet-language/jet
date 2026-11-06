@@ -2,14 +2,14 @@
 // Native document bytes are copied from the originals; only Jet interpolation
 // braces are escaped. No reference outputs or expectations are fabricated.
 
-fn provider_pkg_integration_contract(contracts: [ProviderFamilyContract], family: ProviderFamily) -> ProviderFamilyContract Never! {
+provider_pkg_integration_contract: fn(contracts: [ProviderFamilyContract], family: ProviderFamily) -> ProviderFamilyContract Never! {
     loop contract in contracts {
         if contract.family == family -> return contract
     }
     panic("original contract find must succeed")
 }
 
-fn provider_pkg_integration_report_error(report: ProviderFactReport) -> ProviderGraphError Never! {
+provider_pkg_integration_report_error: fn(report: ProviderFactReport) -> ProviderGraphError Never! {
     if report.validate() == {
         .Err(error) -> error
         .Ok(_) -> panic("original report validation must fail")
@@ -18,7 +18,7 @@ fn provider_pkg_integration_report_error(report: ProviderFactReport) -> Provider
 
 // Ported from pkg.rs:919-948.
 #Test("pkg integration provider_contract_covers_core_nix_path_github") {
-    contracts :: ProviderFamilyContract.built_in()
+    contracts: ProviderFamilyContract.built_in()
     families := [ProviderFamily]{}
     loop contract in contracts -> &families.push(contract.family)
     assert(families.contains(ProviderFamily.Core))
@@ -32,7 +32,7 @@ fn provider_pkg_integration_report_error(report: ProviderFactReport) -> Provider
 
 // Ported from pkg.rs:951-958.
 #Test("pkg integration npm_metadata_normalizes_deps_scripts_bins") {
-    facts :: MetadataFacts.from_npm("{{\"name\":\"web\",\"version\":\"1.0.0\",\"license\":\"MIT\",\"dependencies\":{{\"vite\":\"5\"}},\"scripts\":{{\"build\":\"vite build\"}},\"bin\":{{\"web\":\"cli.js\"}}}}")
+    facts: MetadataFacts.from_npm("{{\"name\":\"web\",\"version\":\"1.0.0\",\"license\":\"MIT\",\"dependencies\":{{\"vite\":\"5\"}},\"scripts\":{{\"build\":\"vite build\"}},\"bin\":{{\"web\":\"cli.js\"}}}}")
     assert_eq(facts.dependencies, [String]{"vite"})
     assert_eq(facts.scripts, [String]{"build"})
     assert_eq(facts.bins, [String]{"web"})
@@ -40,25 +40,25 @@ fn provider_pkg_integration_report_error(report: ProviderFactReport) -> Provider
 
 // Ported from pkg.rs:961-985.
 #Test("pkg integration provider_report_round_trips_through_lock_and_explain") {
-    native :: "{{\"name\":\"web\",\"version\":\"1.0.0\",\"license\":\"MIT\",\"dependencies\":{{\"vite\":\"5\"}}}}"
-    report :: provider_normalize_document(ProviderFamily.Npm, native)
+    native: "{{\"name\":\"web\",\"version\":\"1.0.0\",\"license\":\"MIT\",\"dependencies\":{{\"vite\":\"5\"}}}}"
+    report: provider_normalize_document(ProviderFamily.Npm, native)
     provider_test_valid(report, "lossless npm report")
-    shared :: report.shared_facts()
+    shared: report.shared_facts()
     assert_eq(shared.qualified_reference(), "web@npm#version=1.0.0")
     assert_eq(shared.native_document, native)
     assert(shared.explain_lines().contains("native json: retained"))
     assert_eq(ProviderFacts.from_json(report.export_json()) ?? panic("shared provider facts JSON"), shared)
-    lock :: report.lock_record("app", "web@npm#1.0.0", "any") ?? panic("provider semantic lock")
+    lock: report.lock_record("app", "web@npm#1.0.0", "any") ?? panic("provider semantic lock")
     assert_eq(lock.identity.exact, "web@npm#version=1.0.0")
     assert_eq(lock.future_fields.get("provider-facts-digest"), Val(shared.digest()))
 }
 
 // Ported from pkg.rs:988-1002.
 #Test("pkg integration provider_report_surfaces_missing_identity_as_loss") {
-    native :: "{{\"name\":\"web\"}}"
-    report :: provider_normalize_document(ProviderFamily.Npm, native)
+    native: "{{\"name\":\"web\"}}"
+    report: provider_normalize_document(ProviderFamily.Npm, native)
     assert(!report.is_lossless())
-    error :: provider_pkg_integration_report_error(report)
+    error: provider_pkg_integration_report_error(report)
     assert(error.message.contains("lossy") || error.message.contains("exact"))
     found := false
     loop loss in report.shared_facts_for("web@npm").losses {
@@ -69,40 +69,40 @@ fn provider_pkg_integration_report_error(report: ProviderFactReport) -> Provider
 
 // Ported from pkg.rs:1005-1037.
 #Test("pkg integration provider_report_preserves_alias_resolution_and_typed_native_facts") {
-    native :: "{{\"name\":\"web\",\"version\":\"1.0.0\",\"yanked\":false}}"
-    report :: provider_normalize_document(ProviderFamily.Npm, native)
-    shared :: report.shared_facts_for("web@catalog")
+    native: "{{\"name\":\"web\",\"version\":\"1.0.0\",\"yanked\":false}}"
+    report: provider_normalize_document(ProviderFamily.Npm, native)
+    shared: report.shared_facts_for("web@catalog")
     shared.validate() ?? panic("catalog alias remains lossless")
     assert_eq(shared.qualified_reference(), "web@catalog#version=1.0.0")
     assert_eq(shared.native_document, native)
     assert_eq(shared.facts.get("provider.resolved_selector"), Val(ProviderFactValue.Text("#version=1.0.0")))
     assert_eq(shared.facts.get("provider.npm.native.yanked"), Val(ProviderFactValue.List([ProviderFactValue]{ProviderFactValue.Bool(false)})))
-    lock :: report.lock_record("app", "web@catalog", "any") ?? panic("alias lock retains source authority")
+    lock: report.lock_record("app", "web@catalog", "any") ?? panic("alias lock retains source authority")
     assert_eq(lock.identity.exact, "web@catalog#version=1.0.0")
-    locked :: provider_test_locked_facts(lock)
+    locked: provider_test_locked_facts(lock)
     locked.validate() ?? panic("locked alias facts")
     assert_eq(locked.reference, "web@catalog")
 }
 
 // Ported from pkg.rs:1040-1058. A SwiftPM v2 Package.resolved carries a
 // top-level `"version": 2` (swift-package-manager ResolvedPackagesStore.swift
-// `struct V2`); the Rust fixture omitted it.
+// `V2: struct`); the Rust fixture omitted it.
 #Test("pkg integration swiftpm_v2_report_keeps_revision_and_native_bytes") {
-    revision :: "0123456789abcdef0123456789abcdef01234567"
-    native :: "{{\"pins\":[{{\"identity\":\"swift-log\",\"state\":{{\"revision\":\"{revision}\",\"version\":\"1.5.4\"}}}}],\"version\":2}}"
-    report :: provider_normalize_document(ProviderFamily.SwiftPM, native)
+    revision: "0123456789abcdef0123456789abcdef01234567"
+    native: "{{\"pins\":[{{\"identity\":\"swift-log\",\"state\":{{\"revision\":\"{revision}\",\"version\":\"1.5.4\"}}}}],\"version\":2}}"
+    report: provider_normalize_document(ProviderFamily.SwiftPM, native)
     provider_test_valid(report, "SwiftPM v2 pin is lossless")
-    shared :: report.shared_facts()
+    shared: report.shared_facts()
     assert_eq(shared.qualified_reference(), "swift-log@swiftpm#revision={revision}")
     assert_eq(shared.native_document, native)
-    value :: shared.facts.get("provider.revision") ?? panic("revision fact")
+    value: shared.facts.get("provider.revision") ?? panic("revision fact")
     assert(value.debug().contains(revision))
 }
 
 // Ported from pkg.rs:1061-1071.
 #Test("pkg integration homebrew_report_reads_stable_version_and_dependencies") {
-    native :: "{{\"name\":\"jq\",\"versions\":{{\"stable\":\"1.7.1\"}},\"license\":\"MIT\",\"dependencies\":[\"oniguruma\"]}}"
-    report :: provider_normalize_document(ProviderFamily.Homebrew, native)
+    native: "{{\"name\":\"jq\",\"versions\":{{\"stable\":\"1.7.1\"}},\"license\":\"MIT\",\"dependencies\":[\"oniguruma\"]}}"
+    report: provider_normalize_document(ProviderFamily.Homebrew, native)
     provider_test_valid(report, "Homebrew formula identity is lossless")
     assert_eq(report.facts.version, "1.7.1")
     assert_eq(report.facts.dependencies, [String]{"oniguruma"})
@@ -111,57 +111,57 @@ fn provider_pkg_integration_report_error(report: ProviderFactReport) -> Provider
 
 // Ported from pkg.rs:1074-1105.
 #Test("pkg integration homebrew_conformance_retains_bottle_source_and_hook_facts") {
-    native :: "{{\"name\":\"jq\",\"full_name\":\"jq\",\"version\":\"1.7.1\",\"versions\":{{\"stable\":\"1.7.1\",\"head\":\"HEAD\"}},\"license\":\"MIT\",\"tap\":\"homebrew/core\",\"dependencies\":[\"oniguruma\"],\"build_dependencies\":[\"pkg-config\"],\"test_dependencies\":[\"bats-core\"],\"recommended_dependencies\":[{{\"name\":\"less\",\"version\":\"1.0\"}}],\"source\":{{\"url\":\"https://example.invalid/jq.tar.gz\",\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}},\"bottle\":{{\"stable\":{{\"files\":{{\"arm64_sonoma\":{{\"url\":\"https://example.invalid/jq.arm64.bottle.tar.gz\",\"sha256\":\"abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\"}}}}}}}},\"relocatable\":true,\"test\":\"system \\\"#{{bin}}/jq\\\", \\\"--version\\\"\",\"deprecated\":false}}"
-    report :: provider_normalize_document(ProviderFamily.Homebrew, native)
+    native: "{{\"name\":\"jq\",\"full_name\":\"jq\",\"version\":\"1.7.1\",\"versions\":{{\"stable\":\"1.7.1\",\"head\":\"HEAD\"}},\"license\":\"MIT\",\"tap\":\"homebrew/core\",\"dependencies\":[\"oniguruma\"],\"build_dependencies\":[\"pkg-config\"],\"test_dependencies\":[\"bats-core\"],\"recommended_dependencies\":[{{\"name\":\"less\",\"version\":\"1.0\"}}],\"source\":{{\"url\":\"https://example.invalid/jq.tar.gz\",\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}},\"bottle\":{{\"stable\":{{\"files\":{{\"arm64_sonoma\":{{\"url\":\"https://example.invalid/jq.arm64.bottle.tar.gz\",\"sha256\":\"abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\"}}}}}}}},\"relocatable\":true,\"test\":\"system \\\"#{{bin}}/jq\\\", \\\"--version\\\"\",\"deprecated\":false}}"
+    report: provider_normalize_document(ProviderFamily.Homebrew, native)
     provider_test_valid(report, "Homebrew formula is lossless")
     assert_eq(report.facts.dependencies, [String]{"oniguruma"})
     assert_eq(report.facts.build_dependencies, [String]{"pkg-config"})
     assert_eq(report.facts.dev_dependencies, [String]{"bats-core"})
     assert(report.facts.typed.has_key("provider.homebrew.bottle.arm64_sonoma.sha256"))
     assert(report.shared_facts().facts.has_key("provider.homebrew.hook.test"))
-    shared :: report.shared_facts()
-    lock :: report.lock_record("app", "jq@homebrew#1.7.1", "x86_64-linux") ?? panic("Homebrew provider lock")
-    locked :: provider_test_locked_facts(lock)
+    shared: report.shared_facts()
+    lock: report.lock_record("app", "jq@homebrew#1.7.1", "x86_64-linux") ?? panic("Homebrew provider lock")
+    locked: provider_test_locked_facts(lock)
     assert_eq(locked, shared)
     assert_eq(locked.native_document, native)
 }
 
 // Ported from pkg.rs:1108-1119.
 #Test("pkg integration homebrew_conformance_reports_conflicting_identity_facts") {
-    native :: "{{\"name\":\"jq\",\"version\":\"1.7.1\",\"versions\":{{\"stable\":\"1.7.2\"}}}}"
-    report :: provider_normalize_document(ProviderFamily.Homebrew, native)
+    native: "{{\"name\":\"jq\",\"version\":\"1.7.1\",\"versions\":{{\"stable\":\"1.7.2\"}}}}"
+    report: provider_normalize_document(ProviderFamily.Homebrew, native)
     assert(provider_test_has(report.conflicts, [String]{"conflicting version"}))
     provider_test_invalid(report)
 }
 
 // Ported from pkg.rs:1122-1150.
 #Test("pkg integration github_conformance_retains_release_assets_source_and_status") {
-    native :: "{{\"name\":\"tool\",\"tag_name\":\"v1.2.3\",\"target_commitish\":\"0123456789abcdef0123456789abcdef01234567\",\"license\":\"MIT\",\"repository\":{{\"full_name\":\"acme/tool\"}},\"draft\":false,\"prerelease\":false,\"assets\":[{{\"name\":\"tool-linux\",\"platform\":\"x86_64-linux\",\"digest\":\"sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"browser_download_url\":\"https://example.invalid/tool\"}}],\"signature\":{{\"key\":\"pk\",\"value\":\"sig\"}},\"advisories\":[\"CVE-0000-0000\"],\"hooks\":{{\"build\":\"reviewed\"}}}}"
-    report :: provider_normalize_document(ProviderFamily.Github, native)
+    native: "{{\"name\":\"tool\",\"tag_name\":\"v1.2.3\",\"target_commitish\":\"0123456789abcdef0123456789abcdef01234567\",\"license\":\"MIT\",\"repository\":{{\"full_name\":\"acme/tool\"}},\"draft\":false,\"prerelease\":false,\"assets\":[{{\"name\":\"tool-linux\",\"platform\":\"x86_64-linux\",\"digest\":\"sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"browser_download_url\":\"https://example.invalid/tool\"}}],\"signature\":{{\"key\":\"pk\",\"value\":\"sig\"}},\"advisories\":[\"CVE-0000-0000\"],\"hooks\":{{\"build\":\"reviewed\"}}}}"
+    report: provider_normalize_document(ProviderFamily.Github, native)
     provider_test_valid(report, "GitHub release is lossless")
     assert_eq(report.facts.version, "v1.2.3")
     assert(report.facts.platforms.contains("x86_64-linux"))
     assert(report.facts.typed.has_key("provider.github.revision"))
     assert(report.shared_facts().facts.has_key("provider.github.asset.tool-linux.browser_download_url"))
-    shared :: report.shared_facts()
-    lock :: report.lock_record("app", "tool@github#v1.2.3", "x86_64-linux") ?? panic("GitHub provider lock")
-    locked :: provider_test_locked_facts(lock)
+    shared: report.shared_facts()
+    lock: report.lock_record("app", "tool@github#v1.2.3", "x86_64-linux") ?? panic("GitHub provider lock")
+    locked: provider_test_locked_facts(lock)
     assert_eq(locked, shared)
     assert_eq(locked.native_document, native)
 }
 
 // Ported from pkg.rs:1153-1164.
 #Test("pkg integration github_conformance_reports_unhashed_release_assets") {
-    native :: "{{\"name\":\"tool\",\"tag_name\":\"v1.2.3\",\"assets\":[{{\"name\":\"tool-linux\",\"browser_download_url\":\"https://example.invalid/tool\"}}]}}"
-    report :: provider_normalize_document(ProviderFamily.Github, native)
+    native: "{{\"name\":\"tool\",\"tag_name\":\"v1.2.3\",\"assets\":[{{\"name\":\"tool-linux\",\"browser_download_url\":\"https://example.invalid/tool\"}}]}}"
+    report: provider_normalize_document(ProviderFamily.Github, native)
     assert(provider_test_has(report.losses, [String]{"no content digest"}))
     provider_test_invalid(report)
 }
 
 // Ported from pkg.rs:1167-1187.
 #Test("pkg integration binary_conformance_retains_platform_signature_and_provenance") {
-    native :: "{{\"name\":\"tool\",\"version\":\"2.0.0\",\"hash\":\"sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"platforms\":[\"x86_64-linux\"],\"license\":\"MIT\",\"url\":\"https://example.invalid/tool\",\"signature\":{{\"key\":\"pk\",\"value\":\"sig\"}},\"provenance\":{{\"builder\":\"ci\"}},\"sbom\":{{\"format\":\"spdx\"}},\"variants\":{{\"debug\":{{\"features\":[\"trace\"]}}}}}}"
-    report :: provider_normalize_document(ProviderFamily.Binary, native)
+    native: "{{\"name\":\"tool\",\"version\":\"2.0.0\",\"hash\":\"sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"platforms\":[\"x86_64-linux\"],\"license\":\"MIT\",\"url\":\"https://example.invalid/tool\",\"signature\":{{\"key\":\"pk\",\"value\":\"sig\"}},\"provenance\":{{\"builder\":\"ci\"}},\"sbom\":{{\"format\":\"spdx\"}},\"variants\":{{\"debug\":{{\"features\":[\"trace\"]}}}}}}"
+    report: provider_normalize_document(ProviderFamily.Binary, native)
     provider_test_valid(report, "binary provider facts are lossless")
     assert_eq(report.shared_facts().selector.digest, "sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
     assert(report.shared_facts().facts.has_key("provider.binary.signature"))
@@ -171,8 +171,8 @@ fn provider_pkg_integration_report_error(report: ProviderFactReport) -> Provider
 
 // Ported from pkg.rs:1190-1205.
 #Test("pkg integration binary_conformance_reports_missing_platform_and_weak_hash") {
-    native :: "{{\"name\":\"tool\",\"hash\":\"sha256-aa\"}}"
-    report :: provider_normalize_document(ProviderFamily.Binary, native)
+    native: "{{\"name\":\"tool\",\"hash\":\"sha256-aa\"}}"
+    report: provider_normalize_document(ProviderFamily.Binary, native)
     assert(provider_test_has(report.losses, [String]{"not an exact digest"}))
     assert(provider_test_has(report.losses, [String]{"no target platform"}))
     provider_test_invalid(report)
@@ -180,9 +180,9 @@ fn provider_pkg_integration_report_error(report: ProviderFactReport) -> Provider
 
 // Ported from pkg.rs:1208-1221.
 #Test("pkg integration binary_report_uses_digest_identity_without_fabricating_a_version") {
-    digest :: "sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-    native :: "{{\"name\":\"tool\",\"hash\":\"{digest}\",\"platforms\":[\"linux\"]}}"
-    report :: provider_normalize_document(ProviderFamily.Binary, native)
+    digest: "sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    native: "{{\"name\":\"tool\",\"hash\":\"{digest}\",\"platforms\":[\"linux\"]}}"
+    report: provider_normalize_document(ProviderFamily.Binary, native)
     provider_test_valid(report, "binary digest is an exact identity")
     assert_eq(report.shared_facts().qualified_reference(), "tool@binary#digest={digest}")
     assert_eq(report.shared_facts().native_document, native)
@@ -190,8 +190,8 @@ fn provider_pkg_integration_report_error(report: ProviderFactReport) -> Provider
 
 // Ported from pkg.rs:1224-1237.
 #Test("pkg integration binary_report_surfaces_an_invalid_digest_as_loss") {
-    native :: "{{\"name\":\"tool\",\"hash\":\"sha256-aa\",\"platforms\":[\"linux\"]}}"
-    report :: provider_normalize_document(ProviderFamily.Binary, native)
+    native: "{{\"name\":\"tool\",\"hash\":\"sha256-aa\",\"platforms\":[\"linux\"]}}"
+    report: provider_normalize_document(ProviderFamily.Binary, native)
     assert(!report.is_lossless())
     found := false
     loop loss in report.shared_facts().losses {
@@ -203,7 +203,7 @@ fn provider_pkg_integration_report_error(report: ProviderFactReport) -> Provider
 
 // Ported from pkg.rs:1240-1247.
 #Test("pkg integration cargo_metadata_normalizes_features_and_build_script_fact") {
-    facts :: MetadataFacts.from_cargo_manifest("[package]\nname = \"lib\"\nversion = \"0.1.0\"\nbuild = \"build.rs\"\n[dependencies]\nserde = \"1\"\n[build-dependencies]\ncc = \"1\"\n")
+    facts: MetadataFacts.from_cargo_manifest("[package]\nname = \"lib\"\nversion = \"0.1.0\"\nbuild = \"build.rs\"\n[dependencies]\nserde = \"1\"\n[build-dependencies]\ncc = \"1\"\n")
     assert_eq(facts.dependencies, [String]{"serde"})
     assert_eq(facts.build_dependencies, [String]{"cc"})
     assert_eq(facts.scripts, [String]{"build.rs"})
@@ -211,13 +211,13 @@ fn provider_pkg_integration_report_error(report: ProviderFactReport) -> Provider
 
 // Ported from pkg.rs:1250-1253.
 #Test("pkg integration pypi_dynamic_metadata_becomes_todo_fact") {
-    facts :: MetadataFacts.from_pypi("pkg", "1.0.0", true)
+    facts: MetadataFacts.from_pypi("pkg", "1.0.0", true)
     assert(facts.todos[0].contains("dynamic metadata"))
 }
 
 // Ported from pkg.rs:1256-1260.
 #Test("pkg integration swiftpm_metadata_locks_exact_revision") {
-    facts :: MetadataFacts.from_swiftpm("swift-log", "abc123")
+    facts: MetadataFacts.from_swiftpm("swift-log", "abc123")
     assert_eq(facts.integrity_hash, "abc123")
     assert_eq(facts.source_identity, "swiftpm:swift-log@abc123")
 }
@@ -232,13 +232,13 @@ fn provider_pkg_integration_report_error(report: ProviderFactReport) -> Provider
         .Ok(_) -> panic("empty platform must fail")
         .Err(_) -> {}
     }
-    object :: ProviderObject.binary("tool", "sha256-aa", "linux", "") ?? panic("hash + platform ok")
+    object: ProviderObject.binary("tool", "sha256-aa", "linux", "") ?? panic("hash + platform ok")
     assert_eq(object.exact_identity, "binary:tool:linux:sha256-aa")
 }
 
 // Ported from pkg.rs:1272-1283.
 #Test("pkg integration provider_fetch_denied_under_offline_without_lock") {
-    decision :: AuthorityGraph.empty().fetch_allowed(ProviderRequest{family: ProviderFamily.Cargo, ref_key: "serde", exact_identity: "cargo:serde@1", hash: "sha256-aa", platform: "any", offline: true})
+    decision: AuthorityGraph.empty().fetch_allowed(ProviderRequest{family: ProviderFamily.Cargo, ref_key: "serde", exact_identity: "cargo:serde@1", hash: "sha256-aa", platform: "any", offline: true})
     assert_eq(decision, FetchDecision.DeniedOfflineMissingLock)
 }
 
@@ -246,7 +246,7 @@ fn provider_pkg_integration_report_error(report: ProviderFactReport) -> Provider
 #Test("pkg integration provider_fetch_allowed_offline_with_satisfied_lock") {
     graph := AuthorityGraph.empty()
     &graph.add_locked(ProviderObject{family: ProviderFamily.Cargo, ref_key: "serde", exact_identity: "cargo:serde@1", hash: "sha256-aa", platform: "any", signature: "", audit: [String]{}, sandbox_effects: [String]{}, build_effects: [String]{}})
-    decision :: graph.fetch_allowed(ProviderRequest{family: ProviderFamily.Cargo, ref_key: "serde", exact_identity: "cargo:serde@1", hash: "sha256-aa", platform: "any", offline: true})
+    decision: graph.fetch_allowed(ProviderRequest{family: ProviderFamily.Cargo, ref_key: "serde", exact_identity: "cargo:serde@1", hash: "sha256-aa", platform: "any", offline: true})
     assert_eq(decision, FetchDecision.AllowedOfflineSatisfied)
 }
 
@@ -254,6 +254,6 @@ fn provider_pkg_integration_report_error(report: ProviderFactReport) -> Provider
 #Test("pkg integration lock_satisfied_offline_verbs_do_not_touch_network") {
     graph := AuthorityGraph.empty()
     &graph.add_locked(ProviderObject{family: ProviderFamily.Npm, ref_key: "left-pad", exact_identity: "npm:left-pad@1.0.0", hash: "sha256-aa", platform: "any", signature: "", audit: [String]{}, sandbox_effects: [String]{}, build_effects: [String]{}})
-    decision :: graph.fetch_allowed(ProviderRequest{family: ProviderFamily.Npm, ref_key: "left-pad", exact_identity: "npm:left-pad@1.0.0", hash: "sha256-aa", platform: "any", offline: true})
+    decision: graph.fetch_allowed(ProviderRequest{family: ProviderFamily.Npm, ref_key: "left-pad", exact_identity: "npm:left-pad@1.0.0", hash: "sha256-aa", platform: "any", offline: true})
     assert_eq(decision, FetchDecision.AllowedOfflineSatisfied)
 }

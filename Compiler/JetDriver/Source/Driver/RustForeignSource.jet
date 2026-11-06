@@ -1,6 +1,6 @@
 use jet_foundation.[AccessConvention, Type, ast_comptime_generated_path, measure_expression]
 
-fn jet_driver_rust_foreign_rust_type(ty: Type, user_types: [String]) -> String Never! {
+jet_driver_rust_foreign_rust_type: fn(ty: Type, user_types: [String]) -> String Never! {
     if ty == {
         .Int -> "i64"
         .Float -> "f64"
@@ -33,26 +33,26 @@ fn jet_driver_rust_foreign_rust_type(ty: Type, user_types: [String]) -> String N
     }
 }
 
-fn jet_driver_rust_foreign_param_type(convention: AccessConvention, ty: Type, user_types: [String]) -> String Never! {
-    base :: jet_driver_rust_foreign_rust_type(ty, user_types)
+jet_driver_rust_foreign_param_type: fn(convention: AccessConvention, ty: Type, user_types: [String]) -> String Never! {
+    base: jet_driver_rust_foreign_rust_type(ty, user_types)
     if convention == AccessConvention.Write -> "&mut {base}" else -> base
 }
 
-fn jet_driver_rust_foreign_wrapper(function: JetDriverRustForeignFunction, user_types: [String]) -> String Never! {
+jet_driver_rust_foreign_wrapper: fn(function: JetDriverRustForeignFunction, user_types: [String]) -> String Never! {
     params := [String]{}
     args := [String]{}
     loop index in 0..<function.params.len() {
-        param :: function.params[index]
+        param: function.params[index]
         &params.push("p{index}: {jet_driver_rust_foreign_param_type(param.convention, param.ty, user_types)}")
         &args.push("p{index}")
     }
-    ret :: if function.return_type == .Val(ty) -> jet_driver_rust_foreign_rust_type(ty, user_types) else -> "()"
-    call :: "{function.rust_path}({args.join(", ")})"
+    ret: if function.return_type == .Val(ty) -> jet_driver_rust_foreign_rust_type(ty, user_types) else -> "()"
+    call: "{function.rust_path}({args.join(", ")})"
     if ret == "()" -> return "pub fn jet_ffi_{function.name}({params.join(", ")}) {{\n    match ffi_catch_unwind(|| {{\n        {call};\n    }}) {{\n        Ok(()) => (),\n        Err(_) => ffi_panic(),\n    }}\n}}\n"
     "pub fn jet_ffi_{function.name}({params.join(", ")}) -> {ret} {{\n    match ffi_catch_unwind(|| {call}) {{\n        Ok(v) => v,\n        Err(_) => ffi_panic(),\n    }}\n}}\n"
 }
 
-fn jet_driver_rust_foreign_scalar_type(ty: Type) -> String? Never! {
+jet_driver_rust_foreign_scalar_type: fn(ty: Type) -> String? Never! {
     if ty == {
         .Int -> Val("i64")
         .IntN(signed, bits) -> if bits == 8 || bits == 16 || bits == 32 || bits == 64 -> Val("{if signed -> "i" else -> "u"}{bits}") else -> None
@@ -65,14 +65,14 @@ fn jet_driver_rust_foreign_scalar_type(ty: Type) -> String? Never! {
     }
 }
 
-fn jet_driver_rust_foreign_cabi_record_type(ty: Type, record_names: [String:String]) -> String? Never! {
+jet_driver_rust_foreign_cabi_record_type: fn(ty: Type, record_names: [String:String]) -> String? Never! {
     if ty == .Named(name) -> return record_names.get(name)
     None
 }
 
 // Native descriptor admission is deliberately narrower than the safe wrapper.
 // No ownership-changing slot protocol is invented for WRITE, MOVE or lists.
-fn jet_driver_rust_foreign_trampoline(function: JetDriverRustForeignFunction, record_names: [String:String]) -> String? Never! {
+jet_driver_rust_foreign_trampoline: fn(function: JetDriverRustForeignFunction, record_names: [String:String]) -> String? Never! {
     loop param in function.params {
         if param.convention != AccessConvention.Read -> return None
         if param.ty != Type.String && jet_driver_rust_foreign_scalar_type(param.ty) == None && jet_driver_rust_foreign_cabi_record_type(param.ty, record_names) == None -> return None
@@ -93,7 +93,7 @@ fn jet_driver_rust_foreign_trampoline(function: JetDriverRustForeignFunction, re
     }
     args := [String]{}
     loop index in 0..<function.params.len() {
-        ty :: function.params[index].ty
+        ty: function.params[index].ty
         expr := ""
         if ty == {
             .String -> {
@@ -103,7 +103,7 @@ fn jet_driver_rust_foreign_trampoline(function: JetDriverRustForeignFunction, re
                 expr = "p{index}"
             }
             .Named(_) -> {
-                record_ty :: jet_driver_rust_foreign_cabi_record_type(ty, record_names) ?? return None
+                record_ty: jet_driver_rust_foreign_cabi_record_type(ty, record_names) ?? return None
                 &body.push("    let p{index}_ptr = args[{index}].ptr;")
                 &body.push("    if p{index}_ptr.is_null() {{ ffi_panic(); }}")
                 expr = "unsafe {{ std::ptr::read(p{index}_ptr as *const {record_ty}) }}"
@@ -116,7 +116,7 @@ fn jet_driver_rust_foreign_trampoline(function: JetDriverRustForeignFunction, re
         }
         &args.push(expr)
     }
-    call :: "jet_ffi_{function.name}({args.join(", ")})"
+    call: "jet_ffi_{function.name}({args.join(", ")})"
     if function.return_type == {
         .None -> &body.push("    let _ = {call};")
         .Val(ty) -> if ty == {
@@ -132,7 +132,7 @@ fn jet_driver_rust_foreign_trampoline(function: JetDriverRustForeignFunction, re
             .Bool -> &body.push("    out.value = u64::from({call});")
             .Char -> &body.push("    out.value = ({call}) as u32 as u64;")
             .Named(_) -> {
-                record_ty :: jet_driver_rust_foreign_cabi_record_type(ty, record_names) ?? return None
+                record_ty: jet_driver_rust_foreign_cabi_record_type(ty, record_names) ?? return None
                 &body.push("    let result = {call};")
                 &body.push("    let bytes = unsafe {{ std::slice::from_raw_parts(")
                 &body.push("        (&result as *const {record_ty}).cast::<u8>(),")
@@ -149,14 +149,14 @@ fn jet_driver_rust_foreign_trampoline(function: JetDriverRustForeignFunction, re
     Val("#[no_mangle]\npub unsafe extern \"C\" fn jet_ffi_{function.name}_cabi(args: *const JetFfiSlot, argc: usize, out: *mut JetFfiSlot) -> i32 {{\n    match ffi_catch_unwind(|| {{\n{body.join("\n")}\n    }}) {{\n        Ok(code) => code,\n        Err(_) => {{ ffi_host_fault(); 1 }},\n    }}\n}}\n")
 }
 
-fn jet_driver_rust_foreign_source(facts: JetDriverRustForeignFacts) -> String Never! {
+jet_driver_rust_foreign_source: fn(facts: JetDriverRustForeignFacts) -> String Never! {
     out := [String]{jet_driver_rust_foreign_preamble(), facts.record_source, "// jet-ffi-descriptor={JET_DRIVER_RUST_FOREIGN_DESCRIPTOR}\n"}
     names := [String]{}
     loop entry in facts.entries -> &names.push(entry.declaration.name)
     trampolines := [String?]{}
     has_trampoline := false
     loop entry in facts.entries {
-        source :: jet_driver_rust_foreign_trampoline(entry.declaration, facts.record_names)
+        source: jet_driver_rust_foreign_trampoline(entry.declaration, facts.record_names)
         if source != None -> has_trampoline = true
         &trampolines.push(source)
     }
@@ -169,7 +169,7 @@ fn jet_driver_rust_foreign_source(facts: JetDriverRustForeignFacts) -> String Ne
     out.join("\n")
 }
 
-fn jet_driver_rust_foreign_preamble() -> String Never! {
+jet_driver_rust_foreign_preamble: fn() -> String Never! {
     [String]{
         "// Auto-generated FFI wrappers — do not edit.",
         "#![allow(warnings)]",

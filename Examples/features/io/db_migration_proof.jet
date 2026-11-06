@@ -3,36 +3,36 @@
 // failed transaction leaves rows unchanged, a second connection can write
 // after commit and after a failed batch (nothing stays locked or leased),
 // and a nested `begin` is printed exactly. SQLite file, no ORM.
-package {
+package: {
     name: "db_migration_proof"
     authority: { allow: [DB, DB.Read, DB.Write, FS.Read, FS.Write, IO, Mem.Alloc, Time.Wait] }
 }
 
 use {
-    db :: core.db
-    fs :: core.files
+    db: core.db
+    fs: core.files
 }
 
-fn count(scope: DBScope, sql: SQL) -[DB]> Int {
-    row :: scope.query_one(sql) ?? return -1
+count: fn(scope: DBScope, sql: SQL) -[DB]> Int {
+    row: scope.query_one(sql) ?? return -1
     db.row_int(row, "n") ?? -1
 }
 
-fn table_state(scope: DBScope) -[DB]> String {
+table_state: fn(scope: DBScope) -[DB]> String {
     if scope.query(SQL{"SELECT id FROM audit"}) == {
         .Ok(_) -> return "present"
         .Err(_) -> return "absent"
     }
 }
 
-fn run() {
-    path :: "/tmp/jet_db_migration_proof.sqlite"
+run: fn() {
+    path: "/tmp/jet_db_migration_proof.sqlite"
     if fs.exists(path) -> fs.remove(path)
-    conn :: db.open(path)
-    policy :: db.policy("item", "true") ?? panic("policy")
-    scope :: conn.with_policy(policy, "owner")
+    conn: db.open(path)
+    policy: db.policy("item", "true") ?? panic("policy")
+    scope: conn.with_policy(policy, "owner")
 
-    v1 :: db.migrate(scope, "v1", [SQL{"CREATE TABLE item (id INTEGER PRIMARY KEY, name TEXT NOT NULL)"}]) ?? -1
+    v1: db.migrate(scope, "v1", [SQL{"CREATE TABLE item (id INTEGER PRIMARY KEY, name TEXT NOT NULL)"}]) ?? -1
     print("migrate v1 steps: {v1}")
     if db.migrate(scope, "v2", [SQL{"CREATE TABLE audit (id INTEGER PRIMARY KEY)"}, SQL{"ALTER TABLE missing_table ADD COLUMN x INTEGER"}]) == {
         .Ok(steps) -> print("migrate v2: applied {steps}")
@@ -42,14 +42,14 @@ fn run() {
     // managed only by db.migrate"), so the ledger is observed through migrate
     // itself: v1 re-applies nothing, and the corrected v2 still applies and
     // can create `audit`, which the failed attempt therefore left absent.
-    audit_policy :: db.policy("audit", "true") ?? panic("policy")
-    audit_scope :: conn.with_policy(audit_policy, "owner")
+    audit_policy: db.policy("audit", "true") ?? panic("policy")
+    audit_scope: conn.with_policy(audit_policy, "owner")
     print("audit table after failed v2: {table_state(audit_scope)}")
     print("migrate v1 again steps: {db.migrate(scope, "v1", [SQL{"CREATE TABLE item (id INTEGER PRIMARY KEY, name TEXT NOT NULL)"}]) ?? -1}")
     print("migrate v2 retry steps: {db.migrate(scope, "v2", [SQL{"CREATE TABLE audit (id INTEGER PRIMARY KEY)"}]) ?? -1}")
     print("audit table after v2 retry: {table_state(audit_scope)}")
 
-    committed :: db.transaction(scope, "good batch", [SQL{"INSERT INTO item (id, name) VALUES (1, 'one')"}, SQL{"INSERT INTO item (id, name) VALUES (2, 'two')"}]) ?? -1
+    committed: db.transaction(scope, "good batch", [SQL{"INSERT INTO item (id, name) VALUES (1, 'one')"}, SQL{"INSERT INTO item (id, name) VALUES (2, 'two')"}]) ?? -1
     print("commit steps: {committed}")
     print("rows after commit: {count(scope, SQL{"SELECT COUNT(*) AS n FROM item"})}")
     if db.transaction(scope, "bad batch", [SQL{"INSERT INTO item (id, name) VALUES (3, 'three')"}, SQL{"INSERT INTO item (id, name) VALUES (1, 'duplicate')"}]) == {
@@ -59,22 +59,22 @@ fn run() {
     print("rows after failed batch: {count(scope, SQL{"SELECT COUNT(*) AS n FROM item"})}")
 
     // A second connection proves the first holds no open transaction or lock.
-    other :: db.open(path)
-    other_scope :: other.with_policy(policy, "owner")
+    other: db.open(path)
+    other_scope: other.with_policy(policy, "owner")
     if other_scope.execute(SQL{"INSERT INTO item (id, name) VALUES (4, 'four')"}) == {
         .Ok(_) -> print("second connection write: ok")
         .Err(_) -> print("second connection write: blocked")
     }
     print("rows seen by first connection: {count(scope, SQL{"SELECT COUNT(*) AS n FROM item"})}")
-    _other_closed :: other_scope.close()
+    _other_closed: other_scope.close()
 
     // Nested begin: record the exact behavior.
     print("outer begin: {scope.begin()}")
     print("nested begin: {scope.begin()}")
-    _rolled :: scope.rollback()
+    _rolled: scope.rollback()
     print("rows after nested rollback: {count(scope, SQL{"SELECT COUNT(*) AS n FROM item"})}")
 
-    _closed :: scope.close()
+    _closed: scope.close()
     if scope.query(SQL{"SELECT id FROM item"}) == {
         .Ok(_) -> print("query after close: accepted")
         .Err(_) -> print("query after close: rejected")

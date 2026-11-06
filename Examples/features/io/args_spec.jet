@@ -5,23 +5,23 @@
 // Run with extra args:  jet run Examples/features/io/args_spec.jet -- --verbose hello
 // Golden test (no extra args) uses a spec with no required positionals so parse
 // always succeeds and exercises each query method.
-package {
+package: {
     name: "args_spec"
     authority: { allow: [Env, Exec.Args, IO] }
 }
 
 use {
-    args :: core.args
-    process :: core.process
+    args: core.args
+    process: core.process
 }
 
-fn run() {
-    spec :: args.spec()
+run: fn() {
+    spec: args.spec()
         .flag("verbose", "print extra detail")
         .option("output", "write result to FILE", "FILE")
-    parsed :: spec.parse_or_exit(process.args())
-    verbose :: parsed.flag("verbose")
-    out :: parsed.option("output")
+    parsed: spec.parse_or_exit(process.args())
+    verbose: parsed.flag("verbose")
+    out: parsed.option("output")
     print(verbose)
     print(out ?? "none")
 }

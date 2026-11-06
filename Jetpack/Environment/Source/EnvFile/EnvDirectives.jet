@@ -1,9 +1,9 @@
 // The Jet env file `env.jet` (U3): the directive author surface
 //
 //     // env.jet: a Jetpack project environment (dev-shell descriptor)
-//     use pkg :: jetpack
+//     use pkg: jetpack
 //
-//     fn shell() -> [JSON] {
+//     shell: fn() -> [JSON] {
 //         return [
 //             pkg.source("nixpkgs"),
 //             pkg.packages(["ripgrep", "fd", "claude-code"]),
@@ -23,13 +23,13 @@ use {
     ]
     jet_env_model.[env_file_all_call_args, env_file_list_arg, env_file_quoted_strings, env_file_string_arg]
     jet_pkg_model.[NamedSourceDecl, ProviderKind, ProviderRef, SourceTable, pkg_is_bare_path]
-    files :: core.files
+    files: core.files
 }
 
 // A named source declaration: `pkg.source("<name>", "<upstream>" [, "<via>"])`.
 // `via` selects the provider (`nix` by default, `core` for first-party Jet
 // packages, R2).
-struct EnvNamedSource {
+EnvNamedSource: struct {
     name: String
     upstream: String
     // The provider name (`nix`/`core`); None means the default `nix`.
@@ -41,7 +41,7 @@ struct EnvNamedSource {
 // entries are bare (resolved against the default source) or
 // `package@source`. `env.jet` is purely the dev-shell descriptor (U10): the
 // package index lives in the source repo's `pkg.jet`, never here.
-struct EnvFile {
+EnvFile: struct {
     // The default source for bare package entries (a one-argument source).
     default_source: String?
     // Named sources, in declaration order.
@@ -49,30 +49,30 @@ struct EnvFile {
     packages: [String]
     prompt: String?
 
-    fn empty() -> EnvFile Never! {
+    empty: fn() -> EnvFile Never! {
         EnvFile{default_source: None, named: [EnvNamedSource]{}, packages: [String]{}, prompt: None}
     }
 
     // The prompt label, defaulting to `jetpack`.
-    fn prompt_label(self) -> String Never! {
+    prompt_label: fn(self) -> String Never! {
         self.prompt ?? JETPACK_PROMPT_LABEL
     }
 
     // The default source label, defaulting to canonical `jetpack`.
-    fn source_label(self) -> String Never! {
-        source :: self.default_source ?? return REF_SOURCE_JETPACK
+    source_label: fn(self) -> String Never! {
+        source: self.default_source ?? return REF_SOURCE_JETPACK
         env_file_published_source(source)
     }
 
     // The named-source resolution table for this env.
-    fn source_table(self) -> SourceTable Never! {
+    source_table: fn(self) -> SourceTable Never! {
         decls := [NamedSourceDecl]{}
         loop source in self.named {
-            via :: if source.via == {
+            via: if source.via == {
                 .Val(name) -> ProviderKind.parse(name)
                 .None -> ProviderKind.Nix
             }
-            upstream :: if ProviderRef.classify(source.upstream) == {
+            upstream: if ProviderRef.classify(source.upstream) == {
                 .Ok(provider_ref) -> provider_ref.upstream()
                 .Err(_) -> source.upstream
             }
@@ -89,25 +89,25 @@ struct EnvFile {
 
     // One package entry as a full `package@source` ref: entries that carry a
     // source pass through; bare entries take the default.
-    fn entry_ref(self, raw: String) -> String Never! {
-        entry :: raw.trim()
+    entry_ref: fn(self, raw: String) -> String Never! {
+        entry: raw.trim()
         if entry.contains(REF_PROVIDER_AT) || pkg_is_bare_path(entry) -> return entry
         "{entry}{REF_PROVIDER_AT}{self.source_label()}"
     }
 
     // The canonical refs this env declares.
-    fn refs(self) -> [String] Never! {
+    refs: fn(self) -> [String] Never! {
         out := [String]{}
         loop package in self.packages -> &out.push(self.entry_ref(package))
         out
     }
 
     // The canonical `env.jet` text for this environment.
-    fn render(self) -> String Never! {
-        prompt :: env_file_quote_jet_string(self.prompt_label())
+    render: fn(self) -> String Never! {
+        prompt: env_file_quote_jet_string(self.prompt_label())
         lines := [String]{}
         loop source in self.named {
-            line :: if source.via == {
+            line: if source.via == {
                 .Val(via) -> "        pkg.source({env_file_quote_jet_string(source.name)}, {env_file_quote_jet_string(source.upstream)}, {env_file_quote_jet_string(via)})"
                 .None -> "        pkg.source({env_file_quote_jet_string(source.name)}, {env_file_quote_jet_string(source.upstream)})"
             }
@@ -120,27 +120,27 @@ struct EnvFile {
         loop package in self.packages -> &quoted.push(env_file_quote_jet_string(package))
         &lines.push("        pkg.packages([{quoted.join(", ")}])")
         &lines.push("        pkg.prompt({prompt})")
-        "// {ENV_FILE} — a Jetpack project environment\nuse pkg :: jetpack\n\nfn shell() -> [JSON] {{\n    return [\n{lines.join(",\n")}\n    ]\n}}\n"
+        "// {ENV_FILE} — a Jetpack project environment\nuse pkg: jetpack\n\nshell: fn() -> [JSON] {{\n    return [\n{lines.join(",\n")}\n    ]\n}}\n"
     }
 
     // Path to the env file in a project dir.
-    fn path_in(dir: String) -> String Never! {
+    path_in: fn(dir: String) -> String Never! {
         files.join(dir, ENV_FILE)
     }
 
     // Load and parse the env file in `dir`, if present.
-    fn load(dir: String) -[FS]> EnvFile? Never! {
-        text :: files.read(EnvFile.path_in(dir)) ?? return None
+    load: fn(dir: String) -[FS]> EnvFile? Never! {
+        text: files.read(EnvFile.path_in(dir)) ?? return None
         Val(EnvFile.parse(text))
     }
 
     // Parse the directive calls out of env-file text. Tolerant: anything
     // unrecognized is ignored. Every `pkg.source` is read: one argument sets
     // the default source, two or three declare a named source.
-    fn parse(text: String) -> EnvFile Never! {
+    parse: fn(text: String) -> EnvFile Never! {
         file := EnvFile.empty()
         loop call in env_file_all_call_args(text, PACK_DIRECTIVE_SOURCE) {
-            args :: env_file_quoted_strings(call)
+            args: env_file_quoted_strings(call)
             if args.len() == {
                 0 -> {}
                 1 -> file.default_source = Val(env_file_published_source(args[0]))
@@ -155,13 +155,13 @@ struct EnvFile {
 
     // Add a package (from a classified ref) to the env file in `dir`,
     // creating the file if absent. Idempotent.
-    fn add(dir: String, spec: RefSpec) -[FS]> EnvFile EnvironmentError! {
+    add: fn(dir: String, spec: RefSpec) -[FS]> EnvFile EnvironmentError! {
         file := EnvFile.load(dir) ?? EnvFile.empty()
         // A built-in ref with no default yet becomes the default source.
         if file.default_source == None && RefSource.is_builtin(spec.source.label()) {
             file.default_source = Val(env_file_published_source(spec.source.label()))
         }
-        entry :: file.entry_for(spec)
+        entry: file.entry_for(spec)
         if !file.packages.contains(entry) {
             &file.packages.push(entry)
             &file.packages.sort()
@@ -172,25 +172,25 @@ struct EnvFile {
 
     // Remove a package from the env file in `dir`. Matches on the resolved
     // ref, so it works whether the entry was stored bare or with its source.
-    fn remove(dir: String, spec: RefSpec) -[FS]> (file: EnvFile, removed: Bool) EnvironmentError! {
+    remove: fn(dir: String, spec: RefSpec) -[FS]> (file: EnvFile, removed: Bool) EnvironmentError! {
         file := EnvFile.load(dir) ?? EnvFile.empty()
-        target :: "{spec.package}{REF_PROVIDER_AT}{spec.source.label()}"
-        before :: file.packages.len()
+        target: "{spec.package}{REF_PROVIDER_AT}{spec.source.label()}"
+        before: file.packages.len()
         keep := [String]{}
         loop entry in file.packages {
             if file.entry_ref(entry) != target -> &keep.push(entry)
         }
         file.packages = keep
-        removed :: file.packages.len() != before
+        removed: file.packages.len() != before
         if removed -> files.write(EnvFile.path_in(dir), file.render())
         Ok((file: file, removed: removed))
     }
 
     // How a ref is stored as a package entry: bare when it matches the
     // default source, otherwise `package@source` so the source survives.
-    fn entry_for(self, spec: RefSpec) -> String Never! {
-        source :: env_file_published_source(spec.source.label())
-        is_default :: if spec.source == {
+    entry_for: fn(self, spec: RefSpec) -> String Never! {
+        source: env_file_published_source(spec.source.label())
+        is_default: if spec.source == {
             .Named(_) -> false
             else -> source == self.source_label()
         }
@@ -200,17 +200,17 @@ struct EnvFile {
 }
 
 // The legacy `nixpkgs` token is published as canonical `jetpack`.
-fn env_file_published_source(source: String) -> String Never! {
+env_file_published_source: fn(source: String) -> String Never! {
     if source == REF_SOURCE_NIXPKGS -> return REF_SOURCE_JETPACK
     source.copy()
 }
 
 // Quote a value as a plain Jet string literal. Jet strings double braces
 // because single braces start interpolation.
-fn env_file_quote_jet_string(value: String) -> String Never! {
+env_file_quote_jet_string: fn(value: String) -> String Never! {
     out := [String]{"\""}
     loop scalar in value.chars() {
-        text :: "{scalar}"
+        text: "{scalar}"
         if text == {
             "\\" -> &out.push("\\\\")
             "\"" -> &out.push("\\\"")

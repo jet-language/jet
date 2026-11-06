@@ -1,16 +1,16 @@
 use {
-    comptime_diff_hex :: core.encoding.hex
-    toml :: core.encoding.toml
+    comptime_diff_hex: core.encoding.hex
+    toml: core.encoding.toml
 }
-COMPTIME_VALUE :: comptime { toml.to_string(toml.parse("[a]\nx = 1\n\n[[a.b]]\ny = 2\n\n[[a.b]]\ny = 3\n") ?? panic("bad")).replace("\n", "|") }
+COMPTIME_VALUE: comptime { toml.to_string(toml.parse("[a]\nx = 1\n\n[[a.b]]\ny = 2\n\n[[a.b]]\ny = 3\n") ?? panic("bad")).replace("\n", "|") }
 
-fn run() {
-    r :: toml.to_string(toml.parse("[a]\nx = 1\n\n[[a.b]]\ny = 2\n\n[[a.b]]\ny = 3\n") ?? panic("bad")).replace("\n", "|")
+run: fn() {
+    r: toml.to_string(toml.parse("[a]\nx = 1\n\n[[a.b]]\ny = 2\n\n[[a.b]]\ny = 3\n") ?? panic("bad")).replace("\n", "|")
     comptime_diff_frame("{COMPTIME_VALUE}", "{r}")
 
 }
 
-fn comptime_diff_frame(expected_text: String, actual_text: String) {
+comptime_diff_frame: fn(expected_text: String, actual_text: String) {
     print("{comptime_diff_hex.encode(expected_text.bytes())}")
     print("{comptime_diff_hex.encode(actual_text.bytes())}")
 }

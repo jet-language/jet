@@ -3,20 +3,20 @@
 // marker refuses the generated codec, a hand-written codec replaces it, and a
 // field with no wire form (a function) only leaves the declaration without a
 // codec; it is never an error until a codec is used.
-use json :: core.encoding.json
+use json: core.encoding.json
 
-enum Level {
+Level: enum {
     Low
     High
 }
 
-enum Step {
+Step: enum {
     Wait
     Pause(Int)
     Move(dx: Int, dy: Int)
 }
 
-struct Task {
+Task: struct {
     name: String
     level: Level
     steps: [Step]
@@ -25,36 +25,36 @@ struct Task {
 
 // Opted out of the generated codec; its hand-written Encode is its only one.
 #!Codable
-struct Tag {
+Tag: struct {
     label: String
 }
 
 impl Tag.Encode {
-    fn encode(self) -> Dyn { Dyn.Text("#{self.label}") }
+    encode: fn(self) -> Dyn { Dyn.Text("#{self.label}") }
 }
 
 // Encode-only: `Tag` has no Decode, so `Labelled` derives Encode alone.
-struct Labelled {
+Labelled: struct {
     #Rename("tag") label: Tag
     id: Int
 }
 
 // A function field has no wire form: `Hook` is simply not Codable.
-struct Hook {
+Hook: struct {
     name: String
     apply: fn(Int) -> Int
 }
 
-fn run() [FieldError]! {
-    job :: Task{name: "ship", level: Level.High, steps: [Step.Wait, Step.Pause(3), Step.Move{dx: 1, dy: -2}], note: None}
-    wire :: json.to_string(job) ?? panic("JSON encode")
+run: fn() [FieldError]! {
+    job: Task{name: "ship", level: Level.High, steps: [Step.Wait, Step.Pause(3), Step.Move{dx: 1, dy: -2}], note: None}
+    wire: json.to_string(job) ?? panic("JSON encode")
     print(wire)
-    back :: json.decode<Task>(wire)
+    back: json.decode<Task>(wire)
     print(back.steps.len())
-    packed :: json.decode<Task>("{{\"name\":\"pack\",\"level\":\"Low\",\"steps\":[],\"note\":\"fragile\"}}")
+    packed: json.decode<Task>("{{\"name\":\"pack\",\"level\":\"Low\",\"steps\":[],\"note\":\"fragile\"}}")
     print(packed.note ?? "(none)")
     print(packed.level == Level.Low)
     print(json.to_string(Labelled{label: Tag{label: "red"}, id: 4}) ?? panic("JSON encode"))
-    hook :: Hook{name: "double", apply: (n) -> n * 2}
+    hook: Hook{name: "double", apply: (n) -> n * 2}
     print(hook.apply(21))
 }

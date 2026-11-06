@@ -1,48 +1,48 @@
 use {
-    files :: core.files
-    sys :: core.sys
-    process :: core.process
-    time :: core.time
+    files: core.files
+    sys: core.sys
+    process: core.process
+    time: core.time
 }
 
-fn cases_test_root(label: String) -> String {
-    path :: files.join(kit_scratch_root() ?? panic("no scratch: set JET_SCRATCH_ROOT or HOME"), "testkit-cases-{process.current_pid()}-{label}")
+cases_test_root: fn(label: String) -> String {
+    path: files.join(kit_scratch_root() ?? panic("no scratch: set JET_SCRATCH_ROOT or HOME"), "testkit-cases-{process.current_pid()}-{label}")
     files.create_dir_all(path) ?? panic("case test scratch: {err}")
     path
 }
 
-fn cases_test_context(root: String, scratch: String) -> KitCtx {
-    options :: kit_test_checkout_options(root)
-    env :: KitEnv{root: root, scratch: scratch, jet: "/bin/sh", jetpack: "/bin/sh", timeout: 5s, memory_limit: 0}
+cases_test_context: fn(root: String, scratch: String) -> KitCtx {
+    options: kit_test_checkout_options(root)
+    env: KitEnv{root: root, scratch: scratch, jet: "/bin/sh", jetpack: "/bin/sh", timeout: 5s, memory_limit: 0}
     KitCtx{env: env, root: root, scratch: scratch, bless: options.bless, known: kit_known_load(options.ledger), options: options}
 }
 
-fn cases_test_entry(name: String) -> KitEntry {
-    path :: "tests/cases/group/{name}.case"
+cases_test_entry: fn(name: String) -> KitEntry {
+    path: "tests/cases/group/{name}.case"
     KitEntry{path: path, expected: path, project: "tests/cases/group", suite: "cases", mode: ""}
 }
 
-fn cases_test_source(root: String, name: String, text: String) {
+cases_test_source: fn(root: String, name: String, text: String) {
     kit_exec_write(files.join(root, cases_test_entry(name).path), text)
 }
 
 #Test("cases discovery recurses through groups and sorts repository relative ids") {
-    root :: cases_test_root("discovery")
+    root: cases_test_root("discovery")
     cases_test_source(root, "z", "step: printf z\n")
     cases_test_source(root, "a", "step: printf a\n")
     kit_exec_write(files.join(root, "tests/cases/deeper/group/b.case"), "step: printf b\n")
     kit_exec_write(files.join(root, "tests/cases/.hidden/hidden.case"), "step: printf hidden\n")
     kit_exec_write(files.join(root, "tests/run/not-a-case.case"), "step: printf ignored\n")
     kit_exec_write(files.join(root, "tests/cases/group/a.out"), "a")
-    context :: cases_test_context(root, files.join(root, "scratch"))
-    entries :: kit_cases_discover(context)
+    context: cases_test_context(root, files.join(root, "scratch"))
+    entries: kit_cases_discover(context)
     assert_eq(entries.map(entry -> entry.path), ["tests/cases/deeper/group/b.case", "tests/cases/group/a.case", "tests/cases/group/z.case"])
     assert_eq(entries[1].suite, "cases")
     assert_eq(entries[1].project, "tests/cases/group")
     assert_eq(kit_cases_collect(root, "missing").len(), 0)
     kit_exec_write(files.join(root, "Tools/testkit/retired-with-rust.tsv"), "# source-id and owner reason\ntests/cases/group/a.case\tRetired with Rust: fixture compiler dependency.\nCompiler/JetBackend/Tests/Fragments.fixture/FrontFeed.jet\tRetired with Rust: differential oracle.\n")
     assert_eq(kit_cases_retired(root), ["tests/cases/group/a.case"])
-    active :: kit_cases_discover(context)
+    active: kit_cases_discover(context)
     assert_eq(active.map(entry -> entry.path), ["tests/cases/deeper/group/b.case", "tests/cases/group/z.case"])
     // The raw discovery still accounts for the retired authored file; only the
     // canonical active corpus excludes the explicitly retired ID.
@@ -51,18 +51,18 @@ fn cases_test_source(root: String, name: String, text: String) {
 }
 
 #Test("cases stage fixture state and execute sequential steps with files and stdin") {
-    root :: cases_test_root("execution")
-    directory :: files.join(root, "tests/cases/group")
+    root: cases_test_root("execution")
+    directory: files.join(root, "tests/cases/group")
     // Programs are authored at runtime, never discovered as kit modules.
-    kit_exec_write(files.join(directory, "tree/main.jet"), "fn run() {{ print(\"fixture\") }}\n")
+    kit_exec_write(files.join(directory, "tree/main.jet"), "run: fn() {{ print(\"fixture\") }}\n")
     kit_exec_write(files.join(directory, "tree/state/receipt.txt"), "authored\n")
     kit_exec_write(files.join(directory, "tree/.jet/lock"), "authored lock\n")
     kit_exec_write(files.join(directory, "answers.stdin"), "two words\n")
     kit_exec_write(files.join(directory, "answer.out"), "two words\n")
     cases_test_source(root, "execute", "fixture: tree\nstep: jet -c 'cat > result.txt'\nstdin: answers.stdin\nfile: result.txt = answer.out\nfile: main.jet exists\nfile: .jet/receipt.txt exists\nfile: .jet/lock exists\nstdout: empty\nstderr: empty\nstep: jetpack -c 'cat result.txt'\nstdout: = answer.out\nstderr: empty\n")
-    scratch :: files.join(root, "scratch")
-    context :: cases_test_context(root, scratch)
-    outcomes :: kit_cases_run(cases_test_entry("execute"), context)
+    scratch: files.join(root, "scratch")
+    context: cases_test_context(root, scratch)
+    outcomes: kit_cases_run(cases_test_entry("execute"), context)
     assert_eq(outcomes.len(), 1)
     assert_eq(outcomes[0].tier, "-")
     assert_eq(outcomes[0].verdict.status, "PASS")
@@ -71,24 +71,24 @@ fn cases_test_source(root: String, name: String, text: String) {
 }
 
 #Test("cases expand environment tokens and normalize paths before exact comparison") {
-    root :: cases_test_root("tokens")
-    directory :: files.join(root, "tests/cases/group")
+    root: cases_test_root("tokens")
+    directory: files.join(root, "tests/cases/group")
     kit_exec_write(files.join(directory, "paths.out"), "{{work}}\n{{root}}\n{{scratch}}\n")
     cases_test_source(root, "tokens", "env: LOCATION={{work}}\nstep: jet -c 'printf \"%s\\\\n\" \"$LOCATION\" \"$1\" \"$2\"' scenario {{root}} {{scratch}}\nstdout: = paths.out\nstderr: empty\n")
-    context :: cases_test_context(root, files.join(root, "scratch"))
-    result :: kit_cases_run(cases_test_entry("tokens"), context)[0]
+    context: cases_test_context(root, files.join(root, "scratch"))
+    result: kit_cases_run(cases_test_entry("tokens"), context)[0]
     assert_eq(result.verdict.status, "PASS")
     files.remove_all(root) ?? panic("remove token scratch")
 }
 
 #Test("cases run each row with its own HOME, JET_HOME and XDG roots under its scratch") {
-    root :: cases_test_root("home")
-    directory :: files.join(root, "tests/cases/group")
-    probe :: "probe-{process.current_pid()}"
+    root: cases_test_root("home")
+    directory: files.join(root, "tests/cases/group")
+    probe: "probe-{process.current_pid()}"
     kit_exec_write(files.join(directory, "home.out"), "{{scratch}}/home\n{{scratch}}/home/.jet\n{{scratch}}/home/.config\n{{scratch}}/home/.cache\n{{scratch}}/home/.local/share\n{{scratch}}/home/.local/state\nplanted\n")
     cases_test_source(root, "home", "step: jet -c 'printf \"%s\\\\n\" \"$HOME\" \"$JET_HOME\" \"$XDG_CONFIG_HOME\" \"$XDG_CACHE_HOME\" \"$XDG_DATA_HOME\" \"$XDG_STATE_HOME\" && mkdir -p \"$HOME/.jet\" && printf \"planted\\\\n\" > \"$HOME/.jet/{probe}\" && cat \"$JET_HOME/{probe}\"'\nstdout: = home.out\nstderr: empty\n")
-    context :: cases_test_context(root, files.join(root, "scratch"))
-    result :: kit_cases_run(cases_test_entry("home"), context)[0]
+    context: cases_test_context(root, files.join(root, "scratch"))
+    result: kit_cases_run(cases_test_entry("home"), context)[0]
     assert_eq(result.verdict.status, "PASS")
     // The probe landed in the row's home, never in the kit's own.
     assert(!files.exists(files.join(sys.get("HOME") ?? "/", ".jet/{probe}")))
@@ -97,20 +97,20 @@ fn cases_test_source(root: String, name: String, text: String) {
 }
 
 #Test("cases refuse a row whose HOME or JET_HOME is the invoking user's before it runs") {
-    root :: cases_test_root("user-home")
-    user :: files.canonicalize(kit_exec_user_home()) ?? panic("invoking user's home: {err}")
+    root: cases_test_root("user-home")
+    user: files.canonicalize(kit_exec_user_home()) ?? panic("invoking user's home: {err}")
     cases_test_source(root, "user-home", "env: HOME={user}\nenv: JET_HOME={user}/.jet\nstep: jet -c 'printf reached > {{root}}/reached'\nexit: 0\n")
     cases_test_source(root, "user-jet", "env: JET_HOME={user}/.jet\nstep: jet -c 'printf reached > {{root}}/reached'\nexit: 0\n")
-    context :: cases_test_context(root, files.join(root, "scratch"))
-    home :: kit_cases_run(cases_test_entry("user-home"), context)[0]
+    context: cases_test_context(root, files.join(root, "scratch"))
+    home: kit_cases_run(cases_test_entry("user-home"), context)[0]
     assert_eq(home.verdict.status, "REFUSED")
     assert(home.verdict.detail.contains("HOME is the invoking user's home"))
-    jet_home :: kit_cases_run(cases_test_entry("user-jet"), context)[0]
+    jet_home: kit_cases_run(cases_test_entry("user-jet"), context)[0]
     assert_eq(jet_home.verdict.status, "REFUSED")
     assert(jet_home.verdict.detail.contains("JET_HOME is the invoking user's"))
     assert(!files.exists(files.join(root, "reached")))
-    env :: context.env
-    scratch :: files.join(root, "scratch")
+    env: context.env
+    scratch: files.join(root, "scratch")
     assert_eq(kit_exec_home_refusal(env, root, scratch, [KitEnvVar]{}), None)
     assert(kit_exec_home_refusal(env, user, scratch, [KitEnvVar{name: "HOME", value: Val(".")}]) != None)
     assert_eq(kit_exec_home_refusal(env, root, scratch, [KitEnvVar{name: "HOME", value: None}]), None)
@@ -118,13 +118,13 @@ fn cases_test_source(root: String, name: String, text: String) {
 }
 
 #Test("cases host skips precede refusals and malformed scenarios do not spawn") {
-    root :: cases_test_root("refusals")
+    root: cases_test_root("refusals")
     cases_test_source(root, "skip", "requires: os:not-{sys.family()}\nrefused: missing host capability\n")
     cases_test_source(root, "refused", "requires: os:{sys.family()}\nrefused: missing host capability\n")
     cases_test_source(root, "grammar", "step: jet -c 'exit 0'\nstdout: ~ unstable\n")
     cases_test_source(root, "empty", "# empty case\n")
     cases_test_source(root, "golden", "run: none\n")
-    context :: cases_test_context(root, files.join(root, "scratch"))
+    context: cases_test_context(root, files.join(root, "scratch"))
     assert_eq(kit_cases_run(cases_test_entry("skip"), context)[0].verdict.status, "SKIP-HOST")
     assert_eq(kit_cases_run(cases_test_entry("refused"), context)[0].verdict.detail, "missing host capability")
     assert_eq(kit_cases_run(cases_test_entry("grammar"), context)[0].verdict.status, "REFUSED")
@@ -135,25 +135,25 @@ fn cases_test_source(root: String, name: String, text: String) {
 }
 
 #Test("cases preserve exact mismatch nonzero exit and stop after a failing step") {
-    root :: cases_test_root("failure")
-    directory :: files.join(root, "tests/cases/group")
+    root: cases_test_root("failure")
+    directory: files.join(root, "tests/cases/group")
     kit_exec_write(files.join(directory, "expected.out"), "wanted\n")
     cases_test_source(root, "failure", "step: jet -c 'printf wrong'\nstdout: = expected.out\nstep: jet -c 'touch should-not-exist'\n")
     cases_test_source(root, "nonzero", "step: jet -c 'exit 7'\nexit: nonzero\nstdout: empty\nstderr: empty\n")
-    context :: cases_test_context(root, files.join(root, "scratch"))
-    mismatch :: kit_cases_run(cases_test_entry("failure"), context)[0]
+    context: cases_test_context(root, files.join(root, "scratch"))
+    mismatch: kit_cases_run(cases_test_entry("failure"), context)[0]
     assert_eq(mismatch.verdict.status, "FAIL")
     assert(mismatch.verdict.diff.contains("wanted"))
     assert(!files.exists(files.join(context.scratch, "work/should-not-exist")))
-    nonzero :: kit_cases_run(cases_test_entry("nonzero"), context)[0]
+    nonzero: kit_cases_run(cases_test_entry("nonzero"), context)[0]
     assert_eq(nonzero.verdict.status, "PASS")
     assert_eq(nonzero.run.code, 7)
     files.remove_all(root) ?? panic("remove failure scratch")
 }
 
 #Test("cases one-of accepts exact alternatives and named blessing writes exact snapshots") {
-    root :: cases_test_root("bless")
-    directory :: files.join(root, "tests/cases/group")
+    root: cases_test_root("bless")
+    directory: files.join(root, "tests/cases/group")
     kit_exec_write(files.join(directory, "first.out"), "first")
     kit_exec_write(files.join(directory, "second.out"), "second")
     cases_test_source(root, "alternatives", "step: jet -c 'printf second'\nstdout: one-of first.out second.out # host-dependent result\n")
@@ -170,12 +170,12 @@ fn cases_test_source(root: String, name: String, text: String) {
 }
 
 #Test("case known-failing headers and ledger preserve real failures and reject stale passes") {
-    root :: cases_test_root("known-failing")
+    root: cases_test_root("known-failing")
     cases_test_source(root, "header", "# KNOWN-FAILING #4865\nstep: jet -c 'exit 7'\n")
     cases_test_source(root, "ledger", "step: jet -c 'exit 8'\n")
     kit_exec_write(kit_test_ledger(root), "{cases_test_entry("ledger").path}\t#4866\towned case failure\n")
-    context :: cases_test_context(root, files.join(root, "scratch"))
-    header :: kit_cases_run(cases_test_entry("header"), context)[0]
+    context: cases_test_context(root, files.join(root, "scratch"))
+    header: kit_cases_run(cases_test_entry("header"), context)[0]
     assert_eq(header.verdict.status, "KNOWN-FAILING")
     assert_eq(header.run.code, 7)
     assert(header.verdict.detail.contains("#4865"))
@@ -183,7 +183,7 @@ fn cases_test_source(root: String, name: String, text: String) {
     cases_test_source(root, "crash", "step: jet -c 'exit 101'\n")
     assert_eq(kit_cases_run(cases_test_entry("crash"), context)[0].verdict.status, "ERROR")
     cases_test_source(root, "header", "# KNOWN-FAILING #4865\nstep: jet -c 'exit 101'\n")
-    crash :: kit_cases_run(cases_test_entry("header"), context)[0]
+    crash: kit_cases_run(cases_test_entry("header"), context)[0]
     assert_eq(crash.verdict.status, "KNOWN-FAILING")
     assert(crash.verdict.detail.contains("internal compiler error (exit 101)"))
     cases_test_source(root, "header", "# KNOWN-FAILING #4865\nstep: jet -c 'exit 0'\n")
@@ -198,21 +198,21 @@ fn cases_test_source(root: String, name: String, text: String) {
 }
 
 #Test("a child that exits without reading its scripted input is an owned failure, a kit fault is not") {
-    unread :: kit_exec_input_detail("terminal input: closed during write `process stdin`: process stdin closed", 0, "")
+    unread: kit_exec_input_detail("terminal input: closed during write `process stdin`: process stdin closed", 0, "")
     assert(kit_cases_owned_failure(kit_expect_verdict("ERROR", unread)))
     assert(!kit_cases_owned_failure(kit_expect_verdict("ERROR", "spawn: no such file")))
     assert(!kit_cases_owned_failure(kit_expect_verdict("ERROR", "wait: interrupted")))
 }
 
 #Test("processes a case leaves running in its scratch are stopped before the scratch goes") {
-    root :: cases_test_root("strays")
-    scratch :: files.join(root, "scratch")
+    root: cases_test_root("strays")
+    scratch: files.join(root, "scratch")
     // Job control gives the background sleep a process group of its own, so the
     // step's own group sweep misses it, as it misses a core.process grandchild.
     cases_test_source(root, "stray", "step: jet -c 'set -m; sleep 300 >/dev/null 2>&1 & echo $!'\n")
-    outcome :: kit_cases_run(cases_test_entry("stray"), cases_test_context(root, scratch))[0]
+    outcome: kit_cases_run(cases_test_entry("stray"), cases_test_context(root, scratch))[0]
     assert_eq(outcome.verdict.status, "PASS")
-    pid :: Int.parse(outcome.run.stdout.trim().copy()) ?? panic("stray pid: {outcome.run.stdout}")
+    pid: Int.parse(outcome.run.stdout.trim().copy()) ?? panic("stray pid: {outcome.run.stdout}")
     assert(kit_steps_process_nonzombie(pid, "proc-readable-nonzombie"))
     kit_exec_stop_strays(scratch)
     stopped := false

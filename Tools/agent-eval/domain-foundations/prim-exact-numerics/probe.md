@@ -42,13 +42,13 @@ Evidence:
 - `jet run fixtures/comptime_exact.jet` printed `comptime 0/1 0` and `runtime 10/3 10`.
 - `jet run --interpret fixtures/comptime_exact.jet` printed `comptime 10/3 10` and `runtime 10/3 10`.
 
-The same source expression, `@third :: @ten / 3`, gives a wrong AOT value and a correct interpreter value. Data analysis, backend services, and science share this risk.
+The same source expression, `@third: @ten / 3`, gives a wrong AOT value and a correct interpreter value. Data analysis, backend services, and science share this risk.
 
 ### G2 — helper calls in operator implementations (`defect`, `boilerplate`, hurts)
 
 Capability needed: non-fallible library helpers must be callable from user-defined Add, Sub, Mul, Div, Equatable, and Comparable implementations.
 
-Evidence: `jet check fixtures/struct_impl.jet` reports `Error [E0403]` at `pair :: align(self, rhs)`, claiming the non-fallible helper call is fallible and requiring an error return. The working package must inline scale alignment; its factor loop repeats eight times.
+Evidence: `jet check fixtures/struct_impl.jet` reports `Error [E0403]` at `pair: align(self, rhs)`, claiming the non-fallible helper call is fallible and requiring an error return. The working package must inline scale alignment; its factor loop repeats eight times.
 
 Data analysis, backend services, and science all write exact scalar operators, so this is shared author cost. The workaround is to inline the helper body.
 

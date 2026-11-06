@@ -12,15 +12,15 @@
 // same thing both times. Jet types ride the value, so `run` hands those
 // carriers to a helper that names the `T !E` slots.
 #Error
-struct ImportErr {
+ImportErr: struct {
     broken: Int
     partial: [String]
     notes: [String]
 }
 
-fn import_rows(label: String, rows: [String]) -> [String] ImportErr! {
-    good :: rows.filter((row) -> row != "")
-    broken :: rows.len() - good.len()
+import_rows: fn(label: String, rows: [String]) -> [String] ImportErr! {
+    good: rows.filter((row) -> row != "")
+    broken: rows.len() - good.len()
     if broken > 0 {
         return Err(
         ImportErr{
@@ -33,7 +33,7 @@ fn import_rows(label: String, rows: [String]) -> [String] ImportErr! {
     return Ok(good)
 }
 
-fn report(people: [String] ImportErr!, ports: [String] ImportErr!, clean: [String] ImportErr!) {
+report: fn(people: [String] ImportErr!, ports: [String] ImportErr!, clean: [String] ImportErr!) {
     print((&people.partial() ?? []).join(", "))
     print((&ports.partial() ?? []).join(", "))
     print(people.notes().join(" / "))
@@ -50,7 +50,7 @@ fn report(people: [String] ImportErr!, ports: [String] ImportErr!, clean: [Strin
     print(clean.notes().len())
 }
 
-fn run() {
+run: fn() {
     // Two spotty imports, alive at the same time. Each one carries its own
     // notes, because the notes are part of the outcome and not of the program.
     report(

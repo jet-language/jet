@@ -1,20 +1,20 @@
-package {
+package: {
     name: "deadline_context"
     authority: { allow: [IO, Time, Time.Wait] }
 }
 
-use time :: core.time
+use time: core.time
 
-fn run() {
+run: fn() {
     #Context(deadline: time.unix_ns() /% 1_000_000 + 20) {
-        slow :: task {
+        slow: task {
             time.sleep(10ms)
             print("finished fast")
         }
         ^slow.join() ?? panic("fast task failed")
     }
     #Context(deadline: time.unix_ns() /% 1_000_000 + 20) {
-        slow :: task {
+        slow: task {
             time.sleep(40ms)
             print("finished slow")
         }

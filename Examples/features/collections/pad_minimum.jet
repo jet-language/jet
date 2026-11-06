@@ -5,21 +5,21 @@
 // truncated, and a filler failure is an ordinary failure of the caller.
 // Breaking the consumer loop cancels the generator at its yield point, so no
 // later position is produced.
-enum Pad {
+Pad: enum {
     Item(Int)
     Missing(Int)
 }
 
 #Error
-struct FillError {
+FillError: struct {
     message: String
 }
 
-fn source(items: [Int]) -> Stream<Int> {
+source: fn(items: [Int]) -> Stream<Int> {
     loop item in items -> yield item
 }
 
-fn pad_min(items: ^Stream<Int>, min: Int) -> Stream<Pad> {
+pad_min: fn(items: ^Stream<Int>, min: Int) -> Stream<Pad> {
     seen := 0
     loop item in items {
         yield Pad.Item(item)
@@ -31,18 +31,18 @@ fn pad_min(items: ^Stream<Int>, min: Int) -> Stream<Pad> {
     }
 }
 
-fn fill(index: Int) -> Int {
+fill: fn(index: Int) -> Int {
     print("  fill({index})")
     index * 100
 }
 
-fn checked_fill(index: Int) -> Int FillError! {
+checked_fill: fn(index: Int) -> Int FillError! {
     print("  checked_fill({index})")
     if index == 3 -> return Err(FillError{message: "no filler for index {index}"})
     Ok(index * 100)
 }
 
-fn padded(items: [Int], min: Int) -> [Int] {
+padded: fn(items: [Int], min: Int) -> [Int] {
     out := [Int]{}
     loop slot in pad_min(source(items), min) {
         if slot == {
@@ -53,7 +53,7 @@ fn padded(items: [Int], min: Int) -> [Int] {
     out
 }
 
-fn checked_padded(items: [Int], min: Int) -> [Int] FillError! {
+checked_padded: fn(items: [Int], min: Int) -> [Int] FillError! {
     out := [Int]{}
     loop slot in pad_min(source(items), min) {
         if slot == {
@@ -64,7 +64,7 @@ fn checked_padded(items: [Int], min: Int) -> [Int] FillError! {
     Ok(out)
 }
 
-fn run() {
+run: fn() {
     // (a) short input: only positions 2, 3 and 4 are filled.
     print("short:")
     print(padded([1, 2], 5))
@@ -87,7 +87,7 @@ fn run() {
 
     // (d) a failing filler at position 3 stops after 1, 2 and fill(2).
     print("failing filler:")
-    result :: checked_padded([1, 2], 5) ?? {
+    result: checked_padded([1, 2], 5) ?? {
         print("failed: {err.message}")
         [Int]{}
     }

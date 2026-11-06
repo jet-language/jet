@@ -88,19 +88,19 @@ vocabulary](vocabulary.md).
   D-UNIFYLIT1=A).
 - A marker is a struct whose fields are its arguments, with one
   `impl Marker { … }` block in its body. The block's settings are written
-  `name :: value` (`sites :: [...]`, `repeatable :: true`, …) and its template
-  is `fn expand(self, target: Target) { … }` (D-DECL-TYPES1=A,
+  `name: value` (`sites: [...]`, `repeatable: true`, …) and its template
+  is `expand: fn(self, target: Target) { … }` (D-DECL-TYPES1=A,
   D-MARKER-SITES1, D-BOUND-SINK1=A). A trailing list field
   takes its items as separate arguments at the use site.
   A fixed named group instead is a field-less marker struct whose block sets
-  `group :: #[Inline, Scalar]`; it has at least two members and no parameters,
+  `group: #[Inline, Scalar]`; it has at least two members and no parameters,
   and expands through the same
   argument, site and duplicate checks as its written members. Gates, refusals,
   retired markers and other named groups cannot be hidden inside it
   (D-MARKER-GROUP1=A).
   Markers declared by the current module may be bare; imported markers always
   name their local import alias in PascalCase, acronyms in caps, as in
-  `#Web.Get(...)` through `use web :: core.http.server` (D-MARKER-CASE1=A);
+  `#Web.Get(...)` through `use web: core.http.server` (D-MARKER-CASE1=A);
   a lowercase library part is E0087. Group members bind in the declaring
   module, not in whichever module applies the group. A public group cannot
   publish a private member (D-MARKER-MODULE1=A).
@@ -191,15 +191,15 @@ assign   = place ( "=" | "+=" | "-=" | "*=" | "/=" | "/%=" | "%=" | "%%="
 A parameter's access marker is on its type (`x: &T` or `x: ^T`); receivers
 write `&self` or `^self`. A type is never written between a binding name and its
 binding sigil. Types ride values (`Type{…}` or an expected-type-inferred
-`{…}`), or appear on signatures and fields. The old `name: Type :: value` and
+`{…}`), or appear on signatures and fields. The old `name: Type: value` and
 `name: Type := value` forms are retired (D-BIND-BARE1=A).
 View-typed parameters may add `from owner` or `from owner | other_owner`; the
 names identify sibling owners in the published provenance relation.
 
-An `alias` and a constant share the `name :: …` spelling; meaning, never
+An `alias` and a constant share the `name: …` spelling; meaning, never
 casing, separates them. A declaration with type parameters, or whose right side
-parses only as a type, is an alias. A bare path right side (`RNG ::
-random.RNG`, `MAX :: other.MAX`) is resolved: it is an alias when the path
+parses only as a type, is an alias. A bare path right side (`RNG:
+random.RNG`, `MAX: other.MAX`) is resolved: it is an alias when the path
 names a type and a constant otherwise, and ordinary scoping decides a name that
 is both. `alias` is not a keyword (D-TYPEALIAS1, #6176).
 
@@ -242,22 +242,22 @@ For example, a declared `(lines: [String], at: Int, message: String)` return
 type gives an empty `lines: []` field the element type `String`; it does not
 default that field to `[Int]`. The same contextual rule applies at call arguments.
 
-An executable entry is `fn run`. An executable `run` has no parameters, or has
+An executable entry is `run: fn`. An executable `run` has no parameters, or has
 one parameter whose type is a CLI-derived program struct; it returns `()` or a
 unit-fallible result. The checker gives an omitted entry
 contract the default fallible `Result<(), Err>` carrier, so source may use a
-plain `fn run() { … }`. An explicit unit-fallible contract names its error,
-for example `fn run() !IOError`; a bare `!` is not a contract. Other output
+plain `run: fn() { … }`. An explicit unit-fallible contract names its error,
+for example `run: fn() !IOError`; a bare `!` is not a contract. Other output
 kinds have their own entry contract. Notebook and REPL evaluation may construct
 an explicit entry for the submitted fragment (S12, D-CLIFLAG1,
 D-FAIL-EXIT1=A).
 
-At ordinary file scope, `name :: value` declares an immutable module global and
+At ordinary file scope, `name: value` declares an immutable module global and
 `name := value` declares a mutable module global. A mutable or `#Persist`
 global's initializer is a tier-stable scalar literal; any other initializer is
 E0622. An immutable global's initializer is any expression, computed once in
-dependency order before `fn run`, and every read is an ordinary copy
-(D-MODULE-VALUE1). An initializer that stops stops the program before `fn run`
+dependency order before `run: fn`, and every read is an ordinary copy
+(D-MODULE-VALUE1). An initializer that stops stops the program before `run: fn`
 with its normal report, the same way on every tier. Compile-time code reads an
 immutable global only when the build can compute it, which needs a pure
 evaluation that succeeds (E0627). Only an explicit `comptime { … }` reads build
@@ -269,10 +269,10 @@ be literal data, not a call or arithmetic expression.
 Inside a function, the same spellings are local bindings. A top-level executable statement is
 rejected with E0621; Jet does not synthesize an implicit runtime function.
 The `const` keyword is retired and is recognized only to teach its replacement
-(E0146). A compile-time constant is an ordinary ALL_CAPS name, `NAME :: value`,
+(E0146). A compile-time constant is an ordinary ALL_CAPS name, `NAME: value`,
 described below.
 The retired `#Known` constant, branch, and block forms teach E0377 and recover
-their compile-time form. Their replacements use `NAME :: comptime { value }`,
+their compile-time form. Their replacements use `NAME: comptime { value }`,
 `comptime if condition { … }`, and `comptime { … }` (D-META-STAGE1=B,
 D-PREP-SURFACE2=A). Constant and local-name repairs use the same canonical
 identifier-casing algorithm as semantic diagnostics.
@@ -298,7 +298,7 @@ ranges remain one `Range` value. Expression fences accept expressions, as in
 not a list or destructure (D-EACH1=C, D-FENCE-GLYPH1=A, D-FENCE-RANGE1,
 D-FENCE2=A).
 
-`#Track name :: value` and `#Track name := value` attach the origin fact. Read
+`#Track name: value` and `#Track name := value` attach the origin fact. Read
 that fact as `value.$origin -> ?OriginInfo`; there is no runtime origin
 projection (D-TRACK-ORIGIN1=A).
 
@@ -353,7 +353,7 @@ the first least or greatest one. A NaN argument is the result of all three,
 since NaN orders against nothing; `core.math.min_float` and `max_float` are the
 Float pair that skips a NaN operand. `clamp` accepts reversed bounds, so
 `clamp(x, 10, 0)` clamps to `0..=10`. They are ordinary Core generics
-(`core.prelude`), so they evaluate at compile time (`LIMIT :: max(4, CORES)`).
+(`core.prelude`), so they evaluate at compile time (`LIMIT: max(4, CORES)`).
 
 Automatic Core source loading and readable-prelude alias injection use identifiers
 from the canonical lexer, including code inside string interpolation.
@@ -372,7 +372,7 @@ may be total or return a `Result`, but may not add an implicit conversion
 Functions support multiple arguments, checked arity (E0104), and checked
 argument types (E0112). A function with a non-unit success result must return
 that result on every path (E0114). A parameter may have a default, written on
-its type as `fn f(x: Int{0})`. A call-site label binds by the public parameter
+its type as `f: fn(x: Int{0})`. A call-site label binds by the public parameter
 name, so `f(x: 1)` may omit a default and labelled arguments may be supplied in
 any order. `/` closes the positional-only zone; `*` opens the label-only zone;
 `timeout seconds: Int` publishes `timeout` while the body reads `seconds`.
@@ -455,7 +455,7 @@ list. An explicitly nested collecting loop preserves nesting. Maps and sets use
 explicit terminals; lazy work uses iterator adapters. In statement position,
 a finite source, infinite, condition-only, or mutable-state loop may use
 `-> statement`; its value is discarded. A discarded non-unit value earns the
-registered lint. Bind a collecting loop with `::`, or use a write handle for an
+registered lint. Bind a collecting loop with `:`, or use a write handle for an
 in-place update. A value loop returns a final value only through `break value`
 or `break(name, value)`; all exits unify. A collecting loop returns its partial
 list and rejects payload breaks (D-COMPREHENSION1).
@@ -463,7 +463,7 @@ A collecting expression needs a finite source or explicit-state exhaustion
 edge; bare infinite and condition-only headers are rejected with E0072.
 
 `break` and `next` are legal only inside loops (E0115). A loop may have an
-ordinary-name label, `outer :: loop … { … }`; `break(outer)`,
+ordinary-name label, `outer: loop … { … }`; `break(outer)`,
 `break(outer, value)`, and `next(outer)` target it from a nested loop. E0987
 reports an out-of-scope label. E0988 teaches retired loop-name and `@` forms,
 rejects `outer := loop`, and explains that a loop name is not a runtime value.
@@ -471,29 +471,29 @@ Normal explicit-state fallthrough and targeted `next` run the afterthought once
 and retest. Source fallthrough and targeted `next` pull the stride and use the
 final pull. `break`, `return`, propagated failure, and panic skip the target
 afterthought; abandoning an inner loop runs no edge. Bare `next` is control only
-as a complete statement or `??` fallback. `next()`, `.next()`, and `fn next`
+as a complete statement or `??` fallback. `next()`, `.next()`, and `next: fn`
 remain ordinary identifier uses; a value named `next` after `??` needs
 parentheses: `value ?? (next)`.
 
 ## Compile-time names and staged syntax
 
-An immutable `::` binding asks for build-time evaluation as an optimization,
-and `comptime` forces it (#6125). A module-level `MAX_RETRIES :: 3` or
-`LIMIT :: 6 * 7 + 1` is evaluated while building when its evaluation is pure
+An immutable `:` binding asks for build-time evaluation as an optimization,
+and `comptime` forces it (#6125). A module-level `MAX_RETRIES: 3` or
+`LIMIT: 6 * 7 + 1` is evaluated while building when its evaluation is pure
 and succeeds, and is read as `MAX_RETRIES` like a literal. A value that reads
 the outside world, or fails while building, is computed once at startup,
-before `fn run`, with no build error; a trap there is the program's own. In a
-block, an immutable `name :: value` of Int arithmetic (`+`, `-`, `*`,
+before `run: fn`, with no build error; a trap there is the program's own. In a
+block, an immutable `name: value` of Int arithmetic (`+`, `-`, `*`,
 negation) over literals and other folded bindings holds its value from the
 build on, at every optimization level; any other block value computes at run
-time, where O1 and O2 may still fold it. `NAME :: comptime { value }` at file
-scope, and `lanes :: comptime { calculate() }` in a block, where names stay
+time, where O1 and O2 may still fold it. `NAME: comptime { value }` at file
+scope, and `lanes: comptime { calculate() }` in a block, where names stay
 snake_case (D-SHAPE-CASE1), force evaluation of the single final expression
 while building: a failure stops the build with E3010 (D-PREP-SURFACE2=A).
 Names bound inside a `comptime { … }` statement block stay readable after it.
 At file scope, `name := value` bindings remain runtime module globals; they do
-not require `#Persist`. `#Static NAME :: value` requests a
-stable-address Rust static when the contract needs one, and `#Inline NAME ::
+not require `#Persist`. `#Static NAME: value` requests a
+stable-address Rust static when the contract needs one, and `#Inline NAME:
 value` copies the value into use sites (D-CONSTMARK1). Without a marker, an
 immutable constant whose value is a number, text, or a small record or enum
 case of those is copied into its use sites; any other value (a list, map, or
@@ -548,16 +548,16 @@ scope; Core's generic record methods use this form rather than generic `impl`
 heads.
 
 ```jet
-struct Circle {
+Circle: struct {
     radius: Float
 
-    fn area(self) -> Float {
+    area: fn(self) -> Float {
         3.14159 * self.radius * self.radius
     }
 }
 
 impl Circle {
-    fn unit() -> Circle {
+    unit: fn() -> Circle {
         Circle{radius: 1.0}
     }
 }
@@ -580,7 +580,7 @@ replacement are legal. The same write in a read method is E0205. Calling a
 write-receiver method requires a changeable receiver binding and is E0202.
 Invoke an instance method as `circle.area()`, not `area(circle)`. Methods may
 live in the type, in `impl Type { … }`, or as a top-level external inherent
-method `fn Type.method(self, …) { … }`; the type must be defined in the current
+method `Type.method: fn(self, …) { … }`; the type must be defined in the current
 source module. Static methods omit `self`, as in `Circle.unit()`.
 
 Multiple construction shapes use distinctly named no-`self` statics such as
@@ -592,18 +592,18 @@ inside its type or with `impl Type.Trait { … }`; qualify a foreign type when t
 module owns the implementation:
 
 ```jet
-trait Shape {
-    fn area(self) -> Float
+Shape: trait {
+    area: fn(self) -> Float
 }
 
 impl Circle.Shape {
-    fn area(self) -> Float { 3.14159 * self.radius * self.radius }
+    area: fn(self) -> Float { 3.14159 * self.radius * self.radius }
 }
 ```
 
-A trait name in type position, such as `[Shape]` or `fn f(shape: Shape)`, means
-dynamic dispatch with invisible boxing. Generic bounds use `fn f<T: Bound>(…)`
-and `struct Pair<T> { … }`. Built-in `Printable`, `Equatable`, `Debug`,
+A trait name in type position, such as `[Shape]` or `f: fn(shape: Shape)`, means
+dynamic dispatch with invisible boxing. Generic bounds use `f: fn<T: Bound>(…)`
+and `Pair: struct<T> { … }`. Built-in `Printable`, `Equatable`, `Debug`,
 `Comparable`, `Encode`, and `Decode` derive when every field qualifies. The
 package default can deny `auto_derive` through
 `policy: { lints: { deny: [auto_derive] } }`. A signed type marker opts one
@@ -649,7 +649,7 @@ Its default bound is 128 entries; `#Memo(bound: none)` makes it unbounded.
 including before the first call. The shared Prelude owns eviction and counters;
 emitters only marshal the checked function identity, argument key, and bound.
 
-`tag Name { deny: [Net] }` declares an erased dataflow fact and its policy.
+`Name: tag { deny: [Net] }` declares an erased dataflow fact and its policy.
 `deny` is required and nonempty; `from` is optional. Direct `#Name` tags attach
 to values, fields, parameters, and returns. `#Scrub(Name)` removes exactly that
 tag. Tags have no methods: a method in a tag body is E0732, and using a tag
@@ -663,11 +663,11 @@ effect row is `-[]>`. Compile-time demand uses the prefix `@`; the retired `$`
 spelling is not an alias (D-ONCE-AT1=D).
 
 A declaration may instead write its markers inside its body, one per line, as
-`#X :: value`: anywhere directly in the body of a struct, enum, trait, impl,
-module, or function. `#X :: true` applies `#X` with no arguments, `#X :: false`
-is `#!X`, `#X :: v` passes one name path, string, or number, and
-`#X :: (args)` passes any other argument list; any other value is E0943, and a
-required Bool argument is written `#X :: (true)` (E0943). The line is the same
+`#X: value`: anywhere directly in the body of a struct, enum, trait, impl,
+module, or function. `#X: true` applies `#X` with no arguments, `#X: false`
+is `#!X`, `#X: v` passes one name path, string, or number, and
+`#X: (args)` passes any other argument list; any other value is E0943, and a
+required Bool argument is written `#X: (true)` (E0943). The line is the same
 marker as `#X(args)` above the declaration, checked at the same site; type
 facts such as `$layout` apply once the whole body is read, and a function's
 value line may come before its marker lines. One declaration writes its whole
@@ -721,7 +721,7 @@ defined in the compile-time section above.
 
 ### Published schemas and migrations
 
-`#PublishedSchema struct Name { … }` marks a public record whose field layout is
+`#PublishedSchema Name: struct { … }` marks a public record whose field layout is
 snapshotted under `.jet/cache/schema/`. A later project build compares the
 current shape with that snapshot by field name, ignoring order. A breaking shape
 change is E0910 unless a `migration` block declares it. The four operations are:
@@ -798,13 +798,13 @@ own `to_int` or `from_int` keeps it.
 
 ```jet
 #Layout(U8)
-enum Opcode {
+Opcode: enum {
     Nop
     Load = 16
     Store
 }
 
-op :: Opcode.from_int(17) ?? return
+op: Opcode.from_int(17) ?? return
 print(op.to_int())
 ```
 
@@ -828,8 +828,8 @@ type_fixed_list = "[" type "#" int_literal "]" ;
 ```
 
 ```jet
-result :: [Int#3]{2, 4, 6}
-[a, b, c] :: result
+result: [Int#3]{2, 4, 6}
+[a, b, c]: result
 ```
 
 A wrong destructuring count is **E0963**. `push`, `pop`, `insert`, `remove`,
@@ -844,7 +844,7 @@ bound, and any exit: `return`, `break`, `next`, a diverging call), only the
 part of its interval that the guard lets through, for the rest of the block:
 
 ```jet
-channel :: Int.from_u8(byte)
+channel: Int.from_u8(byte)
 if channel >= channels.len() -> return Err("bad channel")
 channels[channel] += U64{1}
 ```
@@ -865,8 +865,8 @@ Use an explicit module-qualified call to select a declared function while
 keeping a same-named local value in scope.
 
 ```jet
-square :: (n: Int) -> n * n
-increment :: (n: Int) -> {
+square: (n: Int) -> n * n
+increment: (n: Int) -> {
     n + 1
 }
 ```
@@ -874,8 +874,8 @@ increment :: (n: Int) -> {
 `->` is the callable and control arrow. A named function or method has exactly
 one arrow after its inputs, `->` or an effect ceiling `-[Effect]>` / `-[]>`,
 followed by its optional result type and then a braced body:
-`fn f() -> T { expr }`. A unit or unit-fallible callable keeps a bare braced
-body. A second body arrow (`fn f() -> T -> expr`) or an unbraced body after the
+`f: fn() -> T { expr }`. A unit or unit-fallible callable keeps a bare braced
+body. A second body arrow (`f: fn() -> T -> expr`) or an unbraced body after the
 arrow reports **E0080**; `jet fmt` rewrites it to `{ expr }` (D-SIG-AFTER1=A).
 
 Function values use a function type with parameter types and a result:
@@ -899,11 +899,11 @@ indexes, and lambdas remain valid. The adjacent `)(` function-value spelling
 is rejected with **E-CALL-VALUE** (D-CALLVALUE1=B).
 
 ```jet
-fn apply(f: fn(Int) -> Int, n: Int) -> Int {
+apply: fn(f: fn(Int) -> Int, n: Int) -> Int {
     f.call(n)
 }
 
-fn make_adder(base: Int) -> fn(Int) -[]> Int {
+make_adder: fn(base: Int) -> fn(Int) -[]> Int {
     (n: Int) -> base + n
 }
 ```
@@ -914,7 +914,7 @@ A lambda captures a name for shared read access when the body only reads it.
 Writing a captured name requires a mutable `:=` binding; otherwise the compiler
 reports **E0111**. A lambda bound to a local that is only ever called directly
 in that scope does not escape: it borrows each `:=` local it writes, so the
-write lands on the owner (`count := 0; bump :: (n: Int) -> { count += n };
+write lands on the owner (`count := 0; bump: (n: Int) -> { count += n };
 bump(2)` leaves `count` at 2). An escaping lambda—one stored in a binding that
 is passed, stored, or returned, returned itself, stored in a struct field, or
 passed to a `^T` parameter—must own its captures.
@@ -981,10 +981,10 @@ named error domain. The supported forms are:
   `?T !(E1 | E2)`. (D-UNIONTYPE1=A)
 
 The explicit `!` must name an error domain; ordinary failure leaves the error
-contract implicit. The entry function `fn run()` has the default fallible
+contract implicit. The entry function `run: fn()` has the default fallible
 `Result<(), Err>` carrier, so it may propagate a standard-library failure
 without writing a return annotation. Pin an entry to an application error with
-`fn run() !StoreError { ... }` when that distinction is part of the interface.
+`run: fn() !StoreError { ... }` when that distinction is part of the interface.
 (D-FAILURE-FOUNDATION1, D-FAIL-EXIT1)
 
 Construct the two sides with `Ok(value)` and `Err(error)`. These are contextual
@@ -1004,7 +1004,7 @@ A failure conversion is one declared rail:
 
 ```jet
 impl DiskError -> StoreError {
-    fn convert(error: DiskError) -> StoreError {
+    convert: fn(error: DiskError) -> StoreError {
         StoreError.IO
     }
 }
@@ -1148,7 +1148,7 @@ allocation. A body write through an unmarked parameter, or passing it to a write
 or take position, is a hard error at the definition or call site; add `&` or `^`
 to the contract and mirror it where the call transfers access. A cloneable read
 value entering an owning destination is materialized automatically. A bare
-`::` binding of a place remains a read window; non-cloneable values and
+`:` binding of a place remains a read window; non-cloneable values and
 `#Policy(copies: .Explicit)` require an explicit `.copy()` or an owning `^`
 contract (D-MEM1, D-MEM-COPYSEM1).
 
@@ -1177,13 +1177,13 @@ choices; source returns do not guarantee copy elision or allocation avoidance.
 Those performance claims require exercised proof.
 
 ```jet
-fn bump(n: &Int) { n += 1 }
-fn archive(name: ^String) -> String { name }
+bump: fn(n: &Int) { n += 1 }
+archive: fn(name: ^String) -> String { name }
 
-fn run() {
+run: fn() {
     score := 41
     bump(&score)
-    saved :: archive(^"vault")
+    saved: archive(^"vault")
     print(saved)
 }
 ```
@@ -1192,16 +1192,16 @@ The sigil on a method receiver is written at its definition. Plain `self` is a
 read receiver; `&self` is a write receiver; `^self` consumes the receiver.
 
 ```jet
-struct Player {
+Player: struct {
     hp: Int
 }
 
 impl Player {
-    fn show(self) -> Int { self.hp }
-    fn heal(&self, amount: Int) { self.hp = self.hp + amount }
+    show: fn(self) -> Int { self.hp }
+    heal: fn(&self, amount: Int) { self.hp = self.hp + amount }
 }
 
-fn run() {
+run: fn() {
     player := Player{hp: 10}
     &player.heal(2)
     print(player.show())
@@ -1241,7 +1241,7 @@ lent to a read parameter (`show(open_log("x"))`) closes exactly once, when its
 statement ends; one made in a branch or a loop condition of the statement
 closes right after the call that reads it. The result of a call that returns a
 view (`-> Directory from self | picked`) is borrowed, not owned: passed on,
-bound with `::`, wrapped in a carrier, or taken apart, it closes nothing, and
+bound with `:`, wrapped in a carrier, or taken apart, it closes nothing, and
 its owner closes it. `x.copy()` is the one copy spelling
 (D-COPY-WORD1=A); it is a compiler-owned method that no type can redefine, and
 it creates an independent owned value. `.clone()` is not user-typable Jet
@@ -1252,8 +1252,8 @@ The Core-only `IOOperation` carrier is a payload-free runtime `Copy` enum;
 its explicit `.copy()` has no allocation and does not make the type a user export.
 
 ```jet
-name :: "vault"
-saved :: name.copy()
+name: "vault"
+saved: name.copy()
 print(name)
 print(saved)
 ```
@@ -1261,7 +1261,7 @@ See [`copy_verb.jet`](../../Examples/features/memory/copy_verb.jet) for the
 explicit-copy form.
 
 The compiler chooses when a name is unmarked, and a mark gives exact control
-(D-COPY-DEFAULT1=A). `ys :: xs` reads a place through a view, `ys := xs.copy()` makes
+(D-COPY-DEFAULT1=A). `ys: xs` reads a place through a view, `ys := xs.copy()` makes
 an independent copy, and `ys := ^xs` moves `xs` exactly: `^place` is accepted
 in every value position (binding, assignment, field initializer, collection
 element, result), and any later use of `xs` is E0121 naming the move. `^`
@@ -1311,13 +1311,13 @@ borrowed window.
 An ordinary owned field owns its value:
 
 ```jet
-struct Span {
+Span: struct {
     text: String
     meta: String
 }
 
-fn describe(source: String, kind: String) {
-    value :: Span{text: source, meta: kind}
+describe: fn(source: String, kind: String) {
+    value: Span{text: source, meta: kind}
     print(value.text)
 }
 ```
@@ -1341,9 +1341,9 @@ bare place is a checked read window; `&place` is the exclusive write window; and
 
 ```jet
 values := [10, 20, 30, 40]
-read :: values[0..1]
-edit :: &values[2..3]
-copy :: values[0..1].copy()
+read: values[0..1]
+edit: &values[2..3]
+copy: values[0..1].copy()
 ```
 
 The windows above are disjoint. A bare read window remains a view in a non-owning
@@ -1427,8 +1427,8 @@ outlive its owner. The Jet-level type remains `String`.
 
 ```jet
 padded := "  user@jet-lang.dev  "
-email :: padded.trim()
-domain :: email.after("@")
+email: padded.trim()
+domain: email.after("@")
 print("padded still readable: {padded}")
 ```
 
@@ -1455,7 +1455,7 @@ the cycle check runs at the write. A write into a shared cell, its edit guard's
 `.value`, or `try_replace`, whose place can hold a strong edge back to the cell's
 type, is rejected with E0221 unless the stored value is built in place: a
 literal, a new cell (`shared T{…}`) whose fields are built the same way, a value
-whose type has no strong path back, or a `::` name bound to a new cell in the
+whose type has no strong path back, or a `:` name bound to a new cell in the
 same run of its scope and read nowhere else since. A writing call
 (`&cell.kids.push(kid)`) is checked the same way for each argument. Building a
 list by prepending or adding new children never closes a cycle; storing an
@@ -1472,19 +1472,19 @@ rule: use a total update with an explicit missing-key fallback instead. See the
 [compound-place example](../../Examples/features/memory/shared_compound_places.jet).
 
 ```jet
-struct AppConfig {
+AppConfig: struct {
     name: String
     hits: Int
 }
 
-fn handle(id: Int, config: Shared<AppConfig>) -> String {
-    label :: config.name
+handle: fn(id: Int, config: Shared<AppConfig>) -> String {
+    label: config.name
     "request {id} on {label}"
 }
 
-fn run() {
-    config :: shared AppConfig{name: "jet-server", hits: 0}
-    t1 :: task handle(1, config)
+run: fn() {
+    config: shared AppConfig{name: "jet-server", hits: 0}
+    t1: task handle(1, config)
     print(t1.join() ?? panic("task failed"))
     config.hits += 1
 }
@@ -1543,7 +1543,7 @@ hard kill (SIGKILL, power loss) runs nothing; the buffered writes were never
 applied, so no half transaction is visible (#5477).
 
 ```jet
-fn transfer(from: Shared<Account>, to: Shared<Account>, amount: Int) {
+transfer: fn(from: Shared<Account>, to: Shared<Account>, amount: Int) {
     #Transact {
         from.balance -= amount
         to.balance += amount
@@ -1576,19 +1576,19 @@ writable pool: a `:=` binding or a `&` parameter. Through an unmarked
 parameter, `add` and `remove` are **E0202**.
 
 ```jet
-struct Player {
+Player: struct {
     name: String
     hp: Int
     attack: Int
     target: ID<Player>?
 }
 
-fn run() {
+run: fn() {
     world := Pool<Player>.new()
-    kai :: world.add(Player{name: "Kai", hp: 100, attack: 15, target: None})
+    kai: world.add(Player{name: "Kai", hp: 100, attack: 15, target: None})
     world[kai].hp += 1
-    fallen :: world.remove(kai)
-    _ :: fallen
+    fallen: world.remove(kai)
+    _: fallen
 }
 ```
 
@@ -1619,7 +1619,7 @@ dispatch needs a sealed target set or signed dependency summary; otherwise the
 strict fact is unprovable and rejected (D-AUTHORITY-MEM1, D-MEM-FACTS1).
 
 ```jet
-fn integrate(e: &Entity, dt: Float) -[!Mem.Alloc]> {
+integrate: fn(e: &Entity, dt: Float) -[!Mem.Alloc]> {
     e.pos += e.vel * dt
 }
 ```
@@ -1644,17 +1644,17 @@ ownership.
 | `^T` | ownership moves to the callee | owned value |
 
 ```jet
-struct Player {
+Player: struct {
     hp: Int
 }
 
-fn damage(player: &Player, amount: Int) {
+damage: fn(player: &Player, amount: Int) {
     player.hp = player.hp - amount
 }
 
-fn consume(resource: ^String) { print(resource) }
+consume: fn(resource: ^String) { print(resource) }
 
-fn run() {
+run: fn() {
     player := Player{hp: 10}
     damage(&player, 3)
     consume(^"resource")
@@ -1669,8 +1669,8 @@ access marker on a parameter is E0029:
 error[E0029]: two access markers on one parameter
   --> file.jet:3:12
    |
- 3 | fn bad(p: &^Player) { … }
-   |           ^^ remove one access marker
+ 3 | bad: fn(p: &^Player) { … }
+   |            ^^ remove one access marker
 ```
 
 A value takes one marker too: `^^handle.join()` or `&^items` on an argument or
@@ -1749,17 +1749,17 @@ tree. The Prelude also registers common leaves such as `DB.Read`, `DB.Write`,
 
 The Prelude writes each effect as a type implementing `Effect`, recognized by
 its in-body `impl Effect { … }` block. A struct is a root with no members; an
-enum is a closed family whose cases are its leaves. `fn irreversible(self) ->
+enum is a closed family whose cases are its leaves. `irreversible: fn(self) ->
 Bool` says which effects a `#Transact` rollback can't take back, per case
 (D-DECL-TYPES1):
 
 ```jet
-enum FS {
+FS: enum {
     Read
     Write
 
     impl Effect {
-        fn irreversible(self) -> Bool { self == .Write }
+        irreversible: fn(self) -> Bool { self == .Write }
     }
 }
 ```
@@ -1770,7 +1770,7 @@ word. A package may still
 declare a leaf beneath a Prelude root at compile time:
 
 ```jet
-effect Log.Audit
+Log.Audit: effect
 ```
 
 Declarations from the package, its dependencies, and the Prelude form one
@@ -1852,7 +1852,7 @@ script's package block or `package.jet` (D-SCRIPT-CONFIRM1). Without a
 terminal the run stops with E1803 and its Fix names the exact `--allow`
 command. A program without `package.jet` has no manifest to edit, so its
 E1803 names the undecided rights and carries the leading inline
-`package { … }` block (D-ECO-INLINEPACKAGE1) that declares them; the floor
+`package: { … }` block (D-ECO-INLINEPACKAGE1) that declares them; the floor
 stays granted beside that row, so the row lists only the rights the floor
 does not hold. Rights widen only by a written word, so the edit is graded
 `needs-review` and `jet fix --all` inserts it (D-RIGHTS-DIAG1).
@@ -1881,7 +1881,7 @@ listed effect. The unannotated form uses `-> Type`; an effect ceiling is written
 before the return type, as in:
 
 ```jet
-fn load(path: String) -[FS]> String {
+load: fn(path: String) -[FS]> String {
     core.files.read(path)
 }
 ```
@@ -1895,9 +1895,9 @@ produce the same runtime code.
 `#FX(...) { ... }` applies the same idea to one block:
 
 ```jet
-fn run() {
+run: fn() {
     #FX(FS, IO) {
-        text :: core.files.read("x") ?? ""
+        text: core.files.read("x") ?? ""
         print(text)
     }
 }
@@ -1917,9 +1917,9 @@ unknown function value contributes the maximal set, which is conservative and
 sound.
 
 ```jet
-fn apply(f: fn(Int) -> Int, x: Int) -> Int { f(x) }
+apply: fn(f: fn(Int) -> Int, x: Int) -> Int { f(x) }
 
-fn run() -[IO]> Unit {
+run: fn() -[IO]> Unit {
     apply(log_it, 1)
 }
 ```
@@ -1933,12 +1933,12 @@ escapes.
 A trait method may declare an upper bound:
 
 ```jet
-trait Shape {
-    fn area(self) -[]> Int
+Shape: trait {
+    area: fn(self) -[]> Int
 }
 
 impl Square.Shape {
-    fn area(self) -[]> Int { self.side * self.side }
+    area: fn(self) -[]> Int { self.side * self.side }
 }
 ```
 
@@ -2180,20 +2180,20 @@ names a module.
 ```jet
 use {
     "scoring"
-    text :: util
+    text: util
     core.files
 }
 ```
 
 A quoted path is relative to the directory of the file containing the `use`.
 The `.jet` suffix is implicit. A path cannot escape its project with `..`.
-The last path segment supplies the default namespace; `alias :: path` gives
+The last path segment supplies the default namespace; `alias: path` gives
 either form an explicit alias (S16).
 
 Two or more imports are written as one `use { … }` block with one row per
 line, and `pub use { … }` re-exports every row (#6542). A row is any import:
 a module path, `path#version`, a member list `path.[a, b]`, a quoted file,
-each optionally after `alias ::`. A file may hold several blocks, and an
+each optionally after `alias:`. A file may hold several blocks, and an
 inline module body takes its own. `jet fmt` writes a lone import on one line
 and two or more as a block, with re-exports in a separate `pub use { … }`
 block.
@@ -2201,21 +2201,21 @@ block.
 ```jet
 use {
     "scoring"
-    text :: util
+    text: util
     core.files
-    biggest :: numeric.max
+    biggest: numeric.max
     core.math.[min]
 }
 ```
 
-`alias :: path` binds `alias` to whatever `path` names. A path that names a
+`alias: path` binds `alias` to whatever `path` names. A path that names a
 module (a Core, local, package or foreign language module) is that module
 import. A path `owner.name` that names no module, under an owner that declares
 the member `name` (a Core module, an inline or local module, the file a
-body-less `module owner` declares, a file import's alias, or a package
+body-less `owner: module` declares, a file import's alias, or a package
 dependency), binds that member; any other path keeps its module error. A
 member list names its members unrenamed: a renamed member is its own
-`alias :: owner.name` row. A row takes one alias, so `alias ::` with a member
+`alias: owner.name` row. A row takes one alias, so `alias:` with a member
 list is an error, and an empty block is an error.
 
 An unquoted module name is resolved by recursively searching from the project
@@ -2247,7 +2247,7 @@ The UI fixture is
 
 A package is one namespace (D-MOD-CYCLE1=A). A package is a directory with a
 `package.jet`, holding every `.jet` file below it except the files of nested
-packages, or a single file that begins with a `package { }` header. Its
+packages, or a single file that begins with a `package: { }` header. Its
 files see each other's top-level names without any
 import; a file of a package that imports another file by path is **E0623**,
 and a top-level name declared in two files of one package is **E0624**.
@@ -2255,8 +2255,8 @@ Only loose files, which have no header and no `package.jet` above them,
 import files by relative path. Files of one package may refer to each other
 in a cycle; packages themselves are acyclic, and one package uses another
 with `use package.[names]`, which reaches every name of the dependency outside its `priv` and `priv(package)` modules, in
-any of its files. An executable package has one `fn run`, except that each
-file an `outputs:` entry names keeps its own `fn run` (owner ruling B); a
+any of its files. An executable package has one `run: fn`, except that each
+file an `outputs:` entry names keeps its own `run: fn` (owner ruling B); a
 library package has none (**E0625**). An `outputs:` entry `file.callable`
 names the member file whose stem is `file`, at any depth, and a callable it
 declares. The UI fixtures are `tests/ui/package_file_import/`,
@@ -2273,7 +2273,7 @@ their own fields and are different types, even if their field shapes agree.
 Cross-file access is qualified:
 
 ```jet
-score :: scoring.score(91);
+score: scoring.score(91);
 ```
 
 Every declaration and struct field is public by default and crosses a file
@@ -2282,11 +2282,11 @@ contents only its enclosing module uses, and to a `priv` struct field, which
 only its type's module reads and writes.
 
 ```jet
-fn greet() -> String {
+greet: fn() -> String {
     "hello"
 }
 
-fn secret() -> Int {
+secret: fn() -> Int {
     42
 }
 ```
@@ -2306,22 +2306,22 @@ Code modules use `module` where Rust uses `mod`, and `.` where Rust uses `::`
 file.
 
 ```jet
-module math {
-    fn clamp(value: Int, low: Int, high: Int) -> Int {
+math: module {
+    clamp: fn(value: Int, low: Int, high: Int) -> Int {
         if value < low -> low
         else if value > high -> high
         else -> value
     }
 }
 
-fn run() {
+run: fn() {
     math.clamp(3, 0, 2)
 }
 ```
 
-`module math;` declares a file module. The loader searches beside the file for
+`math: module;` declares a file module. The loader searches beside the file for
 `math.jet`, then for `math/module.jet`. Neither file is **E0607**; finding both
-is **E0606**. `module math { ... }` is inline and adds the `math` namespace to
+is **E0606**. `math: module { ... }` is inline and adds the `math` namespace to
 the containing file; it performs no file lookup. The same `module` keyword is
 used by JetOS declarations. The semicolon form always declares a code module,
 and the parser distinguishes braced code and JetOS contributions from their
@@ -2335,7 +2335,7 @@ imports are rejected with **E0612**. An unqualified import of an undefined
 member is **E0611**, and importing an item from a module that is not in scope is
 **E0610** (D-MOD2).
 
-Declarations are public by default (S18, D-VIS-MODULE1). `priv module name`
+Declarations are public by default (S18, D-VIS-MODULE1). `priv name: module`
 keeps a module's contents to its enclosing module, and `priv(package) module
 name` keeps them inside the package; a `priv` struct field is usable only by its
 type's module. Reaching into a private module or field across files reports
@@ -2347,13 +2347,13 @@ in their defining scope, so siblings call each other freely.
 
 A member import names any top-level declaration: a function, type, enum,
 trait, tag, protocol, or constant. A constant is declared like any other item,
-`MAX_ITEMS :: 8`, and is read qualified (`limits.MAX_ITEMS`) or by name after
+`MAX_ITEMS: 8`, and is read qualified (`limits.MAX_ITEMS`) or by name after
 `use limits.[MAX_ITEMS]` (3A). A `use` inside an inline-module body follows the
 same rule.
 
 A module is not a value. Binding, passing, returning, storing or interpolating
-a module, such as `m :: text` or `show(lib.inner)`, reports **E0629**. A
-function the module offers is a value: `f :: text.shout` is the function, as
+a module, such as `m: text` or `show(lib.inner)`, reports **E0629**. A
+function the module offers is a value: `f: text.shout` is the function, as
 `shout` is after `use text.shout`.
 
 An `impl` head that names a declaration through a module alias binds the alias
@@ -2370,7 +2370,7 @@ pub use wrap.wrap
 
 A public declaration that is not re-exported does not become part of the
 parent directory's surface, and neither does the child module itself: when
-`text/module.jet` re-exports only `shout :: wrap.wrap`, reaching the file
+`text/module.jet` re-exports only `shout: wrap.wrap`, reaching the file
 from outside, as `text.wrap.wrap("hi")`, reports **E0605**.
 
 A file and the item it re-exports may share a name, as `wrap` does above. The
@@ -2395,13 +2395,13 @@ value parameters. Applying it creates a specialized ordinary module
 D-GENMOD-IDENTITY1).
 
 ```jet
-module cache<K: Hash>(capacity: Int) {
-    fn key_of(k: K) -> String {
+cache: module<K: Hash>(capacity: Int) {
+    key_of: fn(k: K) -> String {
         "key"
     }
 }
 
-module int_cache :: cache<Int>(64)
+int_cache: cache<Int>(64)
 ```
 
 Type parameters and bounds use the angle list (`<K>` or `<K: Hash>`). Value
@@ -2439,13 +2439,13 @@ dashed-name  = ident { "-" ident } ;
 ```
 
 Package, module, image, and environment names may use kebab case, for example
-`module web-app`, `env.web-tools`, and `image.devhost-oci`. A hyphen joins
+`web-app: module`, `env.web-tools`, and `image.devhost-oci`. A hyphen joins
 segments only when it is adjacent to both; `a - b` remains subtraction. Code
 identifiers—variables, fields, types, and functions—remain plain identifiers.
 Leading, trailing, and doubled hyphens are invalid (S84).
 
 Automatic discovery skips a declaration whose declared name begins with `_`:
-`module _name { ... }`. An explicit `use project._name` is still allowed under
+`_name: module { ... }`. An explicit `use project._name` is still allowed under
 ordinary visibility rules. The name, not the filename or scan order, controls
 discovery; `jet project parts --skipped` lists omitted declarations. Duplicate
 declared names conflict even when one is omitted from discovery
@@ -2505,7 +2505,7 @@ resource bridge as `jet://environment` via `resources/list` and
 
 ### Workspace overlays
 
-`workspace.jet` may carry reviewed overlay policy inside `module workspace`.
+`workspace.jet` may carry reviewed overlay policy inside `workspace: module`.
 An `overlay <name> { ... }` records provider and channel swaps, package-local
 source/version/flag/patch changes, and `allowUnfree` decisions. For example,
 `Provider.nixpkgs(channel: "plasma-beta")` selects a provider channel and
@@ -2692,9 +2692,9 @@ cancelled (D-CANCELMODEL1=C, D-SHIELDNAME1=A).
 at the call site:
 
 ```jet
-{ sender: tx, receiver: rx } :: channel<Int>()
+{ sender: tx, receiver: rx }: channel<Int>()
 tx.send(7)
-value :: rx.receive() ?? panic("channel closed")
+value: rx.receive() ?? panic("channel closed")
 ```
 
 A second sender is made with `tx.copy()`; there is no combined channel value from
@@ -2779,11 +2779,11 @@ serialization or capture merge (D-PARCAPTURE1=D).
 (D-CONC-SPAWN1=D, D-CONC-FAIL1=A, D-CONC-JOIN1).
 
 ```jet
-one :: task work()
-two :: task { work_again() }
-results :: (task.all { work_a(), work_b() }) ?? []
-winner :: (task.race { fast(), slow() }) ?? 0
-first :: (task.any { read_cache(), read_network() }) ?? fallback
+one: task work()
+two: task { work_again() }
+results: (task.all { work_a(), work_b() }) ?? []
+winner: (task.race { fast(), slow() }) ?? 0
+first: (task.any { read_cache(), read_network() }) ?? fallback
 ```
 
 `task.all` waits for every branch and fail-fast cancels remaining children.
@@ -2794,7 +2794,7 @@ children. The combinators consume their children and have no handle-list twin.
 `task.all` may name all branches:
 
 ```jet
-results :: (task.all {
+results: (task.all {
     text: load_text(),
     count: count_items()
 }) ?? panic("task.all failed")
@@ -2811,15 +2811,15 @@ admission. The group owns and joins every child created in its body. A `Group`
 may be passed directly as a free-function or method parameter:
 
 ```jet
-fn add_work(group: Group, value: Int) {
+add_work: fn(group: Group, value: Int) {
     task value + 1
 }
 
-struct Crawler {
+Crawler: struct {
     step: Int
 
-    fn add_stepped(self, group: Group, value: Int) {
-        step :: self.step
+    add_stepped: fn(self, group: Group, value: Int) {
+        step: self.step
         task value + step
     }
 }
@@ -2913,7 +2913,7 @@ fixtures.
 `position == len`.
 
 ```jet
-buffer :: Bytes.with_capacity(128)
+buffer: Bytes.with_capacity(128)
 buffer.write([65, 66])
 print(buffer.string())
 ```
@@ -3005,7 +3005,7 @@ A project binder mounts a language root and library name as `<language>.<lib>`.
 Generated Jet modules and their provenance live below
 `.jet/bindings/<language>/`; generated Jet is ordinary source and can be
 inspected. Import a whole library or a member list with
-`use alias :: <lang>.<lib>` or `use <lang>.[lib, other]`. A generated
+`use alias: <lang>.<lib>` or `use <lang>.[lib, other]`. A generated
 descriptor records the ABI
 contract, ownership/layout rules, callback and error model, effect leaf,
 provider, cache suffix, and capability set. Every generated artifact carries
@@ -3064,8 +3064,8 @@ bridge roots; this direct block is the Rust declaration surface described here.
 `jet inspect bind <header.h> [--pkg <lib>] [--overlay <path>] [--link <lib>] [-o <out.jet>]`
 reads bindable C prototypes and writes the cache
 `.jet/bindings/c/<lib>.jet` by default. The generated module is marked
-`#Bindgen module c.<lib>.__bindgen__`. A source overlay uses
-`#Import module c.<lib> { ... }`; the effective module is the generated
+`#Bindgen c.<lib>.__bindgen__: module`. A source overlay uses
+`#Import c.<lib>: module { ... }`; the effective module is the generated
 binding union, with the overlay winning an incompatible redeclaration. A
 header declaration that the generator cannot map is skipped and reported,
 not guessed. E3208 means the header cannot be read or contains no bindable
@@ -3075,7 +3075,7 @@ Foreign-module head markers belong to that module's declaration and are parsed
 before ordinary item or file-rule replay; they are not unattached file rules.
 
 `#Bindgen` is compiler-generated and legal only in
-`.jet/bindings/c/<lib>.jet`; a user overlay uses `#Import module`.
+`.jet/bindings/c/<lib>.jet`; a user overlay uses `#Import c.<lib>: module`.
 The reserved `__bindgen__` path is E3206. A second C `use` form for the same
 library is E3204; an incompatible overlay is E3205, and handwritten
 `#Bindgen` is E3207.
@@ -3601,7 +3601,7 @@ file is available. Query state and queue transitions are defined by
 
 ### Events and hooks
 
-`use event :: core.event` exposes typed compiler-known event values; it does
+`use event: core.event` exposes typed compiler-known event values; it does
 not add an event declaration syntax. `event.new<T>()` creates an infallible
 synchronous `Event<T>`. `event.scope()` creates an owner for subscriptions;
 `scope.cancel()` is idempotent, unsubscribes every owned listener, and makes
@@ -3642,11 +3642,11 @@ creates a typed fold. Handlers return `HookDecision.Continue`,
 scope, priority, and once rules as events.
 
 ```jet
-use event :: core.event
+use event: core.event
 
-fn run() {
-    scope :: event.scope()
-    clicked :: event.new<Int>()
+run: fn() {
+    scope: event.scope()
+    clicked: event.new<Int>()
     clicked.on(scope, n -> print("clicked {n}"))
     clicked.once(scope, n -> print("once {n}"))
     print(clicked.emit(1).summary())
@@ -3673,10 +3673,10 @@ An RAII guard restores the terminal on normal return, `?` propagation, and panic
 unwind. The marker itself does not require an import; `term.read_key()` does.
 
 ```jet
-use term :: core.term
+use term: core.term
 
 #Live {
-    key :: term.read_key()
+    key: term.read_key()
     if key == Enter { return }
     print("got: {key}")
 }
@@ -3751,7 +3751,7 @@ checked assertion. Duplicate names report E0105; a nested `#Test` reports
 E0601. `jet run` and `jet build` ignore test claims, while `jet test` compiles
 and runs them. (S43, D-CASING1)
 
-A top-level `#Test fn name(p: T, ...) { ... }` is a property test. Each
+A top-level `#Test name: fn(p: T, ...) { ... }` is a property test. Each
 parameter type must be generatable: `Int`, a sized integer, an inline range,
 `Float`, `Float32`, `Bool`, `Char`, `String`, or a list, fixed list, or
 optional of a generatable type; any other type reports E0613. `jet test` runs
@@ -3819,7 +3819,7 @@ Bare `jet test` and `jet test <package dir>` discover every source member in the
 package's checked project set, not only the entry file, and run the aggregate
 `#Test` and contract harness exactly once. Documentation examples remain
 file-local and run once per member. A directory without a package manifest is
-walked recursively for `*.jet` files. A package-level `fn test` override owns
+walked recursively for `*.jet` files. A package-level `test: fn` override owns
 the command unless `--show-default` requests the stock harness.
 The default child-output policy is `--capture=failed`; choose `all` or `none`
 explicitly. `--fresh` bypasses only the persisted test-result cache; the build
@@ -3841,7 +3841,7 @@ A package names test profiles in `package.jet`, and `--profile=<name>` or
 namespace, so a test profile can't take the name of a stock or declared build
 profile. `tests` is the built-in suite, every `#Test` of the package; stock
 suites are declared in `suites:`, and code suites by `t.suite("<name>", body)`
-in `test.jet`'s `fn test`. A profile naming a suite none of these declares, or
+in `test.jet`'s `test: fn`. A profile naming a suite none of these declares, or
 a name declared twice, is a manifest error (E1215) that `jet check` and every
 command loading the package report, as is a `defaults.test` that names neither
 a test profile nor a Check output.
@@ -3883,13 +3883,13 @@ a suite that panics keeps the rows it reported and adds the failing row
 `stopped`.
 
 ```text
-fn test(t: Test) -> Int {
+test: fn(t: Test) -> Int {
     t.suite("perf", perf_rows)
     t.run()
 }
 
-fn perf_rows(rows: TestRows) {
-    size :: built_size("hello")
+perf_rows: fn(rows: TestRows) {
+    size: built_size("hello")
     if size <= 24_000 -> rows.pass("size hello") else -> rows.fail("size hello", "{size} B > 24000 B")
 }
 ```
@@ -4002,14 +4002,14 @@ claim's execution record.
 Build options come from one table (`JET_BUILD_OPTIONS`, #5005). Each row is
 settable in three places that spell it the same way: a profile field in
 `package.jet` (`build: { release: Build{ optimize: full } }`), a call in
-`fn build` (`b.optimize(.Full)`), and a flag (`--optimize=full`; the `=` is
+`build: fn` (`b.optimize(.Full)`), and a flag (`--optimize=full`; the `=` is
 required). Layers apply in order over the command's stock values (`jet build`
 optimizes `basic`; `jet run`, `jet dev` and `jet test` optimize `none`):
-profile, then `fn build`, then the flag. A flag that replaces a profile or
-`fn build` value prints one `note:` line naming the replaced value and where it
+profile, then `build: fn`, then the flag. A flag that replaces a profile or
+`build: fn` value prints one `note:` line naming the replaced value and where it
 was written. `b.pin(.optimize, .Full)` fixes the value for every build; a flag
 with another value is E2113. `jet run` reads profiles and flags, not
-`fn build`. Example:
+`build: fn`. Example:
 [`Examples/features/tooling/build_options`](../../Examples/features/tooling/build_options/run.jet).
 
 The `bounds` row says what a failed list bounds check does: `fatal` (the
@@ -4024,11 +4024,11 @@ E3415 before the native program is built. Jai's `null` and `casts` checks have n
 reference is never null and a raw pointer's validity is the `#Unsafe` author's
 obligation (I1), and a conversion is total or returns an Optional
 (D-SHAPE-CONVERT1), so there is no check to switch. A profile field, flag or
-`fn build` call of either name is refused with that law. Example:
+`build: fn` call of either name is refused with that law. Example:
 [`Examples/features/tooling/build_bounds`](../../Examples/features/tooling/build_bounds/run.jet).
 
 The `debug_info` and `small` rows hold a Bool: a profile field writes
-`debug_info: false`, `fn build` writes `b.debug_info(false)`, and the flag
+`debug_info: false`, `build: fn` writes `b.debug_info(false)`, and the flag
 writes `--debug-info=false`; a bare `--small` or `--debug-info` means `true`.
 `debug_info` (stock `true`) says whether the image carries DWARF debug info
 and the location table crash reports read (`.debug_jetline`). Both describe
@@ -4086,7 +4086,7 @@ level's limits. `always_marked` takes only the functions marked
 size and with no per-caller budget (`small` does not limit them). The inliner
 cannot splice a recursive callee, a callee that writes a parameter, an
 `#FFI(asm)` leaf, or a callee from another file whose arithmetic can stop.
-`off` inlines nothing. `fn build` writes `b.inline(.AlwaysMarked)`, and the
+`off` inlines nothing. `build: fn` writes `b.inline(.AlwaysMarked)`, and the
 flag writes `--inline=always_marked`. Example:
 [`Examples/features/tooling/build_inline`](../../Examples/features/tooling/build_inline/run.jet).
 
@@ -4098,7 +4098,7 @@ image's debug info. `brief` prints only the faulting frame. A stack-overflow
 report names the innermost Jet function and its line under both `full` and
 `brief`. `off` prints no frame: the report is the stop line alone, for example
 `Stop [E3012]: Stack overflow`. Naming frames needs `debug_info`, so writing
-`backtrace: full` (in a profile, in `fn build` or as `--backtrace=full`)
+`backtrace: full` (in a profile, in `build: fn` or as `--backtrace=full`)
 together with `debug_info: false` is refused with E2104. The stock `full` under
 `debug_info: false` prints the return addresses instead.
 
@@ -4106,7 +4106,7 @@ together with `debug_info: false` is refused with E2104. The stock `full` under
 never reaches. `remove` builds only the reached ones. `keep` also builds every
 non-generic function of the package's own modules, so the image carries them
 (a generic function is still built only for the instances a call reaches).
-`fn build` writes `b.backtrace(.Brief)` and `b.dead_code(.Keep)`, and the
+`build: fn` writes `b.backtrace(.Brief)` and `b.dead_code(.Keep)`, and the
 flags write `--backtrace=brief` and `--dead-code=keep`. Example:
 [`Examples/features/tooling/build_backtrace`](../../Examples/features/tooling/build_backtrace/run.jet).
 
@@ -4121,7 +4121,7 @@ the program with a report that names the block and the call sites, then
 aborts. With `false` the image holds none of the checked allocator, and the
 program reads nothing at start to decide it. `jet build --checked-alloc`,
 `jet run --checked-alloc` and `jet test --checked-alloc` are `true`, and
-`fn build` writes `b.checked_alloc(true)`. The row is part of every build
+`build: fn` writes `b.checked_alloc(true)`. The row is part of every build
 key, so a checked build never reuses an unchecked one's outputs. A web build
 has no checked allocator: `true` with `os: web` is refused (E2104).
 
@@ -4132,7 +4132,7 @@ executable, add native link inputs and name the target. `output_dir` and
 `min_os` hold a string (`output_dir: "dist"`, `b.output_dir("dist")`,
 `--output-dir=dist`); `libs` and `link_args` hold a list of strings
 (`libs: ["z"]`, `b.libs(["z"])`), and each flag adds one item
-(`--libs=z --libs=bz2`). `fn build` writes a string or list literal.
+(`--libs=z --libs=bz2`). `build: fn` writes a string or list literal.
 
 `output_dir` (stock `""`, which is `.jet/build`) is the directory `jet build`
 writes its executables to, under the package root unless it is absolute. It
@@ -4328,7 +4328,7 @@ for a requested lens exits successfully.
 projection. The projection records the selection (`all` for the bare form),
 lens name and summary, structured facts, and source locations where available.
 The checked bundle and sema facts are shared with human output. Human output
-retains the stable `effect roles` header and grouped lens lines including
+retains the stable `roles: effect` header and grouped lens lines including
 `inline —`, `effects —`, `layout —`, and `callable-signature —`; empty lenses
 are skipped in the bare form. In JSON, a usage error starts with the
 `jet.status/v1` envelope and an unknown lens carries `"code":"E2941"`.
@@ -4566,18 +4566,18 @@ dispatch is in `Compiler/JetCli/Source/Cli/` (D-SHAPE6, D-CLI-ONE1).
 ### Typed entry signatures
 
 A typed entry's resolved parameter type is its CLI specification; no separate
-flag DSL is required. Plain `fn run()` is the zero-input entry. A program opts
+flag DSL is required. Plain `run: fn()` is the zero-input entry. A program opts
 into typed input with one parameter whose type is a `#CLI` struct:
 
 ```jet
 #CLI
-struct ServeArgs {
+ServeArgs: struct {
     #[Doc("port to listen on"), Env("PORT")] port: Int{3000}
     #Short("v") verbose: Bool
     config: String?
 }
 
-fn run(args: ServeArgs) {
+run: fn(args: ServeArgs) {
     http.serve(routes(), port: args.port)
 }
 ```
@@ -4589,7 +4589,7 @@ are field markers. `#CLI(Standard)` additionally registers
 `--verbose`/`-v`, `--quiet`/`-q`, `--color=auto|always|never`, and `--version`.
 Plain `#CLI` always registers `--help`.
 
-`run` is the reserved program entry name. A typed `fn run(args: T)` is an
+`run` is the reserved program entry name. A typed `run: fn(args: T)` is an
 explicit request for command input; a `main` function has no entry meaning.
 Raw argument access remains explicit through `core.process.args()`. An
 `Output.Executable` entry uses the same contract. There is no variadic typed
@@ -4649,20 +4649,20 @@ navigation rules; it is never a string lookup and a lock cannot rescue a stale
 reference:
 
 ```jet
-CLI :: Output.Executable{name: "todo", entry: launch}
-API :: Output.Service{name: "todo-api", entry: serve}
-RELEASE :: Output.Check{name: "release", entry: verify_release}
+CLI: Output.Executable{name: "todo", entry: launch}
+API: Output.Service{name: "todo-api", entry: serve}
+RELEASE: Output.Check{name: "release", entry: verify_release}
 
-fn launch() {}
-fn serve() {}
-fn verify_release() {}
+launch: fn() {}
+serve: fn() {}
+verify_release: fn() {}
 ```
 
 An Executable takes zero or one supported typed CLI parameter; a Service or
 Check takes no parameters. Each returns `Unit` or `Unit ?`. Sema resolves and
 validates the reference before the IR is built and publishes its definition
 and effect row to semantic tooling.
-With no explicit selection, a legacy `fn run` wins; otherwise one compatible
+With no explicit selection, a legacy `run: fn` wins; otherwise one compatible
 Executable is selected. Multiple candidates are E1321 with a sorted list
 (D-SHAPE-OUTPUT-CALLABLE1).
 
@@ -4686,7 +4686,7 @@ The external completion form is
 `--for`, Jet's own completions are unchanged. With it, the reader uses only the
 checked schema: root help, shared flags, command words, and the selected
 command's local flags. It does not query application values and registers the
-executable basename, rejecting control characters. A plain `fn run()` still
+executable basename, rejecting control characters. A plain `run: fn()` still
 has a valid built-in-only schema. Metadata failures are E2103
 (D-SHAPE-CLI-CARRIER1, D-SHAPE-CLI-COMPLETE1).
 
@@ -4768,16 +4768,16 @@ A single-entry `.jet` file may carry package context in one leading `package`
 block:
 
 ```jet
-package {
+package: {
     name: "inline-demo"
     version: "0.1.0"
 }
 
-fn helper() -> String {
+helper: fn() -> String {
     "same package"
 }
 
-fn run() {
+run: fn() {
     print(helper())
 }
 ```
@@ -4823,7 +4823,7 @@ A manifest-less `.jet` script may begin with an inline dependency:
 // stats.jet
 use textkit#1.4
 
-fn run() {
+run: fn() {
     print(textkit.wrap(input(), width: 72))
 }
 ```
@@ -4870,7 +4870,7 @@ version: "0.1.0"
 
 ```jet
 // sandbox source; it is loaded, not a run entry
-fn scale(a: Float, b: Float) -> Float {
+scale: fn(a: Float, b: Float) -> Float {
     a * b
 }
 ```
@@ -4879,12 +4879,12 @@ A sandbox's WIT world lists the entry file's top-level functions. A host uses a
 typed plugin handle:
 
 ```jet
-use plugin :: core.plugin
+use plugin: core.plugin
 
-fn run() {
-    policy :: Authority.from_rights(["FS.Read:repo"])
-    mathkit :: plugin.load("mathkit.wasm", policy)
-    area :: mathkit.scale(6.0, 7.0) ?? panic("scale failed")
+run: fn() {
+    policy: Authority.from_rights(["FS.Read:repo"])
+    mathkit: plugin.load("mathkit.wasm", policy)
+    area: mathkit.scale(6.0, 7.0) ?? panic("scale failed")
     print("scale(6, 7) = {area}")
 }
 ```
@@ -4955,7 +4955,7 @@ guarantees.
 ## Programmable builds
 
 `jet build` checks the root program and then evaluates at most one package-local
-`fn build(b: Build) -> BuildPlan` through the comptime interpreter. The
+`build: fn(b: Build) -> BuildPlan` through the comptime interpreter. The
 entry may live in any package source file or in `package.jet`; two candidates
 name both sites and fail. An explicit Output `entry:` can select a rare layout.
 For a workspace, member entries run in deterministic dependency order with
@@ -4976,15 +4976,15 @@ canonical graph to scheduling, caching, execution, queries, and LSP.
 `b.args()` returns the words after `--` on the command line as a `[String]`
 (`jet build -- release-notes` gives `["release-notes"]`; no `--` gives
 `[]`), so a build entry can choose its default target or options from them.
-A `jet build` that runs no `fn build`, such as `jet build main.jet -- a`,
+A `jet build` that runs no `build: fn`, such as `jet build main.jet -- a`,
 refuses the words with E2104 instead of dropping them.
 
 ```jet
-fn build(b: Build) -[Exec, FS]> {
+build: fn(b: Build) -[Exec, FS]> {
     #Impure("run declared toolchain probe and action") {
-        shell :: b.probe("shell", "find_program", "sh")
-        native :: b.toolchain("native", "x86_64-linux")
-        stamp :: b.action(
+        shell: b.probe("shell", "find_program", "sh")
+        native: b.toolchain("native", "x86_64-linux")
+        stamp: b.action(
             "stamp",
             ["assets/version.txt"],
             ["build/version.txt"],
@@ -4993,12 +4993,12 @@ fn build(b: Build) -[Exec, FS]> {
             native,
             [shell]
         )
-        app :: b.add_executable("app", ["main.jet"], [stamp])
+        app: b.add_executable("app", ["main.jet"], [stamp])
         b.default(app)
     }
 }
 
-fn run() { print("hello") }
+run: fn() { print("hello") }
 ```
 
 Action dependencies come from target dependencies and declared producer and
@@ -5026,15 +5026,15 @@ The `write_generated` build option (stock `off`) says whether `jet build`
 writes each generated module to that path under the package root for
 inspection: `on` writes them, `off` writes none. It is the profile field
 `write_generated: on`, the flag `--write-generated=on` (which replaces the
-retired `--emit-generated`) and the `fn build` call `b.write_generated(.On)`.
+retired `--emit-generated`) and the `build: fn` call `b.write_generated(.On)`.
 Example:
 [`Examples/features/tooling/build_write_generated`](../../Examples/features/tooling/build_write_generated/run.jet).
 
 `b.contribute(name, value)` gives a value to a setting the package declares in
 `package.jet` (`settings: { cache_slots: Int = 1 }`). The manifest lists every
-setting and its type, and `fn build` only computes a value (D-CONF-SPLIT1).
+setting and its type, and `build: fn` only computes a value (D-CONF-SPLIT1).
 Before a package that declares settings compiles (`jet build`, `jet run`,
-`jet test`), its `fn build` runs, and the project lock records each
+`jet test`), its `build: fn` runs, and the project lock records each
 contribution as a `[[build.contribution]]` row. Every compile of the package
 reads those rows: `$build.settings.cache_slots` folds to the contributed value
 over the declared default and the selected profile's value. Example:
@@ -5236,7 +5236,7 @@ JetOS system app from Canvas, may fall back to the browser over the same local
 projection service, and may deep-link to Canvas for generic source-graph
 editing without storing Canvas semantic state.
 
-`module vmtest.<name>` declares a VM scenario. Its `hosts:` map names scenario
+`vmtest.<name>: module` declares a VM scenario. Its `hosts:` map names scenario
 handles bound to `system.<host>` declarations, and `run: test { ... }` contains
 assertions such as `wait_for_boot`, `assert_unit_active`, and
 `assert_port_open`. `jet os vm test <name> --disk <path>` uses the same

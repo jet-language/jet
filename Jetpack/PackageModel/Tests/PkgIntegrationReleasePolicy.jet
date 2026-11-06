@@ -3,9 +3,9 @@
 use jet_pkg_model.[Manifest, pkg_check_edition_support, pkg_latest_edition]
 
 #Test("edition_too_new") {
-    raw :: "name: \"wordstats\"\nversion: \"0.1.0\"\nedition: \"2099\"\n"
-    manifest :: Manifest.parse("package.jet", raw) ?? panic("manifest parses")
-    error :: if pkg_check_edition_support(manifest, "package.jet") == {
+    raw: "name: \"wordstats\"\nversion: \"0.1.0\"\nedition: \"2099\"\n"
+    manifest: Manifest.parse("package.jet", raw) ?? panic("manifest parses")
+    error: if pkg_check_edition_support(manifest, "package.jet") == {
         .Ok(_) -> panic("future edition must be rejected")
         .Err(error) -> error
     }
@@ -13,9 +13,9 @@ use jet_pkg_model.[Manifest, pkg_check_edition_support, pkg_latest_edition]
 }
 
 #Test("supported_edition_is_accepted") {
-    raw :: "name: \"x\"\nversion: \"0.1.0\"\nedition: \"{pkg_latest_edition()}\"\n"
-    manifest :: Manifest.parse("package.jet", raw) ?? panic("manifest parses")
-    accepted :: if pkg_check_edition_support(manifest, "package.jet") == {
+    raw: "name: \"x\"\nversion: \"0.1.0\"\nedition: \"{pkg_latest_edition()}\"\n"
+    manifest: Manifest.parse("package.jet", raw) ?? panic("manifest parses")
+    accepted: if pkg_check_edition_support(manifest, "package.jet") == {
         .Ok(_) -> true
         .Err(_) -> false
     }
@@ -23,10 +23,10 @@ use jet_pkg_model.[Manifest, pkg_check_edition_support, pkg_latest_edition]
 }
 
 #Test("no_edition_field_is_accepted") {
-    raw :: "name: \"x\"\nversion: \"0.1.0\"\n"
-    manifest :: Manifest.parse("package.jet", raw) ?? panic("manifest parses")
+    raw: "name: \"x\"\nversion: \"0.1.0\"\n"
+    manifest: Manifest.parse("package.jet", raw) ?? panic("manifest parses")
     assert_eq(manifest.package.edition, None)
-    accepted :: if pkg_check_edition_support(manifest, "package.jet") == {
+    accepted: if pkg_check_edition_support(manifest, "package.jet") == {
         .Ok(_) -> true
         .Err(_) -> false
     }

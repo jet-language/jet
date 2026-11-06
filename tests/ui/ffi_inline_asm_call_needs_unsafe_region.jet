@@ -1,7 +1,7 @@
 use core.mem
 
 #[Unsafe("the operands are scalar registers and r10 is a declared clobber"), FFI(asm)]
-fn add_registers(a: Int, b: Int) -> Int {
+add_registers: fn(a: Int, b: Int) -> Int {
     """
     mov r10, {a}
     add r10, {b}
@@ -10,7 +10,7 @@ fn add_registers(a: Int, b: Int) -> Int {
     """
 }
 
-fn run() {
+run: fn() {
     #Unsafe("call the audited register-only assembly contract") {
         print(add_registers(20, 22))
     }

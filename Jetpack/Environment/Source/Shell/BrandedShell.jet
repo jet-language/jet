@@ -7,26 +7,26 @@
 use {
     jetpack_foundation.[ACCENT_SGR, BORDER_SGR, ERROR_SGR, SUCCESS_SGR, WARN_SGR]
     jet_env_model.[PromptPathMode, PromptStripMode]
-    files :: core.files
-    sys :: core.sys
-    time :: core.time
+    files: core.files
+    sys: core.sys
+    time: core.time
 }
 
-ENV_SHELL_PROMPT_LABEL_ENV :: "JETPACK_PROMPT_LABEL"
+ENV_SHELL_PROMPT_LABEL_ENV: "JETPACK_PROMPT_LABEL"
 
 // One ASCII control byte as text. Plain Jet strings have no byte escapes, so
 // the readline invisible markers (0x01/0x02) and ESC are built here.
-fn env_shell_control(code: Int) -> String Never! {
+env_shell_control: fn(code: Int) -> String Never! {
     String.from_bytes([U8]{U8{code}}) ?? ""
 }
 
 // The shells Jetpack can decorate. Anything else falls back to `bash`.
-enum ShellKind {
+ShellKind: enum {
     Bash
     Zsh
     Fish
 
-    fn binary(self) -> String Never! {
+    binary: fn(self) -> String Never! {
         if self == {
             .Bash -> "bash"
             .Zsh -> "zsh"
@@ -35,9 +35,9 @@ enum ShellKind {
     }
 
     // Detect the user's shell from `$SHELL`, defaulting to bash.
-    fn detect() -[Env]> ShellKind Never! {
-        shell :: sys.get("SHELL") ?? ""
-        base :: shell.cut_last("/")?.after ?? shell
+    detect: fn() -[Env]> ShellKind Never! {
+        shell: sys.get("SHELL") ?? ""
+        base: shell.cut_last("/")?.after ?? shell
         if base == {
             "zsh" -> ShellKind.Zsh
             "fish" -> ShellKind.Fish
@@ -47,8 +47,8 @@ enum ShellKind {
 
     // The shell argument of `jet env hook <shell>` / `jet env export <shell>`.
     // `None` detects from `$SHELL`; an unknown name is `None`.
-    fn parse(arg: String?) -[Env]> ShellKind? Never! {
-        name :: arg ?? return Val(ShellKind.detect())
+    parse: fn(arg: String?) -[Env]> ShellKind? Never! {
+        name: arg ?? return Val(ShellKind.detect())
         if name == {
             "bash" -> Val(ShellKind.Bash)
             "zsh" -> Val(ShellKind.Zsh)
@@ -59,8 +59,8 @@ enum ShellKind {
 
     // Help-app prefill widgets for an already-running user shell (`jet env
     // hook`) and for Jet subshells. Idempotent when sourced twice.
-    fn help_prefill_widgets(self) -> String Never! {
-        lines :: if self == {
+    help_prefill_widgets: fn(self) -> String Never! {
+        lines: if self == {
             .Bash -> [String]{
                 "if ! type __jet_help_prefill >/dev/null 2>&1; then",
                 "  __jet_help_prefill() {{ local picked; picked=$(JET_HELP_SHELL_PREFILL=1 command jet '?' </dev/tty) || return; [ -n \"$picked\" ] || return; READLINE_LINE=$picked; READLINE_POINT=$(printf %s \"$READLINE_LINE\" | wc -c); }}",
@@ -94,13 +94,13 @@ enum ShellKind {
 // appends after its own `--command` flag, so a shell entered outside
 // `ShellEnv.enter` still gets the jetpack prompt. `env_vars` must be set on
 // the outer command; `cleanup` runs once the caller's blocking wait returns.
-struct BrandedShell {
+BrandedShell: struct {
     command_tail: [String]
     env_vars: [(name: String, value: String)]
     priv cleanup_file: String?
     priv cleanup_dir: String?
 
-    fn cleanup(self) -[FS]> {
+    cleanup: fn(self) -[FS]> {
         if self.cleanup_file == {
             .Val(path) -> env_shell_remove_file(path)
             .None -> {}
@@ -112,12 +112,12 @@ struct BrandedShell {
     }
 
     // Build a branded shell for `kind`, labeling the prompt with `label`.
-    fn for_shell(kind: ShellKind, label: String) -[FS, Env, Time]> BrandedShell Never! {
-        path :: PromptPathMode.Short
-        strip :: PromptStripMode.Off
+    for_shell: fn(kind: ShellKind, label: String) -[FS, Env, Time]> BrandedShell Never! {
+        path: PromptPathMode.Short
+        strip: PromptStripMode.Off
         if kind == {
             .Bash -> {
-                rc :: env_shell_write_temp("jetpack-bashrc", env_shell_bash_rc(label, path, strip))
+                rc: env_shell_write_temp("jetpack-bashrc", env_shell_bash_rc(label, path, strip))
                 BrandedShell{
                     command_tail: [String]{"bash", "--rcfile", rc, "-i"},
                     env_vars: [(name: String, value: String)]{(name: ENV_SHELL_PROMPT_LABEL_ENV, value: label)},
@@ -126,7 +126,7 @@ struct BrandedShell {
                 }
             }
             .Zsh -> {
-                dir :: env_shell_write_temp_dir("jetpack-zdotdir")
+                dir: env_shell_write_temp_dir("jetpack-zdotdir")
                 env_shell_write_best_effort(files.join(dir, ".zshrc"), env_shell_zsh_rc(label, path, strip))
                 BrandedShell{
                     command_tail: [String]{"zsh", "-i"},
@@ -158,21 +158,21 @@ struct BrandedShell {
 // `\[`/`\]` on this path, so they printed literally inside `nix develop`-
 // wrapped shells. The raw markers work on every bash and are invisible
 // control bytes when readline isn't displaying at all.
-fn env_shell_bash_rc(label: String, path: PromptPathMode, strip: PromptStripMode) -> String Never! {
-    soh :: env_shell_control(1)
-    stx :: env_shell_control(2)
-    esc :: env_shell_control(27)
-    path_escape :: if path == {
+env_shell_bash_rc: fn(label: String, path: PromptPathMode, strip: PromptStripMode) -> String Never! {
+    soh: env_shell_control(1)
+    stx: env_shell_control(2)
+    esc: env_shell_control(27)
+    path_escape: if path == {
         .Short -> "\\W"
         .Full -> "\\w"
     }
-    status_prefix :: if strip == PromptStripMode.On -> "$(__jetpack_status_words)\\n" else -> ""
-    accent :: ACCENT_SGR
-    border :: BORDER_SGR
-    success :: SUCCESS_SGR
-    warn :: WARN_SGR
-    error :: ERROR_SGR
-    lines :: [String]{
+    status_prefix: if strip == PromptStripMode.On -> "$(__jetpack_status_words)\\n" else -> ""
+    accent: ACCENT_SGR
+    border: BORDER_SGR
+    success: SUCCESS_SGR
+    warn: WARN_SGR
+    error: ERROR_SGR
+    lines: [String]{
         "[ -f /etc/bash.bashrc ] && . /etc/bash.bashrc",
         "[ -f \"$HOME/.bashrc\" ] && . \"$HOME/.bashrc\"",
         "__jetpack_build_status='never run'",
@@ -218,22 +218,22 @@ fn env_shell_bash_rc(label: String, path: PromptPathMode, strip: PromptStripMode
         "PS1='{status_prefix}{soh}{esc}[{accent}m{stx}$(printf \"%s\" \"$JETPACK_PROMPT_LABEL\"){soh}{esc}[0m{stx} {soh}{esc}[{border}m{stx}{path_escape}{soh}{esc}[0m{stx} {soh}{esc}[{success}m{stx}❯{soh}{esc}[0m{stx} '",
         "fi"
     }
-    rc :: lines.join("\n")
+    rc: lines.join("\n")
     "{rc}\n{(ShellKind.Bash).help_prefill_widgets()}"
 }
 
-fn env_shell_zsh_rc(label: String, path: PromptPathMode, strip: PromptStripMode) -> String Never! {
-    path_escape :: if path == {
+env_shell_zsh_rc: fn(label: String, path: PromptPathMode, strip: PromptStripMode) -> String Never! {
+    path_escape: if path == {
         .Short -> "%1~"
         .Full -> "%~"
     }
-    status_prefix :: if strip == PromptStripMode.On -> "$(__jetpack_status_words)\n" else -> ""
-    accent :: ACCENT_SGR
-    border :: BORDER_SGR
-    success :: SUCCESS_SGR
-    warn :: WARN_SGR
-    error :: ERROR_SGR
-    lines :: [String]{
+    status_prefix: if strip == PromptStripMode.On -> "$(__jetpack_status_words)\n" else -> ""
+    accent: ACCENT_SGR
+    border: BORDER_SGR
+    success: SUCCESS_SGR
+    warn: WARN_SGR
+    error: ERROR_SGR
+    lines: [String]{
         "[ -f \"$HOME/.zshrc\" ] && source \"$HOME/.zshrc\"",
         "setopt prompt_subst",
         "setopt NO_NOMATCH",
@@ -254,22 +254,22 @@ fn env_shell_zsh_rc(label: String, path: PromptPathMode, strip: PromptStripMode)
         "PROMPT=$'{status_prefix}%{{\\033[{accent}m%}}$(print -r -- \"$JETPACK_PROMPT_LABEL\")%{{\\033[0m%}} %{{\\033[{border}m%}}{path_escape}%{{\\033[0m%}} %{{\\033[{success}m%}}❯%{{\\033[0m%}} '",
         "fi"
     }
-    rc :: lines.join("\n")
+    rc: lines.join("\n")
     "{rc}\n{(ShellKind.Zsh).help_prefill_widgets()}"
 }
 
-fn env_shell_fish_init(label: String, path: PromptPathMode, strip: PromptStripMode) -> String Never! {
-    path_expr :: if path == {
+env_shell_fish_init: fn(label: String, path: PromptPathMode, strip: PromptStripMode) -> String Never! {
+    path_expr: if path == {
         .Short -> "prompt_pwd"
         .Full -> "pwd"
     }
-    strip_line :: if strip == PromptStripMode.On -> "__jetpack_status_words; echo; " else -> ""
-    accent :: ACCENT_SGR
-    border :: BORDER_SGR
-    success :: SUCCESS_SGR
-    warn :: WARN_SGR
-    error :: ERROR_SGR
-    parts :: [String]{
+    strip_line: if strip == PromptStripMode.On -> "__jetpack_status_words; echo; " else -> ""
+    accent: ACCENT_SGR
+    border: BORDER_SGR
+    success: SUCCESS_SGR
+    warn: WARN_SGR
+    error: ERROR_SGR
+    parts: [String]{
         "set -g __jetpack_build_status 'never run'; set -g __jetpack_test_status 'never run'; set -g __jetpack_kind ''; set -g __jetpack_command ''; set -g __jetpack_started 0; set -g __jetpack_spinner_pid ''; ",
         "function __jetpack_git_status; if git rev-parse --is-inside-work-tree >/dev/null 2>&1; set -l branch (git branch --show-current 2>/dev/null); test -n \"$branch\"; or set branch detached; if git diff --quiet --ignore-submodules -- 2>/dev/null; and git diff --cached --quiet --ignore-submodules -- 2>/dev/null; echo -n \"$branch clean\"; else; echo -n \"$branch changed\"; end; else; echo -n 'not a git worktree'; end; end; ",
         "function __jetpack_status_words; printf 'build %s · test %s · git %s' \"$__jetpack_build_status\" \"$__jetpack_test_status\" (__jetpack_git_status); end; ",
@@ -284,7 +284,7 @@ fn env_shell_fish_init(label: String, path: PromptPathMode, strip: PromptStripMo
         "printf '\\033[{border}m%s\\033[0m' ({path_expr}); ",
         "printf ' \\033[{success}m❯\\033[0m '; end; end\n"
     }
-    init :: parts.join("")
+    init: parts.join("")
     "{init}{(ShellKind.Fish).help_prefill_widgets()}"
 }
 
@@ -292,17 +292,17 @@ fn env_shell_fish_init(label: String, path: PromptPathMode, strip: PromptStripMo
 
 // The scratch files and directories one shell entry owns; closing removes
 // them, so a temporary shell leaves nothing behind.
-struct ShellScratch {
+ShellScratch: struct {
     scratch_files: [String]
     scratch_dirs: [String]
 
-    fn empty() -> ShellScratch Never! {
+    empty: fn() -> ShellScratch Never! {
         ShellScratch{scratch_files: [String]{}, scratch_dirs: [String]{}}
     }
 }
 
 impl ShellScratch.Close {
-    fn close(^self) -[FS]> {
+    close: fn(^self) -[FS]> {
         loop path in self.scratch_files -> env_shell_remove_file(path)
         loop path in self.scratch_dirs -> env_shell_remove_tree(path)
     }
@@ -310,32 +310,32 @@ impl ShellScratch.Close {
 
 // Best-effort scratch cleanup: a scratch path that is already gone or cannot
 // be removed never turns a finished shell session into a failure.
-fn env_shell_remove_file(path: String) -[FS]> {
+env_shell_remove_file: fn(path: String) -[FS]> {
     files.remove(path) ?? return
 }
 
-fn env_shell_remove_tree(path: String) -[FS]> {
+env_shell_remove_tree: fn(path: String) -[FS]> {
     files.remove_all(path) ?? return
 }
 
 // Best-effort generated-init write; a failed write surfaces when the shell
 // starts without its rc, exactly as the Rust helpers ignored it.
-fn env_shell_write_best_effort(path: String, contents: String) -[FS]> {
+env_shell_write_best_effort: fn(path: String, contents: String) -[FS]> {
     files.write(path, contents) ?? return
 }
 
-fn env_shell_unique_tmp(prefix: String) -[Env, Time]> String Never! {
+env_shell_unique_tmp: fn(prefix: String) -[Env, Time]> String Never! {
     files.join(sys.temp_dir(), "{prefix}-{sys.pid()}-{time.unix_ns()}")
 }
 
-fn env_shell_write_temp(prefix: String, contents: String) -[FS, Env, Time]> String Never! {
-    path :: env_shell_unique_tmp(prefix)
+env_shell_write_temp: fn(prefix: String, contents: String) -[FS, Env, Time]> String Never! {
+    path: env_shell_unique_tmp(prefix)
     env_shell_write_best_effort(path, contents)
     path
 }
 
-fn env_shell_write_temp_dir(prefix: String) -[FS, Env, Time]> String Never! {
-    path :: env_shell_unique_tmp(prefix)
+env_shell_write_temp_dir: fn(prefix: String) -[FS, Env, Time]> String Never! {
+    path: env_shell_unique_tmp(prefix)
     files.create_dir_all(path) ?? return path
     path
 }

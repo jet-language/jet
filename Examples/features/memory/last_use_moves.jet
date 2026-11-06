@@ -6,12 +6,12 @@
 // Value semantics stay exact: a binding still read later is copied, so
 // editing it never shows through the copy.
 
-enum Link {
+Link: enum {
     Node(c: Int, t: [Int], e: [Link]?)
     End
 }
 
-fn build(n: Int) -> [Link] {
+build: fn(n: Int) -> [Link] {
     holder := [[Link]]{[Link]{}}
     i := n
     loop i > 0 {
@@ -23,7 +23,7 @@ fn build(n: Int) -> [Link] {
     &holder.pop() ?? [Link]{}
 }
 
-fn walk(chain: ^[Link]) -> Int {
+walk: fn(chain: ^[Link]) -> Int {
     total := 0
     rest := ^chain
     loop rest.len() == 1 {
@@ -39,12 +39,12 @@ fn walk(chain: ^[Link]) -> Int {
     total
 }
 
-struct Named {
+Named: struct {
     name: String
 }
 
 // The list is dead after the loop: its items move into the records.
-fn wrap_all(count: Int) -> [Named] {
+wrap_all: fn(count: Int) -> [Named] {
     names := [String]{}
     loop index in 0..<count -> &names.push("n{index}")
     out := [Named]{}
@@ -55,7 +55,7 @@ fn wrap_all(count: Int) -> [Named] {
 }
 
 // Still read after the loop: every stored item is a copy.
-fn wrap_kept(count: Int) -> Int {
+wrap_kept: fn(count: Int) -> Int {
     names := [String]{}
     loop index in 0..<count -> &names.push("k{index}")
     out := [Named]{}
@@ -63,7 +63,7 @@ fn wrap_kept(count: Int) -> Int {
     out.len() * 10 + names.len()
 }
 
-fn run() {
+run: fn() {
     chain := build(5)
     print("walk {walk(^chain)}")
 
@@ -83,7 +83,7 @@ fn run() {
     second := shared
     print("first {first.len()} second {second.len()} shared {shared.len()}")
 
-    wrapped :: wrap_all(3)
+    wrapped: wrap_all(3)
     print("wrapped {wrapped.len()} {wrapped[2].name}")
     print("kept {wrap_kept(2)}")
 }

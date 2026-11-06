@@ -2,16 +2,16 @@
 // Both `Ok()` and `Ok(())` return Unit success, including in terminal arms;
 // terminal `Err(...)` returns the declared error rather than a default error.
 #Error
-enum StepError {
+StepError: enum {
     Refused
 }
 
-fn step(name: String) StepError! {
+step: fn(name: String) StepError! {
     print("step {name}")
     Ok()
 }
 
-fn guarded(value: Int) StepError! {
+guarded: fn(value: Int) StepError! {
     if value < 0 -> return Err(StepError.Refused)
     if value == 0 {
         print("early")
@@ -21,20 +21,20 @@ fn guarded(value: Int) StepError! {
     Ok(())
 }
 
-fn chain(value: Int) StepError! {
+chain: fn(value: Int) StepError! {
     step("chain")
     guarded(value)
     Ok()
 }
 
-fn refused() StepError! {
+refused: fn() StepError! {
     if true == {
         true -> Err(StepError.Refused)
         else -> Ok(())
     }
 }
 
-fn run() {
+run: fn() {
     loop value in [0, 1, -1] {
         if chain(value) == {
             .Ok(_) -> print("ok {value}")

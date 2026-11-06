@@ -18,11 +18,11 @@ function sleep(ms) {
 async function prepareReviewGitProject(ctx) {
   const project = await ctx.driver.evaluate(`fetch("/canvas/project", { cache: "no-store" }).then((r) => r.json())`);
   const root = project.project_root;
-  const baselineMain = `fn helper() Int -> {
+  const baselineMain = `helper: fn() Int -> {
     return 1
 }
 
-fn run() {
+run: fn() {
     print("old")
     print("remove")
     print("keep-1")
@@ -32,11 +32,11 @@ fn run() {
     print("keep-5")
 }
 
-fn removed() {
+removed: fn() {
     print("remove-me")
 }
 `;
-  const baselineHelper = `fn helper_file() Int -> {
+  const baselineHelper = `helper_file: fn() Int -> {
     return 3
 }
 `;
@@ -51,7 +51,7 @@ fn removed() {
   const dirtyMain = baselineMain
     .replace('print("old")', 'print("new")')
     .replace('print("remove")', 'print("added")')
-    .replace('\nfn removed() {\n    print("remove-me")\n}\n', '\n');
+    .replace('\nremoved: fn() {\n    print("remove-me")\n}\n', '\n');
   const dirtyHelper = baselineHelper.replace("return 3", "return 4");
   await writeFile(join(root, "main.jet"), dirtyMain);
   await writeFile(join(root, "helper.jet"), dirtyHelper);
@@ -1149,7 +1149,7 @@ async function finishDataPinDrag(ctx, targetPin) {
 }
 
 function sourceNameOrder(src, names) {
-  return names.map((name) => src.indexOf(`${name} ::`));
+  return names.map((name) => src.indexOf(`${name}: `));
 }
 
 function firstInline(graph, predicate, label) {
@@ -1603,7 +1603,7 @@ async function createCallbackThroughRail(ctx, name) {
   await ctx.waitFor(async () => {
     const result = await ctx.driver.evaluate("window.__jetCanvasLastTxResult || null");
     const source = await ctx.source();
-    return result && result.changed === true && source.includes(`fn ${name}()`);
+    return result && result.changed === true && source.includes(`${name}: fn()`);
   }, `${name} callback transaction`);
   await ctx.waitForCanvas();
   return { before, after: await ctx.source(), result: await ctx.driver.evaluate("window.__jetCanvasLastTxResult") };
@@ -1726,7 +1726,7 @@ export const scenarios = {
     await ctx.driver.evaluate("window.dispatchEvent(new Event('offline'))");
     await ctx.waitFor(async () => await ctx.driver.evaluate("window.__jetCanvasCanvasState && window.__jetCanvasCanvasState.kind === 'offline'"), "offline state");
     const offlineSource = await ctx.driver.evaluate("document.getElementById('source-editor').value");
-    if (!offlineSource.includes("fn run")) throw new Error("offline state hid editable source");
+    if (!offlineSource.includes("run: fn")) throw new Error("offline state hid editable source");
     await ctx.driver.evaluate("window.dispatchEvent(new Event('online'))");
     await ctx.waitFor(async () => !(await ctx.driver.evaluate("window.__jetCanvasCanvasState && window.__jetCanvasCanvasState.kind === 'offline'")), "offline recovery");
 
@@ -1990,7 +1990,7 @@ export const scenarios = {
       throw new Error(`second workbench client diverged: ${JSON.stringify(second)}`);
     }
     const beforeError = await ctx.source();
-    const invalid = await ctx.transaction({ schema_version: 1, op: "replace_source", revision: snapshot.graph.revision, source: "fn broken(" });
+    const invalid = await ctx.transaction({ schema_version: 1, op: "replace_source", revision: snapshot.graph.revision, source: "broken: fn(" });
     const invalidPayload = payload(invalid.json);
     if (invalid.ok || invalidPayload?.kind !== "diagnostic" || await ctx.source() !== beforeError) {
       throw new Error(`invalid source changed the last-good workbench: ${JSON.stringify(invalid)}`);
@@ -2331,7 +2331,7 @@ version: "0.1.0"
       schema_version: 1,
       op: "replace_source",
       revision: "sha256-stale-surface-matrix",
-      source: "fn broken("
+      source: "broken: fn("
       });
       const stalePayload = canvasPayload(stale.json);
       if (stale.ok || stalePayload?.kind !== "conflict") {
@@ -2341,7 +2341,7 @@ version: "0.1.0"
       schema_version: 1,
       op: "replace_source",
       revision: canvasPayload(await ctx.graph()).revision,
-      source: "fn broken("
+      source: "broken: fn("
       });
       const invalidPayload = canvasPayload(invalid.json);
       if (invalid.ok || invalidPayload?.kind !== "diagnostic" || await ctx.source() !== beforeErrorSource) {
@@ -3064,7 +3064,7 @@ version: "0.1.0"
       || receipt.result?.changed !== true) {
       throw new Error(`core menu insertion bypassed the descriptor callee source transaction: ${JSON.stringify(receipt)}`);
     }
-    await ctx.expectSourceContains("use math :: core.math");
+    await ctx.expectSourceContains("use math: core.math");
     await ctx.expectSourceContains("math.abs");
     await ctx.screenshot("core-abs-inserted");
 
@@ -3097,16 +3097,16 @@ version: "0.1.0"
     const project = await ctx.driver.evaluate(`fetch("/canvas/project", { cache: "no-store" }).then((r) => r.json())`);
     const root = project.project_root;
     await writeFile(join(root, "package.jet"), "name: \"canvas_alias_insert\"\nversion: \"0.1.0\"\n");
-    const helperSource = `module tools {
-    fn square(n: Int) Int -> {
+    const helperSource = `tools: module {
+    square: fn(n: Int) Int -> {
         return n * n
     }
 }
 `;
-    const baseSource = `use h :: "./helper"
+    const baseSource = `use h: "./helper"
 
-fn run() {
-    limit :: 4
+run: fn() {
+    limit: 4
     print(limit)
 }
 `;
@@ -3357,7 +3357,7 @@ fn run() {
     try {
       await ctx.waitFor(async () => {
         const source = await ctx.source();
-        return source.includes("use math :: core.math") && source.includes("canvas_value :: math.abs(1)");
+        return source.includes("use math: core.math") && source.includes("canvas_value: math.abs(1)");
       }, "library source transaction");
     } catch (error) {
       const diagnostic = await ctx.driver.evaluate(`(() => ({
@@ -3476,13 +3476,13 @@ fn run() {
       "events library scope entry",
     );
     await ctx.driver.click(scopePoint.x, scopePoint.y);
-    await ctx.waitFor(async () => (await ctx.source()).includes("canvas_value :: event.scope()"), "events library source transaction");
+    await ctx.waitFor(async () => (await ctx.source()).includes("canvas_value: event.scope()"), "events library source transaction");
     const created = await ctx.source();
     const inserted = await ctx.graph();
     const insertedScopeNode = (inserted.graphs || [])
       .flatMap((graph) => graph.nodes || [])
       .find((node) => node.source_span
-        && inserted.source_text.slice(node.source_span.start, node.source_span.end).includes("canvas_value :: event.scope()"));
+        && inserted.source_text.slice(node.source_span.start, node.source_span.end).includes("canvas_value: event.scope()"));
     const insertedScopeOutput = insertedScopeNode
       && (inserted.graphs || [])
         .flatMap((graph) => graph.pins || [])
@@ -3525,7 +3525,7 @@ fn run() {
     graphDoc = await ctx.graph();
     scratch = graphByTitle(graphDoc, "scratch");
     await uiEdit(ctx, { schema_version: 1, op: "insert_call", revision: graphDoc.revision, graph_id: scratch.graph_id, callee: "square", args: ["limit"], bind: "project_value" }, "project insert");
-    await ctx.expectSourceContains("project_value :: square(limit)");
+    await ctx.expectSourceContains("project_value: square(limit)");
 
     await ctx.loadCoreCatalog("abs");
     await ctx.openPinActionMenu("limit", "limit");
@@ -3569,17 +3569,17 @@ fn run() {
       wire_target_pin: "n",
       wire_expr: "limit",
     }, "data wire insert");
-    await ctx.expectSourceContains("wired_value :: square(limit)");
+    await ctx.expectSourceContains("wired_value: square(limit)");
   },
 
   "data-pin-drag-to-wire": async (ctx) => {
     await ctx.openCanvas();
     await clickElement(ctx, `document.getElementById("tour-dismiss")`, "dismiss first-run guide");
-    await ctx.replaceSource(`fn run() {
-    source :: 4
-    other :: 9
-    first :: 1
-    second :: 2
+    await ctx.replaceSource(`run: fn() {
+    source: 4
+    other: 9
+    first: 1
+    second: 2
     print(source)
     print(other)
     print(first)
@@ -3589,19 +3589,19 @@ fn run() {
     await ctx.openCanvas();
     const before = await ctx.source();
     await dragDataPin(ctx, "run", "source", "source", "first", "value", true);
-    await ctx.waitFor(async () => (await ctx.source()).includes("first :: source"), "data wire source transaction");
+    await ctx.waitFor(async () => (await ctx.source()).includes("first: source"), "data wire source transaction");
     let graph = graphByTitle(await ctx.graph(), "run");
     if (!dataWireExists(graph, "source", "first")) throw new Error(`filled data wire missing after drag: ${JSON.stringify(graph.wires)}`);
     await assertCleanSourceSync(ctx, ["data drag source"]);
 
     await dragDataPin(ctx, "run", "source", "source", "second", "value");
-    await ctx.waitFor(async () => (await ctx.source()).includes("second :: source"), "fan-out data wire");
+    await ctx.waitFor(async () => (await ctx.source()).includes("second: source"), "fan-out data wire");
     graph = graphByTitle(await ctx.graph(), "run");
     if (!dataWireExists(graph, "source", "second")) throw new Error("fan-out data wire missing");
 
     const beforeRewire = await ctx.source();
     await dragDataPin(ctx, "run", "other", "other", "first", "value");
-    await ctx.waitFor(async () => (await ctx.source()).includes("first :: other"), "data rewire source");
+    await ctx.waitFor(async () => (await ctx.source()).includes("first: other"), "data rewire source");
     const afterRewire = await ctx.source();
     if (afterRewire === beforeRewire) throw new Error("data rewire did not change source");
     graph = graphByTitle(await ctx.graph(), "run");
@@ -3632,39 +3632,39 @@ fn run() {
   "data-pin-type-gate": async (ctx) => {
     await ctx.openCanvas();
     await clickElement(ctx, `document.getElementById("tour-dismiss")`, "dismiss first-run guide");
-    await ctx.replaceSource(`enum ParseError {
+    await ctx.replaceSource(`ParseError: enum {
     Empty
 }
 
-fn helper(value: Int) Int -[]> {
+helper: fn(value: Int) Int -[]> {
     return value
 }
 
-fn twice(value: Int) Int -[]> {
+twice: fn(value: Int) Int -[]> {
     return value + value
 }
 
-fn use_callback(callback: fn(Int) Int -[]>) {
+use_callback: fn(callback: fn(Int) Int -[]>) {
     print("callback")
 }
 
-fn parse(raw: String) Int !ParseError -> {
+parse: fn(raw: String) Int !ParseError -> {
     if raw == "" -> return Err(ParseError.Empty)
     return Ok(7)
 }
 
-fn write_int(value: &Int) {}
+write_int: fn(value: &Int) {}
 
-fn run() {
+run: fn() {
     source := 4
-    text :: "text"
-    call_target :: 0
-    seed :: twice(2)
-    bad :: source
+    text: "text"
+    call_target: 0
+    seed: twice(2)
+    bad: source
     other := 1
     use_callback(helper)
     write_int(&other)
-    parsed :: parse("")
+    parsed: parse("")
     print(source)
     print(text)
     print(bad)
@@ -3672,8 +3672,8 @@ fn run() {
     print(parsed)
 }
 
-fn other_graph() {
-    target :: 0
+other_graph: fn() {
+    target: 0
     print(target)
 }
 `);
@@ -3681,7 +3681,7 @@ fn other_graph() {
     await ctx.switchGraph("run");
 
     await dragDataPin(ctx, "run", "twice", "result", "call_target", "value", true);
-    await ctx.waitFor(async () => (await ctx.source()).includes("call_target :: twice(2)"), "call result source transaction");
+    await ctx.waitFor(async () => (await ctx.source()).includes("call_target: twice(2)"), "call result source transaction");
     let graph = graphByTitle(await ctx.graph(), "run");
     if (!dataWireExists(graph, "twice", "call_target")) throw new Error("call-result data wire missing");
     await assertCleanSourceSync(ctx, ["call result drag"]);
@@ -3768,14 +3768,14 @@ fn other_graph() {
 
   "exec-rewire-reorders-statements": async (ctx) => {
     await ctx.openCanvas();
-    await ctx.replaceSource(`fn order() {
-    a :: 1
-    b :: 2
-    c :: 3
+    await ctx.replaceSource(`order: fn() {
+    a: 1
+    b: 2
+    c: 3
     print(a + b + c)
 }
 
-fn run() {
+run: fn() {
     order()
 }
 `);
@@ -3798,18 +3798,18 @@ fn run() {
 
   "exec-rewire-refuses-cross-block": async (ctx) => {
     await ctx.openCanvas();
-    await ctx.replaceSource(`fn order() {
-    a :: 1
+    await ctx.replaceSource(`order: fn() {
+    a: 1
     if true {
-        c :: 3
+        c: 3
     } else {
         print(a)
     }
-    b :: 2
+    b: 2
     print(a + b)
 }
 
-fn run() {
+run: fn() {
     order()
 }
 `);
@@ -3827,14 +3827,14 @@ fn run() {
 
   "exec-rewire-binding-order-diagnostic": async (ctx) => {
     await ctx.openCanvas();
-    await ctx.replaceSource(`fn order() {
-    a :: 1
-    b :: 2
-    c :: a + b
+    await ctx.replaceSource(`order: fn() {
+    a: 1
+    b: 2
+    c: a + b
     print(c)
 }
 
-fn run() {
+run: fn() {
     order()
 }
 `);
@@ -3849,9 +3849,9 @@ fn run() {
 
   "exec-convergence-preview": async (ctx) => {
     await ctx.openCanvas();
-    await ctx.replaceSource(`fn converge(flag: Bool) {
-    value :: 1
-    done :: value
+    await ctx.replaceSource(`converge: fn(flag: Bool) {
+    value: 1
+    done: value
     if flag {
         print(value)
         finish(done)
@@ -3860,11 +3860,11 @@ fn run() {
     }
 }
 
-fn finish(value: Int) {
+finish: fn(value: Int) {
     print(value)
 }
 
-fn run() {
+run: fn() {
     converge(true)
 }
 `);
@@ -3888,7 +3888,7 @@ fn run() {
       schema_version: 1,
       op: "replace_source",
       revision: (await ctx.graph()).revision,
-      source: "fn converge("
+      source: "converge: fn("
     });
     if (rejected.ok) throw new Error(`invalid convergence source unexpectedly accepted: ${JSON.stringify(rejected.json)}`);
     if (await ctx.source() !== before) throw new Error("rejected convergence edit changed source");
@@ -3902,8 +3902,8 @@ fn run() {
 
   "exec-convergence-structured-join": async (ctx) => {
     await ctx.openCanvas();
-    await ctx.replaceSource(`fn converge(flag: Bool) {
-    value :: 1
+    await ctx.replaceSource(`converge: fn(flag: Bool) {
+    value: 1
     if flag {
         print(value)
     } else {
@@ -3912,11 +3912,11 @@ fn run() {
     finish(value)
 }
 
-fn finish(value: Int) {
+finish: fn(value: Int) {
     print(value)
 }
 
-fn run() {
+run: fn() {
     converge(true)
 }
 `);
@@ -3938,9 +3938,9 @@ fn run() {
 
   "exec-convergence-apply": async (ctx) => {
     await ctx.openCanvas();
-    await ctx.replaceSource(`fn converge(flag: Bool) {
-    value :: 1
-    done :: value
+    await ctx.replaceSource(`converge: fn(flag: Bool) {
+    value: 1
+    done: value
     if flag {
         print(value)
         finish(done)
@@ -3949,11 +3949,11 @@ fn run() {
     }
 }
 
-fn finish(value: Int) {
+finish: fn(value: Int) {
     print(value)
 }
 
-fn run() {
+run: fn() {
     converge(true)
 }
 `);
@@ -3978,7 +3978,7 @@ fn run() {
     if (!applied) throw new Error("convergence apply button missing");
     await ctx.waitFor(async () => {
       const source = await ctx.source();
-      return source.includes("fn shared_finish(done: Int)")
+      return source.includes("shared_finish: fn(done: Int)")
         && source.match(/shared_finish\(done\)/g)?.length === 2;
     }, "convergence source apply");
     const after = await ctx.source();
@@ -3993,8 +3993,8 @@ fn run() {
 
   "exec-convergence-selected-span": async (ctx) => {
     await ctx.openCanvas();
-    await ctx.replaceSource(`fn converge(flag: Bool) {
-    value :: 1
+    await ctx.replaceSource(`converge: fn(flag: Bool) {
+    value: 1
     if flag {
         notify(value)
         bump_metric()
@@ -4004,15 +4004,15 @@ fn run() {
     }
 }
 
-fn notify(value: Int) {
+notify: fn(value: Int) {
     print(value)
 }
 
-fn bump_metric() {
+bump_metric: fn() {
     print("metric")
 }
 
-fn run() {
+run: fn() {
     converge(true)
 }
 `);
@@ -4033,7 +4033,7 @@ fn run() {
     await ctx.driver.evaluate(`document.getElementById("apply-exec-convergence").click()`);
     await ctx.waitFor(async () => {
       const source = await ctx.source();
-      return source.includes("fn shared_notify(value: Int)")
+      return source.includes("shared_notify: fn(value: Int)")
         && source.match(/shared_notify\(value\)/g)?.length === 2;
     }, "selected convergence source apply");
     const after = await ctx.source();
@@ -4048,21 +4048,21 @@ fn run() {
 
   "exec-convergence-refuses-out-of-scope": async (ctx) => {
     await ctx.openCanvas();
-    await ctx.replaceSource(`fn converge(flag: Bool) {
-    value :: 1
+    await ctx.replaceSource(`converge: fn(flag: Bool) {
+    value: 1
     if flag {
-        branch_value :: value
+        branch_value: value
         finish(branch_value)
     } else {
         print(value)
     }
 }
 
-fn finish(value: Int) {
+finish: fn(value: Int) {
     print(value)
 }
 
-fn run() {
+run: fn() {
     converge(true)
 }
 `);
@@ -4096,13 +4096,13 @@ fn run() {
 
   "exec-convergence-explicit-strategies": async (ctx) => {
     await ctx.openCanvas();
-    await ctx.replaceSource(`fn shared_finish(done: Int) {
+    await ctx.replaceSource(`shared_finish: fn(done: Int) {
     finish(done)
 }
 
-fn converge(flag: Bool) {
-    value :: 1
-    done :: value
+converge: fn(flag: Bool) {
+    value: 1
+    done: value
     if flag {
         print(value)
         finish(done)
@@ -4111,11 +4111,11 @@ fn converge(flag: Bool) {
     }
 }
 
-fn finish(value: Int) {
+finish: fn(value: Int) {
     print(value)
 }
 
-fn run() {
+run: fn() {
     converge(true)
 }
 `);
@@ -4127,11 +4127,11 @@ fn run() {
     await ctx.driver.evaluate(`document.querySelector('[data-exec-convergence-strategy="helper"]').click()`);
     await ctx.driver.evaluate(`document.getElementById("apply-exec-convergence").click()`);
     await ctx.waitFor(async () => (await ctx.source()).match(/shared_finish\(done\)/g)?.length === 2, "exact helper convergence apply");
-    if ((await ctx.source()).match(/fn shared_finish\(/g)?.length !== 1) throw new Error("helper strategy created a duplicate helper");
+    if ((await ctx.source()).match(/shared_finish: fn\(/g)?.length !== 1) throw new Error("helper strategy created a duplicate helper");
 
-    await ctx.replaceSource(`fn converge(flag: Bool) {
-    value :: 1
-    done :: value
+    await ctx.replaceSource(`converge: fn(flag: Bool) {
+    value: 1
+    done: value
     if flag {
         print(value)
         finish(done)
@@ -4140,11 +4140,11 @@ fn run() {
     }
 }
 
-fn finish(value: Int) {
+finish: fn(value: Int) {
     print(value)
 }
 
-fn run() {
+run: fn() {
     converge(true)
 }
 `);
@@ -4155,14 +4155,14 @@ fn run() {
     await ctx.driver.evaluate(`document.getElementById("apply-exec-convergence").click()`);
     await ctx.waitFor(async () => (await ctx.source()).match(/finish\(done\)/g)?.length === 2, "duplicate convergence apply");
     const duplicated = await ctx.source();
-    if (duplicated.includes("fn shared_finish")) throw new Error("duplicate strategy created a helper");
+    if (duplicated.includes("shared_finish: fn")) throw new Error("duplicate strategy created a helper");
   },
 
   "exec-convergence-escape": async (ctx) => {
     await ctx.openCanvas();
-    await ctx.replaceSource(`fn converge(flag: Bool) {
-    value :: 1
-    done :: value
+    await ctx.replaceSource(`converge: fn(flag: Bool) {
+    value: 1
+    done: value
     if flag {
         print(value)
         finish(done)
@@ -4171,11 +4171,11 @@ fn run() {
     }
 }
 
-fn finish(value: Int) {
+finish: fn(value: Int) {
     print(value)
 }
 
-fn run() {
+run: fn() {
     converge(true)
 }
 `);
@@ -4195,9 +4195,9 @@ fn run() {
 
   "exec-convergence-stale": async (ctx) => {
     await ctx.openCanvas();
-    await ctx.replaceSource(`fn converge(flag: Bool) {
-    value :: 1
-    done :: value
+    await ctx.replaceSource(`converge: fn(flag: Bool) {
+    value: 1
+    done: value
     if flag {
         print(value)
         finish(done)
@@ -4206,18 +4206,18 @@ fn run() {
     }
 }
 
-fn finish(value: Int) {
+finish: fn(value: Int) {
     print(value)
 }
 
-fn run() {
+run: fn() {
     converge(true)
 }
 `);
     await ctx.openCanvas();
     await dragExecPin(ctx, "converge", "if", "else", "finish");
     await ctx.waitFor(async () => !!(await ctx.state()).execConvergencePreview, "stale convergence preview");
-    const changed = (await ctx.source()).replace("value :: 1", "value :: 2");
+    const changed = (await ctx.source()).replace("value: 1", "value: 2");
     const graph = await ctx.graph();
     const external = await ctx.transaction({ schema_version: 1, op: "replace_source", revision: graph.revision, source: changed });
     if (!external.ok) throw new Error(`stale setup failed: ${JSON.stringify(external.json)}`);
@@ -4229,7 +4229,7 @@ fn run() {
 
   "branch-insertion-targets": async (ctx) => {
     await ctx.openCanvas();
-    await ctx.replaceSource(`fn run() {
+    await ctx.replaceSource(`run: fn() {
     print("before")
     print("target")
     print("after")
@@ -4313,25 +4313,25 @@ fn run() {
 
   "pattern-arm-add-edit-remove": async (ctx) => {
     await ctx.openCanvas();
-    await ctx.replaceSource(`enum Choice {
+    await ctx.replaceSource(`Choice: enum {
     A(Int)
     B(Int)
     C(Int)
 }
 
-fn choose(x: Choice) Int -> {
+choose: fn(x: Choice) Int -> {
     if x == {
         .A(n) -> { return n }
         else -> { return 0 }
     }
 }
 
-fn run() {
+run: fn() {
     print(choose(Choice.A(1)))
 }
 `);
     await ctx.openCanvas();
-    // `enum Choice` projects derived `encode`/`decode` graphs (13 and 27 nodes)
+    // `Choice: enum` projects derived `encode`/`decode` graphs (13 and 27 nodes)
     // that outweigh `choose` (7), so the editor's richest-graph default selects
     // `decode` — whose own `if ==` dispatch node satisfies ctx.node("if ==").
     // Without pinning the graph, every arm transaction carried
@@ -4386,19 +4386,19 @@ fn run() {
 
   "pattern-arm-invalid-refused": async (ctx) => {
     await ctx.openCanvas();
-    await ctx.replaceSource(`enum Choice {
+    await ctx.replaceSource(`Choice: enum {
     A(Int)
     B(Int)
 }
 
-fn choose(x: Choice) Int -> {
+choose: fn(x: Choice) Int -> {
     if x == {
         .A(n) -> { return n }
         else -> { return 0 }
     }
 }
 
-fn run() {
+run: fn() {
     print(choose(Choice.A(1)))
 }
 `);
@@ -4430,17 +4430,17 @@ fn run() {
 
   "multi-input-append-remove": async (ctx) => {
     await ctx.openCanvas();
-    await ctx.replaceSource(`fn to_int(n: Int) Int -> {
+    await ctx.replaceSource(`to_int: fn(n: Int) Int -> {
     return n
 }
 
-fn demo() Int -> {
-    xs :: [1, 2, 3]
-    ys :: [1, 2]
+demo: fn() Int -> {
+    xs: [1, 2, 3]
+    ys: [1, 2]
     return xs[0] + ys[0]
 }
 
-fn run() {
+run: fn() {
     print(demo())
 }
 `);
@@ -4486,7 +4486,7 @@ fn run() {
 
   "node-state-off-toggle": async (ctx) => {
     await ctx.openCanvas();
-    await ctx.replaceSource(`fn run() {
+    await ctx.replaceSource(`run: fn() {
     #Off print("off")
     print("on")
 }
@@ -4520,8 +4520,8 @@ fn run() {
 
   "node-state-debug-only-toggle": async (ctx) => {
     await ctx.openCanvas();
-    await ctx.replaceSource(`fn run() {
-    debug_value :: 3
+    await ctx.replaceSource(`run: fn() {
+    debug_value: 3
     #DebugOnly print("debug")
     print("on")
 }
@@ -4605,7 +4605,7 @@ fn run() {
     await ctx.driver.evaluate(`window.prompt = () => "promoted_limit"`);
     await pressAttribute(ctx, "data-inline-promote", selected.expr.inline_expr_id, "Promote to binding");
     await sleep(500);
-    if (!(await ctx.source()).includes("promoted_limit :: limit")) {
+    if (!(await ctx.source()).includes("promoted_limit: limit")) {
       const state = await ctx.driver.evaluate(`JSON.stringify({
         tx: window.__jetCanvasLastTx,
         result: window.__jetCanvasLastTxResult,
@@ -4613,7 +4613,7 @@ fn run() {
       })`);
       throw new Error(`promotion gesture did not write source: ${state}`);
     }
-    await ctx.waitFor(async () => (await ctx.source()).includes("promoted_limit :: limit"), "promoted binding source");
+    await ctx.waitFor(async () => (await ctx.source()).includes("promoted_limit: limit"), "promoted binding source");
     await ctx.expectSourceContains("print(promoted_limit)");
     await assertCleanSourceSync(ctx, ["keyboard promote"]);
 
@@ -4649,15 +4649,15 @@ fn run() {
 
   "conversion-keyboard-gesture": async (ctx) => {
     await ctx.openCanvas();
-    await ctx.replaceSource(`fn to_int(n: Int) Int -> {
+    await ctx.replaceSource(`to_int: fn(n: Int) Int -> {
     return n
 }
 
-fn convert(limit: Int) {
+convert: fn(limit: Int) {
     print(limit)
 }
 
-fn run() {
+run: fn() {
     convert(3)
 }
 `);
@@ -4706,13 +4706,13 @@ fn run() {
 
   "collapse-expand-keyboard-gesture": async (ctx) => {
     await ctx.openCanvas();
-    await ctx.replaceSource(`fn compute(x: Int) {
-    a :: x + 1
-    b :: a * 2
+    await ctx.replaceSource(`compute: fn(x: Int) {
+    a: x + 1
+    b: a * 2
     print(b)
 }
 
-fn run() {
+run: fn() {
     compute(3)
 }
 `);
@@ -4792,13 +4792,13 @@ fn run() {
       if (await ctx.source() !== before) throw new Error(`${hostile.label} partially changed source`);
     }
 
-    await ctx.replaceSource(`fn cross(x: Int) {
+    await ctx.replaceSource(`cross: fn(x: Int) {
     if x > 0 {
         print(x)
     }
 }
 
-fn run() {
+run: fn() {
     cross(1)
 }
 `);
@@ -4839,18 +4839,18 @@ fn run() {
       mobile: false,
     }, ctx.driver.pageSession);
     await sleep(120);
-    await ctx.replaceSource(`fn child(n: Int) Int -> {
+    await ctx.replaceSource(`child: fn(n: Int) Int -> {
     return n * 2
 }
 
-fn layout(x: Int) {
-    a :: x + 1
-    b :: x + 2
-    c :: x + 3
+layout: fn(x: Int) {
+    a: x + 1
+    b: x + 2
+    c: x + 3
     print(child(a + b + c))
 }
 
-fn run() {
+run: fn() {
     layout(1)
 }
 `);
@@ -5083,7 +5083,7 @@ fn run() {
     await ctx.waitFor(async () => await ctx.driver.evaluate(`(() => {
       const editor = document.getElementById("source-editor");
       return window.__jetCanvasCanvasState?.kind === "recovery"
-        && editor?.value.includes("fn run")
+        && editor?.value.includes("run: fn")
         && getComputedStyle(editor).display !== "none";
     })()`), "initial loading source recovery");
     await ctx.driver.evaluate(`(() => {
@@ -5330,7 +5330,7 @@ fn run() {
         to: "score"
       }, "sidebar-selected variable rename");
     }
-    await ctx.waitFor(async () => (await ctx.source()).includes("score := square(limit)") || (await ctx.source()).includes("score :: square(limit)"), "sidebar rename source");
+    await ctx.waitFor(async () => (await ctx.source()).includes("score := square(limit)") || (await ctx.source()).includes("score: square(limit)"), "sidebar rename source");
     await ctx.waitForCanvas();
     await ctx.expectSourceContains("if score > 10");
   },
@@ -5356,17 +5356,17 @@ fn run() {
     const project = await ctx.driver.evaluate(`fetch("/canvas/project", { cache: "no-store" }).then((r) => r.json())`);
     const root = project.project_root;
     await writeFile(join(root, "package.jet"), "name: \"canvas_project_rename\"\nversion: \"0.1.0\"\n");
-    await writeFile(join(root, "main.jet"), `fn helper() Int -> {
+    await writeFile(join(root, "main.jet"), `helper: fn() Int -> {
     return 1
 }
 
-fn run() {
+run: fn() {
     print(helper())
 }
 `);
-    await writeFile(join(root, "other.jet"), `use main :: "./main"
+    await writeFile(join(root, "other.jet"), `use main: "./main"
 
-fn use_helper() Int -> {
+use_helper: fn() Int -> {
     return main.helper()
 }
 `);
@@ -5447,17 +5447,17 @@ fn use_helper() Int -> {
     }, "project rename reference source");
     if (other.protocol !== "jet.canvas.graph" || !other.source_text.includes("compute()")) throw new Error("project rename did not update reference source");
 
-    await writeFile(join(root, "main.jet"), `fn helper() Int -> {
+    await writeFile(join(root, "main.jet"), `helper: fn() Int -> {
     return 1
 }
 
-fn run() {
+run: fn() {
     print(helper())
 }
 `);
-    await writeFile(join(root, "other.jet"), `use main :: "./main"
+    await writeFile(join(root, "other.jet"), `use main: "./main"
 
-fn use_helper() Int -> {
+use_helper: fn() Int -> {
     return main.helper()
 }
     `);
@@ -5517,27 +5517,27 @@ fn use_helper() Int -> {
   "details-scalar-enum-reference-editors": async (ctx) => {
     await ctx.openCanvas();
     await clickElement(ctx, `document.getElementById("tour-dismiss")`, "dismiss first-run guide");
-    await ctx.replaceSource(`enum Mode {
+    await ctx.replaceSource(`Mode: enum {
     Fast
     Slow
 }
 
 /// Edits a checked choice.
-fn edit(choice: Mode) -[]> {
+edit: fn(choice: Mode) -[]> {
     #Meta(category: "Tuning", tunable)
-    amount :: 3
-    other :: 9
-    flag :: true
-    label :: "start"
-    mode :: Mode.Fast
-    alias :: amount
+    amount: 3
+    other: 9
+    flag: true
+    label: "start"
+    mode: Mode.Fast
+    alias: amount
     needs_int(amount)
     print(alias)
 }
 
-fn needs_int(value: Int) {}
+needs_int: fn(value: Int) {}
 
-fn run() {
+run: fn() {
     edit(Mode.Fast)
 }
     `);
@@ -5632,7 +5632,7 @@ fn run() {
       input.dispatchEvent(new Event("input", { bubbles: true }));
     })()`);
     await ctx.driver.press("Enter");
-    await ctx.waitFor(async () => (await ctx.source()).includes("amount :: 8"), "Details Enter apply");
+    await ctx.waitFor(async () => (await ctx.source()).includes("amount: 8"), "Details Enter apply");
     await ctx.waitForCanvas();
 
     await selectVariable("amount");
@@ -5643,7 +5643,7 @@ fn run() {
       input.dispatchEvent(new Event("input", { bubbles: true }));
       document.getElementById("toolbar-search").focus();
     })()`);
-    await ctx.waitFor(async () => (await ctx.source()).includes("amount :: 6"), "Details blur apply");
+    await ctx.waitFor(async () => (await ctx.source()).includes("amount: 6"), "Details blur apply");
     await ctx.waitForCanvas();
 
     await selectVariable("amount");
@@ -5664,7 +5664,7 @@ fn run() {
     await applyValue("mode", "Mode.Slow", "enum", "enum Details edit");
     await applyValue("alias", "other", "reference", "reference Details edit");
     const edited = await ctx.source();
-    for (const text of ["amount :: 7", "flag :: false", "label :: \"line\\n<b>☃</b>\"", "mode :: Mode.Slow", "alias :: other", "print(alias)"]) {
+    for (const text of ["amount: 7", "flag: false", "label: \"line\\n<b>☃</b>\"", "mode: Mode.Slow", "alias: other", "print(alias)"]) {
       if (!edited.includes(text)) throw new Error(`Details edit missing ${text}:\n${edited}`);
     }
 
@@ -5693,9 +5693,9 @@ fn run() {
     if (!reloaded || reloaded.kind !== "reference" || reloaded.value !== "other") throw new Error(`reference editor did not reload its source value: ${JSON.stringify(reloaded)}`);
 
     const undone = await ctx.undo();
-    if (!undone.includes("alias :: amount")) throw new Error(`undo did not restore reference source:\n${undone}`);
+    if (!undone.includes("alias: amount")) throw new Error(`undo did not restore reference source:\n${undone}`);
     const redone = await ctx.redo();
-    if (!redone.includes("alias :: other")) throw new Error(`redo did not restore reference edit:\n${redone}`);
+    if (!redone.includes("alias: other")) throw new Error(`redo did not restore reference edit:\n${redone}`);
 
     const beforeInvalid = await ctx.source();
     await selectVariable("amount");
@@ -5751,12 +5751,12 @@ fn run() {
     const beforeFunction = await ctx.source();
     await clickElement(ctx, `document.getElementById("function-signature")`, "function signature editor");
     await ctx.driver.shortcut(["Control", "A"]);
-    await ctx.driver.type("fn edit(choice: Mode, scale: Int{1}) -[]>");
+    await ctx.driver.type("edit: fn(choice: Mode, scale: Int{1}) -[]>");
     await clickElement(ctx, `document.getElementById("edit-function-signature")`, "function signature apply");
     await ctx.waitFor(async () => {
       const source = await ctx.source();
       const result = await ctx.driver.evaluate("window.__jetCanvasLastTxResult || null");
-      return source.includes("fn edit(choice: Mode, scale: Int{1}) -[]>") && result && result.changed === true;
+      return source.includes("edit: fn(choice: Mode, scale: Int{1}) -[]>") && result && result.changed === true;
     }, "function signature source transaction");
     await ctx.waitForCanvas();
     const afterFunction = await ctx.source();
@@ -5772,7 +5772,7 @@ fn run() {
       const apply = document.getElementById("edit-function-signature");
       if (!signature || !apply) return false;
       signature.focus();
-      signature.value = "fn edit(";
+      signature.value = "edit: fn(";
       signature.dispatchEvent(new Event("input", { bubbles: true }));
       apply.click();
       return true;
@@ -5790,19 +5790,19 @@ fn run() {
 
   "details-collection-nested-editors": async (ctx) => {
     await ctx.openCanvas();
-    await ctx.replaceSource(`fn edit() {
-    matrix :: [[1, 2], [3, 4]]
-    settings :: Point{x: 4, y: [5, 6]}
-    lookup :: ["first": 7, "second": 8]
+    await ctx.replaceSource(`edit: fn() {
+    matrix: [[1, 2], [3, 4]]
+    settings: Point{x: 4, y: [5, 6]}
+    lookup: ["first": 7, "second": 8]
     print(1)
 }
 
-struct Point {
+Point: struct {
     x: Int
     y: [Int]
 }
 
-fn run() {
+run: fn() {
     edit()
 }
 `);
@@ -5874,7 +5874,7 @@ fn run() {
       const result = await ctx.driver.evaluate("window.__jetCanvasLastTxResult || null");
       const state = await ctx.state();
       if (result && result.ok === false) throw new Error(`map nested apply refused: ${JSON.stringify(result)}`);
-      return source.includes('lookup :: ["first": 10, "second": 8]')
+      return source.includes('lookup: ["first": 10, "second": 8]')
         && result && result.changed === true && result.source_text === source && state && state.undoDepth >= 1;
     }, "map nested apply");
     const afterMap = await ctx.source();
@@ -5899,7 +5899,7 @@ fn run() {
       const source = await ctx.source();
       const result = await ctx.driver.evaluate("window.__jetCanvasLastTxResult || null");
       const state = await ctx.state();
-      return source.includes("settings :: Point{x: 9, y: [5, 7]}")
+      return source.includes("settings: Point{x: 9, y: [5, 7]}")
         && result && result.changed === true && result.source_text === source && state && state.undoDepth >= 1;
     }, "struct nested apply");
     const afterStruct = await ctx.source();
@@ -5930,7 +5930,7 @@ fn run() {
       const source = await ctx.source();
       const result = await ctx.driver.evaluate("window.__jetCanvasLastTxResult || null");
       const state = await ctx.state();
-      return source.includes("matrix :: [[1, 11], [3, 4]]")
+      return source.includes("matrix: [[1, 11], [3, 4]]")
         && result && result.changed === true && result.source_text === source && state && state.undoDepth >= 1;
     }, "nested blur apply");
     const beforeMatrixApply = await ctx.source();
@@ -5941,7 +5941,7 @@ fn run() {
       const source = await ctx.source();
       const result = await ctx.driver.evaluate("window.__jetCanvasLastTxResult || null");
       const state = await ctx.state();
-      return source.includes("matrix :: [[1, 11], [12, 4]]")
+      return source.includes("matrix: [[1, 11], [12, 4]]")
         && result && result.changed === true && result.source_text === source && state && state.undoDepth >= 1;
     }, "nested matrix apply");
     const afterMatrixApply = await ctx.source();
@@ -5992,7 +5992,7 @@ fn run() {
     if (!staleState || staleState.phase !== "refused" || staleState.event !== "transaction-refused") {
       throw new Error(`stale nested refusal was not visible: ${JSON.stringify(staleState)}`);
     }
-    if (await ctx.source() !== beforeStaleApply || !(await ctx.source()).includes('lookup :: ["first": 11, "second": 8]')) {
+    if (await ctx.source() !== beforeStaleApply || !(await ctx.source()).includes('lookup: ["first": 11, "second": 8]')) {
       throw new Error("stale nested edit changed source beyond the external committed edit");
     }
   },
@@ -6000,18 +6000,18 @@ fn run() {
   "traits-panel-authoring": async (ctx) => {
     await ctx.openCanvas();
     await clickElement(ctx, `document.getElementById("tour-dismiss")`, "dismiss first-run guide");
-    await ctx.replaceSource(`trait Drawable {
-    fn render(self) String -[IO]>
-    fn label(self) String -> {
+    await ctx.replaceSource(`Drawable: trait {
+    render: fn(self) String -[IO]>
+    label: fn(self) String -> {
         return "drawable"
     }
 }
 
-struct Badge {
+Badge: struct {
     text: String
 }
 
-fn run() {
+run: fn() {
     print("ready")
 }
     `);
@@ -6053,7 +6053,7 @@ fn run() {
       const state = await ctx.driver.evaluate("window.__jetCanvasTraitsPanel || null");
       return state && state.implementationCount === 1 && state.implementedMethodCount === 1;
     }, "traits panel implementation projection");
-    await ctx.expectSourceContains("fn render(self) String -[IO]>");
+    await ctx.expectSourceContains("render: fn(self) String -[IO]>");
     await ctx.expectSourceContains('return "canvas"');
     const created = await ctx.source();
     const createdState = await ctx.driver.evaluate("window.__jetCanvasTraitsPanel");
@@ -6195,7 +6195,7 @@ fn run() {
     await pressAttribute(ctx, "id", "canvas-new-callback", "callback creation keyboard focus");
     await ctx.waitFor(async () => {
       const state = await ctx.state();
-      return state.graphTitle === "on_keyboard" && (await ctx.source()).includes("fn on_keyboard()");
+      return state.graphTitle === "on_keyboard" && (await ctx.source()).includes("on_keyboard: fn()");
     }, "keyboard callback creation");
     const focus = await ctx.driver.evaluate("document.activeElement && document.activeElement.id");
     if (focus !== "canvas-new-callback") throw new Error(`callback keyboard action lost focus: ${focus}`);
@@ -7303,7 +7303,7 @@ fn run() {
 
     // Parse/semantic refusal also preserves the same committed snapshot and
     // history. The normal problem rail must be visible before any retry.
-    await replaceSourceBuffer(`${beforeFailedSave}\nfn broken(`);
+    await replaceSourceBuffer(`${beforeFailedSave}\nbroken: fn(`);
     await clickElement(ctx, `document.getElementById("check-current")`, "invalid source check");
     await ctx.waitFor(async () => {
       const state = await ctx.driver.evaluate("window.__jetCanvasCanvasState || null");
@@ -7356,8 +7356,8 @@ fn run() {
           const { doc, graph } = await currentGraphDoc(ctx, "scratch");
           const hasExtra = (await ctx.source()).includes("extra: Int{1}");
           const signature = hasExtra
-            ? "fn scratch(limit: Int, text: String, flag: Bool, ratio: Float)"
-            : "fn scratch(limit: Int, text: String, flag: Bool, ratio: Float, extra: Int{1})";
+            ? "scratch: fn(limit: Int, text: String, flag: Bool, ratio: Float)"
+            : "scratch: fn(limit: Int, text: String, flag: Bool, ratio: Float, extra: Int{1})";
           const label = `signature ${hasExtra ? "remove" : "add"} extra`;
           opLog.push(label);
           await uiEdit(ctx, { schema_version: 1, op: "edit_function_signature", revision: doc.revision, graph_id: graph.graph_id, signature }, label);

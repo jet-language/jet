@@ -3,10 +3,10 @@
 use jet_pkg_model.[PKG_API_SNAPSHOT_VERSION, pkg_api_snapshot_line_name, pkg_api_snapshot_render, pkg_capability_snapshot_parse]
 
 #Test("api snapshot render round trips through parse") {
-    signatures :: [String]{"fn area(s: Shape) Float Never! -[]>", "struct Point<T: Ord> {{ .. }}", "variant Shape.Square{{side: Float}}"}
-    text :: pkg_api_snapshot_render("geo", "1.2.0", signatures)
+    signatures: [String]{"fn area(s: Shape) Float Never! -[]>", "struct Point<T: Ord> {{ .. }}", "variant Shape.Square{{side: Float}}"}
+    text: pkg_api_snapshot_render("geo", "1.2.0", signatures)
     assert_eq(text, "api_version = 4\npackage = geo\npublished_version = 1.2.0\nfn area(s: Shape) Float Never! -[]>\nstruct Point<T: Ord> {{ .. }}\nvariant Shape.Square{{side: Float}}\n")
-    snapshot :: pkg_capability_snapshot_parse(text) ?? panic("snapshot")
+    snapshot: pkg_capability_snapshot_parse(text) ?? panic("snapshot")
     assert_eq(snapshot.api_version, PKG_API_SNAPSHOT_VERSION)
     assert_eq(snapshot.package, "geo")
     assert_eq(snapshot.published_version, "1.2.0")
@@ -14,8 +14,8 @@ use jet_pkg_model.[PKG_API_SNAPSHOT_VERSION, pkg_api_snapshot_line_name, pkg_api
     assert_eq(pkg_api_snapshot_render("geo", "0.1.0", [String]{}), "api_version = 4\npackage = geo\npublished_version = 0.1.0\n")
 }
 
-fn api_snapshot_test_line(line: String) -> String Never! {
-    row :: pkg_api_snapshot_line_name(line) ?? panic("no kind: {line}")
+api_snapshot_test_line: fn(line: String) -> String Never! {
+    row: pkg_api_snapshot_line_name(line) ?? panic("no kind: {line}")
     "{row.kind} {row.name}"
 }
 #Test("api snapshot line names end at the first signature delimiter") {

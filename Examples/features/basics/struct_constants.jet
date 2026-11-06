@@ -1,46 +1,46 @@
-// Module-scope `::` constants can hold struct, enum, and list literal data.
+// Module-scope `:` constants can hold struct, enum, and list literal data.
 // Jet folds each value once while building; every read is an ordinary copy.
-struct RGB {
+RGB: struct {
     r: U8
     g: U8
     b: U8
 }
 
-struct Swatch {
+Swatch: struct {
     name: String
     color: RGB
 }
 
-enum Finish {
+Finish: enum {
     Matte
     Gloss
 }
 
-BLACK :: RGB{r: U8{0}, g: U8{0}, b: U8{0}}
+BLACK: RGB{r: U8{0}, g: U8{0}, b: U8{0}}
 // Fields may be written in any order.
-TEAL :: RGB{b: U8{128}, r: U8{0}, g: U8{128}}
-NIGHT :: Swatch{name: "night", color: RGB{r: U8{15}, g: U8{56}, b: U8{15}}}
-RAMP :: [RGB]{
+TEAL: RGB{b: U8{128}, r: U8{0}, g: U8{128}}
+NIGHT: Swatch{name: "night", color: RGB{r: U8{15}, g: U8{56}, b: U8{15}}}
+RAMP: [RGB]{
     RGB{r: U8{155}, g: U8{188}, b: U8{15}},
     RGB{r: U8{139}, g: U8{172}, b: U8{15}},
 }
-FINISH :: Finish.Gloss
-OFFSET :: -4
+FINISH: Finish.Gloss
+OFFSET: -4
 
-fn show(color: RGB) -> String { "{color.r},{color.g},{color.b}" }
+show: fn(color: RGB) -> String { "{color.r},{color.g},{color.b}" }
 
-fn finish_name(finish: Finish) -> String {
+finish_name: fn(finish: Finish) -> String {
     if finish == {
         .Matte -> "matte"
         .Gloss -> "gloss"
     }
 }
 
-fn pick(palette: [U8:RGB], glyph: U8, width: Int, x: Int) -> RGB {
+pick: fn(palette: [U8:RGB], glyph: U8, width: Int, x: Int) -> RGB {
     if x < width -> palette.get(glyph) ?? BLACK else -> BLACK
 }
 
-fn run() {
+run: fn() {
     palette := [U8:RGB]{}
     palette[U8{0x61}] = RGB{r: U8{1}, g: U8{2}, b: U8{3}}
 

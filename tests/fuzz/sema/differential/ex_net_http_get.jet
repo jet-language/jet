@@ -2,23 +2,23 @@
 // Starts a loopback server in a background task, then uses core.http.get
 // to send a request and print the response body.
 use {
-    http :: core.http
-    net :: core.net
-    tasks :: core.tasks
+    http: core.http
+    net: core.net
+    tasks: core.tasks
 }
 
-fn run() {
-    { sender, receiver: ch } :: channel<String>()
+run: fn() {
+    { sender, receiver: ch }: channel<String>()
     // Mini one-shot server: bind, send address back, handle one request.
-    t :: task {
-        listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
+    t: task {
+        listener: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
         sender.send(listener.local_addr() ?? panic("address failed"))
-        stream :: &listener.accept() ?? panic("accept failed")
-        _req :: stream.read_text(8192) ?? panic("read failed")
+        stream: &listener.accept() ?? panic("accept failed")
+        _req: stream.read_text(8192) ?? panic("read failed")
         net.tcp_reply(^stream, "200 OK", "hello, world!") ?? panic("tcp reply")
     }
-    addr :: ch.receive() ?? panic("no address")
-    resp :: http.get("http://{addr}/") ?? panic("http get failed")
+    addr: ch.receive() ?? panic("no address")
+    resp: http.get("http://{addr}/") ?? panic("http get failed")
     print(resp.body().text(8 * 1024 * 1024) ?? panic("body text"))
     t.join() ?? panic("server failed")
 }

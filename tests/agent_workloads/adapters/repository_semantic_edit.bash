@@ -12,7 +12,7 @@ cp -R -- "$1" "$project"
 source="$project/project/examples/main.jet"
 temporary="$source.tmp"
 awk '
-  index($0, "fn prepare()") == 1 { sub("fn prepare", "fn configure") }
+  index($0, "prepare: fn()") == 1 { sub("prepare: fn", "configure: fn") }
   $0 == "    prepare()" { $0 = "    configure()" }
   { print }
 ' "$source" >"$temporary"

@@ -1,16 +1,16 @@
 // A payload bound from a subject this scope owns moves with `^` (spec.md:1189:
 // a value with cleanup moves only where `^` writes it): the binding takes it,
 // and the subject never closes it again.
-struct Res { name: String }
+Res: struct { name: String }
 impl Res.Close {
-    fn close(^self) { print("close {self.name}") }
+    close: fn(^self) { print("close {self.name}") }
 }
 
-fn keep(r: ^Res) -> Int { r.name.len() }
+keep: fn(r: ^Res) -> Int { r.name.len() }
 
-fn make(name: String) -> Res? { Val(Res{name: name}) }
+make: fn(name: String) -> Res? { Val(Res{name: name}) }
 
-fn from_local() -> Int {
+from_local: fn() -> Int {
     local := make("local")
     if local == .Val(held) {
         applied := ^held
@@ -19,7 +19,7 @@ fn from_local() -> Int {
     0
 }
 
-fn from_call() -> Int {
+from_call: fn() -> Int {
     if make("call") == {
         .Val(held) -> {
             applied := ^held
@@ -29,6 +29,6 @@ fn from_call() -> Int {
     }
 }
 
-fn run() {
+run: fn() {
     print(from_local() + from_call())
 }

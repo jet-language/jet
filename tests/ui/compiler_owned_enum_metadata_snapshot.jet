@@ -1,19 +1,19 @@
-struct MetadataField { name: String }
-enum MetadataPayload {
+MetadataField: struct { name: String }
+MetadataPayload: enum {
     Unit
     Named(fields: [MetadataField])
 }
-struct MetadataVariant { name: String, payload: MetadataPayload }
-enum MetadataDefinitionKind { Enum(variants: [MetadataVariant]) }
-struct MetadataDefinition { key: String, kind: MetadataDefinitionKind }
-struct MetadataEmitter { definitions: [MetadataDefinition], rendered: Int }
+MetadataVariant: struct { name: String, payload: MetadataPayload }
+MetadataDefinitionKind: enum { Enum(variants: [MetadataVariant]) }
+MetadataDefinition: struct { key: String, kind: MetadataDefinitionKind }
+MetadataEmitter: struct { definitions: [MetadataDefinition], rendered: Int }
 
-fn metadata_field_name(emitter: &MetadataEmitter, name: String) -> String Never! {
+metadata_field_name: fn(emitter: &MetadataEmitter, name: String) -> String Never! {
     emitter.rendered += 1
     name.copy()
 }
 
-fn render_metadata(emitter: &MetadataEmitter) -> [String] Never! {
+render_metadata: fn(emitter: &MetadataEmitter) -> [String] Never! {
     definition := emitter.definitions[0].copy()
     names := [String]{}
     if definition.kind == .Enum(variants) {
@@ -26,7 +26,7 @@ fn render_metadata(emitter: &MetadataEmitter) -> [String] Never! {
     names
 }
 
-fn run() Never! {
+run: fn() Never! {
     emitter := MetadataEmitter{
         definitions: [MetadataDefinition]{MetadataDefinition{
             key: "Choice",

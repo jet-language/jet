@@ -11,6 +11,7 @@ when os-name linux: chmod: bin/systemd-run 755
 when os-name linux: chmod: bin/systemctl 755
 mkdir: src/nested
 append: src/nested/input "one\n"
+step: jetpack config trust add {work}
 step: jetpack services up --no-color
 when os-name linux: env: PATH={work}/bin:{env:PATH}
 when os-name linux: env: JETPACK_FAKE_SYSTEMD_STATE={work}/state

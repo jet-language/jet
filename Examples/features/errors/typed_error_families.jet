@@ -2,19 +2,19 @@
 // `#Error` declares application-owned result families; `impl Source -> Target`
 // is the one conversion rail. It is not a logging layer or a generic alias.
 #Error
-enum FileErr {
+FileErr: enum {
     NotFound(String)
     PermDenied
 }
 
 #Error
-enum ParseErr {
+ParseErr: enum {
     Empty
     BadInt(String)
 }
 
 #Error
-enum AppErr {
+AppErr: enum {
     File(FileErr)
     Parse(ParseErr)
     Missing(String)
@@ -26,12 +26,12 @@ impl FileErr -> AppErr { AppErr.File(self) }
 
 impl ParseErr -> AppErr { AppErr.Parse(self) }
 
-fn read_config(path: String) -> String FileErr! {
+read_config: fn(path: String) -> String FileErr! {
     if path == "" -> return Err(FileErr.NotFound("(empty path)"))
     Ok("42")
 }
 
-fn parse_int(text: String) -> Int ParseErr! {
+parse_int: fn(text: String) -> Int ParseErr! {
     if text == "" -> return Err(ParseErr.Empty)
     if text == "x" -> return Err(ParseErr.BadInt(text.copy()))
     Ok(42)
@@ -39,16 +39,16 @@ fn parse_int(text: String) -> Int ParseErr! {
 
 // Plain fallible calls propagate automatically. At each call, the declared
 // conversion changes only the error carrier; the success payload stays intact.
-fn load(path: String) -> Int AppErr! {
-    raw :: read_config(path)  // FileErr -> AppErr.File
-    port :: parse_int(raw)  // ParseErr -> AppErr.Parse
+load: fn(path: String) -> Int AppErr! {
+    raw: read_config(path)  // FileErr -> AppErr.File
+    port: parse_int(raw)  // ParseErr -> AppErr.Parse
     Ok(port)
 }
 
-fn run() {
+run: fn() {
     // Fallback recovery handles either converted failure locally and keeps
     // this entry moving. It is distinct from propagation inside `load`.
-    loaded_value :: load("config.txt") ?? 0
+    loaded_value: load("config.txt") ?? 0
     print(loaded_value)
     // This pattern observes the declared FileErr -> AppErr conversion inside
     // `load`; both result routes are handled here rather than propagated.

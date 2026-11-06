@@ -8,10 +8,10 @@
 
 // Every Services failure is final diagnostic text (Rust `Result<_, String>`).
 #Error
-struct ServicesError {
+ServicesError: struct {
     message: String
 
-    fn new(message: String) -> ServicesError Never! {
+    new: fn(message: String) -> ServicesError Never! {
         ServicesError{message}
     }
 }
@@ -21,14 +21,14 @@ impl IOError -> ServicesError { return ServicesError{message: "{self}"} }
 // Typed metadata exposed by the shared preset registry. A source-only
 // owner-gated row stays discovery metadata until its runtime projection is
 // ratified; it is never treated as a runnable service.
-struct ServicePreset {
+ServicePreset: struct {
     name: String
     package: String
     default_port: Int
 }
 
 // One documented dev service. Declaration order is the catalog order.
-enum ServicePresetKind {
+ServicePresetKind: enum {
     Redis
     Postgres
     Mysql
@@ -72,7 +72,7 @@ enum ServicePresetKind {
     Wiremock
 
     // Canonical name first; the rest are accepted aliases.
-    fn names(self) -> [String] Never! {
+    names: fn(self) -> [String] Never! {
         if self == {
             .Redis -> [String]{"redis"}
             .Postgres -> [String]{"postgres", "postgresql"}
@@ -118,14 +118,14 @@ enum ServicePresetKind {
         }
     }
 
-    fn canonical_name(self) -> String Never! {
+    canonical_name: fn(self) -> String Never! {
         self.names()[0]
     }
 
     // The `<package>@<source>` ref realized before spawning. It is the public
     // spelling, `@jetpack`: `nixpkgs` is not a public source (E1358), and
     // nixpkgs stays provenance in locks and receipts.
-    fn pkg_ref(self) -> String Never! {
+    pkg_ref: fn(self) -> String Never! {
         if self == {
             .Redis -> "redis@jetpack"
             .Postgres -> "postgresql@jetpack"
@@ -173,7 +173,7 @@ enum ServicePresetKind {
     // The executable the package exposes; package and executable names are
     // not assumed to match. Empty means source-only and owner-gated
     // (Nixpkgs ships Adminer as PHP source, not a runnable executable).
-    fn executable(self) -> String Never! {
+    executable: fn(self) -> String Never! {
         if self == {
             .Redis -> "redis-server"
             .Postgres -> "postgres"
@@ -219,7 +219,7 @@ enum ServicePresetKind {
         }
     }
 
-    fn port(self) -> Int Never! {
+    port: fn(self) -> Int Never! {
         if self == {
             .Redis -> 6379
             .Postgres -> 5432
@@ -255,28 +255,28 @@ enum ServicePresetKind {
         }
     }
 
-    fn executable_name(self) -> String? Never! {
-        executable :: self.executable()
+    executable_name: fn(self) -> String? Never! {
+        executable: self.executable()
         if executable == "" -> return None
         Val(executable)
     }
 
-    fn require_runtime(self, name: String) ServicesError! {
+    require_runtime: fn(self, name: String) ServicesError! {
         if self.executable_name() == None {
             return Err(ServicesError.new("service preset `{name}` is owner-gated until a PHP runtime/source projection is ratified"))
         }
     }
 
     // The foreground start command for `port`, keeping state in `data_dir`.
-    fn run(self, port: Int, data_dir: String) -> [String] Never! {
-        data :: data_dir.copy()
+    run: fn(self, port: Int, data_dir: String) -> [String] Never! {
+        data: data_dir.copy()
         if self == {
             .Redis -> [String]{"redis-server", "--bind", "127.0.0.1", "--port", "{port}", "--daemonize", "no", "--dir", data}
             .Postgres -> [String]{"postgres", "-D", data, "-h", "127.0.0.1", "-p", "{port}"}
             .Mysql -> [String]{"mysqld", "--datadir={data}", "--port={port}", "--bind-address=127.0.0.1", "--skip-networking=0"}
             .Mariadb -> [String]{"mariadbd", "--datadir={data}", "--port={port}", "--bind-address=127.0.0.1", "--skip-networking=0"}
             .Nginx -> {
-                prefix :: services_nginx_prefix(port, data)
+                prefix: services_nginx_prefix(port, data)
                 return [String]{"nginx", "-p", prefix, "-c", files.join(prefix, "conf/nginx.conf"), "-g", "daemon off;"}
             }
             .Minio -> [String]{"minio", "server", data, "--address", "127.0.0.1:{port}"}
@@ -319,7 +319,7 @@ enum ServicePresetKind {
     }
 
     // The typed readiness probe for `port`.
-    fn readiness(self, port: Int) -> ReadyProbe Never! {
+    readiness: fn(self, port: Int) -> ReadyProbe Never! {
         if self == {
             .Redis -> ReadyProbe.Exec{command: "redis-cli -p {port} ping"}
             .Postgres -> ReadyProbe.Exec{command: "pg_isready -h 127.0.0.1 -p {port}"}
@@ -333,7 +333,7 @@ enum ServicePresetKind {
     }
 
     // First-start state setup inside `data_dir`, run through `env`'s PATH.
-    fn prepare(self, port: Int, data_dir: String, env: &ShellEnv) ServicesError! -[FS, Env, Exec, Time.Wait]> {
+    prepare: fn(self, port: Int, data_dir: String, env: &ShellEnv) ServicesError! -[FS, Env, Exec, Time.Wait]> {
         if self == {
             .Postgres -> services_prepare_database(port, data_dir, &env, "initdb", [String]{"--no-locale", "--encoding=UTF8", "--pgdata", data_dir})
             .Mysql -> services_prepare_database(port, data_dir, &env, "mysqld", [String]{"--initialize-insecure", "--datadir={data_dir}"})
@@ -341,12 +341,12 @@ enum ServicePresetKind {
             .Nginx -> services_prepare_nginx(port, data_dir)
             .Garage -> services_prepare_config(files.join(data_dir, "garage.toml"), "metadata_dir = \"{data_dir}/meta\"\ndata_dir = \"{data_dir}/data\"\nrpc_bind_addr = \"127.0.0.1:{services_saturating_add(port, 1)}\"\n[s3_api]\napi_bind_addr = \"127.0.0.1:{port}\"\n", "Garage")
             .Kafka -> {
-                controller_port :: services_saturating_add(port, 1)
+                controller_port: services_saturating_add(port, 1)
                 services_prepare_config(files.join(data_dir, "server.properties"), "process.roles=broker,controller\nnode.id=1\ncontroller.quorum.voters=1@127.0.0.1:{controller_port}\nlisteners=PLAINTEXT://127.0.0.1:{port},CONTROLLER://127.0.0.1:{controller_port}\nadvertised.listeners=PLAINTEXT://127.0.0.1:{port}\nlistener.security.protocol.map=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT\ncontroller.listener.names=CONTROLLER\ninter.broker.listener.name=PLAINTEXT\nlog.dirs={data_dir}/logs\n", "Kafka")
             }
             .KafkaConnect -> {
-                worker :: "bootstrap.servers=127.0.0.1:9092\ngroup.id=jet\nkey.converter=org.apache.kafka.connect.storage.StringConverter\nvalue.converter=org.apache.kafka.connect.storage.StringConverter\nrest.port={port}\n"
-                connector :: "name=jet-file-source\nconnector.class=FileStreamSource\ntasks.max=1\nfile=/dev/null\ntopic=jet\n"
+                worker: "bootstrap.servers=127.0.0.1:9092\ngroup.id=jet\nkey.converter=org.apache.kafka.connect.storage.StringConverter\nvalue.converter=org.apache.kafka.connect.storage.StringConverter\nrest.port={port}\n"
+                connector: "name=jet-file-source\nconnector.class=FileStreamSource\ntasks.max=1\nfile=/dev/null\ntopic=jet\n"
                 if services_write_atomic(files.join(data_dir, "connect-standalone.properties"), worker.bytes()) == .Err(error) {
                     return Err(ServicesError.new("couldn't write Kafka Connect preset config: {error}"))
                 }
@@ -362,7 +362,7 @@ enum ServicePresetKind {
 }
 
 // Every preset in catalog order.
-fn services_catalog_kinds() -> [ServicePresetKind] Never! {
+services_catalog_kinds: fn() -> [ServicePresetKind] Never! {
     [ServicePresetKind]{
         .Redis, .Postgres, .Mysql, .Mariadb, .Nginx, .Minio, .Adminer, .Blackfire, .Caddy,
         .Cassandra, .Clickhouse, .Cockroachdb, .Couchdb, .DynamodbLocal, .Elasticmq, .Elasticsearch,
@@ -374,36 +374,36 @@ fn services_catalog_kinds() -> [ServicePresetKind] Never! {
 }
 
 // The preset a name or alias selects.
-fn services_catalog(name: String) -> ServicePresetKind? Never! {
-    kinds :: services_catalog_kinds()
+services_catalog: fn(name: String) -> ServicePresetKind? Never! {
+    kinds: services_catalog_kinds()
     loop kind in kinds {
         if kind.names().contains(name) -> return Val(kind)
     }
     None
 }
 
-fn services_canonical_service_name(name: String) -> String Never! {
-    kind :: services_catalog(name) ?? return name
+services_canonical_service_name: fn(name: String) -> String Never! {
+    kind: services_catalog(name) ?? return name
     kind.canonical_name()
 }
 
 // The catalog package ref for `name`, folded into the project's realized
 // packages so a bare `redis: { enable: true }` has `redis-server` on PATH.
-fn services_catalog_pkg_ref(name: String) -> String? Never! {
-    kind :: services_catalog(name) ?? return None
+services_catalog_pkg_ref: fn(name: String) -> String? Never! {
+    kind: services_catalog(name) ?? return None
     Val(kind.pkg_ref())
 }
 
 // The executable a catalog package contributes to an environment image.
-fn services_catalog_executable(name: String) -> String? Never! {
-    kind :: services_catalog(name) ?? return None
+services_catalog_executable: fn(name: String) -> String? Never! {
+    kind: services_catalog(name) ?? return None
     kind.executable_name()
 }
 
 // Built-in presets for the typed contribution path, from the same catalog.
-fn services_catalog_presets() -> [ServicePreset] Never! {
+services_catalog_presets: fn() -> [ServicePreset] Never! {
     presets := [ServicePreset]{}
-    kinds :: services_catalog_kinds()
+    kinds: services_catalog_kinds()
     loop kind in kinds -> &presets.push(ServicePreset{name: kind.canonical_name(), package: kind.pkg_ref(), default_port: kind.port()})
     presets
 }
@@ -411,7 +411,7 @@ fn services_catalog_presets() -> [ServicePreset] Never! {
 // The executable vector for a service projected into an environment image.
 // Image state lives below /var/lib/jet/services, so a generated image
 // supervisor never keeps a build-machine path.
-fn services_image_run_command(plan: DevServicePlan) -> [String] ServicesError! {
+services_image_run_command: fn(plan: DevServicePlan) -> [String] ServicesError! {
     if !plan.enable -> return Err(ServicesError.new("service {plan.name} is disabled"))
     if plan.run == .Val(run) {
         if run.len() == 0 || services_any_contains_nul(run) {
@@ -419,14 +419,14 @@ fn services_image_run_command(plan: DevServicePlan) -> [String] ServicesError! {
         }
         return Ok(run)
     }
-    kind :: services_catalog(plan.name) ?? return Err(ServicesError.new("service {plan.name} has no run command and is not a built-in service"))
+    kind: services_catalog(plan.name) ?? return Err(ServicesError.new("service {plan.name} has no run command and is not a built-in service"))
     kind.require_runtime(plan.name)
-    port :: if plan.ports.len() > 0 -> plan.ports[0] else -> kind.port()
+    port: if plan.ports.len() > 0 -> plan.ports[0] else -> kind.port()
     if port < 1 || port > 65535 -> return Err(ServicesError.new("service {plan.name} has an invalid port"))
     Ok(kind.run(port, "/var/lib/jet/services/{services_canonical_service_name(plan.name)}"))
 }
 
-fn services_any_contains_nul(values: [String]) -> Bool Never! {
+services_any_contains_nul: fn(values: [String]) -> Bool Never! {
     loop value in values {
         loop byte in value.bytes() {
             if Int.from_u8(byte) == 0 -> return true
@@ -435,60 +435,60 @@ fn services_any_contains_nul(values: [String]) -> Bool Never! {
     false
 }
 
-fn services_tcp_readiness(port: Int) -> ReadyProbe Never! {
+services_tcp_readiness: fn(port: Int) -> ReadyProbe Never! {
     ReadyProbe.TCP{host: "127.0.0.1", port: if port >= 0 && port <= 65535 -> port else -> 0}
 }
 
 // Rust `i64::saturating_add` for the few derived preset ports.
-fn services_saturating_add(value: Int, delta: Int) -> Int Never! {
+services_saturating_add: fn(value: Int, delta: Int) -> Int Never! {
     if value > 9223372036854775807 - delta -> return 9223372036854775807
     value + delta
 }
 
-fn services_nginx_prefix(port: Int, data_dir: String) -> String Never! {
+services_nginx_prefix: fn(port: Int, data_dir: String) -> String Never! {
     files.join(data_dir, "nginx-{port}")
 }
 
-fn services_catalog_marker(data_dir: String) -> String Never! {
+services_catalog_marker: fn(data_dir: String) -> String Never! {
     files.join(data_dir, ".jet-preset-initialized")
 }
 
-fn services_prepare_config(path: String, contents: String, label: String) ServicesError! -[FS, Env]> {
+services_prepare_config: fn(path: String, contents: String, label: String) ServicesError! -[FS, Env]> {
     if services_write_atomic(path, contents.bytes()) == .Err(error) {
         return Err(ServicesError.new("couldn't write {label} preset config: {error}"))
     }
 }
 
-fn services_prepare_nginx(port: Int, data_dir: String) ServicesError! -[FS, Env]> {
-    prefix :: services_nginx_prefix(port, data_dir)
-    config_dir :: files.join(prefix, "conf")
+services_prepare_nginx: fn(port: Int, data_dir: String) ServicesError! -[FS, Env]> {
+    prefix: services_nginx_prefix(port, data_dir)
+    config_dir: files.join(prefix, "conf")
     if files.create_dir_all(config_dir) == .Err(error) {
         return Err(ServicesError.new("couldn't create Nginx preset config directory: {error}"))
     }
-    config :: "worker_processes 1;\npid {prefix}/nginx.pid;\nerror_log stderr notice;\nevents {{ worker_connections 64; }}\nhttp {{\n    access_log off;\n    server {{\n        listen 127.0.0.1:{port};\n        location / {{ return 200 \"jet nginx preset\"; }}\n    }}\n}}\n"
+    config: "worker_processes 1;\npid {prefix}/nginx.pid;\nerror_log stderr notice;\nevents {{ worker_connections 64; }}\nhttp {{\n    access_log off;\n    server {{\n        listen 127.0.0.1:{port};\n        location / {{ return 200 \"jet nginx preset\"; }}\n    }}\n}}\n"
     services_prepare_config(files.join(config_dir, "nginx.conf"), config, "Nginx")
 }
 
 // Initialize a database directory once; an existing initialized directory
 // only gains the marker.
-fn services_prepare_database(port: Int, data_dir: String, env: &ShellEnv, tool: String, args: [String]) ServicesError! -[FS, Env, Exec, Time.Wait]> {
-    marker :: services_catalog_marker(data_dir)
+services_prepare_database: fn(port: Int, data_dir: String, env: &ShellEnv, tool: String, args: [String]) ServicesError! -[FS, Env, Exec, Time.Wait]> {
+    marker: services_catalog_marker(data_dir)
     if files.is_file(marker) -> return
-    initialized :: files.is_file(files.join(data_dir, "PG_VERSION")) || files.is_dir(files.join(data_dir, "mysql"))
+    initialized: files.is_file(files.join(data_dir, "PG_VERSION")) || files.is_dir(files.join(data_dir, "mysql"))
     if !initialized -> services_run_catalog_tool(&env, tool, args, data_dir)
     if services_write_atomic(marker, "port={port}\n".bytes()) == .Err(error) {
         return Err(ServicesError.new("couldn't record service preset initialization: {error}"))
     }
 }
 
-fn services_run_catalog_tool(env: &ShellEnv, tool: String, args: [String], data_dir: String) ServicesError! -[FS, Env, Exec, Time.Wait]> {
+services_run_catalog_tool: fn(env: &ShellEnv, tool: String, args: [String], data_dir: String) ServicesError! -[FS, Env, Exec, Time.Wait]> {
     argv := [String]{tool}
     loop arg in args -> &argv.push(arg)
     spec := process.cmd(argv).cwd(data_dir).stdout(.Capture).stderr(.Capture)
     spec = &env.apply_to(spec) ?? return Err(ServicesError.new("couldn't initialize service preset with `{tool}`: {err.message()}"))
-    receipt :: spec.run() ?? return Err(ServicesError.new("couldn't initialize service preset with `{tool}`: {err}"))
+    receipt: spec.run() ?? return Err(ServicesError.new("couldn't initialize service preset with `{tool}`: {err}"))
     if receipt.success -> return
-    detail :: receipt.errors.trim()
+    detail: receipt.errors.trim()
     if detail == "" -> return Err(ServicesError.new("service preset initializer `{tool}` exited with {env_shell_exit_status_text(receipt)}"))
     Err(ServicesError.new("service preset initializer `{tool}` failed: {detail}"))
 }

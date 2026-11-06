@@ -1,13 +1,13 @@
 
 use {
-    crypto :: core.crypto
-    vault :: core.crypto.vault
+    crypto: core.crypto
+    vault: core.crypto.vault
 }
 
-fn inspect(secret: &ExpiringSecret<crypto.SigningKey>) -[]> Bool {
+inspect: fn(secret: &ExpiringSecret<crypto.SigningKey>) -[]> Bool {
     return secret.with((borrowed) -> borrowed.public_key()) == .Ok(_)
 }
-fn run() {
+run: fn() {
     ttl := Duration.seconds(1) ?? panic("duration")
     key := crypto.SigningKey.new_random() ?? panic("key")
     secret := vault.ExpiringSecret.new(^key, ttl, Clock.system())

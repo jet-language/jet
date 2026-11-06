@@ -1,63 +1,63 @@
 // Canonical typed evidence: the record shape and its outcome/expectation law.
 // Evidence never implies a stronger claim than the producer actually observed.
 
-enum EvidenceProducerKind { Test Prove Compile Runtime }
+EvidenceProducerKind: enum { Test Prove Compile Runtime }
 
-enum EvidenceKind { Unit Contract Runtime Property Doctest }
+EvidenceKind: enum { Unit Contract Runtime Property Doctest }
 
-enum EvidenceFacet { All Refinements Effects Taint Contracts Tests Budgets Replay Solver }
+EvidenceFacet: enum { All Refinements Effects Taint Contracts Tests Budgets Replay Solver }
 
-enum EvidenceOutcome { Proved Generated Passed Failed Checked Unchecked Unavailable Incomplete NotObserved Skipped Error }
+EvidenceOutcome: enum { Proved Generated Passed Failed Checked Unchecked Unavailable Incomplete NotObserved Skipped Error }
 
-enum EvidenceExpectation { Ordinary ExpectedFailure }
+EvidenceExpectation: enum { Ordinary ExpectedFailure }
 
-enum EvidenceCompleteness {
+EvidenceCompleteness: enum {
     Complete
     Incomplete(reason: String)
     Unavailable(reason: String)
 }
 
-struct EvidenceIdentity {
+EvidenceIdentity: struct {
     report_id: String
     claim_id: String
     evidence_id: String
 }
 
-struct EvidenceSource {
+EvidenceSource: struct {
     path: String
     line: U32
     column: U32
 }
 
-struct EvidenceBuild {
+EvidenceBuild: struct {
     toolchain: String
     target: String
     profile: String
 }
 
-struct EvidenceRevision {
+EvidenceRevision: struct {
     source: String
     build: String
     revision: String
 }
 
-struct EvidenceAttachment {
+EvidenceAttachment: struct {
     name: String
     value: String
 }
 
-struct EvidenceDiagnostic {
+EvidenceDiagnostic: struct {
     code: String
     message: String
     source: EvidenceSource?
 }
 
-struct EvidenceChainLink {
+EvidenceChainLink: struct {
     evidence_id: String
     relation: String
 }
 
-struct EvidenceRecord {
+EvidenceRecord: struct {
     identity: EvidenceIdentity
     kind: EvidenceKind
     facet: EvidenceFacet
@@ -78,12 +78,12 @@ struct EvidenceRecord {
 }
 
 #Error
-enum EvidenceExpectationError {
+EvidenceExpectationError: enum {
     InvalidOutcome(expectation: EvidenceExpectation, outcome: EvidenceOutcome)
 }
 
 // Rust `EvidenceOutcome::as_str`.
-fn evidence_outcome_name(value: EvidenceOutcome) -> String Never! {
+evidence_outcome_name: fn(value: EvidenceOutcome) -> String Never! {
     if value == {
         .Proved -> "proved"
         .Generated -> "generated"
@@ -100,7 +100,7 @@ fn evidence_outcome_name(value: EvidenceOutcome) -> String Never! {
 }
 
 // Rust `EvidenceOutcome::is_failure`.
-fn evidence_outcome_is_failure(value: EvidenceOutcome) -> Bool Never! {
+evidence_outcome_is_failure: fn(value: EvidenceOutcome) -> Bool Never! {
     if value == {
         .Failed | .Error -> true
         else -> false
@@ -108,7 +108,7 @@ fn evidence_outcome_is_failure(value: EvidenceOutcome) -> Bool Never! {
 }
 
 // Rust `EvidenceOutcome::is_incomplete`.
-fn evidence_outcome_is_incomplete(value: EvidenceOutcome) -> Bool Never! {
+evidence_outcome_is_incomplete: fn(value: EvidenceOutcome) -> Bool Never! {
     if value == {
         .Unavailable | .Incomplete | .NotObserved | .Skipped -> true
         else -> false
@@ -116,7 +116,7 @@ fn evidence_outcome_is_incomplete(value: EvidenceOutcome) -> Bool Never! {
 }
 
 // Rust `EvidenceExpectation::as_str`.
-fn evidence_expectation_name(value: EvidenceExpectation) -> String Never! {
+evidence_expectation_name: fn(value: EvidenceExpectation) -> String Never! {
     if value == {
         .Ordinary -> "ordinary"
         .ExpectedFailure -> "expected_failure"
@@ -125,30 +125,30 @@ fn evidence_expectation_name(value: EvidenceExpectation) -> String Never! {
 
 // Rust `EvidenceExpectation::validate`: an expected failure describes only a
 // failed or (unexpectedly) passed observation.
-fn evidence_expectation_validate(expectation: EvidenceExpectation, outcome: EvidenceOutcome) EvidenceExpectationError! {
+evidence_expectation_validate: fn(expectation: EvidenceExpectation, outcome: EvidenceOutcome) EvidenceExpectationError! {
     if expectation == EvidenceExpectation.ExpectedFailure && outcome != EvidenceOutcome.Failed && outcome != EvidenceOutcome.Passed {
         return Err(EvidenceExpectationError.InvalidOutcome{expectation: expectation, outcome: outcome})
     }
 }
 
 // Rust `Display for EvidenceExpectationError`.
-fn evidence_expectation_error_text(error: EvidenceExpectationError) -> String Never! {
+evidence_expectation_error_text: fn(error: EvidenceExpectationError) -> String Never! {
     if error == {
         .InvalidOutcome(expectation, outcome) -> "evidence expectation {evidence_expectation_name(expectation)} cannot describe outcome {evidence_outcome_name(outcome)}"
     }
 }
 
 // Rust `EvidenceRecord::validate`.
-fn evidence_record_validate(record: EvidenceRecord) EvidenceExpectationError! {
+evidence_record_validate: fn(record: EvidenceRecord) EvidenceExpectationError! {
     evidence_expectation_validate(record.expectation, record.outcome)
 }
 
 // Rust `EvidenceRecord::is_expected_failure`.
-fn evidence_record_is_expected_failure(record: EvidenceRecord) -> Bool Never! {
+evidence_record_is_expected_failure: fn(record: EvidenceRecord) -> Bool Never! {
     record.outcome == EvidenceOutcome.Failed && record.expectation == EvidenceExpectation.ExpectedFailure
 }
 
 // Rust `EvidenceRecord::is_unexpected_pass`.
-fn evidence_record_is_unexpected_pass(record: EvidenceRecord) -> Bool Never! {
+evidence_record_is_unexpected_pass: fn(record: EvidenceRecord) -> Bool Never! {
     record.outcome == EvidenceOutcome.Passed && record.expectation == EvidenceExpectation.ExpectedFailure
 }

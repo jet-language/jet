@@ -49,18 +49,18 @@ use jet_foundation.[Expr, Span, expr_span]
 // Integration replaces that body and migrates every walker caller to this body.
 // GATE #4483: USize.MAX is the compilation target's unsigned pointer maximum.
 // Foundation's Span carrier must retain every offset in that range.
-fn structural_span_add(offset: Int, extra: Int) -> Int {
-    maximum :: Int{USize.MAX}
+structural_span_add: fn(offset: Int, extra: Int) -> Int {
+    maximum: Int{USize.MAX}
     if offset > maximum - extra -> maximum else -> offset + extra
 }
-fn structural_expr_span(expr: Expr) -> Span {
+structural_expr_span: fn(expr: Expr) -> Span {
     if expr == {
         .Call(call, _) -> {
-            end :: if call.args.is_empty() -> structural_span_add(call.name_span.end, 2) else -> structural_span_add(structural_expr_span(call.args[call.args.len() - 1].expr).end, 1)
+            end: if call.args.is_empty() -> structural_span_add(call.name_span.end, 2) else -> structural_span_add(structural_expr_span(call.args[call.args.len() - 1].expr).end, 1)
             Span{start: call.name_span.start, end: end}
         }
         .MethodCall(receiver, _, method_span, _, _, args, _) -> {
-            end :: if args.is_empty() -> structural_span_add(method_span.end, 2) else -> structural_span_add(structural_expr_span(args[args.len() - 1].expr).end, 1)
+            end: if args.is_empty() -> structural_span_add(method_span.end, 2) else -> structural_span_add(structural_expr_span(args[args.len() - 1].expr).end, 1)
             Span{start: structural_expr_span(receiver).start, end: end}
         }
         else -> expr_span(expr)

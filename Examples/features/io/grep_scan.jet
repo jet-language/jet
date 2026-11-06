@@ -1,31 +1,31 @@
 // D-FSOPS1: parallel directory queue + regex file scan. Both walks yield the
 // Core `WalkEntry` fields `path`, `relative`, `is_dir` and `depth`.
-package {
+package: {
     name: "grep_scan"
     // Walking declares FS; reads need FS.Read and fixture creation FS.Write.
     authority: { allow: [FS, FS.Read, FS.Write, IO, Mem.Alloc] }
 }
 
 use {
-    fs :: core.files
-    testing :: core.testing
+    fs: core.files
+    testing: core.testing
 }
 
-fn run() {
-    root :: testing.temp_dir("grep-scan")
-    src :: Path.from(root).join("src")
+run: fn() {
+    root: testing.temp_dir("grep-scan")
+    src: Path.from(root).join("src")
     fs.create_dir_all(src.to_string())
     fs.write(Path.from(root).join("notes.txt"), "needle in notes\n")
     fs.write(src.join("alpha.txt"), "needle in alpha\n")
     fs.write(src.join("beta.txt"), "no match\n")
-    ignored :: Path.from(root).join("ignored")
+    ignored: Path.from(root).join("ignored")
     fs.create_dir_all(ignored.to_string())
     fs.write(ignored.join("hidden.txt"), "needle must stay ignored\n")
     fs.write(Path.from(root).join(".gitignore"), "ignored/\n")
 
     // Both walks opt into the same ignore file; omission means no ignore rules.
-    parallel :: fs.walk_parallel(root, ignore: ".gitignore")
-    sequential :: fs.walk(root, ignore: ".gitignore")
+    parallel: fs.walk_parallel(root, ignore: ".gitignore")
+    sequential: fs.walk(root, ignore: ".gitignore")
     parallel_set := [String]{}
     sequential_set := [String]{}
     loop entry in parallel -> &parallel_set.push("{entry.relative}:{entry.is_dir}:{entry.depth}")
@@ -34,10 +34,10 @@ fn run() {
     &sequential_set.sort()
 
     matches := [String]{}
-    needle :: Regex{"needle"}
+    needle: Regex{"needle"}
     loop entry in parallel {
         if !entry.is_dir {
-            text :: fs.read(entry.path)
+            text: fs.read(entry.path)
             if needle.is_match(text) -> &matches.push("{entry.relative}: needle")
         }
     }

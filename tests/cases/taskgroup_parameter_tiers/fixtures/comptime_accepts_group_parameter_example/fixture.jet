@@ -10,34 +10,34 @@
 //
 // A spawn through a parameter group owns its captures. Both spawns below copy
 // plain Ints in, so nothing borrowed can outlive the helper's frame.
-package {
+package: {
     name: "task_group_parameter"
     authority: { allow: [IO, Time.Wait] }
 }
 
-struct Counter {
+Counter: struct {
     step: Int
 
-    fn print_stepped(self, group: Group, value: Int) {
-        step :: self.step
-        handle :: task value + step
+    print_stepped: fn(self, group: Group, value: Int) {
+        step: self.step
+        handle: task value + step
         print(^handle.join() ?? 0)
     }
 }
 
-fn print_next(group: Group, value: Int) {
-    handle :: task value + 1
+print_next: fn(group: Group, value: Int) {
+    handle: task value + 1
     print(^handle.join() ?? panic("task failed"))
 }
 
-fn run() {
+run: fn() {
     task.group group {
         print_next(group, 41)
-        counter :: Counter{step: 2}
+        counter: Counter{step: 2}
         counter.print_stepped(group, 40)
     }
 }
 
-FOLDED :: comptime { 40 + 2 }
+FOLDED: comptime { 40 + 2 }
 
-fn show() { print(FOLDED) }
+show: fn() { print(FOLDED) }

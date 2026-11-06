@@ -18,23 +18,23 @@ use {
         ENV_EXPORT_VERB, ENV_HOOK_ACTIVE_DIR_VAR, ENV_HOOK_ACTIVE_HASH_VAR, ENV_HOOK_OLD_PATH_VAR, JETPACK_ENV_MARKER, JETPACK_REF_VAR,
     ]
     jet_env_model.[env_hook_has_parent_component, env_hook_path_within, envmodel_sorted_keys, envmodel_valid_env_name]
-    files :: core.files
+    files: core.files
 }
 
-ENV_HOOK_GIT_CONFIG_COUNT :: "GIT_CONFIG_COUNT"
-ENV_HOOK_GIT_CONFIG_KEY_0 :: "GIT_CONFIG_KEY_0"
-ENV_HOOK_GIT_CONFIG_VALUE_0 :: "GIT_CONFIG_VALUE_0"
+ENV_HOOK_GIT_CONFIG_COUNT: "GIT_CONFIG_COUNT"
+ENV_HOOK_GIT_CONFIG_KEY_0: "GIT_CONFIG_KEY_0"
+ENV_HOOK_GIT_CONFIG_VALUE_0: "GIT_CONFIG_VALUE_0"
 
 // Resolve the ratified `git_hooks_path` fact to the directory native Git
 // uses. The model rejects lexical escapes; this runtime check also rejects a
 // symlinked directory that leaves the project and requires the target to
 // exist before entry can claim the hook path is active.
-fn env_hook_git_hooks_environment(root: String, relative: String) -[FS, Env]> [String: String] EnvironmentError! {
+env_hook_git_hooks_environment: fn(root: String, relative: String) -[FS, Env]> [String: String] EnvironmentError! {
     if relative.trim() == "" || files.is_absolute(relative) || env_hook_has_parent_component(relative) {
         return Err(EnvironmentError.Activation("git hook path `{relative}` must be a non-empty project-relative path without `..`"))
     }
-    project :: files.canonicalize(root) ?? return Err(EnvironmentError.Activation("could not resolve project root for git hooks: {err}"))
-    hooks :: files.canonicalize(files.join(project, relative)) ?? return Err(EnvironmentError.Activation("git hook path `{relative}` does not name an existing directory: {err}"))
+    project: files.canonicalize(root) ?? return Err(EnvironmentError.Activation("could not resolve project root for git hooks: {err}"))
+    hooks: files.canonicalize(files.join(project, relative)) ?? return Err(EnvironmentError.Activation("git hook path `{relative}` does not name an existing directory: {err}"))
     if !files.is_dir(hooks) {
         return Err(EnvironmentError.Activation("git hook path `{relative}` does not name a directory"))
     }
@@ -52,9 +52,9 @@ fn env_hook_git_hooks_environment(root: String, relative: String) -[FS, Env]> [S
 // double-registers. It also installs the `jet ?` / Alt-? help-app prefill
 // widgets so a normal shell gets the same editable-buffer behavior as a
 // branded jetpack subshell.
-fn env_hook_render_hook(kind: ShellKind) -> String Never! {
-    export :: ENV_EXPORT_VERB
-    lines :: if kind == {
+env_hook_render_hook: fn(kind: ShellKind) -> String Never! {
+    export: ENV_EXPORT_VERB
+    lines: if kind == {
         .Bash -> [String]{
             "__jet_env_hook() {{",
             "  local __jet_out",
@@ -86,7 +86,7 @@ fn env_hook_render_hook(kind: ShellKind) -> String Never! {
 }
 
 // The activation facts a load emits into the shell.
-struct EnvHookActivation {
+EnvHookActivation: struct {
     // The `PATH` the shell had before this env loaded, saved so unload can
     // restore it verbatim.
     base_path: String
@@ -103,11 +103,11 @@ struct EnvHookActivation {
     // The statements that load this env into the current shell. Variable
     // names are checked here, at the render boundary, so no name can carry
     // shell syntax.
-    fn render_activate(self, kind: ShellKind) -> String EnvironmentError! {
+    render_activate: fn(self, kind: ShellKind) -> String EnvironmentError! {
         self.validate()
-        vars :: env_hook_render_vars(kind, self.vars)
-        unset :: env_hook_render_unset(kind, self.unset)
-        lines :: if kind == {
+        vars: env_hook_render_vars(kind, self.vars)
+        unset: env_hook_render_unset(kind, self.unset)
+        lines: if kind == {
             .Bash | .Zsh -> [String]{
                 "export {ENV_HOOK_OLD_PATH_VAR}={env_hook_sh_quote(self.base_path)}",
                 "export PATH={env_hook_sh_quote(self.composed_path)}",
@@ -128,7 +128,7 @@ struct EnvHookActivation {
         Ok("{lines.join("\n")}\n{vars}{unset}")
     }
 
-    fn validate(self) EnvironmentError! {
+    validate: fn(self) EnvironmentError! {
         loop name in envmodel_sorted_keys(self.vars) {
             if !envmodel_valid_env_name(name) -> return Err(env_hook_invalid_name(name))
         }
@@ -138,14 +138,14 @@ struct EnvHookActivation {
     }
 }
 
-fn env_hook_invalid_name(name: String) -> EnvironmentError Never! {
+env_hook_invalid_name: fn(name: String) -> EnvironmentError Never! {
     EnvironmentError.Activation("activation variable '{name}' is not a valid environment name")
 }
 
 // The statements that unload the active env: restore `base_path` (the
 // `PATH` from before the env loaded) and clear every marker.
-fn env_hook_render_unload(kind: ShellKind, base_path: String) -> String Never! {
-    names :: [String]{
+env_hook_render_unload: fn(kind: ShellKind, base_path: String) -> String Never! {
+    names: [String]{
         JETPACK_ENV_MARKER,
         JETPACK_REF_VAR,
         ENV_HOOK_ACTIVE_DIR_VAR,
@@ -155,17 +155,17 @@ fn env_hook_render_unload(kind: ShellKind, base_path: String) -> String Never! {
         ENV_HOOK_GIT_CONFIG_VALUE_0,
         ENV_HOOK_OLD_PATH_VAR
     }
-    path_line :: if kind == {
+    path_line: if kind == {
         .Bash | .Zsh -> "export PATH={env_hook_sh_quote(base_path)}\n"
         .Fish -> "set -gx PATH (string split : {env_hook_fish_quote(base_path)})\n"
     }
     "{path_line}{env_hook_render_unset(kind, names)}"
 }
 
-fn env_hook_render_vars(kind: ShellKind, vars: [String: String]) -> String Never! {
+env_hook_render_vars: fn(kind: ShellKind, vars: [String: String]) -> String Never! {
     out := [String]{}
     loop name in envmodel_sorted_keys(vars) {
-        line :: if kind == {
+        line: if kind == {
             .Bash | .Zsh -> "export {name}={env_hook_sh_quote(vars[name])}\n"
             .Fish -> "set -gx {name} {env_hook_fish_quote(vars[name])}\n"
         }
@@ -174,10 +174,10 @@ fn env_hook_render_vars(kind: ShellKind, vars: [String: String]) -> String Never
     out.join("")
 }
 
-fn env_hook_render_unset(kind: ShellKind, names: [String]) -> String Never! {
+env_hook_render_unset: fn(kind: ShellKind, names: [String]) -> String Never! {
     out := [String]{}
     loop name in names {
-        line :: if kind == {
+        line: if kind == {
             .Bash | .Zsh -> "unset {name}\n"
             .Fish -> "set -e {name}\n"
         }
@@ -188,11 +188,11 @@ fn env_hook_render_unset(kind: ShellKind, names: [String]) -> String Never! {
 
 // POSIX single quote (bash/zsh): wrap in quotes, closing, escaping, and
 // reopening for any embedded single quote.
-fn env_hook_sh_quote(text: String) -> String Never! {
+env_hook_sh_quote: fn(text: String) -> String Never! {
     "'{text.replace("'", "'\\''")}'"
 }
 
 // fish single quote: inside quotes fish treats only `\` and `'` specially.
-fn env_hook_fish_quote(text: String) -> String Never! {
+env_hook_fish_quote: fn(text: String) -> String Never! {
     "'{text.replace("\\", "\\\\").replace("'", "\\'")}'"
 }

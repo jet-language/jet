@@ -1,13 +1,13 @@
 // top_n(k) equals the first k entries of a full sort by descending value and
 // ascending key, for every k from -1 to past the length, with many ties.
-fn matches(counts: [String:Int]) -> Int {
+matches: fn(counts: [String:Int]) -> Int {
     ranked := counts.to_list()
     &ranked.sort_by((left, right) -> (right.value <=> left.value).then(left.key <=> right.key))
     wrong := 0
     k := -1
     loop k <= counts.len() + 1 {
-        top :: counts.top_n(k)
-        want :: if {
+        top: counts.top_n(k)
+        want: if {
             k < 0 -> 0
             k > ranked.len() -> ranked.len()
             else -> k
@@ -23,7 +23,7 @@ fn matches(counts: [String:Int]) -> Int {
     wrong
 }
 
-fn run() {
+run: fn() {
     counts := [String:Int]{}
     i := 0
     loop i < 97 {
@@ -37,7 +37,7 @@ fn run() {
         names[(i * 17) % 40] = "n{(i * 7) % 5}"
         i += 1
     }
-    top :: names.top_n(6)
+    top: names.top_n(6)
     loop item in top -> print("{item.key}:{item.value}")
     print(names.top_n(40).len())
     empty := [String:Int]{}

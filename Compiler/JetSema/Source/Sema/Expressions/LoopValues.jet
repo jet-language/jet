@@ -13,39 +13,39 @@ use jet_foundation.[
     type_name,
 ]
 
-fn sema_loop_value_check_result_exit(context: &SemaCheckContext, frame_index: Int, value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
-    frame :: if frame_index >= 0 && frame_index < context.loop_value_frames.len() -> Val(context.loop_value_frames[frame_index]) else -> None
-    target :: frame ?? return None
+sema_loop_value_check_result_exit: fn(context: &SemaCheckContext, frame_index: Int, value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
+    frame: if frame_index >= 0 && frame_index < context.loop_value_frames.len() -> Val(context.loop_value_frames[frame_index]) else -> None
+    target: frame ?? return None
     if target.kind != SemaLoopValueKind.Result -> return None
     if target.ty == None {
         sema_loop_value_set_result_type(&context, frame_index, value.ty)
         return Val(value)
     }
-    expected :: target.ty ?? value.ty
+    expected: target.ty ?? value.ty
     if type_identity_equal(expected, value.ty) -> return Val(value)
-    common :: sema_expr_numeric_join(expected, value.ty) ?? {
+    common: sema_expr_numeric_join(expected, value.ty) ?? {
         &diagnostics.push(sema_error("E0076", value.span, "this loop breaks with `{type_name(value.ty)}`, but another exit uses `{type_name(expected)}`", "an ordinary loop used as a value has one result type", "make every break payload use the same type"))
         return None
     }
     sema_loop_value_set_result_type(&context, frame_index, common)
     if type_identity_equal(common, value.ty) -> return Val(value)
     if sema_expr_numeric_value_widening(value, common) == (Val(true)) {
-        line :: sema_source_line_at(environment.source_segments, value.span) ?? 0
+        line: sema_source_line_at(environment.source_segments, value.span) ?? 0
         return sema_expr_numeric_literal_conversion(value, common, value.span, line, &diagnostics)
     }
     Val(value)
 }
 
-fn sema_loop_value_check_collecting_item(value: Expr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_loop_value_check_collecting_item: fn(value: Expr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if context.collect_item_types.len() == 0 -> return None
     expected := sema_loop_value_collecting_type(context)
     checked_expected := expected
     if expected == .Val(expected_type) && sema_expr_is_numeric(expected_type) -> checked_expected = None
-    outer_item_if :: context.collect_item_if
+    outer_item_if: context.collect_item_if
     context.collect_item_if = if value == .If(_, _, _, _, _, _, _) -> Val(span) else -> None
-    checked_value :: sema_check_expression(value, checked_expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    checked_value: sema_check_expression(value, checked_expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     context.collect_item_if = outer_item_if
-    checked :: checked_value ?? return None
+    checked: checked_value ?? return None
     if checked.ty == (Type.Named{name: "Unit"}) {
         &diagnostics.push(sema_error("E0073", span, "this collecting loop path produces no item", "every accepted iteration must contribute one non-unit value unless `next` omits it", "return a value on this path, or remove `->`"))
         return None
@@ -54,46 +54,46 @@ fn sema_loop_value_check_collecting_item(value: Expr, span: Span, environment: S
         sema_loop_value_set_collecting_type(&context, checked.ty)
         return Val(checked)
     }
-    required :: expected ?? checked.ty
+    required: expected ?? checked.ty
     if type_identity_equal(required, checked.ty) -> return Val(checked)
-    common :: sema_expr_numeric_join(required, checked.ty) ?? {
+    common: sema_expr_numeric_join(required, checked.ty) ?? {
         &diagnostics.push(sema_error("E0074", span, "this collecting loop produces incompatible item types", "one collecting loop builds one List, but this item is `{type_name(checked.ty)}` instead of `{type_name(required)}`", "convert every item to one type, or split the loops"))
         return None
     }
     sema_loop_value_set_collecting_type(&context, common)
     if type_identity_equal(common, checked.ty) -> return Val(checked)
     if sema_expr_numeric_value_widening(checked, common) == (Val(true)) {
-        line :: sema_source_line_at(environment.source_segments, checked.span) ?? 0
+        line: sema_source_line_at(environment.source_segments, checked.span) ?? 0
         return sema_expr_numeric_literal_conversion(checked, common, checked.span, line, &diagnostics)
     }
     Val(checked)
 }
 
-fn sema_loop_value_collect_local_expr(local: TLocal, item_type: Type, span: Span) -> TExpr Never! {
+sema_loop_value_collect_local_expr: fn(local: TLocal, item_type: Type, span: Span) -> TExpr Never! {
     sema_tree_node(Type.List{element: item_type}, TExprKind.Local{local: local}, span)
 }
 
-fn sema_loop_value_collect_push(local: TLocal, item_type: Type, value: TExpr, span: Span) -> TStmt Never! {
-    receiver :: sema_loop_value_collect_local_expr(local, item_type, span)
+sema_loop_value_collect_push: fn(local: TLocal, item_type: Type, value: TExpr, span: Span) -> TStmt Never! {
+    receiver: sema_loop_value_collect_local_expr(local, item_type, span)
     call := sema_tree_node(Type.Named{name: "Unit"}, TExprKind.BuiltinMethod{receiver: receiver, operation: TBuiltinOp.Push, args: [TExpr]{value}}, span)
     TStmt.ExprStmt{value: call, span: span}
 }
 
-fn sema_loop_value_collect_widen(value: TExpr, item_type: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_loop_value_collect_widen: fn(value: TExpr, item_type: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
     if type_identity_equal(value.ty, item_type) -> return Val(value)
     if sema_expr_numeric_value_widening(value, item_type) != (Val(true)) -> return None
-    line :: sema_source_line_at(environment.source_segments, value.span) ?? 0
+    line: sema_source_line_at(environment.source_segments, value.span) ?? 0
     sema_expr_numeric_literal_conversion(value, item_type, value.span, line, &diagnostics)
 }
 
-fn sema_loop_value_rewrite_collecting_statements(statements: &[TStmt], local: TLocal, item_type: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool Never! {
+sema_loop_value_rewrite_collecting_statements: fn(statements: &[TStmt], local: TLocal, item_type: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool Never! {
     index := 0
     loop index < statements.len() {
         statement := statements[index]
         if statement == {
             .ExprStmt(value, span) -> {
                 if span.start == span.end {
-                    widened :: sema_loop_value_collect_widen(value, item_type, environment, program, &diagnostics) ?? return false
+                    widened: sema_loop_value_collect_widen(value, item_type, environment, program, &diagnostics) ?? return false
                     statements[index] = sema_loop_value_collect_push(local, item_type, widened, span)
                 }
             }
@@ -251,7 +251,7 @@ fn sema_loop_value_rewrite_collecting_statements(statements: &[TStmt], local: TL
     true
 }
 
-fn sema_loop_value_lower_collecting_body(body: [TStmt], item_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> [TStmt]? {
+sema_loop_value_lower_collecting_body: fn(body: [TStmt], item_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> [TStmt]? {
     collector_type := Type.List{element: item_type}
     local := checked_generated_local("__jet_collect_{span.start}", span, collector_type)
     local.mutable = true
@@ -263,12 +263,12 @@ fn sema_loop_value_lower_collecting_body(body: [TStmt], item_type: Type, span: S
     &lowered.push(TStmt.ExprStmt{value: result, span: span})
     Val(lowered)
 }
-fn sema_loop_value_result_exit_matches(label: String?, root_label: String?, allow_unlabeled: Bool) -> Bool Never! {
+sema_loop_value_result_exit_matches: fn(label: String?, root_label: String?, allow_unlabeled: Bool) -> Bool Never! {
     if label == .Val(name) -> return root_label == (Val(name))
     allow_unlabeled && root_label == None
 }
 
-fn sema_loop_value_widen_result_breaks_in(statements: &[TStmt], root_label: String?, result_type: Type, allow_unlabeled: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
+sema_loop_value_widen_result_breaks_in: fn(statements: &[TStmt], root_label: String?, result_type: Type, allow_unlabeled: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
     index := 0
     loop index < statements.len() {
         statement := statements[index]
@@ -279,8 +279,8 @@ fn sema_loop_value_widen_result_breaks_in(statements: &[TStmt], root_label: Stri
                         &diagnostics.push(sema_error("E0076", value.span, "this loop breaks with `{type_name(value.ty)}`, but another exit uses `{type_name(result_type)}`", "an ordinary loop used as a value has one result type", "make every break payload use the same type"))
                         return false
                     }
-                    line :: sema_source_line_at(environment.source_segments, value.span) ?? 0
-                    widened :: sema_expr_numeric_literal_conversion(value, result_type, value.span, line, &diagnostics) ?? return false
+                    line: sema_source_line_at(environment.source_segments, value.span) ?? 0
+                    widened: sema_expr_numeric_literal_conversion(value, result_type, value.span, line, &diagnostics) ?? return false
                     statements[index] = TStmt.BreakValue{label: label, value: widened, span: span}
                 }
             }
@@ -438,6 +438,6 @@ fn sema_loop_value_widen_result_breaks_in(statements: &[TStmt], root_label: Stri
     true
 }
 
-fn sema_loop_value_widen_result_breaks(body: &[TStmt], root_label: String?, result_type: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
+sema_loop_value_widen_result_breaks: fn(body: &[TStmt], root_label: String?, result_type: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
     sema_loop_value_widen_result_breaks_in(&body, root_label, result_type, true, environment, program, &diagnostics)
 }

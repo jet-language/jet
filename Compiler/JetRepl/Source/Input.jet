@@ -8,7 +8,7 @@ use {
     jet_parser.[parse_generated_source, parse_source]
 }
 
-enum ReplInput {
+ReplInput: enum {
     Meta(command: String, argument: String?)
     // `check_source` is the user's statement text; `echo` marks the
     // expression form, whose value the session binds and shows.
@@ -18,7 +18,7 @@ enum ReplInput {
     Empty
 }
 
-enum ReplInputParse {
+ReplInputParse: enum {
     Accepted(input: ReplInput)
     // Spans are anchored to the user's input text.
     Rejected(diagnostics: [Diagnostic])
@@ -26,14 +26,14 @@ enum ReplInputParse {
 
 // `reanchor_repl_diagnostic`: shift a span `offset` bytes back to the user's
 // input; a span inside the generated wrapper clamps to 0.
-fn repl_reanchor_span(span: Span, offset: Int) -> Span Never! {
-    start :: if span.start - offset < 0 -> 0 else -> span.start - offset
-    end :: if span.end - offset < 0 -> start else -> span.end - offset
+repl_reanchor_span: fn(span: Span, offset: Int) -> Span Never! {
+    start: if span.start - offset < 0 -> 0 else -> span.start - offset
+    end: if span.end - offset < 0 -> start else -> span.end - offset
     Span{start: start, end: if end < start -> start else -> end}
 }
 
 // Every span a report renders (primary, labels, edit), shifted to the input.
-fn repl_reanchor(diagnostic: ^Diagnostic, offset: Int) -> Diagnostic Never! {
+repl_reanchor: fn(diagnostic: ^Diagnostic, offset: Int) -> Diagnostic Never! {
     updated := diagnostic
     if updated.span == .Val(span) -> updated.span = Val(repl_reanchor_span(span, offset))
     labels := [DiagnosticLabel]{}
@@ -43,22 +43,22 @@ fn repl_reanchor(diagnostic: ^Diagnostic, offset: Int) -> Diagnostic Never! {
     updated
 }
 
-fn repl_reanchor_all(diagnostics: [Diagnostic], offset: Int) -> [Diagnostic] Never! {
+repl_reanchor_all: fn(diagnostics: [Diagnostic], offset: Int) -> [Diagnostic] Never! {
     shifted := [Diagnostic]{}
     loop diagnostic in diagnostics -> &shifted.push(repl_reanchor(diagnostic.copy(), offset))
     shifted
 }
 
-fn repl_rejected(diagnostics: [Diagnostic], offset: Int) -> ReplInputParse Never! {
+repl_rejected: fn(diagnostics: [Diagnostic], offset: Int) -> ReplInputParse Never! {
     ReplInputParse.Rejected{diagnostics: repl_reanchor_all(diagnostics, offset)}
 }
 
-fn repl_skip_leading_comments(source: String) -> String Never! {
+repl_skip_leading_comments: fn(source: String) -> String Never! {
     text := source
     loop {
         text = text.trim_start()
         if !text.starts_with("//") && !text.starts_with("/*") -> return text
-        bytes :: text.bytes()
+        bytes: text.bytes()
         if text.starts_with("//") {
             newline := Int?{None}
             loop index in 0..<text.len() {
@@ -86,7 +86,7 @@ fn repl_skip_leading_comments(source: String) -> String Never! {
     }
 }
 
-fn repl_looks_like_item(source: String) -> Bool Never! {
+repl_looks_like_item: fn(source: String) -> Bool Never! {
     text := repl_skip_leading_comments(source)
     if text.starts_with("pub") -> text = text.slice(3..<text.len()).trim_start()
     if text.starts_with("pure") -> text = text.slice(4..<text.len()).trim_start()
@@ -94,23 +94,23 @@ fn repl_looks_like_item(source: String) -> Bool Never! {
 }
 
 // The kind words of a colon declaration head.
-REPL_COLON_ITEM_KINDS :: [String]{"fn", "struct", "enum", "trait", "module", "tag", "effect"}
+REPL_COLON_ITEM_KINDS: [String]{"fn", "struct", "enum", "trait", "module", "tag", "effect"}
 
 // `name: fn`, `Name: struct`, `name: module` … : a colon declaration head.
-fn repl_colon_item_head(text: String) -> Bool Never! {
-    colon :: repl_top_level_colon(text) ?? return false
-    head :: text.slice(0..<colon).trim()
+repl_colon_item_head: fn(text: String) -> Bool Never! {
+    colon: repl_top_level_colon(text) ?? return false
+    head: text.slice(0..<colon).trim()
     if head.len() == 0 -> return false
     loop byte in head.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if !((code >= 97 && code <= 122) || (code >= 65 && code <= 90) || (code >= 48 && code <= 57) || code == 95 || code == 46) -> return false
     }
-    rest :: text.slice(colon + 1..<text.len()).trim_start()
+    rest: text.slice(colon + 1..<text.len()).trim_start()
     loop keyword in REPL_COLON_ITEM_KINDS {
         if !rest.starts_with(keyword) -> next
-        after :: rest.slice(keyword.len()..<rest.len())
+        after: rest.slice(keyword.len()..<rest.len())
         if after.len() == 0 -> return true
-        code :: Int.from_u8(after.bytes()[0])
+        code: Int.from_u8(after.bytes()[0])
         if !((code >= 97 && code <= 122) || (code >= 65 && code <= 90) || (code >= 48 && code <= 57) || code == 95) -> return true
     }
     false
@@ -118,13 +118,13 @@ fn repl_colon_item_head(text: String) -> Bool Never! {
 
 // The byte of the first `:` outside strings and groups that is not `:=`,
 // or None.
-fn repl_top_level_colon(text: String) -> Int? Never! {
-    bytes :: text.bytes()
+repl_top_level_colon: fn(text: String) -> Int? Never! {
+    bytes: text.bytes()
     depth := 0
     quoted := false
     escaped := false
     loop index in 0..<bytes.len() {
-        code :: Int.from_u8(bytes[index])
+        code: Int.from_u8(bytes[index])
         if quoted {
             if escaped {
                 escaped = false
@@ -146,29 +146,29 @@ fn repl_top_level_colon(text: String) -> Int? Never! {
     None
 }
 
-fn repl_looks_like_import(source: String) -> Bool Never! {
+repl_looks_like_import: fn(source: String) -> Bool Never! {
     text := source.trim_start()
     if text.starts_with("pub") -> text = text.slice(3..<text.len()).trim_start()
     text.starts_with("use ") || text == "use"
 }
 
-fn repl_starts_with_stmt_keyword(text: String) -> Bool Never! {
+repl_starts_with_stmt_keyword: fn(text: String) -> Bool Never! {
     repl_top_level_colon(text) != None || text.contains(":=") || text.starts_with("return ") || text.starts_with("return") || text.starts_with("if ") || text.starts_with("loop ") || text.starts_with("break") || text.starts_with("continue") || text.starts_with("print(") || text.starts_with("eprint(")
 }
 
-fn repl_first_function_body(items: [Item]) -> [Stmt]? Never! {
+repl_first_function_body: fn(items: [Item]) -> [Stmt]? Never! {
     if items.len() == 0 -> return None
     if items[0] == .Func(function) -> return Val(function.body)
     None
 }
 
-fn repl_classify(source: String, step: Int) -> ReplInputParse {
-    text :: source.trim()
+repl_classify: fn(source: String, step: Int) -> ReplInputParse {
+    text: source.trim()
     if text == "" -> return ReplInputParse.Accepted{input: ReplInput.Empty}
     if text.starts_with(":") {
-        rest :: text.slice(1..<text.len())
+        rest: text.slice(1..<text.len())
         split := rest.len()
-        bytes :: rest.bytes()
+        bytes: rest.bytes()
         loop index in 0..<bytes.len() {
             if bytes[index] == 32 {
                 split = index
@@ -177,40 +177,40 @@ fn repl_classify(source: String, step: Int) -> ReplInputParse {
         }
         argument := String?{None}
         if split < rest.len() {
-            tail :: rest.slice(split + 1..<rest.len()).trim()
+            tail: rest.slice(split + 1..<rest.len()).trim()
             if tail != "" -> argument = Val(tail)
         }
         return ReplInputParse.Accepted{input: ReplInput.Meta{command: rest.slice(0..<split), argument: argument}}
     }
     if text.starts_with("?") {
-        name :: text.slice(1..<text.len()).trim()
+        name: text.slice(1..<text.len()).trim()
         return ReplInputParse.Accepted{input: ReplInput.Meta{command: "?", argument: if name == "" -> None else -> Val(name)}}
     }
-    header :: "// repl:{step}\n"
+    header: "// repl:{step}\n"
     if repl_looks_like_import(text) {
-        normalized :: text.trim_end()
-        full :: "{header}{normalized}\n"
-        parsed :: parse_source(full.bytes())
+        normalized: text.trim_end()
+        full: "{header}{normalized}\n"
+        parsed: parse_source(full.bytes())
         if parsed.diagnostics.len() > 0 -> return repl_rejected(parsed.diagnostics, header.len())
         if parsed.program.items.len() == 0 && parsed.program.imports.len() > 0 {
             return ReplInputParse.Accepted{input: ReplInput.Import{source: "{normalized}\n"}}
         }
     }
-    suppress :: text.ends_with(";") && !repl_looks_like_item(text) && !text.ends_with("}};")
+    suppress: text.ends_with(";") && !repl_looks_like_item(text) && !text.ends_with("}};")
     if repl_looks_like_item(text) {
-        item_source :: "{text}\n"
-        parsed :: parse_source("{header}{item_source}".bytes())
+        item_source: "{text}\n"
+        parsed: parse_source("{header}{item_source}".bytes())
         if parsed.diagnostics.len() > 0 -> return repl_rejected(parsed.diagnostics, header.len())
         return ReplInputParse.Accepted{input: ReplInput.Item{source: item_source}}
     }
-    user_lexed :: lex(text.bytes())
+    user_lexed: lex(text.bytes())
     if user_lexed.diagnostics.len() > 0 -> return repl_rejected(user_lexed.diagnostics, 0)
-    plain_input :: text.trim_end()
-    wrapper :: "{header}fn __repl__() {{\n"
-    plain_source :: "{wrapper}{plain_input}\n}}\n"
+    plain_input: text.trim_end()
+    wrapper: "{header}__repl__: fn() {{\n"
+    plain_source: "{wrapper}{plain_input}\n}}\n"
     plain_attempt := ParseResult?{None}
     if repl_starts_with_stmt_keyword(text) || suppress {
-        parsed :: parse_generated_source(plain_source.bytes())
+        parsed: parse_generated_source(plain_source.bytes())
         if parsed.diagnostics.len() == 0 && repl_first_function_body(parsed.program.items) == .Val(body) {
             if body.len() > 0 {
                 return ReplInputParse.Accepted{input: ReplInput.Stmts{body: body, suppress_echo: suppress, echo: false, check_source: plain_input}}
@@ -218,15 +218,15 @@ fn repl_classify(source: String, step: Int) -> ReplInputParse {
         }
         plain_attempt = Val(parsed)
     }
-    echo_stmt :: "__repl_echo__ :: {text}"
-    echo_source :: "{wrapper}{echo_stmt}\n}}\n"
-    echo :: parse_generated_source(echo_source.bytes())
+    echo_stmt: "__repl_echo__: {text}"
+    echo_source: "{wrapper}{echo_stmt}\n}}\n"
+    echo: parse_generated_source(echo_source.bytes())
     if echo.diagnostics.len() == 0 && repl_first_function_body(echo.program.items) == .Val(body) {
         if body.len() > 0 {
             return ReplInputParse.Accepted{input: ReplInput.Stmts{body: body, suppress_echo: suppress, echo: true, check_source: plain_input}}
         }
     }
-    plain :: plain_attempt ?? parse_generated_source(plain_source.bytes())
+    plain: plain_attempt ?? parse_generated_source(plain_source.bytes())
     if plain.diagnostics.len() > 0 -> return repl_rejected(plain.diagnostics, wrapper.len())
     if repl_first_function_body(plain.program.items) == .Val(body) {
         return ReplInputParse.Accepted{input: ReplInput.Stmts{body: body, suppress_echo: suppress, echo: false, check_source: plain_input}}

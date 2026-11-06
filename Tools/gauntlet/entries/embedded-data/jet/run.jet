@@ -1,19 +1,19 @@
-use files :: core.files
+use files: core.files
 
 #CLI
-struct Args {
+Args: struct {
     input: String
 }
 
-fn run(args: Args) Err! {
-    payload :: files.read_bytes(args.input) ?? return
+run: fn(args: Args) Err! {
+    payload: files.read_bytes(args.input) ?? return
 
     checksum := U64{0}
     loop byte in payload -> checksum += U64.from_u8(byte)
 
-    reader :: Reader.over(payload)
+    reader: Reader.over(payload)
     reader.take_pattern([U8]{"EDB1"}) ?? return Err("bad magic")
-    count :: Int.from_u32(reader.read_u32_le() ?? return)
+    count: Int.from_u32(reader.read_u32_le() ?? return)
 
     valid := U64{0}
     channels := [U64#4]{0, 0, 0, 0}
@@ -25,13 +25,13 @@ fn run(args: Args) Err! {
     tick_sum := U64{0}
 
     loop _ in 0..<count {
-        frame :: reader.take_pattern([U8]{"{channel:U8}{flags:U8}{sample:U16le}{tick:U32le}{energy:U16le}{load:U16le}"}) ?? return
-        channel :: Int.from_u8(frame.channel)
+        frame: reader.take_pattern([U8]{"{channel:U8}{flags:U8}{sample:U16le}{tick:U32le}{energy:U16le}{load:U16le}"}) ?? return
+        channel: Int.from_u8(frame.channel)
         if channel >= channels.len() -> return Err("bad channel")
         if frame.flags == 0 {
             valid += U64{1}
             channels[channel] = channels[channel] + U64{1}
-            sample :: U64.from_u16(frame.sample)
+            sample: U64.from_u16(frame.sample)
             if sample < sample_min -> sample_min = sample
             if sample > sample_max -> sample_max = sample
             sample_sum += sample

@@ -5,14 +5,14 @@
 // the parser's reason (Rust `io::Error::other(error)`).
 
 #Error
-enum ImageError {
+ImageError: enum {
     IO(IOError)
     InvalidData(String)
     InvalidInput(String)
     AlreadyExists(String)
     Other(String)
 
-    fn message(self) -> String Never! {
+    message: fn(self) -> String Never! {
         if self == {
             .IO(error) -> "{error}"
             .InvalidData(text) -> text
@@ -23,7 +23,7 @@ enum ImageError {
     }
 
     // Rust `error.kind() == ErrorKind::NotFound`.
-    fn is_not_found(self) -> Bool Never! {
+    is_not_found: fn(self) -> Bool Never! {
         if self == {
             .IO(error) -> {
                 if error == {
@@ -41,6 +41,6 @@ impl IOError -> ImageError { ImageError.IO(self) }
 impl EncodingError -> ImageError { ImageError.Other(self.reason) }
 
 // Rust `invalid(message)`: an `InvalidData` refusal with final text.
-fn image_invalid(message: String) -> ImageError Never! {
+image_invalid: fn(message: String) -> ImageError Never! {
     ImageError.InvalidData(message)
 }

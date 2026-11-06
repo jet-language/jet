@@ -3,8 +3,8 @@
 // the merged source table, select one environment, and fold every module's
 // contributions into the runnable plan.
 use {
-    envmodel_plan_files :: core.files
-    envmodel_plan_sys :: core.sys
+    envmodel_plan_files: core.files
+    envmodel_plan_sys: core.sys
     jet_lexer.[TOKEN_KW_MODULE, lex_config]
     jet_parser.[parse_lexed]
     jet_pkg_model.[
@@ -22,15 +22,15 @@ use {
 // the Phase-1 `pkg.*` directive surface. A file that declares the `module`
 // keyword stays on this path even when its later syntax is malformed; only
 // the legacy directive surface uses the tolerant fallback scanner.
-fn envmodel_is_module_surface(src: String) -> Bool Never! {
-    source :: src.bytes()
-    lexed :: lex_config(source)
+envmodel_is_module_surface: fn(src: String) -> Bool Never! {
+    source: src.bytes()
+    lexed: lex_config(source)
     has_module := false
     loop token in lexed.tokens {
         if token.kind == TOKEN_KW_MODULE -> has_module = true
     }
     if lexed.diagnostics.len() > 0 -> return has_module
-    parsed :: parse_lexed(^lexed)
+    parsed: parse_lexed(^lexed)
     if envmodel_first_error(parsed.diagnostics) != None -> return has_module
     loop item in parsed.program.items {
         if item == {
@@ -45,30 +45,30 @@ fn envmodel_is_module_surface(src: String) -> Bool Never! {
 // by key (U5); package sugar resolves to `package@source` refs; the `prompt`
 // fact becomes the label. Module values run through the Compiler's comptime
 // driver (dynamic host calls), so this chain declares no effect row.
-fn envmodel_evaluate_env(src: String, base_dir: String) -> EnvPlan EnvModelEvalError! {
+envmodel_evaluate_env: fn(src: String, base_dir: String) -> EnvPlan EnvModelEvalError! {
     Ok(envmodel_evaluate_env_with_selections(src, base_dir, None, None))
 }
 
 // Evaluate a typed environment with one authoritative preset selection. An
 // explicit CLI choice is resolved before ambient hostname/user matching, so
 // an unrelated ambient preset cannot reject or augment the requested plan.
-fn envmodel_evaluate_env_with_preset(src: String, base_dir: String, requested_preset: String?) -> EnvPlan EnvModelEvalError! {
+envmodel_evaluate_env_with_preset: fn(src: String, base_dir: String, requested_preset: String?) -> EnvPlan EnvModelEvalError! {
     Ok(envmodel_evaluate_env_with_selections(src, base_dir, requested_preset, None))
 }
 
 // Evaluate an environment while explicitly selecting one `env.<name>` module.
 // The ordinary CLI uses the deterministic default (`dev`, then `default`,
 // then lexical order) when it has no selector.
-fn envmodel_evaluate_env_with_environment(src: String, base_dir: String, requested_environment: String?) -> EnvPlan EnvModelEvalError! {
+envmodel_evaluate_env_with_environment: fn(src: String, base_dir: String, requested_environment: String?) -> EnvPlan EnvModelEvalError! {
     Ok(envmodel_evaluate_env_with_selections(src, base_dir, None, requested_environment))
 }
 
-fn envmodel_unresolved_root(base_dir: String, cause: IOError) -> EnvModelEvalError Never! {
+envmodel_unresolved_root: fn(base_dir: String, cause: IOError) -> EnvModelEvalError Never! {
     envmodel_error("E1331", "environment root `{base_dir}` cannot be resolved: {cause}", "one environment graph must resolve from a real project directory before it follows imports or path-backed facts", "run the command from an existing project directory", None)
 }
 
-fn envmodel_evaluate_env_with_selections(src: String, base_dir: String, requested_preset: String?, requested_environment: String?) -> EnvPlan EnvModelEvalError! {
-    environment_root :: envmodel_plan_files.canonicalize(base_dir) ?? return Err(envmodel_unresolved_root(base_dir, err))
+envmodel_evaluate_env_with_selections: fn(src: String, base_dir: String, requested_preset: String?, requested_environment: String?) -> EnvPlan EnvModelEvalError! {
+    environment_root: envmodel_plan_files.canonicalize(base_dir) ?? return Err(envmodel_unresolved_root(base_dir, err))
     loader := FileSystemSourceLoader{root: environment_root}
     Ok(envmodel_evaluate_env_with_source_loader(src, environment_root, &loader, requested_preset, requested_environment))
 }
@@ -77,33 +77,33 @@ fn envmodel_evaluate_env_with_selections(src: String, base_dir: String, requeste
 // the store. This is the production path for `jet profile plan`: provider
 // identity, source provenance, and collision selections come from the same
 // graph used by environment evaluation.
-fn envmodel_evaluate_package_profile(src: String, base_dir: String, name: String) -> PackageProfilePlan EnvModelEvalError! {
-    env :: envmodel_evaluate_env(src, base_dir)
+envmodel_evaluate_package_profile: fn(src: String, base_dir: String, name: String) -> PackageProfilePlan EnvModelEvalError! {
+    env: envmodel_evaluate_env(src, base_dir)
     profiles := PackageProfileSet{}
     loop profile in env.package_profiles {
         &profiles.insert_checked(profile) ?? return Err(envmodel_error("E1332", "package generation composition failed: {err.message()}", "one source-backed package generation cannot silently choose different inheritance, package, or collision facts", "merge the declarations so they agree, or give the generations different names", None))
     }
-    resolved :: profiles.resolve(name) ?? return Err(envmodel_error("E1332", "package generation `{name}` could not be resolved: {err.message()}", "generation inheritance is resolved parent-first and must remain acyclic", "fix the generation name, parent reference, or inheritance cycle", None))
+    resolved: profiles.resolve(name) ?? return Err(envmodel_error("E1332", "package generation `{name}` could not be resolved: {err.message()}", "generation inheritance is resolved parent-first and must remain acyclic", "fix the generation name, parent reference, or inheritance cycle", None))
     package_names := [String]{}
     loop package in resolved.packages -> &package_names.push(package.raw)
     loop path in envmodel_sorted_keys_of(resolved.collisions) {
-        provider :: resolved.collisions[path]
+        provider: resolved.collisions[path]
         if !package_names.contains(provider) {
             return Err(envmodel_error("E1335", "package generation `{name}` selects `{provider}` for `{path}`, but that provider is not in the generation", "a collision selection must name one exact package contender retained by the source-backed generation", "add the selected package ref to `packages`, or select one of the existing contenders", None))
         }
     }
     packages := [PackageProfileFact]{}
     loop package in resolved.packages {
-        spec :: envmodel_classify_profile_ref(package.raw, env.table) ?? return Err(envmodel_error("E1335", "package generation `{name}` contains unsupported ref `{package.raw}`: {err:Debug}", "generation package facts must retain one lossless package and provider identity", "use `package@source` with a built-in or declared source", None))
-        split :: pkg_split_channel_ref(spec.package)
-        target :: split.base
-        channel :: split.channel
+        spec: envmodel_classify_profile_ref(package.raw, env.table) ?? return Err(envmodel_error("E1335", "package generation `{name}` contains unsupported ref `{package.raw}`: {err:Debug}", "generation package facts must retain one lossless package and provider identity", "use `package@source` with a built-in or declared source", None))
+        split: pkg_split_channel_ref(spec.package)
+        target: split.base
+        channel: split.channel
         // Keep the source token from the declaration. `default` is the
         // package-sugar spelling for nixpkgs, but changing it to `nixpkgs`
         // here would erase source identity from the plan and later lock views.
-        source :: package.raw.cut_last(REF_PROVIDER_AT)?.after ?? spec.source.label()
-        provider :: envmodel_profile_provider_label(spec.source, source, env.table)
-        upstream :: env.table.upstream(source)
+        source: package.raw.cut_last(REF_PROVIDER_AT)?.after ?? spec.source.label()
+        provider: envmodel_profile_provider_label(spec.source, source, env.table)
+        upstream: env.table.upstream(source)
         facts := ProviderFacts.for_reference(provider, package.raw)
         &facts.set_profile(resolved.name, package.declared_by.join(","))
         &facts.add_fact("package.target", ProviderFactValue.Text(target), "profile.declaration")
@@ -119,8 +119,8 @@ fn envmodel_evaluate_package_profile(src: String, base_dir: String, name: String
             .Val(resolved_upstream) -> {
                 &facts.set_resolved_source(resolved_upstream)
                 &facts.add_fact("provider.upstream", ProviderFactValue.Text(resolved_upstream), "env.source")
-                resolved_reference :: envmodel_provider_reference_from_upstream(resolved_upstream, provider)
-                resolved_facts :: ProviderFacts.for_reference(provider, resolved_reference)
+                resolved_reference: envmodel_provider_reference_from_upstream(resolved_upstream, provider)
+                resolved_facts: ProviderFacts.for_reference(provider, resolved_reference)
                 if resolved_facts.selector.is_exact() {
                     &facts.set_resolved_selector(resolved_facts.selector.raw, "env.source")
                 } else if pkg_provider_is_external(provider) {
@@ -137,16 +137,16 @@ fn envmodel_evaluate_package_profile(src: String, base_dir: String, name: String
                 &details.push(loss.reason)
             }
             loop conflict in facts.conflicts -> &details.push(conflict.right)
-            message :: if ambiguous -> "package generation `{name}` has ambiguous provider fact: {details.join("; ")}" else -> "package generation `{name}` has lossy or conflicting provider fact: {details.join("; ")}"
+            message: if ambiguous -> "package generation `{name}` has ambiguous provider fact: {details.join("; ")}" else -> "package generation `{name}` has lossy or conflicting provider fact: {details.join("; ")}"
             return Err(envmodel_error("E1335", message, "provider identity, selector, and native meaning must remain explicit across planning and locking", "pin the provider with an exact version, revision, or digest, or declare a lossless built-in source", None))
         }
-        channel_text :: if channel == {
+        channel_text: if channel == {
             .Val(value) -> Val(value.as_str())
             .None -> None
         }
         &packages.push(PackageProfileFact{raw: package.raw, target: target, source: source, upstream: upstream, provider: provider, channel: channel_text, declared_by: package.declared_by, provider_facts: facts})
     }
-    plan :: PackageProfilePlan{
+    plan: PackageProfilePlan{
         name: resolved.name,
         selected_profiles: resolved.selected_profiles,
         applied: resolved.applied,
@@ -157,7 +157,7 @@ fn envmodel_evaluate_package_profile(src: String, base_dir: String, name: String
     Ok(^plan.finalize())
 }
 
-fn envmodel_profile_provider_label(source: RefSource, source_name: String, table: SourceTable) -> String Never! {
+envmodel_profile_provider_label: fn(source: RefSource, source_name: String, table: SourceTable) -> String Never! {
     if source == {
         .Jetpack | .Nixpkgs -> "nix"
         .Github -> "github"
@@ -174,8 +174,8 @@ fn envmodel_profile_provider_label(source: RefSource, source_name: String, table
         .SwiftPM -> "swiftpm"
         .Releases -> "jetpackage"
         .Named(_) -> {
-            upstream :: table.upstream(source_name) ?? ""
-            provider :: upstream.cut_last("@")?.after ?? ""
+            upstream: table.upstream(source_name) ?? ""
+            provider: upstream.cut_last("@")?.after ?? ""
             if provider != "" -> return provider
             table.provider(source_name).label()
         }
@@ -187,20 +187,23 @@ fn envmodel_profile_provider_label(source: RefSource, source_name: String, table
 // `provider:target` so the resolver can pass it to its native backend; the
 // shared carrier uses `target@provider#selector` so identity and selectors
 // remain parseable and comparable.
-fn envmodel_provider_reference_from_upstream(upstream: String, provider: String) -> String Never! {
-    halves :: upstream.split_once(REF_SEPARATOR) ?? return upstream
+envmodel_provider_reference_from_upstream: fn(upstream: String, provider: String) -> String Never! {
+    halves: upstream.split_once(REF_SEPARATOR) ?? return upstream
+    if halves.after.split_once(REF_CHANNEL_MARKER) == .Val(target) {
+        return "{target.before}{REF_PROVIDER_AT}{provider}{REF_CHANNEL_MARKER}{target.after}"
+    }
     "{halves.after}{REF_PROVIDER_AT}{provider}"
 }
 
-fn envmodel_classify_profile_ref(raw: String, table: SourceTable) -> RefSpec RefError! {
+envmodel_classify_profile_ref: fn(raw: String, table: SourceTable) -> RefSpec RefError! {
     if raw.cut_last(REF_PROVIDER_AT) == {
         .Val(halves) -> {
-            package :: halves.before
-            source_with_selector :: halves.after
-            selector_split :: source_with_selector.split_once(REF_CHANNEL_MARKER)
-            source :: selector_split?.before ?? source_with_selector
+            package: halves.before
+            source_with_selector: halves.after
+            selector_split: source_with_selector.split_once(REF_CHANNEL_MARKER)
+            source: selector_split?.before ?? source_with_selector
             if source == DEFAULT_SOURCE && !package.contains(REF_CHANNEL_MARKER) {
-                qualified :: if selector_split == {
+                qualified: if selector_split == {
                     .Val(parts) -> "{package}{REF_CHANNEL_MARKER}{parts.after}"
                     .None -> package
                 }
@@ -216,9 +219,9 @@ fn envmodel_classify_profile_ref(raw: String, table: SourceTable) -> RefSpec Ref
 // This is the same graph evaluator as `envmodel_evaluate_env_with_selections`;
 // only the file and directory boundary changes. Package tooling uses it to
 // keep every imported profile source inside the already-pinned package root.
-fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, base_dir: String, loader: &L, requested_preset: String?, requested_environment: String?) -> EnvPlan EnvModelEvalError! {
-    program :: envmodel_parse_program(src)
-    environment_root :: envmodel_plan_files.canonicalize(base_dir) ?? return Err(envmodel_unresolved_root(base_dir, err))
+envmodel_evaluate_env_with_source_loader: fn<L: SourceLoader>(src: String, base_dir: String, loader: &L, requested_preset: String?, requested_environment: String?) -> EnvPlan EnvModelEvalError! {
+    program: envmodel_parse_program(src)
+    environment_root: envmodel_plan_files.canonicalize(base_dir) ?? return Err(envmodel_unresolved_root(base_dir, err))
     // The root `env.jet` plus every file reachable through `imports: find(…)`
     // (U4). Each unit owns its source text (spans index into it) and the dir
     // its relative refs / `embed_file` resolve against.
@@ -228,7 +231,7 @@ fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, base_d
     loop unit in units {
         if envmodel_path_within(unit.source_path, environment_root) && unit.source_path != environment_root { &source_files.push(unit.source_path.removeprefix("{environment_root}/")) }
     }
-    table :: envmodel_build_source_table(units)
+    table: envmodel_build_source_table(units)
     // Evaluate every unit's modules (each against its own source + base dir),
     // then merge all contributions through the §6 engine as one pass — so a
     // discovered module's `env.dev` packages combine with the root's, and a
@@ -260,13 +263,13 @@ fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, base_d
     // Select exactly one environment before projecting any non-entry facts:
     // services, lifecycle, files, integrations, and variable disclosure
     // follow the same boundary as packages and settings.
-    active_environment :: envmodel_select_active_environment(environment_names, requested_environment)
+    active_environment: envmodel_select_active_environment(environment_names, requested_environment)
     loop evaluated in modules {
         loop image in evaluated.images -> &images.push(image)
         loop profile in evaluated.package_profiles {
             &package_profiles.insert_checked(profile) ?? return Err(envmodel_error("E1332", "package generation composition failed: {err.message()}", "one source-backed package generation cannot silently choose different inheritance, package, or collision facts", "merge the declarations so they agree, or give the generations different names", None))
         }
-        active_name :: active_environment ?? next
+        active_name: active_environment ?? next
         contributes := false
         loop contribution in evaluated.environment_contributions {
             if contribution.name == active_name -> contributes = true
@@ -335,7 +338,7 @@ fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, base_d
             loop file in integration.files -> envmodel_merge_managed_file(&managed_files, file)
             loop task_name in integration.tasks {
                 envmodel_push_unique(&integration_facts.tasks, task_name)
-                fact :: IntegrationTaskFact{name: task_name, integration: integration.kind, packages: integration.packages, secrets: integration.secrets, providers: integration.providers, host_checks: integration.host_checks, grants: integration.grants}
+                fact: IntegrationTaskFact{name: task_name, integration: integration.kind, packages: integration.packages, secrets: integration.secrets, providers: integration.providers, host_checks: integration.host_checks, grants: integration.grants}
                 if !integration_facts.task_facts.contains(fact) { &integration_facts.task_facts.push(fact) }
             }
             loop provider in integration.providers -> envmodel_push_unique(&integration_facts.providers, provider)
@@ -351,7 +354,7 @@ fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, base_d
     }
     system_names := [String]{}
     loop system in systems -> &system_names.push(system.name)
-    known_systems :: if system_names.len() == 0 -> "no `system.<name>:` contribution is defined" else -> "known systems: {system_names.join(", ")}"
+    known_systems: if system_names.len() == 0 -> "no `system.<name>:` contribution is defined" else -> "known systems: {system_names.join(", ")}"
     // An `.Oci` image's `from: packages.<name>` cross-checks
     // against this project's own package manifest (E1267) — a different
     // manifest than the environment this pass evaluates, so it is loaded here
@@ -372,7 +375,7 @@ fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, base_d
         }
         if image.from_environment {
             if !environment_names.contains(image.from) {
-                return Err(envmodel_error("E1327", "the image `{image.name}` names unknown environment `{image.from}`", "an environment image projects one declared `env.<name>` fact graph into a runnable OCI image", "declare `module env.{image.from} {{ … }}`, or point `from:` at an existing environment", None))
+                return Err(envmodel_error("E1327", "the image `{image.name}` names unknown environment `{image.from}`", "an environment image projects one declared `env.<name>` fact graph into a runnable OCI image", "declare `env.{image.from}: module {{ … }}`, or point `from:` at an existing environment", None))
             }
             next
         }
@@ -419,7 +422,7 @@ fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, base_d
             }
         }
     }
-    merged :: envmodel_merge_all(modules) ?? return Err(envmodel_merge_error_to_diagnostic(err))
+    merged: envmodel_merge_all(modules) ?? return Err(envmodel_merge_error_to_diagnostic(err))
     // The selected name is explicit when a host asks for it; otherwise `dev`,
     // then `default`, then lexical order gives one stable beginner path
     // instead of silently merging sibling modules.
@@ -430,7 +433,7 @@ fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, base_d
     prompt_strip := PromptStripMode.Off
     if active_environment == {
         .Val(active_name) -> {
-            key :: ModuleEntryKey{namespace: Namespace.Env, path: active_name}
+            key: ModuleEntryKey{namespace: Namespace.Env, path: active_name}
             loop evaluated in modules {
                 contributed := false
                 loop keyed in evaluated.entries {
@@ -438,7 +441,7 @@ fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, base_d
                 }
                 if contributed { &active_environment_provenance.push(evaluated.name) }
             }
-            entry :: envmodel_merged_entry(merged, key) ?? panic("the active environment is a merged entry key")
+            entry: envmodel_merged_entry(merged, key) ?? panic("the active environment is a merged entry key")
             loop pkg in entry.packages -> envmodel_push_unique(&package_refs, envmodel_pkg_ref(pkg))
             if entry.settings.get(ENV_FIELD_PROMPT) == {
                 .Val(label) -> prompt = Val(label)
@@ -455,17 +458,17 @@ fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, base_d
         }
         .None -> {}
     }
-    selected_names :: if requested_preset == {
+    selected_names: if requested_preset == {
         .Val(name) -> [String]{name}
         .None -> presets.auto_select_many(envmodel_plan_sys.get("HOSTNAME") ?? "", envmodel_plan_sys.get("USER") ?? (envmodel_plan_sys.get("USERNAME") ?? ""))
     }
     selected_preset := ResolvedPreset?{None}
     if selected_names.len() > 0 {
-        resolved :: presets.resolve_many(selected_names) ?? return Err(envmodel_error("E1332", "environment preset could not be resolved: {err.message()}", "preset inheritance is resolved parent-first and must remain acyclic", "fix the preset name, parent reference, or inheritance cycle", None))
+        resolved: presets.resolve_many(selected_names) ?? return Err(envmodel_error("E1332", "environment preset could not be resolved: {err.message()}", "preset inheritance is resolved parent-first and must remain acyclic", "fix the preset name, parent reference, or inheritance cycle", None))
         loop package in resolved.packages -> envmodel_push_unique(&package_refs, package)
         selected_preset = Val(resolved)
     }
-    language_expansion :: LanguagePackCatalog.builtin().expand(languages) ?? return Err(envmodel_error("E1333", "environment language pack could not be expanded: {err.message}", "language packs expand through one closed catalog into ordinary package refs", "choose a language name from the catalog exposed by `jet env info`", None))
+    language_expansion: LanguagePackCatalog.builtin().expand(languages) ?? return Err(envmodel_error("E1333", "environment language pack could not be expanded: {err.message}", "language packs expand through one closed catalog into ordinary package refs", "choose a language name from the catalog exposed by `jet env info`", None))
     loop package in language_expansion.packages -> envmodel_push_unique(&package_refs, package)
     preset_list := [PresetSpec]{}
     loop preset_name in envmodel_sorted_preset_names(presets) -> &preset_list.push(presets.presets[preset_name])
@@ -502,20 +505,20 @@ fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, base_d
     })
 }
 
-fn envmodel_sorted_preset_names(presets: PresetSet) -> [String] Never! {
+envmodel_sorted_preset_names: fn(presets: PresetSet) -> [String] Never! {
     names := presets.presets.keys().to_list()
     &names.sort()
     names
 }
 
-fn envmodel_sorted_profile_names(profiles: PackageProfileSet) -> [String] Never! {
+envmodel_sorted_profile_names: fn(profiles: PackageProfileSet) -> [String] Never! {
     names := profiles.profiles.keys().to_list()
     &names.sort()
     names
 }
 
 // One managed file per destination; a second, different owner conflicts.
-fn envmodel_merge_managed_file(managed_files: &[ManagedFile], file: ManagedFile) EnvModelEvalError! {
+envmodel_merge_managed_file: fn(managed_files: &[ManagedFile], file: ManagedFile) EnvModelEvalError! {
     loop existing in managed_files {
         if existing.destination == file.destination {
             if existing != file {
@@ -529,7 +532,7 @@ fn envmodel_merge_managed_file(managed_files: &[ManagedFile], file: ManagedFile)
 
 // `names` is sorted: the requested module if declared, else `dev`, then
 // `default`, then the first name.
-fn envmodel_select_active_environment(names: [String], requested_environment: String?) -> String? EnvModelEvalError! {
+envmodel_select_active_environment: fn(names: [String], requested_environment: String?) -> String? EnvModelEvalError! {
     if requested_environment == {
         .Val(name) -> {
             if names.contains(name) -> return Ok(Val(name))
@@ -543,15 +546,15 @@ fn envmodel_select_active_environment(names: [String], requested_environment: St
     Ok(Val(names[0]))
 }
 
-fn envmodel_push_unique(values: &[String], value: String) Never! {
+envmodel_push_unique: fn(values: &[String], value: String) Never! {
     if !values.contains(value) { &values.push(value) }
 }
 
 // An explicit declaration replaces an integration's implicit source name;
 // any other repeated declaration conflicts.
-fn envmodel_merge_secret_spec(specs: &[SecretSpec], incoming: SecretSpec) EnvModelEvalError! {
+envmodel_merge_secret_spec: fn(specs: &[SecretSpec], incoming: SecretSpec) EnvModelEvalError! {
     loop index in 0..<specs.len() {
-        existing :: specs[index]
+        existing: specs[index]
         if existing.name != incoming.name -> next
         if existing.implicit && !incoming.implicit {
             specs[index] = incoming
@@ -563,14 +566,14 @@ fn envmodel_merge_secret_spec(specs: &[SecretSpec], incoming: SecretSpec) EnvMod
     &specs.push(incoming)
 }
 
-fn envmodel_prompt_path_mode(value: String) -> PromptPathMode Never! {
+envmodel_prompt_path_mode: fn(value: String) -> PromptPathMode Never! {
     if value == {
         PROMPT_PATH_FULL -> PromptPathMode.Full
         else -> PromptPathMode.Short
     }
 }
 
-fn envmodel_prompt_strip_mode(value: String) -> PromptStripMode Never! {
+envmodel_prompt_strip_mode: fn(value: String) -> PromptStripMode Never! {
     if value == {
         PROMPT_STRIP_ON -> PromptStripMode.On
         else -> PromptStripMode.Off

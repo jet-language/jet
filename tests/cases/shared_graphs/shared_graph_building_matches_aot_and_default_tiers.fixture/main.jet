@@ -1,4 +1,4 @@
-package {
+package: {
     name: "memory_shared_graph_building"
     version: "0.1.0"
     authority: { allow: [IO, Mem.Alloc, Mem.Rc] }
@@ -6,17 +6,17 @@ package {
 // A type may hold strong `Shared` edges to its own kind. Building a graph out of
 // new cells never closes a loop: E0221 rejects only a write that stores a cell
 // which may already reach the written one (see tests/ui/shared_strong_cycle*).
-struct Node {
+Node: struct {
     value: Int
     next: Shared<Node>?
 }
 
-struct Person {
+Person: struct {
     name: String
     kids: [Shared<Person>]
 }
 
-fn total(start: Shared<Node>?) -> Int {
+total: fn(start: Shared<Node>?) -> Int {
     sum := 0
     cursor := start
     loop {
@@ -31,7 +31,7 @@ fn total(start: Shared<Node>?) -> Int {
     sum
 }
 
-fn run() {
+run: fn() {
     // A strong linked list built by prepending: each new cell points at the
     // old head, which nothing new points back to.
     head := Shared<Node>?{None}
@@ -40,14 +40,14 @@ fn run() {
     }
     print("list total={total(head)}")
     // Appending a new cell writes into an existing one, and stays acyclic.
-    tail :: shared Node{value: 10, next: None}
+    tail: shared Node{value: 10, next: None}
     tail.next = Val(shared Node{value: 20, next: None})
     print("tail total={total(Val(tail))}")
     // A tree with strong kids. A writing call on a cell's field edits the
     // stored list under the cell's lock, so every handle sees the new kids.
-    mum :: shared Person{name: "Ada", kids: []}
-    same :: mum.copy()
-    kid :: shared Person{name: "Byron", kids: []}
+    mum: shared Person{name: "Ada", kids: []}
+    same: mum.copy()
+    kid: shared Person{name: "Byron", kids: []}
     &mum.kids.push(kid)
     &mum.kids.push(shared Person{name: "Cy", kids: []})
     print("{same.name} has {same.kids.len()} kids")

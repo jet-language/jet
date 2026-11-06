@@ -3,15 +3,15 @@
 // why: the queue identity is attached to the declared #Job and cannot be selected by an arbitrary function value
 // fix: pass the name of a #Job function with exactly one payload parameter
 // The composed verifier records stderr; no diagnostic output is claimed here.
-use jobs :: core.jobs
+use jobs: core.jobs
 
-fn ordinary(payload: String) { print(payload) }
+ordinary: fn(payload: String) { print(payload) }
 
-fn reject(queue: &jobs.JobQueue) -[DB, Time]> {
-    _ :: &queue.enqueue(ordinary, "not a declared job") ?? return
+reject: fn(queue: &jobs.JobQueue) -[DB, Time]> {
+    _: &queue.enqueue(ordinary, "not a declared job") ?? return
 }
 
-fn run() {
+run: fn() {
     queue := jobs.queue() ?? return
     reject(&queue)
 }

@@ -4,16 +4,16 @@
 // distinct: a String target reads a binary, or a byte list only under
 // `strings: .UTF8ByteList`; only `Atom` and record keys become atoms.
 use {
-    eetf :: core.encoding.eetf
+    eetf: core.encoding.eetf
     core.encoding.[EncodingError, EncodingLimits, bytes_to_hex]
 }
 
-struct CountRecord {
+CountRecord: struct {
     count: Int
 }
 
 #Codable
-struct Packet {
+Packet: struct {
     name: String
     data: [U8]
     status: eetf.Atom
@@ -21,7 +21,7 @@ struct Packet {
     tags: [String]
 }
 
-fn kind_name(err: EncodingError) -> String {
+kind_name: fn(err: EncodingError) -> String {
     if err.kind == {
         .Syntax -> "Syntax"
         .Truncated -> "Truncated"
@@ -32,30 +32,30 @@ fn kind_name(err: EncodingError) -> String {
     }
 }
 
-fn view(label: String, bytes: [U8]) {
-    text :: eetf.to_json(bytes) ?? {
+view: fn(label: String, bytes: [U8]) {
+    text: eetf.to_json(bytes) ?? {
         print("{label}: {kind_name(err)} at byte {err.byte_offset} {err.path}: {err.reason}")
         return
     }
     print("{label}: {text}")
 }
 
-fn shallow(label: String, bytes: [U8]) {
-    limits :: EncodingLimits{buffer_bytes: 65536, max_depth: 2, max_item_bytes: 4, max_total_bytes: Val(64), max_expansion_depth: 32, max_expansion_bytes: 8388608}
-    text :: eetf.to_json(bytes, limits) ?? {
+shallow: fn(label: String, bytes: [U8]) {
+    limits: EncodingLimits{buffer_bytes: 65536, max_depth: 2, max_item_bytes: 4, max_total_bytes: Val(64), max_expansion_depth: 32, max_expansion_bytes: 8388608}
+    text: eetf.to_json(bytes, limits) ?? {
         print("{label}: {kind_name(err)} at byte {err.byte_offset} {err.path}: {err.reason}")
         return
     }
     print("{label}: {text}")
 }
 
-fn show_failures(label: String, failures: [FieldError]) {
+show_failures: fn(label: String, failures: [FieldError]) {
     loop failure in failures -> print("{label}: error at '{failure.path}': {failure.reason}")
 }
 
-fn run() {
-    binary_key :: [U8]{131, 116, 0, 0, 0, 1, 109, 0, 0, 0, 5, 99, 111, 117, 110, 116, 97, 2}
-    atom_key :: [U8]{131, 116, 0, 0, 0, 1, 119, 5, 99, 111, 117, 110, 116, 97, 2}
+run: fn() {
+    binary_key: [U8]{131, 116, 0, 0, 0, 1, 109, 0, 0, 0, 5, 99, 111, 117, 110, 116, 97, 2}
+    atom_key: [U8]{131, 116, 0, 0, 0, 1, 119, 5, 99, 111, 117, 110, 116, 97, 2}
 
     // The JSON view: what JSON cannot say is lost, as documented.
     view("COUNT-ETF-131", binary_key)
@@ -97,11 +97,11 @@ fn run() {
 
     // Typed encode: record keys are atoms, so COUNT-ETF-131's atom form returns.
     if eetf.encode(CountRecord{count: 2}) == .Ok(bytes) -> print("encode CountRecord: {bytes == atom_key} {bytes_to_hex(bytes)}")
-    packet :: Packet{name: "hi", data: [U8]{1, 2}, status: eetf.Atom.new("ok") ?? panic("atom"), note: None, tags: ["a"]}
-    wire :: eetf.encode(packet) ?? panic("encode Packet")
+    packet: Packet{name: "hi", data: [U8]{1, 2}, status: eetf.Atom.new("ok") ?? panic("atom"), note: None, tags: ["a"]}
+    wire: eetf.encode(packet) ?? panic("encode Packet")
     print("encode Packet: {bytes_to_hex(wire)}")
     if eetf.decode<Packet>(wire) == .Ok(back) -> print("round trip: {back.name} {back.data} {back.status.name} {back.note ?? "(none)"} {back.tags}")
-    lists :: eetf.encode(packet, layout: .Proplist, strings: .UTF8ByteList, byte_arrays: .List) ?? panic("encode proplist")
+    lists: eetf.encode(packet, layout: .Proplist, strings: .UTF8ByteList, byte_arrays: .List) ?? panic("encode proplist")
     print("encode Packet as proplist of byte lists: {bytes_to_hex(lists)}")
     if eetf.decode<Packet>(lists, layout: .Proplist, strings: .UTF8ByteList) == .Ok(back) -> print("proplist round trip: {back.name} {back.data} {back.status.name} {back.tags}")
     if eetf.Atom.new("a".repeat(256)) == .Err(err) -> print("long atom: {kind_name(err)}: {err.reason}")

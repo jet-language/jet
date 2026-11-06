@@ -3,33 +3,33 @@
 // UiCarriersBasic raw {cols,rows} record. Session aliases compare the
 // descriptor owner's identity and keep it alive independently of ProcessChild
 // handles. Explicit stream close stays shared.
-#Export(c) fn jet_terminal_session_from_child_raw(child: I64) -> I64 {
-    session :: jet_rt_alloc(I64{8}, I64{8})
+#Export(c) jet_terminal_session_from_child_raw: fn(child: I64) -> I64 {
+    session: jet_rt_alloc(I64{8}, I64{8})
     fd_put(session, I64{0}, jet_process_retain_raw(child))
     session
 }
 
 // The returned Child72 is borrowed for the lifetime of the session owner.
-#Export(c) fn jet_terminal_session_child_raw(session: I64) -> I64 {
+#Export(c) jet_terminal_session_child_raw: fn(session: I64) -> I64 {
     fd_word(session, I64{0})
 }
 
-#Export(c) fn jet_rt_handle_clone_terminal_session(session: I64) -> I64 {
+#Export(c) jet_rt_handle_clone_terminal_session: fn(session: I64) -> I64 {
     jet_terminal_session_from_child_raw(jet_terminal_session_child_raw(session))
 }
 
-#Export(c) fn jet_rt_handle_drop_terminal_session(session: I64) {
+#Export(c) jet_rt_handle_drop_terminal_session: fn(session: I64) {
     if (session == I64{0}) -> return
     jet_process_drop_raw(jet_terminal_session_child_raw(session))
     jet_rt_free(session, I64{8}, I64{8})
 }
 
-#Export(c) fn jet_rt_handle_eq_terminal_session(left: I64, right: I64) -> Bool {
+#Export(c) jet_rt_handle_eq_terminal_session: fn(left: I64, right: I64) -> Bool {
     jet_terminal_session_child_raw(left) == jet_terminal_session_child_raw(right)
 }
 
-fn terminal_process_invalid_size(cols: I64, rows: I64) -> I64 {
-    cause :: jet_rt_string_builder_new()
+terminal_process_invalid_size: fn(cols: I64, rows: I64) -> I64 {
+    cause: jet_rt_string_builder_new()
     jet_rt_string_builder_push(cause, rt_static_text("terminal size must be between 1 and 65535, got "))
     rt_text_push_number(cause, cols)
     jet_rt_string_builder_push(cause, rt_static_text("x"))
@@ -37,20 +37,20 @@ fn terminal_process_invalid_size(cols: I64, rows: I64) -> I64 {
     jet_rt_string_builder_finish(cause)
 }
 
-#Export(c) fn jet_terminal_session_resize(session: I64, size: I64, error: I64) -> I64 {
+#Export(c) jet_terminal_session_resize: fn(session: I64, size: I64, error: I64) -> I64 {
     jet_rt_world_reject_uncontrolled(I64{0})
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
-    cols :: ui_carrier_word(wrapping(size + UI_CARRIER_TERMINAL_SIZE_COLS))
-    rows :: ui_carrier_word(wrapping(size + UI_CARRIER_TERMINAL_SIZE_ROWS))
+    cols: ui_carrier_word(wrapping(size + UI_CARRIER_TERMINAL_SIZE_COLS))
+    rows: ui_carrier_word(wrapping(size + UI_CARRIER_TERMINAL_SIZE_ROWS))
     // Validate the raw i64 record before borrowing the descriptor. These are
     // not tagged exact Int words, and invalid dimensions outrank EBADF.
     if (cols < I64{1} || cols > I64{65535} || rows < I64{1} || rows > I64{65535}) {
         return host_io_other_take(HOST_IO_OP_RESOLVE, jet_rt_string_clone(rt_static_text("process terminal")), terminal_process_invalid_size(cols, rows), error)
     }
-    child :: jet_terminal_session_child_raw(session)
-    winsize :: rows.bit_or(cols << I64{16})
+    child: jet_terminal_session_child_raw(session)
+    winsize: rows.bit_or(cols << I64{16})
     sync_mutex_lock(child)
-    master :: fd_word(child, I64{56})
+    master: fd_word(child, I64{56})
     result := I64{-9}
     if (master >= I64{0}) {
         // Same mechanical ioctl/lock seam as jet_process_resize_raw, without
@@ -61,7 +61,7 @@ fn terminal_process_invalid_size(cols: I64, rows: I64) -> I64 {
     }
     sync_mutex_unlock(child)
     if (result == I64{0}) -> return I64{1}
-    cause :: jet_rt_string_builder_new()
+    cause: jet_rt_string_builder_new()
     jet_rt_string_builder_push(cause, rt_static_text("TIOCSWINSZ: "))
     host_errno_cause_append(cause, wrapping(I64{0} - result))
     host_io_other_take(HOST_IO_OP_RESOLVE, jet_rt_string_clone(rt_static_text("process terminal")), jet_rt_string_builder_finish(cause), error)

@@ -1,7 +1,7 @@
 // Native O1 cell string_fresh (text; Tools/perf/function-boundary
 // string-fresh with n fixed): a String of 32-63 appends built per call and
 // dropped each iteration.
-fn render(seed: Int) -> String {
+render: fn(seed: Int) -> String {
     out := ""
     loop i in 0..<(32 + seed % 32) {
         if (seed + i) % 2 == 0 -> out += "ab" else -> out += "xyz"
@@ -9,10 +9,10 @@ fn render(seed: Int) -> String {
     out
 }
 
-fn run() {
+run: fn() {
     acc := 0
     loop i in 0..<300000 {
-        text :: render(i)
+        text: render(i)
         acc += text.len()
     }
     print(acc)

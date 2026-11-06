@@ -9,29 +9,29 @@
 // arguments prints the command list and exits 0 (Docs/spec/spec.md — a bare
 // invocation asking "what can this program do" isn't a mistake).
 #CLI(Standard)
-struct Commands {
+Commands: struct {
     #[Doc("configuration file"), Env("COMMANDS_CONFIG")] config: String{"default"}
 
     #Doc("preview changes") plan = plan_impl
 
-    #Doc("Start the service and listen for requests") fn serve(self, port: Int{3000}) {
+    #Doc("Start the service and listen for requests") serve: fn(self, port: Int{3000}) {
         print("serve")
         print(self.config)
         print(port)
     }
 
-    #Doc("Import one data file") fn import(self, file: String) {
+    #Doc("Import one data file") import: fn(self, file: String) {
         print("import")
         print(self.config)
         print(file)
     }
 }
 
-fn plan_impl(args: Commands) {
+plan_impl: fn(args: Commands) {
     print("plan")
     print(args.config)
 }
 
-fn run(args: Commands) {
+run: fn(args: Commands) {
 
 }

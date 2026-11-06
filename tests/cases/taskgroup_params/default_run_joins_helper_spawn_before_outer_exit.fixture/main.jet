@@ -1,8 +1,8 @@
 
-struct Gate { step: Int }
+Gate: struct { step: Int }
 
-fn spawn_later(_group: Group) -> Shared<Gate> {
-    gate :: shared Gate{ step: 0 }
+spawn_later: fn(_group: Group) -> Shared<Gate> {
+    gate: shared Gate{ step: 0 }
     task {
         gate.step += 1
         loop gate.step == 1 {}
@@ -15,9 +15,9 @@ fn spawn_later(_group: Group) -> Shared<Gate> {
     return gate.copy()
 }
 
-fn run() {
+run: fn() {
     task.group group {
-        gate :: spawn_later(group)
+        gate: spawn_later(group)
         print("inside")
         gate.step += 1
         loop gate.step < 3 {}

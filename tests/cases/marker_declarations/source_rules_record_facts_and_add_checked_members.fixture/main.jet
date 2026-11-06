@@ -1,26 +1,26 @@
-struct Recorded {
+Recorded: struct {
     impl Marker {
-        sites :: [.Type]
+        sites: [.Type]
     }
 }
 
-struct AddGreeting {
+AddGreeting: struct {
     impl Marker {
-        sites :: [.Type]
+        sites: [.Type]
 
-        fn expand(self, target: Target) {
-            tname :: target.name
+        expand: fn(self, target: Target) {
+            tname: target.name
             impl $tname {
-                fn greeting(self) -> String { "hello" }
+                greeting: fn(self) -> String { "hello" }
             }
         }
     }
 }
 
 #[Recorded, AddGreeting]
-struct Person { name: String }
+Person: struct { name: String }
 
-fn run() {
-    person :: Person{name: "ada"}
+run: fn() {
+    person: Person{name: "ada"}
     print(person.greeting())
 }

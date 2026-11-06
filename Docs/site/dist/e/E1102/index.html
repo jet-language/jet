@@ -37,15 +37,10 @@
 <p class="diag-copy fix" data-registry-field="fix">Send plain owned data, make an ordinary owned copy when permitted, or use `Shared&lt;T&gt;` for deliberate shared state.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E1102</code>: <code>tests/ui/E1130_kernel_proof.stderr</code>.</p>
-<pre class="diag">Error [jet.MissingRunFunction]: This program has no `run` function
- Why: Running a program starts at `fn run`, and the entry file doesn&#39;t define one
- Fix: Add `fn run() { ... }` to the entry file
-More: jet-lang.dev/e/E0101
-
-Error [jet.ValueNotSendable]: `#Kernel(.parallel)` cannot cross its worker boundary: sema cannot prove no reachable effects or opaque calls
+<pre class="diag">Error [jet.ValueNotSendable]: `#Kernel(.parallel)` cannot cross its worker boundary: sema cannot prove no reachable effects or opaque calls
   --&gt; tests/ui/E1130_kernel_proof.jet:1:1
     |
-  1 | #Kernel(.parallel) fn noisy(value: Int) -&gt; Int {
+  1 | #Kernel(.parallel) noisy: fn(value: Int) -&gt; Int {
     | ^^^^^^^^^^^^^^^^^^
  Why: A safe kernel crosses a worker boundary only after sema proves sendability, bounds, aliasing, captures, races, barriers, and control flow before lowering
  Fix: Use a read-only effect-free expression over checked Core compute operations, or move provider/raw code behind its typed `#Unsafe` boundary

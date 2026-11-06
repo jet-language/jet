@@ -8,27 +8,27 @@
 // borrowed bind_pattern_names projection; no local replicas.
 use jet_foundation.[Stmt, LValue, Binding, NamedSpan, Span, CallArg, Program, NameFacts, expr_span, type_name]
 
-fn semindex_collect_stmts(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, stmts: [Stmt], mp: String) {
+semindex_collect_stmts: fn(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, stmts: [Stmt], mp: String) {
     loop stmt in stmts -> semindex_collect_stmt(&db, &ctx, names, program, source, stmt, mp)
 }
 
-fn semindex_collect_loop_label_def(db: &SymbolDB, ctx: WalkCtx, label: NamedSpan?, mp: String) Never! {
+semindex_collect_loop_label_def: fn(db: &SymbolDB, ctx: WalkCtx, label: NamedSpan?, mp: String) Never! {
     if label == .Val(label) -> &db.defs.push(SymDef{identity: semindex_scoped_local_identity(ctx, "loop_label", label.name), name: label.name, def_span: label.span, module_path: mp, kind: (.Local{mutable: false, ty: None})})
 }
 // Rust2924: byte length, not String scalar length. The label span can include
 // punctuation after the token; the reference covers only the label's name.
 // Source offsets plus valid source token lengths cannot overflow Rust usize.
 // Jet Int is unbounded, so plain addition preserves that source-span behavior.
-fn semindex_loop_label_span(name: String, span: Span) -> Span Never! {
+semindex_loop_label_span: fn(name: String, span: Span) -> Span Never! {
     Span{start: span.start, end: span.start + name.bytes().len()}
 }
-fn semindex_collect_loop_label_ref(db: &SymbolDB, ctx: WalkCtx, names: NameFacts, name: String, span: Span, mp: String) Never! {
-    reference :: semindex_scoped_ref(&db, ctx, names, name, semindex_loop_label_span(name, span), mp)
+semindex_collect_loop_label_ref: fn(db: &SymbolDB, ctx: WalkCtx, names: NameFacts, name: String, span: Span, mp: String) Never! {
+    reference: semindex_scoped_ref(&db, ctx, names, name, semindex_loop_label_span(name, span), mp)
     &db.refs.push(reference)
 }
 
-fn semindex_collect_stmt(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, stmt: Stmt, mp: String) {
-    structural_id :: semindex_record_node(&db, ctx, "stmt", semindex_stmt_shape(stmt), mp, stmt_span(stmt))
+semindex_collect_stmt: fn(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, stmt: Stmt, mp: String) {
+    structural_id: semindex_record_node(&db, ctx, "stmt", semindex_stmt_shape(stmt), mp, stmt_span(stmt))
     if structural_id == .Val(id) -> &ctx.structural_parents.push(id)
     if stmt == {
         .Val(binding) -> semindex_collect_binding(&db, &ctx, names, program, source, binding, mp)
@@ -72,7 +72,7 @@ fn semindex_collect_stmt(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program
             semindex_structural_slot(&db, &ctx, "subject", StructuralSlotKind.Scalar, (db: SymbolDB, ctx: WalkCtx) -> semindex_collect_expr(&db, &ctx, names, program, source, subject, mp))
             semindex_structural_slot(&db, &ctx, "arms", StructuralSlotKind.List, (db: SymbolDB, ctx: WalkCtx) -> {
                 loop arm in arms {
-                    arm_id :: semindex_record_node(&db, ctx, "arm", "switch_arm", mp, arm.span)
+                    arm_id: semindex_record_node(&db, ctx, "arm", "switch_arm", mp, arm.span)
                     if arm_id == .Val(id) -> &ctx.structural_parents.push(id)
                     semindex_structural_slot(&db, &ctx, "condition", StructuralSlotKind.Scalar, (db: SymbolDB, ctx: WalkCtx) -> semindex_collect_expr(&db, &ctx, names, program, source, arm.cond, mp))
                     semindex_structural_slot(&db, &ctx, "body", StructuralSlotKind.List, (db: SymbolDB, ctx: WalkCtx) -> semindex_collect_stmts(&db, &ctx, names, program, source, arm.body, mp))
@@ -131,10 +131,10 @@ fn semindex_collect_stmt(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program
     if structural_id != None -> &ctx.structural_parents.pop()
 }
 
-fn semindex_collect_lvalue(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, target: LValue, mp: String) {
+semindex_collect_lvalue: fn(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, target: LValue, mp: String) {
     if target == {
         .Local(name, span) -> {
-            reference :: semindex_scoped_ref(&db, ctx, names, name, span, mp)
+            reference: semindex_scoped_ref(&db, ctx, names, name, span, mp)
             &db.refs.push(reference)
         }
         .Index(base, index, _, _) -> {
@@ -145,7 +145,7 @@ fn semindex_collect_lvalue(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, progr
     }
 }
 
-fn semindex_collect_binding(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, binding: Binding, mp: String) {
+semindex_collect_binding: fn(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, binding: Binding, mp: String) {
     if binding.ty_span == .Val(span) -> semindex_structural_slot(&db, &ctx, "type", StructuralSlotKind.Scalar, (db: SymbolDB, ctx: WalkCtx) -> { semindex_record_node(&db, ctx, "type", "type", mp, span) })
     if binding.pattern == .Val(pattern) {
         semindex_structural_slot(&db, &ctx, "initializer", StructuralSlotKind.Scalar, (db: SymbolDB, ctx: WalkCtx) -> semindex_collect_expr(&db, &ctx, names, program, source, binding.init, mp))
@@ -157,7 +157,7 @@ fn semindex_collect_binding(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, prog
     }
     &db.defs.push(SymDef{identity: semindex_scoped_local_identity(ctx, "local", binding.name), name: binding.name, def_span: binding.name_span, module_path: mp, kind: .Local{mutable: binding.mutable, ty: binding.ty}})
     if binding.ty == .Val(ty) {
-        mutability :: if binding.mutable -> "mutable" else -> "immutable"
+        mutability: if binding.mutable -> "mutable" else -> "immutable"
         &db.hover.push(HoverEntry{span: binding.name_span, module_path: mp, text: "`{binding.name}`: {type_name(ty)} ({mutability})"})
         if binding.ty_span == None -> &db.inlay.push(InlayHint{span: binding.name_span, module_path: mp, label: ": {type_name(ty)}"})
     }
@@ -166,7 +166,7 @@ fn semindex_collect_binding(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, prog
 
 // Rust3243–3272: binder facts are already checked. No source declaration lookup,
 // policy resolver, textual parameter inference or re-binding supplied args.
-fn semindex_collect_call_inlay_hints(db: &SymbolDB, args: [CallArg], mp: String) {
+semindex_collect_call_inlay_hints: fn(db: &SymbolDB, args: [CallArg], mp: String) {
     seen_slots := [Int:Bool]{}
     loop arg in args {
         if arg.label != None -> next
@@ -175,7 +175,7 @@ fn semindex_collect_call_inlay_hints(db: &SymbolDB, args: [CallArg], mp: String)
             if arg.flags.binder_slot == .Val(slot) {
                 if seen_slots.get(slot) != None -> next
                 seen_slots[slot] = true
-                start :: expr_span(arg.expr).start
+                start: expr_span(arg.expr).start
                 &db.inlay.push(InlayHint{span: Span{start: start, end: start}, module_path: mp, label: "{label}: "})
             }
         }

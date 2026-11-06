@@ -1,17 +1,17 @@
 // Bytes: builder + one read cursor + string-like decode (I9 / #1467).
 // Cursor EOF is position == len. Reader/Writer stay on core.encoding / core.term.
-fn run() {
+run: fn() {
     b := Bytes.with_capacity(16)
     print("capacity_ok: {b.capacity() >= 16}")
-    one :: U8{65}
+    one: U8{65}
     &b.write_byte(one)
     &b.write([66, 67])
     print("bytes: {b.to_bytes()}")
     print("get0: {b.get(0)}")
     print("first: {b.first()}")
-    needle_b :: "B"
-    needle_a :: "A"
-    needle_c :: "C"
+    needle_b: "B"
+    needle_a: "A"
+    needle_c: "C"
     print("contains_B: {b.contains(needle_b)}")
     print("starts_A: {b.starts_with(needle_a)}")
     print("ends_C: {b.ends_with(needle_c)}")
@@ -31,10 +31,10 @@ fn run() {
     print("trim: {spaced.trim().string()}")
     print("lower: {Bytes.from([72, 73]).to_lower().string()}")
     print("title: {Bytes.from([104, 105]).to_title().string()}")
-    from_a :: "a"
-    to_b :: "b"
+    from_a: "a"
+    to_b: "b"
     print("replace: {Bytes.from([97, 97]).replace(from_a, to_b).string()}")
-    sep_comma :: ","
+    sep_comma: ","
     print("split: {Bytes.from([97, 44, 98]).split(sep_comma)}")
     print("lines: {Bytes.from([97, 10, 98]).lines()}")
     sep := Bytes.from([45])

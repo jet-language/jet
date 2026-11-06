@@ -5,8 +5,8 @@
 use jet_lexer.[TOKEN_AMP, TOKEN_CARET, TOKEN_SEMI, lex]
 
 // Whether `lex` put a statement terminator right before the first `mark` token of `source`.
-fn place_mark_semi_before(source: String, mark: Int) -> Bool Never! {
-    lexed :: lex(source.bytes())
+place_mark_semi_before: fn(source: String, mark: Int) -> Bool Never! {
+    lexed: lex(source.bytes())
     assert(lexed.diagnostics.is_empty())
     loop index in 0..<lexed.tokens.len() {
         if lexed.tokens[index].kind == mark -> return index > 0 && lexed.tokens[index - 1].kind == TOKEN_SEMI

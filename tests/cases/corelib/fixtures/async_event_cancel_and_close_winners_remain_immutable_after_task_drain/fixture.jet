@@ -1,53 +1,53 @@
-package { name: "async-event-cancel-close" authority: { allow: [Time] } }
+package: { name: "async-event-cancel-close" authority: { allow: [Time] } }
 use {
-    event :: core.event
-    tasks :: core.tasks
-    time :: core.time
+    event: core.event
+    tasks: core.tasks
+    time: core.time
 }
 
-fn run() {
-    { sender: cancel_gate_started_tx, receiver: cancel_gate_started_rx } :: channel<Int>()
-    { sender: cancel_gate_release_tx, receiver: cancel_gate_release_rx } :: channel<Int>()
-    cancel_gate :: task {
+run: fn() {
+    { sender: cancel_gate_started_tx, receiver: cancel_gate_started_rx }: channel<Int>()
+    { sender: cancel_gate_release_tx, receiver: cancel_gate_release_rx }: channel<Int>()
+    cancel_gate: task {
         cancel_gate_started_tx.send(1)
-        released :: cancel_gate_release_rx.receive() ?? panic("cancel gate")
+        released: cancel_gate_release_rx.receive() ?? panic("cancel gate")
     }
-    cancel_gate_started :: cancel_gate_started_rx.receive() ?? panic("cancel gate start")
+    cancel_gate_started: cancel_gate_started_rx.receive() ?? panic("cancel gate start")
 
-    cancel_scope :: event.scope()
-    cancel_event :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    cancel_scope: event.scope()
+    cancel_event: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
     #Context(deadline: time.unix_ns() /% 1_000_000 + 100000) {
-        cancel_queued :: cancel_event.emit_async(1)
-        cancel_pending :: cancel_event.emit_async(2)
+        cancel_queued: cancel_event.emit_async(1)
+        cancel_pending: cancel_event.emit_async(2)
         cancel_event.on(cancel_scope, (n: Int) -> {})
         cancel_scope.cancel()
         cancel_gate_release_tx.send(1)
-        queued_report :: cancel_queued.join() ?? panic("cancel queued join")
-        pending_report :: cancel_pending.join() ?? panic("cancel pending join")
+        queued_report: cancel_queued.join() ?? panic("cancel queued join")
+        pending_report: cancel_pending.join() ?? panic("cancel pending join")
         print("cancel queued={queued_report.state() == .Cancelled} trace={queued_report.trace().summary()}")
         print("cancel pending={pending_report.state() == .Cancelled} trace={pending_report.trace().summary()}")
     }
     print("cancel counts={cancel_event.queued_count()},{cancel_event.running_count()},{cancel_event.blocked_count()}")
 
-    { sender: close_gate_started_tx, receiver: close_gate_started_rx } :: channel<Int>()
-    { sender: close_gate_release_tx, receiver: close_gate_release_rx } :: channel<Int>()
-    close_gate :: task {
+    { sender: close_gate_started_tx, receiver: close_gate_started_rx }: channel<Int>()
+    { sender: close_gate_release_tx, receiver: close_gate_release_rx }: channel<Int>()
+    close_gate: task {
         close_gate_started_tx.send(1)
-        released :: close_gate_release_rx.receive() ?? panic("close gate")
+        released: close_gate_release_rx.receive() ?? panic("close gate")
     }
-    close_gate_started :: close_gate_started_rx.receive() ?? panic("close gate start")
+    close_gate_started: close_gate_started_rx.receive() ?? panic("close gate start")
 
-    close_scope :: event.scope()
-    close_event :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    close_scope: event.scope()
+    close_event: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
     close_event.on(close_scope, (n: Int) -> {})
     #Context(deadline: time.unix_ns() /% 1_000_000 + 100000) {
-        close_queued :: close_event.emit_async(3)
-        close_pending :: close_event.emit_async(4)
+        close_queued: close_event.emit_async(3)
+        close_pending: close_event.emit_async(4)
         close_event.close()
         close_scope.cancel()
         close_gate_release_tx.send(1)
-        queued_report :: close_queued.join() ?? panic("close queued join")
-        pending_report :: close_pending.join() ?? panic("close pending join")
+        queued_report: close_queued.join() ?? panic("close queued join")
+        pending_report: close_pending.join() ?? panic("close pending join")
         print("close queued={queued_report.state() == .Cancelled} trace={queued_report.trace().summary()}")
         print("close pending={pending_report.state() == .Closed} trace={pending_report.trace().summary()}")
     }

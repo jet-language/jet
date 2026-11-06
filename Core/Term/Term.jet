@@ -1,4 +1,4 @@
-package {
+package: {
     name: "core.term"
     version: "0.0.1"
     edition: "2026"
@@ -8,7 +8,7 @@ package {
         term: .Library{ entry: term }
     }
 }
-use core :: core
+use core: core
 // core.term — the connected terminal.
 //
 // `print` / `eprint` write UTF-8. `input` / `readline` / `read_until` read
@@ -16,75 +16,75 @@ use core :: core
 // a TTY unless `style_force` is used. Width and height fall back to 80x24.
 //
 // ANSI SGR parsing is Jet. Byte IO is host (fd 0/1/2).
-struct Reader {
+Reader: struct {
     fd: Int
 }
 
-struct Writer {
+Writer: struct {
     fd: Int
 }
 
-struct StdinHandle {
+StdinHandle: struct {
     fd: Int
 
     // The declaration's fd is informational; every token reads shared stdin.
     // The Rust original owns no independent unread buffer or close operation.
     // The raw leaf already drops the line's trailing LF and CR bytes.
-    fn read_line(&self) -[IO, Time.Wait]> String? IOError! {
+    read_line: fn(&self) -[IO, Time.Wait]> String? IOError! {
         stdio_checkpoint(.Read, "stdin", "IO.Read")
         core.term.__stdin_line()
     }
     // Whether standard input is a terminal, mirroring
     // Stdout.is_tty and Stderr.is_tty. It reads no input and never fails; the read
     // receiver lets a temporary ask (`stdin().is_tty()`).
-    fn is_tty(self) -[IO]> Bool Never! {
+    is_tty: fn(self) -[IO]> Bool Never! {
         core.term.__terminal8_stdin_tty()
     }
 }
 
-struct Stdout {
+Stdout: struct {
     fd: Int
 
-    fn write(&self, text: String) IOError! -[IO]> {
+    write: fn(&self, text: String) IOError! -[IO]> {
         stdio_write(text, false, false)
     }
-    fn write_line(&self, text: String) IOError! -[IO]> {
+    write_line: fn(&self, text: String) IOError! -[IO]> {
         stdio_write(text, true, false)
     }
-    fn write_bytes(&self, bytes: [U8]) IOError! -[IO]> {
+    write_bytes: fn(&self, bytes: [U8]) IOError! -[IO]> {
         stdio_bytes(bytes, false)
     }
-    fn flush(&self) IOError! -[IO]> {
+    flush: fn(&self) IOError! -[IO]> {
         stdio_flush(false)
     }
     // A pure query: the read receiver lets a temporary ask (`stdout().is_tty()`).
-    fn is_tty(self) -[IO]> Bool Never! {
+    is_tty: fn(self) -[IO]> Bool Never! {
         core.term.__stdout_terminal()
     }
 }
 
-struct Stderr {
+Stderr: struct {
     fd: Int
 
-    fn write(&self, text: String) IOError! -[IO]> {
+    write: fn(&self, text: String) IOError! -[IO]> {
         stdio_write(text, false, true)
     }
-    fn write_line(&self, text: String) IOError! -[IO]> {
+    write_line: fn(&self, text: String) IOError! -[IO]> {
         stdio_write(text, true, true)
     }
-    fn write_bytes(&self, bytes: [U8]) IOError! -[IO]> {
+    write_bytes: fn(&self, bytes: [U8]) IOError! -[IO]> {
         stdio_bytes(bytes, true)
     }
-    fn flush(&self) IOError! -[IO]> {
+    flush: fn(&self) IOError! -[IO]> {
         stdio_flush(true)
     }
-    fn is_tty(self) -[IO]> Bool Never! {
+    is_tty: fn(self) -[IO]> Bool Never! {
         core.term.__stderr_terminal()
     }
 }
 
 // The one `Key` value `read_key()` answers on every tier.
-enum Key {
+Key: enum {
     Char(Char)
     Enter
     Escape
@@ -99,7 +99,7 @@ enum Key {
     Ctrl(Char)
     Unknown
 }
-fn print(text: String) Never! -[IO, Time.Wait]> {
+print: fn(text: String) Never! -[IO, Time.Wait]> {
     out := stdout()
     &out.write_line(text).drop("stdout write")
 }
@@ -108,85 +108,85 @@ fn print(text: String) Never! -[IO, Time.Wait]> {
 // the same IO.Write checkpoint, then the same raw write (stderr ignores
 // `flush`; stdio_write passes true for any nonempty text), whose cause text
 // is dropped unread.
-fn eprint(text: String) Never! -[IO, Time.Wait]> {
+eprint: fn(text: String) Never! -[IO, Time.Wait]> {
     if core.term.__stdio_fault("IO.Write") -> return
-    _ :: core.term.__stdio_write("{text}\n", false, true, true)
+    _: core.term.__stdio_write("{text}\n", false, true, true)
 }
 
 // jet_std_io_input: the prompt is written and flushed, then one line is read
 // without its line ending; a closed stream reads as "".
-fn input(prompt: String{""}) -[IO, Time.Wait]> String IOError! {
+input: fn(prompt: String{""}) -[IO, Time.Wait]> String IOError! {
     terminal_prompt(prompt, false)
     readline()
 }
 
-fn input_secret(prompt: String) -[IO, Time.Wait]> String IOError! {
+input_secret: fn(prompt: String) -[IO, Time.Wait]> String IOError! {
     if !core.term.__terminal8_stdin_tty() || !core.term.__terminal8_stdout_tty() -> return Err(terminal_invalid("secret input needs a terminal"))
-    cause :: terminal_secret_write(prompt)
+    cause: terminal_secret_write(prompt)
     if cause != None -> return Err(terminal_other(.Flush, Val("stdout"), cause))
     if !core.term.__terminal8_mode_enter(false) {
-        _ :: terminal_secret_write("\n")
+        _: terminal_secret_write("\n")
         return Err(terminal_other(.Read, Val("stdin"), "could not disable terminal echo"))
     }
-    result :: terminal_secret_read()
-    _ :: terminal_secret_write("\n")
+    result: terminal_secret_read()
+    _: terminal_secret_write("\n")
     if result.cause != None -> return Err(terminal_other(.Read, Val("stdin"), result.cause ?? ""))
     if result.eof -> return Err(terminal_other(.Read, Val("stdin"), "the input stream closed before the secret arrived"))
     Ok(chomp(result.line))
 }
 
-fn read_all_input() -[IO, Time.Wait]> String IOError! {
+read_all_input: fn() -[IO, Time.Wait]> String IOError! {
     terminal_read_preflight()
-    result :: core.term.__terminal8_read_all()
+    result: core.term.__terminal8_read_all()
     if result.cause != None -> return Err(terminal_other(.Read, Val("stdin"), result.cause ?? ""))
     Ok(result.text)
 }
 
-fn readline() -[IO, Time.Wait]> String IOError! {
-    line :: terminal_line()
+readline: fn() -[IO, Time.Wait]> String IOError! {
+    line: terminal_line()
     Ok(line ?? "")
 }
 
-fn read_until(delimiter: String) -[IO, Time.Wait]> String IOError! {
+read_until: fn(delimiter: String) -[IO, Time.Wait]> String IOError! {
     if delimiter.is_empty() -> return Err(terminal_other(.Read, Val("stdin"), "empty delimiter"))
     terminal_read_preflight()
-    result :: core.term.__terminal8_read_until(delimiter)
+    result: core.term.__terminal8_read_until(delimiter)
     if result.cause != None -> return Err(terminal_other(.Read, Val("stdin"), result.cause ?? ""))
     Ok(result.text)
 }
 
-fn __take_bytes(n: Int) -[IO, Time.Wait]> [U8] IOError! {
+__take_bytes: fn(n: Int) -[IO, Time.Wait]> [U8] IOError! {
     if n < 0 -> return Err(terminal_other(.Read, Val("stdin"), "negative take"))
     terminal_read_preflight()
-    result :: core.term.__terminal8_take(n)
+    result: core.term.__terminal8_take(n)
     if result.cause != None -> return Err(terminal_other(.Read, Val("stdin"), result.cause ?? ""))
     Ok(result.bytes)
 }
 
 
-fn binread(path: String) -[FS, IO, Time.Wait]> [U8] IOError! {
+binread: fn(path: String) -[FS, IO, Time.Wait]> [U8] IOError! {
     core.files.read_bytes(path)
 }
 
-fn binwrite(path: String, bytes: [U8]) IOError! -[FS, IO, Time.Wait]> {
+binwrite: fn(path: String, bytes: [U8]) IOError! -[FS, IO, Time.Wait]> {
     core.files.write_bytes(path, bytes)
 }
 
-fn confirm(prompt: String) -[IO, Time.Wait]> Bool Never! {
-    answer :: input("{prompt} [y/N] ") ?? ""
+confirm: fn(prompt: String) -[IO, Time.Wait]> Bool Never! {
+    answer: input("{prompt} [y/N] ") ?? ""
     confirm_answer(answer)
 }
 
-fn choose(prompt: String, options: [String]) -[IO, Time.Wait]> String IOError! {
+choose: fn(prompt: String, options: [String]) -[IO, Time.Wait]> String IOError! {
     if options.len() == 0 -> return Err(terminal_invalid("choose needs at least one item"))
     terminal_prompt(choose_menu(prompt, options), true)
     loop attempt in 0..<11 {
         terminal_prompt("> ", true)
-        read :: terminal_line()
-        answer :: read ?? return Err(terminal_invalid("the input stream closed before a choice arrived"))
-        index :: choose_index(answer)
+        read: terminal_line()
+        answer: read ?? return Err(terminal_invalid("the input stream closed before a choice arrived"))
+        index: choose_index(answer)
         if index != None {
-            n :: index
+            n: index
             if n > 0 && n <= options.len() -> return Ok(options[n - 1])
         }
         terminal_prompt("Enter a number from 1 to {options.len()}.\n", true)
@@ -194,86 +194,86 @@ fn choose(prompt: String, options: [String]) -[IO, Time.Wait]> String IOError! {
     Err(terminal_invalid("no valid choice after 10 retries"))
 }
 
-fn stdin() -> StdinHandle Never! { StdinHandle{fd: 0} }
+stdin: fn() -> StdinHandle Never! { StdinHandle{fd: 0} }
 
-fn stdout() -> Stdout Never! { Stdout{fd: 1} }
+stdout: fn() -> Stdout Never! { Stdout{fd: 1} }
 
-fn stderr() -> Stderr Never! { Stderr{fd: 2} }
+stderr: fn() -> Stderr Never! { Stderr{fd: 2} }
 
-fn buffered() -> StdinHandle Never! { stdin() }
+buffered: fn() -> StdinHandle Never! { stdin() }
 
-fn terminal_width() -[IO]> Int Never! {
-    from_env :: positive_dimension(core.term.__terminal8_env("COLUMNS"))
+terminal_width: fn() -[IO]> Int Never! {
+    from_env: positive_dimension(core.term.__terminal8_env("COLUMNS"))
     if from_env != None -> return from_env
-    size :: core.term.__terminal8_stty()
+    size: core.term.__terminal8_stty()
     if size != None -> return size.w
     80
 }
 
-fn terminal_height() -[IO]> Int Never! {
-    from_env :: positive_dimension(core.term.__terminal8_env("LINES"))
+terminal_height: fn() -[IO]> Int Never! {
+    from_env: positive_dimension(core.term.__terminal8_env("LINES"))
     if from_env != None -> return from_env
-    size :: core.term.__terminal8_stty()
+    size: core.term.__terminal8_stty()
     if size != None -> return size.h
     24
 }
 
-fn style(style: String, text: String) -[IO]> String Never! {
+style: fn(style: String, text: String) -[IO]> String Never! {
     if !terminal_style_enabled() -> return text.copy()
-    code :: legacy_style_code(style)
+    code: legacy_style_code(style)
     if code.is_empty() -> return text.copy()
-    esc :: String.from_bytes([U8]{27}) ?? ""
+    esc: String.from_bytes([U8]{27}) ?? ""
     "{esc}[{code}m{text}{esc}[0m"
 }
 
-fn style_force(style: String, text: String) -> String Never! {
-    codes :: sgr(style)
+style_force: fn(style: String, text: String) -> String Never! {
+    codes: sgr(style)
     if codes.len() == 0 -> return text.copy()
-    esc :: String.from_bytes([U8]{27}) ?? ""
+    esc: String.from_bytes([U8]{27}) ?? ""
     return "{esc}[{codes}m{text}{esc}[0m"
 }
 
 
-fn read_key() -[IO, Time.Wait]> Key Never! {
-    raw :: core.term.__terminal8_key_bytes()
+read_key: fn() -[IO, Time.Wait]> Key Never! {
+    raw: core.term.__terminal8_key_bytes()
     decode_key(raw.bytes, raw.platform)
 }
 
-struct WinSize {
+WinSize: struct {
     w: Int
     h: Int
 }
-fn progress(label: String) IOError! -[IO, Time.Wait]> {
+progress: fn(label: String) IOError! -[IO, Time.Wait]> {
     if core.term.__terminal8_machine_output() -> return Ok()
     // Without a terminal on stderr the label is a plain stdout line, so a
     // piped run still records its progress.
     if !core.term.__terminal8_stderr_tty() {
         terminal_write_preflight("stdout")
-        line_cause :: core.term.__terminal8_write_stdout("{label}\n", true)
+        line_cause: core.term.__terminal8_write_stdout("{label}\n", true)
         if line_cause != None -> return Err(terminal_other(.Flush, Val("stdout"), line_cause))
         return Ok()
     }
     terminal_write_preflight("stderr")
-    carriage_return :: String.from_bytes([U8]{13}) ?? panic("CR is valid UTF-8")
-    cause :: core.term.__terminal8_write_stderr("{carriage_return}{label}", true)
+    carriage_return: String.from_bytes([U8]{13}) ?? panic("CR is valid UTF-8")
+    cause: core.term.__terminal8_write_stderr("{carriage_return}{label}", true)
     if cause != None -> return Err(terminal_other(.Flush, Val("stderr"), cause))
     Ok()
 }
 
-fn decode_key(raw: [U8], platform: Int) -> Key Never! {
+decode_key: fn(raw: [U8], platform: Int) -> Key Never! {
     if platform == 0 || raw.len() == 0 -> return .Unknown
     if raw.len() == 1 {
-        b :: Int.from_u8(raw[0])
+        b: Int.from_u8(raw[0])
         if b == 13 || b == 10 -> return .Enter
         if b == 27 -> return .Escape
         if b == 127 || b == 8 -> return .Backspace
         if b == 9 -> return .Tab
         if platform == 1 && b >= 1 && b <= 26 {
-            text :: String.from_bytes([U8]{U8{b + 96}}) ?? ""
+            text: String.from_bytes([U8]{U8{b + 96}}) ?? ""
             return .Ctrl(text.chars()[0])
         }
         if b < 128 {
-            text :: String.from_bytes(raw) ?? ""
+            text: String.from_bytes(raw) ?? ""
             return .Char(text.chars()[0])
         }
     }
@@ -289,8 +289,8 @@ fn decode_key(raw: [U8], platform: Int) -> Key Never! {
         }
         if raw.len() == 4 && raw[2] == (U8{51}) && raw[3] == (U8{126}) -> return .Delete
         if platform == 1 && raw[raw.len() - 1] == (U8{126}) {
-            n :: positive_dimension(Val(slice_bytes(raw, 2, raw.len() - 1))) ?? -1
-            key :: if n == {
+            n: positive_dimension(Val(slice_bytes(raw, 2, raw.len() - 1))) ?? -1
+            key: if n == {
                 11 -> 1
                 12 -> 2
                 13 -> 3
@@ -310,8 +310,8 @@ fn decode_key(raw: [U8], platform: Int) -> Key Never! {
         return .Unknown
     }
     if platform == 2 -> return .Unknown
-    text :: String.from_bytes(raw) ?? return .Unknown
-    chars :: text.chars()
+    text: String.from_bytes(raw) ?? return .Unknown
+    chars: text.chars()
     if chars.len() == 0 {
         return .Unknown
     }
@@ -325,30 +325,30 @@ fn decode_key(raw: [U8], platform: Int) -> Key Never! {
     assert_eq(decode_key([U8]{3}, 1), Key.Ctrl('c'))
     assert_eq(decode_key([U8]{195, 169}, 1), Key.Char('é'))
     assert_eq(decode_key([U8]{195}, 1), Key.Unknown)
-    carriage_return :: String.from_bytes([U8]{13}) ?? panic("CR is valid UTF-8")
+    carriage_return: String.from_bytes([U8]{13}) ?? panic("CR is valid UTF-8")
     assert_eq(chomp("a{carriage_return}{carriage_return}\n"), "a")
 }
 
 
 // Raw leaves expose host operations only. Prompt fault probes must both run
 // before the first byte is written, and each caller owns its error projection.
-fn terminal_other(operation: IOOperation, resource: String?, cause: String) -> IOError Never! {
+terminal_other: fn(operation: IOOperation, resource: String?, cause: String) -> IOError Never! {
     IOError.Other(IOContext{operation: operation, resource: resource, os_code: None, cause: Val(cause)})
 }
 
-fn terminal_invalid(cause: String) -> IOError Never! {
+terminal_invalid: fn(cause: String) -> IOError Never! {
     IOError.InvalidInput(IOContext{operation: .Read, resource: Val("stdin"), os_code: None, cause: Val(cause)})
 }
 
-fn terminal_write_preflight(resource: String) IOError! -[IO, Time.Wait]> {
+terminal_write_preflight: fn(resource: String) IOError! -[IO, Time.Wait]> {
     if core.term.__terminal8_fault("IO.Write") -> return Err(terminal_other(.Write, Val(resource), "fault injected: IO.Write"))
     if core.term.__terminal8_fault("IO.Flush") -> return Err(terminal_other(.Flush, Val(resource), "fault injected: IO.Flush"))
     Ok()
 }
 
-fn terminal_prompt(text: String, choose: Bool) IOError! -[IO, Time.Wait]> {
+terminal_prompt: fn(text: String, choose: Bool) IOError! -[IO, Time.Wait]> {
     terminal_write_preflight("stdout")
-    cause :: core.term.__terminal8_write_stdout(text, true)
+    cause: core.term.__terminal8_write_stdout(text, true)
     if cause != None {
         if choose -> return Err(terminal_other(.Write, Val("stdout"), cause))
         return Err(terminal_other(.Flush, None, cause))
@@ -356,44 +356,44 @@ fn terminal_prompt(text: String, choose: Bool) IOError! -[IO, Time.Wait]> {
     Ok()
 }
 
-fn terminal_read_preflight() IOError! -[IO, Time.Wait]> {
+terminal_read_preflight: fn() IOError! -[IO, Time.Wait]> {
     if core.term.__terminal8_fault("IO.Read") -> return Err(terminal_other(.Read, Val("stdin"), "fault injected: IO.Read"))
     Ok()
 }
-fn terminal_line() -[IO, Time.Wait]> String? IOError! {
+terminal_line: fn() -[IO, Time.Wait]> String? IOError! {
     if core.term.__terminal8_fault("IO.Read") -> return Err(terminal_other(.Read, Val("stdin"), "fault injected: IO.Read"))
-    result :: core.term.__terminal8_line()
+    result: core.term.__terminal8_line()
     if result.cause != None -> return Err(terminal_other(.Read, Val("stdin"), result.cause ?? ""))
     if result.eof -> return Ok(None)
     Ok(Val(chomp(result.line)))
 }
 
-fn terminal_secret_write(text: String) -[IO, Time.Wait]> String? Never! {
+terminal_secret_write: fn(text: String) -[IO, Time.Wait]> String? Never! {
     if core.term.__terminal8_fault("IO.Write") -> return Val("fault injected: IO.Write")
     if core.term.__terminal8_fault("IO.Flush") -> return Val("fault injected: IO.Flush")
     core.term.__terminal8_write_stdout(text, true)
 }
 
-fn terminal_secret_read() -[IO, Time.Wait]> (eof: Bool, line: String, cause: String?) Never! {
-    _guard :: core.mem.scope.guard(() -> core.term.__terminal8_mode_leave())
+terminal_secret_read: fn() -[IO, Time.Wait]> (eof: Bool, line: String, cause: String?) Never! {
+    _guard: core.mem.scope.guard(() -> core.term.__terminal8_mode_leave())
     if core.term.__terminal8_fault("IO.Read") -> return (eof: false, line: "", cause: Val("fault injected: IO.Read"))
     core.term.__terminal8_line()
 }
 
-fn choose_menu(prompt: String, options: [String]) -> String Never! {
+choose_menu: fn(prompt: String, options: [String]) -> String Never! {
     menu := "{prompt}\n"
     loop i in 0..<options.len() -> menu = "{menu}  {i + 1}) {options[i]}\n"
     menu
 }
 
-fn choose_index(answer: String) -> Int? Never! {
-    raw :: answer.trim().bytes()
+choose_index: fn(answer: String) -> Int? Never! {
+    raw: answer.trim().bytes()
     start := 0
     if raw.len() > 0 && raw[0] == (U8{43}) -> start = 1
     if start >= raw.len() -> return None
     n := 0
     loop i in start..<raw.len() {
-        d :: Int.from_u8(raw[i]) - 48
+        d: Int.from_u8(raw[i]) - 48
         if d < 0 || d > 9 -> return None
         // Values above Int::MAX cannot select any source array entry.
         if n > 922337203685477580 || (n == 922337203685477580 && d > 7) -> return None
@@ -402,16 +402,16 @@ fn choose_index(answer: String) -> Int? Never! {
     Val(n)
 }
 
-fn positive_dimension(value: String?) -> Int? Never! {
-    text :: value ?? return None
-    n :: choose_index(text) ?? return None
+positive_dimension: fn(value: String?) -> Int? Never! {
+    text: value ?? return None
+    n: choose_index(text) ?? return None
     // Rust parse::<i64> allows a leading +, but not surrounding whitespace.
     if text != text.trim() || n <= 0 -> return None
     Val(n)
 }
 
-fn terminal_style_enabled() -[IO]> Bool Never! {
-    mode :: core.term.__terminal8_color_mode()
+terminal_style_enabled: fn() -[IO]> Bool Never! {
+    mode: core.term.__terminal8_color_mode()
     if mode == 1 -> return true
     if mode == 2 -> return false
     if core.term.__terminal8_env_has("NO_COLOR") -> return false
@@ -419,7 +419,7 @@ fn terminal_style_enabled() -[IO]> Bool Never! {
     core.term.__terminal8_stdout_tty()
 }
 
-fn legacy_style_code(style: String) -> String Never! {
+legacy_style_code: fn(style: String) -> String Never! {
     if style == {
         "black" -> "30"
         "red" -> "31"
@@ -455,23 +455,23 @@ fn legacy_style_code(style: String) -> String Never! {
     assert_eq(legacy_style_code("31"), "")
 }
 
-fn confirm_answer(answer: String) -> Bool Never! {
-    normalized :: ascii_lower(answer.trim())
+confirm_answer: fn(answer: String) -> Bool Never! {
+    normalized: ascii_lower(answer.trim())
     normalized == "y" || normalized == "yes"
 }
-fn sgr(spec: String) -> String {
+sgr: fn(spec: String) -> String {
     parts := [String]{}
     cur := [U8]{}
     loop b in spec.bytes() {
         if b == (U8{32}) || b == (U8{44}) || b == (U8{59}) {
-            token :: ascii_lower(String.from_bytes(cur) ?? "")
+            token: ascii_lower(String.from_bytes(cur) ?? "")
             cur = [U8]{}
-            code :: token_code(token)
+            code: token_code(token)
             if code.len() > 0 -> &parts.push(code)
         } else { &cur.push(b) }
     }
-    token :: ascii_lower(String.from_bytes(cur) ?? "")
-    code :: token_code(token)
+    token: ascii_lower(String.from_bytes(cur) ?? "")
+    code: token_code(token)
     if code.len() > 0 -> &parts.push(code)
     out := ""
     loop i in 0..<parts.len() {
@@ -481,8 +481,8 @@ fn sgr(spec: String) -> String {
     out
 }
 
-fn token_code(token: String) -> String {
-    numeric :: parse_int(token) ?? -1
+token_code: fn(token: String) -> String {
+    numeric: parse_int(token) ?? -1
     if numeric >= 0 && numeric <= 109 -> return "{numeric}"
     if token == {
         "bold" -> "1"
@@ -512,14 +512,14 @@ fn token_code(token: String) -> String {
     }
 }
 
-fn chomp(text: String) -> String {
-    raw :: text.bytes()
+chomp: fn(text: String) -> String {
+    raw: text.bytes()
     n := raw.len()
     loop n > 0 && (raw[n - 1] == (U8{10}) || raw[n - 1] == (U8{13})) -> n = n - 1
     slice_bytes(raw, 0, n)
 }
 
-fn slice_bytes(raw: [U8], start: Int, end: Int) -> String {
+slice_bytes: fn(raw: [U8], start: Int, end: Int) -> String {
     out := [U8]{}
     i := start
     loop {
@@ -529,29 +529,29 @@ fn slice_bytes(raw: [U8], start: Int, end: Int) -> String {
     }
 }
 
-fn ends_with_bytes(hay: [U8], needle: [U8]) -> Bool {
+ends_with_bytes: fn(hay: [U8], needle: [U8]) -> Bool {
     if needle.len() > hay.len() -> return false
-    off :: hay.len() - needle.len()
+    off: hay.len() - needle.len()
     loop i in 0..<needle.len() {
         if hay[off + i] != needle[i] -> return false
     }
     true
 }
 
-fn ascii_lower(text: String) -> String {
+ascii_lower: fn(text: String) -> String {
     out := [U8]{}
     loop b in text.bytes() {
-        n :: b
+        n: b
         if n >= 65 && n <= 90 -> &out.push(U8{n + 32}) else -> &out.push(b)
     }
     String.from_bytes(out) ?? text
 }
 
-fn parse_int(text: String) -> Int? {
+parse_int: fn(text: String) -> Int? {
     n := 0
     any := false
     loop b in text.bytes() {
-        d :: b
+        d: b
         if d < 48 || d > 57 -> return None
         if n > 922337203685477580 || (n == 922337203685477580 && d > 7) -> return None
         n = n * 10 + (d - 48)
@@ -567,7 +567,7 @@ fn parse_int(text: String) -> Int? {
     assert(stdin() != StdinHandle{fd: 9})
 }
 
-fn stdio_error(operation: IOOperation, resource: String, cause: String) -> IOError Never! {
+stdio_error: fn(operation: IOOperation, resource: String, cause: String) -> IOError Never! {
     IOError.Other(IOContext{
         operation: operation.copy(),
         resource: Val(resource),
@@ -576,43 +576,43 @@ fn stdio_error(operation: IOOperation, resource: String, cause: String) -> IOErr
     })
 }
 
-fn stdio_checkpoint(operation: IOOperation, resource: String, selector: String) IOError! {
+stdio_checkpoint: fn(operation: IOOperation, resource: String, selector: String) IOError! {
     if core.term.__stdio_fault(selector) {
         return Err(stdio_error(operation, resource, "fault injected: {selector}"))
     }
     Ok()
 }
 
-fn stdio_result(cause: String?, operation: IOOperation, resource: String) IOError! {
+stdio_result: fn(cause: String?, operation: IOOperation, resource: String) IOError! {
     if cause == {
         .Val(text) -> Err(stdio_error(operation, resource, text))
         .None -> Ok()
     }
 }
 
-fn stdio_terminal(stderr: Bool) -> Bool Never! {
+stdio_terminal: fn(stderr: Bool) -> Bool Never! {
     if stderr -> return core.term.__stderr_terminal()
     core.term.__stdout_terminal()
 }
 
 // The Rust original holds one lock across write_all and flush. The raw
 // operation receives this source decision; it never re-decides it.
-fn stdio_write(text: String, newline: Bool, stderr: Bool) IOError! -[IO]> {
-    resource :: if stderr -> "stderr" else -> "stdout"
+stdio_write: fn(text: String, newline: Bool, stderr: Bool) IOError! -[IO]> {
+    resource: if stderr -> "stderr" else -> "stdout"
     stdio_checkpoint(.Write, resource, "IO.Write")
-    flush :: !text.is_empty() || newline || stdio_terminal(stderr)
+    flush: !text.is_empty() || newline || stdio_terminal(stderr)
     stdio_result(core.term.__stdio_write(text, newline, stderr, flush), .Write, resource)
 }
 
-fn stdio_bytes(bytes: [U8], stderr: Bool) IOError! -[IO]> {
-    resource :: if stderr -> "stderr" else -> "stdout"
+stdio_bytes: fn(bytes: [U8], stderr: Bool) IOError! -[IO]> {
+    resource: if stderr -> "stderr" else -> "stdout"
     stdio_checkpoint(.Write, resource, "IO.Write")
-    flush :: bytes.len() > 0 || stdio_terminal(stderr)
+    flush: bytes.len() > 0 || stdio_terminal(stderr)
     stdio_result(core.term.__stdio_bytes(bytes, stderr, flush), .Write, resource)
 }
 
-fn stdio_flush(stderr: Bool) IOError! -[IO]> {
-    resource :: if stderr -> "stderr" else -> "stdout"
+stdio_flush: fn(stderr: Bool) IOError! -[IO]> {
+    resource: if stderr -> "stderr" else -> "stdout"
     stdio_checkpoint(.Flush, resource, "IO.Flush")
     stdio_result(core.term.__stdio_flush(stderr), .Flush, resource)
 }
@@ -648,7 +648,7 @@ fn stdio_flush(stderr: Bool) IOError! -[IO]> {
 }
 
 #Test("negative byte take fails before reading stdin") {
-    result :: __take_bytes(-1)
+    result: __take_bytes(-1)
     if result == {
         .Err(_) -> {}
         .Ok(_) -> assert(false)

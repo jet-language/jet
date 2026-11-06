@@ -1,17 +1,17 @@
 // #6290: a `[Int#4]` passed as `&a` to a `&[Int]` parameter lends the
 // callee a write window over the caller's elements.
-fn bump(xs: &[Int]) {
+bump: fn(xs: &[Int]) {
     xs[0] = xs[0] + 1
     xs[3] = xs[3] * 10
 }
 
-fn total(xs: [Int]) -> Int {
+total: fn(xs: [Int]) -> Int {
     sum := 0
     loop x in xs -> sum += x
     sum
 }
 
-fn run() {
+run: fn() {
     a := [Int#4]{1, 2, 3, 4}
     bump(&a)
     print(a[0])

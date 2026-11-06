@@ -5,7 +5,7 @@
 // records, a root authority row, a foreign source) is refused with E2104, never
 // guessed; a lock Rust cannot parse is no lockfile, as in `Lock::load`.
 use {
-    cli_files :: core.files
+    cli_files: core.files
     jet_driver.[
         JetDriverAuthorizedSourceSnapshot,
         JetDriverCompileMode,
@@ -18,13 +18,13 @@ use {
 }
 
 // `MAX_LOCK_BYTES` (also the per-line limit).
-JET_CLI_LOCK_MAX_BYTES :: 1048576
+JET_CLI_LOCK_MAX_BYTES: 1048576
 
 // The lock sections whose records this port does not validate.
-JET_CLI_LOCK_UNPORTED_SECTIONS :: [String]{"[[workspace_member]]", "[[browser]]", "[[build.contribution]]", "[[workspace_overlay]]", "[[workspace_overlay_package]]", "[[workspace_build_grant]]"}
+JET_CLI_LOCK_UNPORTED_SECTIONS: [String]{"[[workspace_member]]", "[[browser]]", "[[build.contribution]]", "[[workspace_overlay]]", "[[workspace_overlay_package]]", "[[workspace_build_grant]]"}
 
 // The facts of one `LockedPackage` the provenance report reads.
-struct JetCLILockPackage {
+JetCLILockPackage: struct {
     name: String
     version: String
     root: Bool
@@ -48,7 +48,7 @@ struct JetCLILockPackage {
 }
 
 // One `[[package]]` record while its lines are read.
-struct JetCLILockPartial {
+JetCLILockPartial: struct {
     name: String?
     version: String?
     source_raw: String?
@@ -67,32 +67,32 @@ struct JetCLILockPartial {
     build: String?
 }
 
-enum JetCLILockLoad {
+JetCLILockLoad: enum {
     Loaded(packages: [JetCLILockPackage])
     // No lock, an unreadable one, or one `parse` rejects.
     Missing
     Unported(shape: String)
 }
 
-enum JetCLILockStep {
+JetCLILockStep: enum {
     Ok
     Missing
     Unported(shape: String)
 }
 
-enum JetCLILockSource {
+JetCLILockSource: enum {
     Parsed(root: Bool, source_hash: String?)
     Missing
     Unported(shape: String)
 }
 
-fn jet_cli_lock_partial() -> JetCLILockPartial Never! {
+jet_cli_lock_partial: fn() -> JetCLILockPartial Never! {
     JetCLILockPartial{name: None, version: None, source_raw: None, locked_raw: None, content_hash: None, envelope: false, envelope_provenance: "", effects: [String]{}, effect_grants: [String]{}, required_effects: [String]{}, granted_effects: [String]{}, denied_effects: [String]{}, effect_authority: None, transparency: None, publisher: None, build: None}
 }
 
 // Rust `str::trim_matches('"')`.
-fn jet_cli_lock_trim_quotes(value: String) -> String Never! {
-    bytes :: value.bytes()
+jet_cli_lock_trim_quotes: fn(value: String) -> String Never! {
+    bytes: value.bytes()
     start := 0
     end := bytes.len()
     loop start < end && bytes[start] == (U8{34}) -> start += 1
@@ -100,13 +100,13 @@ fn jet_cli_lock_trim_quotes(value: String) -> String Never! {
     value.slice(start..<end)
 }
 
-fn jet_cli_lock_unescape(raw: String) -> String Never! {
+jet_cli_lock_unescape: fn(raw: String) -> String Never! {
     text := raw.trim()
     if text.len() >= 2 && text.starts_with("\"") && text.ends_with("\"") -> text = text.slice(1..<text.len() - 1)
     out := [U8]{}
     escaped := false
     loop byte in text.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if escaped {
             if code == {
                 110 -> &out.push(U8{10})
@@ -126,10 +126,10 @@ fn jet_cli_lock_unescape(raw: String) -> String Never! {
 }
 
 // None is its `invalid string array` error.
-fn jet_cli_lock_string_array(raw: String) -> [String]? Never! {
-    value :: raw.trim()
+jet_cli_lock_string_array: fn(raw: String) -> [String]? Never! {
+    value: raw.trim()
     if !value.starts_with("[") || !value.ends_with("]") || value.len() < 2 -> return None
-    inner :: value.slice(1..<value.len() - 1)
+    inner: value.slice(1..<value.len() - 1)
     if inner.trim() == "" -> return Val([String]{})
     values := [String]{}
     current := [U8]{}
@@ -138,7 +138,7 @@ fn jet_cli_lock_string_array(raw: String) -> [String]? Never! {
     item_started := false
     item_quoted := false
     loop byte in inner.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if escaped {
             if code == {
                 110 -> &current.push(U8{10})
@@ -156,7 +156,7 @@ fn jet_cli_lock_string_array(raw: String) -> [String]? Never! {
             item_quoted = true
         } else if code == 44 && !quoted {
             if !item_started -> return None
-            text :: String.from_bytes(current) ?? ""
+            text: String.from_bytes(current) ?? ""
             &values.push(if item_quoted -> text else -> text.trim())
             current = [U8]{}
             item_started = false
@@ -167,7 +167,7 @@ fn jet_cli_lock_string_array(raw: String) -> [String]? Never! {
         }
     }
     if quoted || escaped || !item_started -> return None
-    text :: String.from_bytes(current) ?? ""
+    text: String.from_bytes(current) ?? ""
     &values.push(if item_quoted -> text else -> text.trim())
     Val(values)
 }
@@ -175,14 +175,14 @@ fn jet_cli_lock_string_array(raw: String) -> [String]? Never! {
 // `kv_field`: the value of `key = …` among the comma-separated parts of an
 // inline table. The first part that starts with `key` but has no `=` ends the
 // search with None, as the Rust `?` does.
-fn jet_cli_lock_kv_field(inline: String, key: String) -> String? Never! {
+jet_cli_lock_kv_field: fn(inline: String, key: String) -> String? Never! {
     parts := [String]{}
     start := 0
     quoted := false
     escaped := false
-    bytes :: inline.bytes()
+    bytes: inline.bytes()
     loop index in 0..<bytes.len() {
-        code :: Int.from_u8(bytes[index])
+        code: Int.from_u8(bytes[index])
         if escaped {
             escaped = false
         } else if quoted && code == 92 {
@@ -196,11 +196,11 @@ fn jet_cli_lock_kv_field(inline: String, key: String) -> String? Never! {
     }
     &parts.push(inline.slice(start..<bytes.len()))
     loop raw_part in parts {
-        part :: raw_part.trim()
+        part: raw_part.trim()
         if !part.starts_with(key) -> next
-        rest :: part.slice(key.len()..<part.len()).trim()
+        rest: part.slice(key.len()..<part.len()).trim()
         if !rest.starts_with("=") -> return None
-        value :: rest.slice(1..<rest.len()).trim()
+        value: rest.slice(1..<rest.len()).trim()
         if value.starts_with("\"") -> return Val(jet_cli_lock_unescape(value))
         return Val(value)
     }
@@ -208,9 +208,9 @@ fn jet_cli_lock_kv_field(inline: String, key: String) -> String? Never! {
 }
 
 // `parse_source` and `parse_locked`: the inline table with its braces trimmed.
-fn jet_cli_lock_inline(raw: String) -> String Never! {
-    text :: raw.trim()
-    bytes :: text.bytes()
+jet_cli_lock_inline: fn(raw: String) -> String Never! {
+    text: raw.trim()
+    bytes: text.bytes()
     start := 0
     end := bytes.len()
     loop start < end && bytes[start] == (U8{123}) -> start += 1
@@ -221,12 +221,12 @@ fn jet_cli_lock_inline(raw: String) -> String Never! {
 // `parse_source`, keeping only what the provenance report reads. A Nix source
 // cannot finish without the closure record this port refuses, so it is the
 // parse error Rust reports for a Nix package without one.
-fn jet_cli_lock_source(raw: String) -> JetCLILockSource Never! {
-    inline :: jet_cli_lock_inline(raw)
+jet_cli_lock_source: fn(raw: String) -> JetCLILockSource Never! {
+    inline: jet_cli_lock_inline(raw)
     if jet_cli_lock_kv_field(inline, "root") != None -> return JetCLILockSource.Parsed{root: true, source_hash: None}
     if jet_cli_lock_kv_field(inline, "path") != None -> return JetCLILockSource.Parsed{root: false, source_hash: None}
     if jet_cli_lock_kv_field(inline, "nix") != None -> return JetCLILockSource.Missing
-    registry_kinds :: [String]{"cran", "luarocks", "registry"}
+    registry_kinds: [String]{"cran", "luarocks", "registry"}
     loop registry_kind in registry_kinds {
         if jet_cli_lock_kv_field(inline, registry_kind) != None {
             return JetCLILockSource.Parsed{root: false, source_hash: Val(jet_cli_lock_kv_field(inline, "source-hash") ?? "")}
@@ -237,9 +237,9 @@ fn jet_cli_lock_source(raw: String) -> JetCLILockSource Never! {
     JetCLILockSource.Missing
 }
 
-fn jet_cli_lock_finish(partial: JetCLILockPartial, packages: &[JetCLILockPackage]) -> JetCLILockStep Never! {
-    name :: partial.name ?? return JetCLILockStep.Missing
-    version :: partial.version ?? return JetCLILockStep.Missing
+jet_cli_lock_finish: fn(partial: JetCLILockPartial, packages: &[JetCLILockPackage]) -> JetCLILockStep Never! {
+    name: partial.name ?? return JetCLILockStep.Missing
+    version: partial.version ?? return JetCLILockStep.Missing
     root := false
     source_hash := String?{None}
     if jet_cli_lock_source(partial.source_raw ?? "") == {
@@ -276,7 +276,7 @@ fn jet_cli_lock_finish(partial: JetCLILockPartial, packages: &[JetCLILockPackage
 }
 
 // `canonicalize_lock` for one list: sorted, duplicates dropped.
-fn jet_cli_lock_canonical(values: [String]) -> [String] Never! {
+jet_cli_lock_canonical: fn(values: [String]) -> [String] Never! {
     sorted := values
     &sorted.sort()
     out := [String]{}
@@ -287,14 +287,14 @@ fn jet_cli_lock_canonical(values: [String]) -> [String] Never! {
 }
 
 // Rust `str::parse::<u32>`.
-fn jet_cli_lock_u32(text: String) -> Int? Never! {
-    bytes :: text.bytes()
+jet_cli_lock_u32: fn(text: String) -> Int? Never! {
+    bytes: text.bytes()
     start := 0
     if bytes.len() > 0 && bytes[0] == (U8{43}) -> start = 1
     if start >= bytes.len() -> return None
     value := 0
     loop index in start..<bytes.len() {
-        digit :: Int.from_u8(bytes[index]) - 48
+        digit: Int.from_u8(bytes[index]) - 48
         if digit < 0 || digit > 9 -> return None
         value = value * 10 + digit
         if value > 4294967295 -> return None
@@ -304,8 +304,8 @@ fn jet_cli_lock_u32(text: String) -> Int? Never! {
 
 // `load` then `parse`, over the sections the provenance report reads. `section`
 // names the open `[[…]]` record ("" for none).
-fn jet_cli_lock_load(root: String) -[FS]> JetCLILockLoad Never! {
-    raw :: cli_files.read(jet_cli_entry_join(root, ".jet/lock")) ?? return JetCLILockLoad.Missing
+jet_cli_lock_load: fn(root: String) -[FS]> JetCLILockLoad Never! {
+    raw: cli_files.read(jet_cli_entry_join(root, ".jet/lock")) ?? return JetCLILockLoad.Missing
     if raw.len() > JET_CLI_LOCK_MAX_BYTES -> return JetCLILockLoad.Missing
     packages := [JetCLILockPackage]{}
     version := Int?{None}
@@ -315,7 +315,7 @@ fn jet_cli_lock_load(root: String) -[FS]> JetCLILockLoad Never! {
     in_build_stamp := false
     loop raw_line in raw.split("\n").to_list() {
         if raw_line.len() > JET_CLI_LOCK_MAX_BYTES -> return JetCLILockLoad.Missing
-        line :: raw_line.trim()
+        line: raw_line.trim()
         if line == "" || line.starts_with("#") -> next
         if line.starts_with("[") {
             if section == "package" {
@@ -351,8 +351,8 @@ fn jet_cli_lock_load(root: String) -[FS]> JetCLILockLoad Never! {
             }
         }
         if equals < 0 -> return JetCLILockLoad.Missing
-        key :: line.slice(0..<equals).trim()
-        value :: line.slice(equals + 1..<line.len()).trim()
+        key: line.slice(0..<equals).trim()
+        value: line.slice(equals + 1..<line.len()).trim()
         if key == "version" && section != "package" && section != "toolchain" && !in_root {
             version = Val(jet_cli_lock_u32(jet_cli_lock_trim_quotes(value)) ?? return JetCLILockLoad.Missing)
             next
@@ -413,7 +413,7 @@ fn jet_cli_lock_load(root: String) -[FS]> JetCLILockLoad Never! {
     // earlier one of the same name.
     kept := [JetCLILockPackage]{}
     loop (index, package) in packages {
-        replaced :: loop later in index + 1..<packages.len() {
+        replaced: loop later in index + 1..<packages.len() {
             if packages[later].name == package.name -> break true
         } ?? false
         if !replaced -> &kept.push(package)
@@ -421,12 +421,12 @@ fn jet_cli_lock_load(root: String) -[FS]> JetCLILockLoad Never! {
     JetCLILockLoad.Loaded{packages: kept}
 }
 
-struct JetCLIProvenanceField {
+JetCLIProvenanceField: struct {
     value: String
     status: String
 }
 
-struct JetCLIProvenanceReport {
+JetCLIProvenanceReport: struct {
     name: String
     version: String
     integrity: JetCLIProvenanceField
@@ -439,21 +439,21 @@ struct JetCLIProvenanceReport {
     authority: String
 }
 
-fn jet_cli_provenance_present(value: String?) -> String? Never! {
-    text :: value ?? return None
+jet_cli_provenance_present: fn(value: String?) -> String? Never! {
+    text: value ?? return None
     if text.trim() == "" -> return None
     Val(text)
 }
 
-fn jet_cli_provenance_report(package: JetCLILockPackage) -> JetCLIProvenanceReport Never! {
-    absent :: "not recorded"
+jet_cli_provenance_report: fn(package: JetCLILockPackage) -> JetCLIProvenanceReport Never! {
+    absent: "not recorded"
     locked_hash := package.content_hash
     if locked_hash == None -> locked_hash = package.tree_hash
     if locked_hash == None -> locked_hash = package.source_hash
-    integrity :: jet_cli_provenance_present(locked_hash) ?? absent
-    integrity_status :: if integrity == absent -> "recorded" else -> "enforced"
-    transparency :: jet_cli_provenance_present(package.transparency)
-    publisher :: jet_cli_provenance_present(package.publisher)
+    integrity: jet_cli_provenance_present(locked_hash) ?? absent
+    integrity_status: if integrity == absent -> "recorded" else -> "enforced"
+    transparency: jet_cli_provenance_present(package.transparency)
+    publisher: jet_cli_provenance_present(package.publisher)
     build := jet_cli_provenance_present(package.build)
     if build == None -> build = jet_cli_provenance_present(package.envelope_provenance)
     JetCLIProvenanceReport{
@@ -472,7 +472,7 @@ fn jet_cli_provenance_report(package: JetCLILockPackage) -> JetCLIProvenanceRepo
 
 // The reports of the non-root packages (only `target`'s when named), by
 // name, then version.
-fn jet_cli_provenance_reports(packages: [JetCLILockPackage], target: String?) -> [JetCLIProvenanceReport] Never! {
+jet_cli_provenance_reports: fn(packages: [JetCLILockPackage], target: String?) -> [JetCLIProvenanceReport] Never! {
     reports := [JetCLIProvenanceReport]{}
     loop package in packages {
         if package.root -> next
@@ -485,16 +485,16 @@ fn jet_cli_provenance_reports(packages: [JetCLILockPackage], target: String?) ->
     reports
 }
 
-fn jet_cli_provenance_effects(effects: [String]) -> String Never! {
+jet_cli_provenance_effects: fn(effects: [String]) -> String Never! {
     if effects.len() == 0 -> return "none"
     effects.join(", ")
 }
 
-fn jet_cli_provenance_text(requirement: String, reports: [JetCLIProvenanceReport]) -> String Never! {
+jet_cli_provenance_text: fn(requirement: String, reports: [JetCLIProvenanceReport]) -> String Never! {
     out := "provenance\nrequire: {requirement}\n"
     loop (index, report) in reports {
         if index > 0 -> out = "{out}\n"
-        evidence :: if report.integrity.status == "enforced" -> ", E1204" else -> ""
+        evidence: if report.integrity.status == "enforced" -> ", E1204" else -> ""
         out = "{out}{report.name} {report.version}\n  integrity    {report.integrity.value} — matches .jet/lock ({report.integrity.status}{evidence})\n"
         out = "{out}  transparency {report.transparency.value} ({report.transparency.status})\n"
         out = "{out}  publisher    {report.publisher.value} ({report.publisher.status})\n"
@@ -505,14 +505,14 @@ fn jet_cli_provenance_text(requirement: String, reports: [JetCLIProvenanceReport
     out
 }
 
-fn jet_cli_provenance_field_value(field: JetCLIProvenanceField, evidence: Bool) -> JetCLIStatusValue Never! {
+jet_cli_provenance_field_value: fn(field: JetCLIProvenanceField, evidence: Bool) -> JetCLIStatusValue Never! {
     fields := [JetCLIStatusField]{jet_cli_status_field("value", jet_cli_status_text(field.value)), jet_cli_status_field("status", jet_cli_status_text(field.status))}
     if evidence -> &fields.push(jet_cli_status_field("evidence", jet_cli_status_text("E1204")))
     jet_cli_status_object(fields)
 }
 
-fn jet_cli_provenance_json(requirement: String, reports: [JetCLIProvenanceReport]) -> String Never! {
-    packages :: loop report in reports -> jet_cli_status_object([JetCLIStatusField]{
+jet_cli_provenance_json: fn(requirement: String, reports: [JetCLIProvenanceReport]) -> String Never! {
+    packages: loop report in reports -> jet_cli_status_object([JetCLIStatusField]{
         jet_cli_status_field("name", jet_cli_status_text(report.name)),
         jet_cli_status_field("version", jet_cli_status_text(report.version)),
         jet_cli_status_field("integrity", jet_cli_provenance_field_value(report.integrity, report.integrity.status == "enforced")),
@@ -524,7 +524,7 @@ fn jet_cli_provenance_json(requirement: String, reports: [JetCLIProvenanceReport
         jet_cli_status_field("denied_effects", jet_cli_status_texts(report.denied_effects)),
         jet_cli_status_field("authority", jet_cli_status_text(report.authority)),
     })
-    provenance :: jet_cli_status_object([JetCLIStatusField]{
+    provenance: jet_cli_status_object([JetCLIStatusField]{
         jet_cli_status_field("require", jet_cli_status_text(requirement)),
         jet_cli_status_field("packages", jet_cli_status_array(packages)),
     })
@@ -534,8 +534,8 @@ fn jet_cli_provenance_json(requirement: String, reports: [JetCLIProvenanceReport
 // `run_provenance` up to the package facts: the manifest root (or its one-line
 // error), the lock (E1202 when absent or unreadable), then the project entry
 // whose package facts the host checks.
-fn jet_cli_inspect_provenance(args: [String], color: Bool, json: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
-    root :: jet_cli_inspect_package_root(cli_files.cwd() ?? ".") ?? return jet_cli_inspect_plain_error("error: no package.jet found — run `jet inspect provenance` inside a project\n", "no package.jet found", "run `jet inspect provenance` inside a project", JET_DRIVER_EXIT_USER_ERROR)
+jet_cli_inspect_provenance: fn(args: [String], color: Bool, json: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
+    root: jet_cli_inspect_package_root(cli_files.cwd() ?? ".") ?? return jet_cli_inspect_plain_error("error: no package.jet found — run `jet inspect provenance` inside a project\n", "no package.jet found", "run `jet inspect provenance` inside a project", JET_DRIVER_EXIT_USER_ERROR)
     if jet_cli_lock_load(root) == {
         .Missing -> return jet_cli_inspect_b_report("E1202", "no lockfile found — run `jet fetch` first", "the lockfile must contain the exact dependency graph before a locked or supply-chain command can run", "run `jet fetch`, then run the command again", color, json, JET_DRIVER_EXIT_USER_ERROR)
         .Unported(shape) -> return jet_cli_not_ported("inspect provenance <{shape}>", color)
@@ -543,7 +543,7 @@ fn jet_cli_inspect_provenance(args: [String], color: Bool, json: Bool, threads: 
     }
     notices := [String]{}
     entry := ""
-    found_entry :: jet_cli_find_project_entry(root, "inspect provenance", color, &notices)
+    found_entry: jet_cli_find_project_entry(root, "inspect provenance", color, &notices)
     if found_entry == {
         .Entry(found) -> entry = found.path
         .Refused(plan) -> return jet_cli_with_notices(notices, ^plan)
@@ -563,15 +563,15 @@ fn jet_cli_inspect_provenance(args: [String], color: Bool, json: Bool, threads: 
 // entry's package facts. The Jet driver reads the same manifest as it checks
 // the entry, so the requirement is the checked entry root's
 // `authority.trust.require`; a project that does not check is refused.
-fn jet_cli_inspect_provenance_host(job: JetCLIInspectJob) -> JetDriverVerbOutput {
+jet_cli_inspect_provenance_host: fn(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     if !cli_files.is_file(job.file) -> return jet_cli_not_ported_output("inspect provenance <unreadable project entry>", job.color)
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled :: jet_cli_compile_file(job.file, job.color, job.threads, JetDriverCompileMode.Doc)
+    compiled: jet_cli_compile_file(job.file, job.color, job.threads, JetDriverCompileMode.Doc)
     if compiled == {
         .Refused(_) -> output = jet_cli_not_ported_output("inspect provenance <project the Jet compiler refuses>", job.color)
         .Compiled(result, snapshot) -> {
-            diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
-            checked :: jet_cli_errors(diagnostics).len() == 0 && result.internal_problem == None
+            diagnostics: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
+            checked: jet_cli_errors(diagnostics).len() == 0 && result.internal_problem == None
             jet_cli_inspect_finish(job, if checked -> jet_cli_inspect_provenance_report(job, jet_cli_provenance_requirement(snapshot)) else -> jet_cli_not_ported_output("inspect provenance <project that does not check>", job.color))
         }
     }
@@ -580,29 +580,29 @@ fn jet_cli_inspect_provenance_host(job: JetCLIInspectJob) -> JetDriverVerbOutput
 
 // The entry package's `authority.trust.require` floor; `none` when its
 // manifest names none.
-fn jet_cli_provenance_requirement(snapshot: JetDriverAuthorizedSourceSnapshot) -> String Never! {
+jet_cli_provenance_requirement: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> String Never! {
     loop root in snapshot.roots {
         if root.identity != snapshot.entry_root_identity -> next
-        facts :: jet_cli_root_package_facts(root) ?? break
-        trust :: facts.authority.trust ?? break
-        require :: trust.require ?? break
+        facts: jet_cli_root_package_facts(root) ?? break
+        trust: facts.authority.trust ?? break
+        require: trust.require ?? break
         return require.label()
     }
     ProvenanceRequirement.Unrequired.label()
 }
 
 // The locked dependencies' provenance of a project that checked.
-fn jet_cli_inspect_provenance_report(job: JetCLIInspectJob, requirement: String) -> JetDriverVerbOutput {
+jet_cli_inspect_provenance_report: fn(job: JetCLIInspectJob, requirement: String) -> JetDriverVerbOutput {
     packages := [JetCLILockPackage]{}
     if jet_cli_lock_load(job.root) == {
         .Loaded(loaded) -> packages = loaded
         else -> return jet_cli_not_ported_output("inspect provenance <lock changed during the check>", job.color)
     }
-    reports :: jet_cli_provenance_reports(packages, job.subject)
+    reports: jet_cli_provenance_reports(packages, job.subject)
     if job.subject == .Val(target) {
         if reports.len() == 0 {
-            what :: "dependency `{target}` is not present in the lockfile"
-            fix :: "use `jet inspect provenance` to list locked dependencies"
+            what: "dependency `{target}` is not present in the lockfile"
+            fix: "use `jet inspect provenance` to list locked dependencies"
             if job.json -> return JetDriverVerbOutput{stdout: jet_cli_fail_json("E2104", what, jet_cli_why("E2104"), fix), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
             return jet_cli_report_output("", "E2104", what, jet_cli_why("E2104"), fix, job.color, JET_DRIVER_EXIT_USER_ERROR)
         }

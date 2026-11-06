@@ -3,16 +3,16 @@
 // frames that feed SHA-256 identities.
 
 // Lowercase hex of the UTF-8 bytes of `value`.
-fn store_hex_text(value: String) -> String Never! {
+store_hex_text: fn(value: String) -> String Never! {
     store_hex_bytes(value.bytes())
 }
 
 // Lowercase hex of `bytes`.
-fn store_hex_bytes(bytes: [U8]) -> String Never! {
-    digits :: "0123456789abcdef".bytes()
+store_hex_bytes: fn(bytes: [U8]) -> String Never! {
+    digits: "0123456789abcdef".bytes()
     out := [U8]{}
     loop byte in bytes {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         &out.push(digits[code >> 4])
         &out.push(digits[(code).bit_and(15)])
     }
@@ -20,7 +20,7 @@ fn store_hex_bytes(bytes: [U8]) -> String Never! {
 }
 
 // The value of one lowercase hex digit, or -1.
-fn store_lower_hex_value(code: Int) -> Int Never! {
+store_lower_hex_value: fn(code: Int) -> Int Never! {
     if {
         code >= 48 && code <= 57 -> code - 48
         code >= 97 && code <= 102 -> code - 87
@@ -29,7 +29,7 @@ fn store_lower_hex_value(code: Int) -> Int Never! {
 }
 
 // The value of one hex digit of either case, or -1.
-fn store_any_hex_value(code: Int) -> Int Never! {
+store_any_hex_value: fn(code: Int) -> Int Never! {
     if {
         code >= 48 && code <= 57 -> code - 48
         code >= 97 && code <= 102 -> code - 87
@@ -39,8 +39,8 @@ fn store_any_hex_value(code: Int) -> Int Never! {
 }
 
 // Whether `value` is exactly `count` lowercase hex digits.
-fn store_is_lower_hex(value: String, count: Int) -> Bool Never! {
-    bytes :: value.bytes()
+store_is_lower_hex: fn(value: String, count: Int) -> Bool Never! {
+    bytes: value.bytes()
     if bytes.len() != count -> return false
     loop byte in bytes {
         if store_lower_hex_value(Int.from_u8(byte)) < 0 -> return false
@@ -48,7 +48,7 @@ fn store_is_lower_hex(value: String, count: Int) -> Bool Never! {
     true
 }
 // One decoded lowercase-hex text field, or the reason it failed.
-enum StoreUnhex {
+StoreUnhex: enum {
     Text(String)
     OddLength
     NotLowerHex
@@ -56,32 +56,32 @@ enum StoreUnhex {
 }
 
 // Decode lowercase hex text into UTF-8 text.
-fn store_unhex_text(value: String) -> StoreUnhex Never! {
-    raw :: value.bytes()
+store_unhex_text: fn(value: String) -> StoreUnhex Never! {
+    raw: value.bytes()
     if raw.len() % 2 != 0 -> return StoreUnhex.OddLength
     bytes := [U8]{}
     index := 0
     loop index < raw.len() {
-        high :: store_lower_hex_value(Int.from_u8(raw[index]))
-        low :: store_lower_hex_value(Int.from_u8(raw[index + 1]))
+        high: store_lower_hex_value(Int.from_u8(raw[index]))
+        low: store_lower_hex_value(Int.from_u8(raw[index + 1]))
         if high < 0 || low < 0 -> return StoreUnhex.NotLowerHex
         &bytes.push(U8{high * 16 + low})
         index += 2
     }
-    text :: String.from_bytes(bytes) ?? return StoreUnhex.NotUTF8
+    text: String.from_bytes(bytes) ?? return StoreUnhex.NotUTF8
     StoreUnhex.Text(text)
 }
 
 // Rust `str::lines`: split at LF, drop a CR before an LF, and a final LF
 // ends the last line.
-fn store_text_lines(raw: String) -> [String] Never! {
+store_text_lines: fn(raw: String) -> [String] Never! {
     if raw == "" -> return [String]{}
-    segments :: raw.split("\n").to_list()
-    count :: if raw.ends_with("\n") -> segments.len() - 1 else -> segments.len()
+    segments: raw.split("\n").to_list()
+    count: if raw.ends_with("\n") -> segments.len() - 1 else -> segments.len()
     lines := [String]{}
     loop index in 0..<count {
-        segment :: segments[index]
-        bytes :: segment.bytes()
+        segment: segments[index]
+        bytes: segment.bytes()
         if bytes.len() > 0 && Int.from_u8(bytes[bytes.len() - 1]) == 13 {
             &lines.push(pkg_bytes_text(bytes, 0, bytes.len() - 1))
             next
@@ -92,9 +92,9 @@ fn store_text_lines(raw: String) -> [String] Never! {
 }
 
 // Rust `rsplit_once(needle)`.
-fn store_text_split_last(text: String, needle: String) -> (before: String, after: String)? Never! {
-    raw :: text.bytes()
-    pattern :: needle.bytes()
+store_text_split_last: fn(text: String, needle: String) -> (before: String, after: String)? Never! {
+    raw: text.bytes()
+    pattern: needle.bytes()
     if pattern.len() > raw.len() -> return None
     at := raw.len() - pattern.len()
     loop at >= 0 {
@@ -107,7 +107,7 @@ fn store_text_split_last(text: String, needle: String) -> (before: String, after
 }
 
 // Append `value` as 8 big-endian bytes.
-fn store_push_u64_be(out: &[U8], value: Int) Never! {
+store_push_u64_be: fn(out: &[U8], value: Int) Never! {
     shift := 56
     loop shift >= 0 {
         &out.push(U8{((value >> shift)).bit_and(255)})
@@ -116,30 +116,30 @@ fn store_push_u64_be(out: &[U8], value: Int) Never! {
 }
 
 // Append `value` as 8 little-endian bytes.
-fn store_push_u64_le(out: &[U8], value: Int) Never! {
+store_push_u64_le: fn(out: &[U8], value: Int) Never! {
     loop shift in 0..<8 -> &out.push(U8{((value >> (shift * 8))).bit_and(255)})
 }
 
 // Append `value` as 16 little-endian bytes (Rust `i128::to_le_bytes`).
-fn store_push_i128_le(out: &[U8], value: Int) Never! {
+store_push_i128_le: fn(out: &[U8], value: Int) Never! {
     loop shift in 0..<8 -> &out.push(U8{((value >> (shift * 8))).bit_and(255)})
-    fill :: if value < 0 -> 255 else -> 0
+    fill: if value < 0 -> 255 else -> 0
     loop _ in 0..<8 -> &out.push(U8{fill})
 }
 
 // Append every byte of `bytes`.
-fn store_push_bytes(out: &[U8], bytes: [U8]) Never! {
+store_push_bytes: fn(out: &[U8], bytes: [U8]) Never! {
     loop byte in bytes -> &out.push(byte)
 }
 
 // A big-endian length frame followed by the bytes.
-fn store_push_frame(out: &[U8], field: [U8]) Never! {
+store_push_frame: fn(out: &[U8], field: [U8]) Never! {
     store_push_u64_be(&out, field.len())
     store_push_bytes(&out, field)
 }
 
 // Sorted, de-duplicated copy of `values` (Rust `BTreeSet<String>`).
-fn store_sorted_unique(values: [String]) -> [String] Never! {
+store_sorted_unique: fn(values: [String]) -> [String] Never! {
     sorted := values.copy()
     &sorted.sort()
     out := [String]{}
@@ -151,7 +151,7 @@ fn store_sorted_unique(values: [String]) -> [String] Never! {
 }
 
 // The keys of `map` in Rust `BTreeMap` order.
-fn store_sorted_keys(map: [String: String]) -> [String] Never! {
+store_sorted_keys: fn(map: [String: String]) -> [String] Never! {
     keys := map.keys().to_list()
     &keys.sort()
     keys
@@ -159,9 +159,9 @@ fn store_sorted_keys(map: [String: String]) -> [String] Never! {
 
 // Whether `path` equals `prefix` or lies below it, compared by whole
 // components (Rust `Path::starts_with`).
-fn store_path_starts_with(path: String, prefix: String) -> Bool Never! {
-    left :: store_path_components(path)
-    right :: store_path_components(prefix)
+store_path_starts_with: fn(path: String, prefix: String) -> Bool Never! {
+    left: store_path_components(path)
+    right: store_path_components(prefix)
     if right.len() > left.len() -> return false
     if path.starts_with("/") != prefix.starts_with("/") -> return false
     loop index in 0..<right.len() {
@@ -172,7 +172,7 @@ fn store_path_starts_with(path: String, prefix: String) -> Bool Never! {
 
 // The normal components of `path` (Rust `Path::components` without the
 // root, `.` components dropped, repeated separators collapsed).
-fn store_path_components(path: String) -> [String] Never! {
+store_path_components: fn(path: String) -> [String] Never! {
     out := [String]{}
     loop part in path.split("/") {
         if part == "" || part == "." -> next
@@ -182,10 +182,10 @@ fn store_path_components(path: String) -> [String] Never! {
 }
 
 // Rust `Path::strip_prefix`: the remainder of `path` below `prefix`.
-fn store_path_strip_prefix(path: String, prefix: String) -> String? Never! {
+store_path_strip_prefix: fn(path: String, prefix: String) -> String? Never! {
     if !store_path_starts_with(path, prefix) -> return None
-    left :: store_path_components(path)
-    right :: store_path_components(prefix)
+    left: store_path_components(path)
+    right: store_path_components(prefix)
     rest := [String]{}
     loop index in right.len()..<left.len() -> &rest.push(left[index])
     Val(rest.join("/"))
@@ -193,7 +193,7 @@ fn store_path_strip_prefix(path: String, prefix: String) -> String? Never! {
 
 // Whether `path` is one or more normal relative components (no root, no
 // `..`, no leading `.`), Rust `components().all(Normal)` on a relative path.
-fn store_path_is_normal_relative(path: String) -> Bool Never! {
+store_path_is_normal_relative: fn(path: String) -> Bool Never! {
     if path == "" || path.starts_with("/") || path == "." || path.starts_with("./") -> return false
     loop part in path.split("/") {
         if part == ".." -> return false
@@ -202,6 +202,6 @@ fn store_path_is_normal_relative(path: String) -> Bool Never! {
 }
 
 // SHA-256 of `bytes` as lowercase hex.
-fn store_sha256_hex(bytes: [U8]) -> String Never! {
+store_sha256_hex: fn(bytes: [U8]) -> String Never! {
     pkg_sha256_hex(bytes)
 }

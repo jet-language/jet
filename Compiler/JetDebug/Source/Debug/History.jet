@@ -6,12 +6,12 @@
 // executes code.
 
 // Rust MAX_DEBUG_HISTORY and MAX_DEBUG_WATCHES: independent bounds.
-DEBUG_HISTORY_MAX_EVENTS :: 100000
-DEBUG_HISTORY_MAX_WATCHES :: 32
+DEBUG_HISTORY_MAX_EVENTS: 100000
+DEBUG_HISTORY_MAX_WATCHES: 32
 
 // Rust DebugEvent: one post-statement source event already projected into
 // safe Jet terms; no generated-code addresses or host objects cross here.
-struct DebugEvent {
+DebugEvent: struct {
     sequence: Int
     function: String
     line: Int
@@ -22,7 +22,7 @@ struct DebugEvent {
 }
 
 // Rust DebugWrite: one source-level write observed at a statement boundary.
-struct DebugWrite {
+DebugWrite: struct {
     line: Int
     place: String
     old_value: String
@@ -31,14 +31,14 @@ struct DebugWrite {
 
 // Rust DebugCheckpoint: authority captured before a live session starts; a
 // repair can only rebind while it stays identical.
-struct DebugCheckpoint {
+DebugCheckpoint: struct {
     source_identity: String
     shape: String
     sequence: Int
 }
 
 // Rust DebugHistory: bounded, indexed recorded-stop history.
-struct DebugHistory {
+DebugHistory: struct {
     events: [DebugEvent]
     checkpoint: DebugCheckpoint?
     cursor: Int?
@@ -50,13 +50,13 @@ struct DebugHistory {
     decision_ledger: String?
 
     // Rust derived Default.
-    fn default() -> DebugHistory Never! {
+    default: fn() -> DebugHistory Never! {
         DebugHistory{events: [DebugEvent]{}, checkpoint: None, cursor: None, capped: false, decision_ledger: None}
     }
 
     // Rust push: a full history rejects the event and sets the sticky capped
     // flag; nothing older is overwritten and no later push clears the flag.
-    fn push(&self, event: ^DebugEvent) -> Bool Never! {
+    push: fn(&self, event: ^DebugEvent) -> Bool Never! {
         if self.events.len() >= DEBUG_HISTORY_MAX_EVENTS {
             self.capped = true
             return false
@@ -70,7 +70,7 @@ struct DebugHistory {
     // so none are synthesized). All acts are kept, even past the cap; capped
     // reports acts >= cap. The checkpoint carries the last act's sequence (0
     // when empty) and the cursor starts unset.
-    fn from_recorded_run(run: RecordedRun, source_identity: ^String, shape: ^String) -> DebugHistory Never! {
+    from_recorded_run: fn(run: RecordedRun, source_identity: ^String, shape: ^String) -> DebugHistory Never! {
         grouped := debug_writes_by_sequence(run)
         // Acts sharing a sequence each receive that sequence's whole group, as
         // the reference clones per act; the last such act takes it by move.
@@ -97,7 +97,7 @@ struct DebugHistory {
                 writes: ^writes,
             })
         }
-        last_sequence :: if run.acts.len() > 0 -> run.acts[run.acts.len() - 1].sequence else -> 0
+        last_sequence: if run.acts.len() > 0 -> run.acts[run.acts.len() - 1].sequence else -> 0
         DebugHistory{
             events: ^events,
             checkpoint: Val(DebugCheckpoint{source_identity: ^source_identity, shape: ^shape, sequence: last_sequence}),
@@ -110,7 +110,7 @@ struct DebugHistory {
     // Rust to_recorded_run: the legacy receipt keeps sequence, function, line
     // and locals per event plus the decision ledger; depth, stack and writes
     // are not part of that artifact.
-    fn to_recorded_run(self) -> RecordedRun Never! {
+    to_recorded_run: fn(self) -> RecordedRun Never! {
         acts := [RecordedAct]{}
         loop event in self.events {
             &acts.push(RecordedAct{sequence: event.sequence, function: event.function.copy(), line: event.line, locals: event.locals.copy()})
@@ -120,7 +120,7 @@ struct DebugHistory {
 }
 
 // Rust RecordedAct: one post-statement state in a recorded run receipt.
-struct RecordedAct {
+RecordedAct: struct {
     sequence: Int
     function: String
     line: Int
@@ -129,18 +129,18 @@ struct RecordedAct {
 
 // Rust RecordedRun: bounded causal evidence attached to a `.jetproof-replay`
 // receipt, with the optional checked IR decision ledger captured alongside.
-struct RecordedRun {
+RecordedRun: struct {
     acts: [RecordedAct]
     decision_ledger: String?
 
     // Rust derived Default.
-    fn default() -> RecordedRun Never! {
+    default: fn() -> RecordedRun Never! {
         RecordedRun{acts: [RecordedAct]{}, decision_ledger: None}
     }
 }
 
 // Rust IndexedWrite: one derived write keyed by its act sequence.
-struct DebugIndexedWrite {
+DebugIndexedWrite: struct {
     sequence: Int
     line: Int
     place: String
@@ -152,7 +152,7 @@ struct DebugIndexedWrite {
 // replaces an earlier one (HashMap collect). The map holds the index of the
 // winning snapshot in the caller's list so values are read in place, never
 // cloned into a second map.
-fn debug_snapshot_map(values: [ValueSnapshot]) -> [String:Int] Never! {
+debug_snapshot_map: fn(values: [ValueSnapshot]) -> [String:Int] Never! {
     slots := [String:Int]{}
     loop (index, value) in values -> slots[value.name] = index
     slots
@@ -162,16 +162,16 @@ fn debug_snapshot_map(values: [ValueSnapshot]) -> [String:Int] Never! {
 // emitting a write when a place appears/disappears or its type name or value
 // text changes. A missing side renders `<unbound>`. Writes are appended to the
 // caller's accumulator (Rust extends its result into the same vector).
-fn debug_diff_snapshots(writes: &[DebugIndexedWrite], sequence: Int, line: Int, before: [ValueSnapshot], before_slots: [String:Int], after: [ValueSnapshot], after_slots: [String:Int]) Never! {
+debug_diff_snapshots: fn(writes: &[DebugIndexedWrite], sequence: Int, line: Int, before: [ValueSnapshot], before_slots: [String:Int], after: [ValueSnapshot], after_slots: [String:Int]) Never! {
     places := [String]{}
     loop place in before_slots.keys() -> &places.push(place)
     loop place in after_slots.keys() -> &places.push(place)
     &places.sort()
     loop (index, place) in places {
         if index > 0 && places[index - 1] == place -> next
-        old_slot :: before_slots.get(place)
-        new_slot :: after_slots.get(place)
-        changed :: if old_slot == {
+        old_slot: before_slots.get(place)
+        new_slot: after_slots.get(place)
+        changed: if old_slot == {
             .Val(old) -> if new_slot == {
                 .Val(new) -> before[old].type_name != after[new].type_name || before[old].value != after[new].value
                 else -> true
@@ -179,11 +179,11 @@ fn debug_diff_snapshots(writes: &[DebugIndexedWrite], sequence: Int, line: Int, 
             else -> new_slot != None
         }
         if !changed -> next
-        old_value :: if old_slot == {
+        old_value: if old_slot == {
             .Val(old) -> before[old].value.copy()
             else -> "<unbound>"
         }
-        new_value :: if new_slot == {
+        new_value: if new_slot == {
             .Val(new) -> after[new].value.copy()
             else -> "<unbound>"
         }
@@ -196,10 +196,10 @@ fn debug_diff_snapshots(writes: &[DebugIndexedWrite], sequence: Int, line: Int, 
 // nothing, so every local reads as newly bound. Each act's map is built once
 // and moved forward as the next act's `before`. (Rust's unused `_src`
 // parameter is not carried.)
-fn debug_derive_recorded_writes(run: RecordedRun) -> [DebugIndexedWrite] Never! {
+debug_derive_recorded_writes: fn(run: RecordedRun) -> [DebugIndexedWrite] Never! {
     writes := [DebugIndexedWrite]{}
-    unbound_values :: [ValueSnapshot]{}
-    unbound_slots :: [String:Int]{}
+    unbound_values: [ValueSnapshot]{}
+    unbound_slots: [String:Int]{}
     previous := [String:Int]{}
     loop (index, act) in run.acts {
         after := debug_snapshot_map(act.locals)
@@ -216,15 +216,15 @@ fn debug_derive_recorded_writes(run: RecordedRun) -> [DebugIndexedWrite] Never! 
 // derivation order; acts sharing a sequence share one group. Writes and
 // groups are popped (moved) out of their owned buffers, never cloned: the
 // derived list is reversed once so popping yields derivation order.
-fn debug_writes_by_sequence(run: RecordedRun) -> [Int:[DebugWrite]] Never! {
+debug_writes_by_sequence: fn(run: RecordedRun) -> [Int:[DebugWrite]] Never! {
     slots := [Int:Int]{}
     sequences := [Int]{}
     groups := [[DebugWrite]]{}
     derived := debug_derive_recorded_writes(run)
     &derived.reverse()
     loop derived.len() > 0 {
-        write :: &derived.pop() ?? break
-        converted :: DebugWrite{line: write.line, place: write.place, old_value: write.old_value, new_value: write.new_value}
+        write: &derived.pop() ?? break
+        converted: DebugWrite{line: write.line, place: write.place, old_value: write.old_value, new_value: write.new_value}
         if slots.get(write.sequence) == {
             .Val(slot) -> &groups[slot].push(^converted)
             else -> {
@@ -237,7 +237,7 @@ fn debug_writes_by_sequence(run: RecordedRun) -> [Int:[DebugWrite]] Never! {
     grouped := [Int:[DebugWrite]]{}
     loop groups.len() > 0 {
         group := &groups.pop() ?? break
-        sequence :: &sequences.pop() ?? break
+        sequence: &sequences.pop() ?? break
         grouped[sequence] = ^group
     }
     grouped

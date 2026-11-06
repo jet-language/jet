@@ -1,20 +1,20 @@
 
 use {
-    encoding :: core.encoding
-    fmt :: core.encoding.jsonl
-    files :: core.files
+    encoding: core.encoding
+    fmt: core.encoding.jsonl
+    files: core.files
 }
 
 
-fn run() {
+run: fn() {
     path := "{work}/rows.jsonl"
-    output :: files.create(path) ?? panic("create")
+    output: files.create(path) ?? panic("create")
     writer := fmt.writer(^output) ?? panic("writer")
     &writer.write(Dyn.Object(["a": Dyn.Int(1)])) ?? panic("write")
     &writer.finish() ?? panic("finish")
-    input :: files.open(path) ?? panic("open")
+    input: files.open(path) ?? panic("open")
     reader := fmt.reader(^input) ?? panic("reader")
-    first :: &reader.next()
+    first: &reader.next()
     if first == {
         .Val(_) -> print(true)
         .None -> print(false)

@@ -1,13 +1,16 @@
 // Port of tests/image.rs:218-253. All original ImagePlan predicates.
 // Package-test execution PENDING-SAME-HEAD; repo root is passed explicitly.
-use jet_env_model.[envmodel_evaluate_env]
+use {
+    jet_env_model.[envmodel_evaluate_env]
+    files: core.files
+}
 
-fn envmodel_test_committed_images(root: String) {
-    base :: files.join(root, "tests/fixtures/jetpack-typed")
-    source :: files.read(files.join(base, "image.jet")) ?? panic("read committed OCI image fixture")
-    plan :: envmodel_evaluate_env(source, base) ?? panic("committed OCI image evaluates")
+envmodel_test_committed_images: fn(root: String) {
+    base: files.join(root, "tests/fixtures/jetpack-typed")
+    source: files.read(files.join(base, "image.jet")) ?? panic("read committed OCI image fixture")
+    plan: envmodel_evaluate_env(source, base) ?? panic("committed OCI image evaluates")
     assert_eq(plan.images.len(), 1)
-    image :: plan.images[0]
+    image: plan.images[0]
     assert_eq(image.name, "server")
     assert_eq(image.from, "server")
     assert_eq(image.expose, [Int]{8080, 8443})
@@ -17,12 +20,12 @@ fn envmodel_test_committed_images(root: String) {
     assert_eq(image.files, [String]{"config/app.toml"})
 }
 
-fn envmodel_test_committed_environment_image(root: String) {
-    base :: files.join(root, "tests/fixtures/jetpack-typed")
-    source :: files.read(files.join(base, "environment_image.jet")) ?? panic("read committed environment image fixture")
-    plan :: envmodel_evaluate_env(source, base) ?? panic("committed environment image evaluates")
+envmodel_test_committed_environment_image: fn(root: String) {
+    base: files.join(root, "tests/fixtures/jetpack-typed")
+    source: files.read(files.join(base, "environment_image.jet")) ?? panic("read committed environment image fixture")
+    plan: envmodel_evaluate_env(source, base) ?? panic("committed environment image evaluates")
     assert_eq(plan.images.len(), 1)
-    image :: plan.images[0]
+    image: plan.images[0]
     assert(image.from_environment)
     assert_eq(image.from, "dev")
     assert_eq(image.target, Val("linux.arm64"))

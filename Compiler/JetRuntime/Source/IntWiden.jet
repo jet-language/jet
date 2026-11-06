@@ -3,19 +3,19 @@
 // Flag, borrowed E4 Text, Word -> Float; the line retains trap_line's u32
 // policy. Reuse the fixed-width widening report, including E3010/exit70. Boxed
 // magnitudes remain exact base-1e9 limbs until their precision is known.
-#Export(c) fn jet_int_checked_widen(value: I64, target_f32: Bool, file: I64, line: I64) -> Float {
+#Export(c) jet_int_checked_widen: fn(value: I64, target_f32: Bool, file: I64, line: I64) -> Float {
     if int_inline(value) -> return jet_numeric_checked_widen_at(value, true, target_f32, file, line)
-    precision :: if target_f32 -> I64{24} else -> I64{53}
+    precision: if target_f32 -> I64{24} else -> I64{53}
     // A private copy is necessary for binary division of borrowed decimal
     // limbs. One pass supplies bit_width, trailing zeros and the top bits;
     // unlike the reference's separate scans, no second workspace is needed.
-    node :: int_copy(value, I64{0})
+    node: int_copy(value, I64{0})
     significant := I64{0}
     trailing := I64{0}
     seen_one := false
     top := I64{0}
     loop !(int_load(wrapping(node + I64{32})) == I64{1} && int_get(node, I64{0}) == I64{0}) {
-        bit :: int_div_small(node, I64{2})
+        bit: int_div_small(node, I64{2})
         if !seen_one {
             if {
                 (bit == I64{0}) -> trailing += I64{1}
@@ -32,7 +32,7 @@
     // With exactness established, bit_width <=128/1024 is equivalent to
     // the reference's finite F32/F64 check: the largest accepted mantissa
     // at those widths is exactly the corresponding maximum finite value.
-    maximum_bits :: if target_f32 -> I64{128} else -> I64{1024}
+    maximum_bits: if target_f32 -> I64{128} else -> I64{1024}
     if (significant > maximum_bits || (significant > precision && trailing < significant - precision)) {
         // The stop is published: the caller's stop point takes it.
         numeric_widen_stop(target_f32, file, line)

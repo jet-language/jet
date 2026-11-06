@@ -1,26 +1,26 @@
 // The shipped Algorithm R sampler, with its fixed xorshift seed and slot order.
-struct ReservoirSampler {
+ReservoirSampler: struct {
     state: ReservoirState
 
     impl Display {
-        fn display(self) -> String {
+        display: fn(self) -> String {
             "ReservoirSampler(n={self.state.count})"
         }
     }
 }
 
-struct ReservoirState {
+ReservoirState: struct {
     capacity: Int
     items: [String]
     count: U64
     rng: U64
 }
 
-fn new(capacity: Int) -> ReservoirSampler Never! { ReservoirSampler.new(capacity) }
+new: fn(capacity: Int) -> ReservoirSampler Never! { ReservoirSampler.new(capacity) }
 
 impl ReservoirSampler {
-    fn new(capacity: Int) -> ReservoirSampler Never! {
-        limit :: if capacity < 1 -> 1 else -> capacity
+    new: fn(capacity: Int) -> ReservoirSampler Never! {
+        limit: if capacity < 1 -> 1 else -> capacity
         ReservoirSampler{state: ReservoirState{
             capacity: limit,
             items: [String]{},
@@ -29,7 +29,7 @@ impl ReservoirSampler {
         }}
     }
 
-    fn add(&self, item: String) Never! {
+    add: fn(&self, item: String) Never! {
         self.state.count = self.state.count.wrapping_add(U64{1})
         if self.state.items.len() < self.state.capacity {
             &self.state.items.push(item)
@@ -40,11 +40,11 @@ impl ReservoirSampler {
         state = state.bit_xor((state >> 7))
         state = state.bit_xor((state << 17))
         self.state.rng = state
-        index :: state %% self.state.count
+        index: state %% self.state.count
         if index < (U64{self.state.capacity}) -> self.state.items[Int.from_u64(index)] = item
     }
 
-    fn sample(self) -> [String] Never! {
+    sample: fn(self) -> [String] Never! {
         self.state.items.copy()
     }
 }

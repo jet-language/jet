@@ -1,12 +1,12 @@
 use core.mem
-fn leak() -> Int {
-    cell :: 1337
+leak: fn() -> Int {
+    cell: 1337
     return mem.address_of(cell)
 }
-fn run() {
-    addr :: leak()
+run: fn() {
+    addr: leak()
     #Unsafe("the returned address outlives its owning Jet frame") {
-        pointer :: mem.Ptr<Int>.from_addr(addr)
+        pointer: mem.Ptr<Int>.from_addr(addr)
         print(pointer.*)
     }
 }

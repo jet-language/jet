@@ -1,17 +1,17 @@
 // core-conformance: core.data.left_join
-use data :: core.data
+use data: core.data
 
-struct LeftRow {
+LeftRow: struct {
     key: String
 }
 
-struct RightRow {
+RightRow: struct {
     key: String
 }
 
-fn run() {
-    left :: [LeftRow]{LeftRow{key: "a"}, LeftRow{key: "b"}}
-    right :: [RightRow]{RightRow{key: "b"}}
-    joined :: data.left_join(left, right, left_row -> left_row.key, right_row -> right_row.key) ?? panic("join")
+run: fn() {
+    left: [LeftRow]{LeftRow{key: "a"}, LeftRow{key: "b"}}
+    right: [RightRow]{RightRow{key: "b"}}
+    joined: data.left_join(left, right, left_row -> left_row.key, right_row -> right_row.key) ?? panic("join")
     print(joined.len())
 }

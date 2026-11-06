@@ -47,7 +47,7 @@ function body(path) {
   const kept = [];
   for (const line of unblockUses(read(path)).split("\n")) {
     if (/^use jet_\w+/.test(line)) continue;
-    if (/^use (?:\w+ :: )?core\./.test(line)) {
+    if (/^use (?:\w+: )?core\./.test(line)) {
       coreUses.add(line);
       continue;
     }
@@ -63,25 +63,25 @@ const dwarf = "Compiler/JetBackend/Source/Image/Dwarf.jet";
 const buildOptions = "Compiler/JetFoundation/Source/Registry/BuildOptions.jet";
 const parts = [
   `// [unit source: ELF writer items of ${elf} and ${object}]`,
-  item(elf, "struct X64ExecutableResult {"),
-  item(elf, "fn elf64_u16("),
-  item(elf, "fn elf64_u32("),
-  item(elf, "fn elf64_u64("),
-  item(object, "fn elf64_string("),
-  item(object, "fn elf64_pad("),
-  item(object, "fn elf64_section_header("),
+  item(elf, "X64ExecutableResult: struct {"),
+  item(elf, "elf64_u16: fn("),
+  item(elf, "elf64_u32: fn("),
+  item(elf, "elf64_u64: fn("),
+  item(object, "elf64_string: fn("),
+  item(object, "elf64_pad: fn("),
+  item(object, "elf64_section_header: fn("),
   `// [unit source: compiler-thread items of ${threads}]`,
-  item(threads, "struct CompilerThreads {"),
-  item(threads, "fn compiler_threads_single("),
-  item(threads, "fn compiler_threads_admit("),
-  item(threads, "fn compiler_threads_partition("),
-  item(threads, "fn compiler_threads_failure_text("),
+  item(threads, "CompilerThreads: struct {"),
+  item(threads, "compiler_threads_single: fn("),
+  item(threads, "compiler_threads_admit: fn("),
+  item(threads, "compiler_threads_partition: fn("),
+  item(threads, "compiler_threads_failure_text: fn("),
   `// [unit source: the DWARF, build-option and hash items the link reads]`,
-  item(dwarf, "fn dwarf_uleb("),
-  item(dwarf, "fn dwarf_sleb("),
-  item(dwarf, "fn dwarf_patch_u32("),
-  item(dwarf, "fn dwarf_patch_length("),
-  item(buildOptions, "CHECKED_ALLOC_RUNTIME_EXPORTS ::"),
+  item(dwarf, "dwarf_uleb: fn("),
+  item(dwarf, "dwarf_sleb: fn("),
+  item(dwarf, "dwarf_patch_u32: fn("),
+  item(dwarf, "dwarf_patch_length: fn("),
+  item(buildOptions, "CHECKED_ALLOC_RUNTIME_EXPORTS: "),
   "",
   body("Compiler/JetFoundation/Source/Hash/SHA256.jet"),
   body("Compiler/JetBackend/Source/Image/Archive.jet"),

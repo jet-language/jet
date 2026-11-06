@@ -2,16 +2,16 @@
 // core.compiler.lang declaration in embedded Prelude/Core.jet. The authority
 // roots and builtin taint tags remain inputs from their Source registries.
 
-fn foundation_core_menu_ascii_lower(text: String) -> String Never! {
+foundation_core_menu_ascii_lower: fn(text: String) -> String Never! {
     bytes := text.bytes()
     loop index in 0..<bytes.len() {
-        code :: Int.from_u8(bytes[index])
+        code: Int.from_u8(bytes[index])
         if code >= 65 && code <= 90 -> bytes[index] = U8{code + 32}
     }
     String.from_bytes(bytes) ?? text
 }
 
-fn foundation_core_menu_variant(name: String, variant: String) -> String? {
+foundation_core_menu_variant: fn(name: String, variant: String) -> String? {
     if name == "ABI" || name == "FFILanguage" || name == "KernelMode" || name == "Layout" || name == "NamingCase" {
         return Val(foundation_core_menu_ascii_lower(variant))
     }
@@ -28,7 +28,7 @@ fn foundation_core_menu_variant(name: String, variant: String) -> String? {
     Val(variant)
 }
 
-fn foundation_core_menu_variants(name: String, kind: CoreLeafKind, effect_roots: [String], builtin_tags: [String]) -> [String]? {
+foundation_core_menu_variants: fn(name: String, kind: CoreLeafKind, effect_roots: [String], builtin_tags: [String]) -> [String]? {
     if name == "Effect" {
         return if kind == {
             .Enum(_) -> Val(effect_roots)
@@ -49,7 +49,7 @@ fn foundation_core_menu_variants(name: String, kind: CoreLeafKind, effect_roots:
         .Enum(variants) -> {
             result := [String]{}
             loop variant in variants {
-                canonical :: foundation_core_menu_variant(name, variant)
+                canonical: foundation_core_menu_variant(name, variant)
                 if canonical == .Val(value) -> &result.push(value)
             }
             Val(result)
@@ -69,15 +69,15 @@ fn foundation_core_menu_variants(name: String, kind: CoreLeafKind, effect_roots:
 // from the canonical Source fixed-width integer registry, which mirrors the
 // native canonical_rule_arg_variants ordering instead of maintaining a
 // menu-local width table.
-fn foundation_core_argument_menus(effect_roots: [String], builtin_tags: [String]) -> [TAppliedRuleArgumentMenu]? {
+foundation_core_argument_menus: fn(effect_roots: [String], builtin_tags: [String]) -> [TAppliedRuleArgumentMenu]? {
     module_name := "core.compiler.lang"
-    declaration :: core_module_export(module_name) ?? return None
+    declaration: core_module_export(module_name) ?? return None
     menus := [TAppliedRuleArgumentMenu]{}
     loop name in declaration.type_exports {
         if name != "IntType" {
             kind := CoreLeafKind.Plain
             if core_module_enum_variants(module_name, name) == .Val(enum_variants) -> kind = CoreLeafKind.Enum{variants: enum_variants}
-            variants :: foundation_core_menu_variants(name, kind, effect_roots, builtin_tags) ?? return None
+            variants: foundation_core_menu_variants(name, kind, effect_roots, builtin_tags) ?? return None
             &menus.push(TAppliedRuleArgumentMenu{
                 name: name,
                 variants: variants,
@@ -97,7 +97,7 @@ fn foundation_core_argument_menus(effect_roots: [String], builtin_tags: [String]
 
 // The canonical rule-argument declaration named `name` among the projected
 // menus, never a raw Core enum slot.
-fn rule_arg_declaration(name: String, menus: [TAppliedRuleArgumentMenu]) -> TAppliedRuleArgumentMenu? Never! {
+rule_arg_declaration: fn(name: String, menus: [TAppliedRuleArgumentMenu]) -> TAppliedRuleArgumentMenu? Never! {
     loop menu in menus {
         if menu.name == name -> return Val(menu.copy())
     }

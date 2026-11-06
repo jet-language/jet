@@ -33,9 +33,9 @@ if (mode === 'assemble') {
   const paths = read('Compiler/JetRuntime/sources.list').split('\n').map(s=>s.trim()).filter(s=>s&&!s.startsWith('#'));
   paths.push('Compiler/JetBackend/Tests/Fragments.fixture/Fixtures/U32Import.jet');
   const unit = paths.map(read).join('\n');
-  const names = [...unit.matchAll(/^#Export\(c\)\s+fn\s+(\w+)\(/gm)].map(m=>m[1]);
+  const names = [...unit.matchAll(/^#Export\(c\)\s+(\w+): fn\(/gm)].map(m=>m[1]);
   if (new Set(names).size !== names.length) throw Error('duplicate fixture export');
-  const init = new Map([...unit.matchAll(/^\/\/ runtime-init: (\d+)(?: when \S+)?\n#Export\(c\) fn (\w+)/gm)].map(m=>[m[2],m[1]]));
+  const init = new Map([...unit.matchAll(/^\/\/ runtime-init: (\d+)(?: when \S+)?\n#Export\(c\) (\w+): fn\b/gm)].map(m=>[m[2],m[1]]));
   init.set('jet_rt_alloc_init','0');
   writeFileSync(join(fixture,'Source/Fixture.jet'),unit);
   writeFileSync(join(fixture,'exports.list'),names.sort().map(n=>n==='jet_rt_panic_list_bounds'?`${n} int-index-seam`:init.has(n)?`${n} init ${init.get(n)}`:n).join('\n')+'\n');

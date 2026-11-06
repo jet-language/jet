@@ -1,6 +1,6 @@
 use {
-    unicode :: core.text
-    math :: core.math
+    unicode: core.text
+    math: core.math
 }
 // core.text.fmt — deterministic number, quantity, and display formatting. Calls
 // run this source; interpolation selectors and compile-time calls run the
@@ -9,16 +9,16 @@ use {
 // counts UTF-8 scalars. Fixed-precision formats round half away from zero
 // (owner ruling #4588) and print a value that rounds to zero without a sign;
 // non-finite Floats keep their ordinary display.
-fn number(n: Int) -> String Never! { grouped_int(n) }
-fn bin(n: Int) -> String Never! { radix_signed_width(n, 2, 0) }
-fn oct(n: Int) -> String Never! { radix_signed_width(n, 8, 0) }
+number: fn(n: Int) -> String Never! { grouped_int(n) }
+bin: fn(n: Int) -> String Never! { radix_signed_width(n, 2, 0) }
+oct: fn(n: Int) -> String Never! { radix_signed_width(n, 8, 0) }
 
 /// `width` is the minimum digit count, zero-padded. Negative `n` keeps sign.
-fn hex(n: Int, width: Int) -> String Never! { radix_signed_width(n, 16, width) }
+hex: fn(n: Int, width: Int) -> String Never! { radix_signed_width(n, 16, width) }
 
-fn ordinal(n: Int) -> String Never! {
-    abs :: abs_int(n)
-    suffix :: if {
+ordinal: fn(n: Int) -> String Never! {
+    abs: abs_int(n)
+    suffix: if {
         abs % 100 >= 11 && abs % 100 <= 13 -> "th"
         abs % 10 == 1 -> "st"
         abs % 10 == 2 -> "nd"
@@ -28,77 +28,77 @@ fn ordinal(n: Int) -> String Never! {
     "{grouped_int(n)}{suffix}"
 }
 
-fn plural(n: Int, singular: String, many: String) -> String Never! {
-    word :: if abs_int(n) == 1 -> singular else -> many
+plural: fn(n: Int, singular: String, many: String) -> String Never! {
+    word: if abs_int(n) == 1 -> singular else -> many
     "{grouped_int(n)} {word}"
 }
 
 /// An empty `fill` pads with spaces; the fill pattern restarts on each side.
-fn pad_left(text: String, width: Int, fill: String) -> String Never! { pad_mode(text, width, fill, 0) }
-fn pad_right(text: String, width: Int, fill: String) -> String Never! { pad_mode(text, width, fill, 1) }
-fn pad_center(text: String, width: Int, fill: String) -> String Never! { pad_mode(text, width, fill, 2) }
-fn pad(text: String, width: Int, fill: String) -> String Never! { pad_right(text, width, fill) }
+pad_left: fn(text: String, width: Int, fill: String) -> String Never! { pad_mode(text, width, fill, 0) }
+pad_right: fn(text: String, width: Int, fill: String) -> String Never! { pad_mode(text, width, fill, 1) }
+pad_center: fn(text: String, width: Int, fill: String) -> String Never! { pad_mode(text, width, fill, 2) }
+pad: fn(text: String, width: Int, fill: String) -> String Never! { pad_right(text, width, fill) }
 
-fn grouped(n: Float, frac: Int) -> String Never! { group_decimal(float_fixed(n, frac)) }
-fn decimal(n: Float, frac: Int) -> String Never! { float_fixed(n, frac) }
-fn percent(n: Float, frac: Int) -> String Never! { "{grouped(n * 100.0, frac)}%" }
+grouped: fn(n: Float, frac: Int) -> String Never! { group_decimal(float_fixed(n, frac)) }
+decimal: fn(n: Float, frac: Int) -> String Never! { float_fixed(n, frac) }
+percent: fn(n: Float, frac: Int) -> String Never! { "{grouped(n * 100.0, frac)}%" }
 
 // Compiler interpolation helpers reuse the source-owned formatting policy.
 // Ported from aa45bf8fc Core/Text/Runtime/kernel_fmt.jet; no C ABI adapter.
-fn quantity(n: Float) -> String Never! {
-    text :: "{n}"
+quantity: fn(n: Float) -> String Never! {
+    text: "{n}"
     if text.ends_with(".0") -> slice(text, 0, unicode.scalar_count(text) - 2) else -> text
 }
 
-fn fixed_int(n: Int, frac: Int) -> String Never! { exact_int_decimal(n, frac, false) }
+fixed_int: fn(n: Int, frac: Int) -> String Never! { exact_int_decimal(n, frac, false) }
 
-fn grouped_int_fixed(n: Int, frac: Int) -> String Never! { exact_int_decimal(n, frac, true) }
+grouped_int_fixed: fn(n: Int, frac: Int) -> String Never! { exact_int_decimal(n, frac, true) }
 
-fn exact_int_decimal(n: Int, frac: Int, grouped: Bool) -> String Never! {
-    whole :: if grouped -> grouped_int(n) else -> "{n}"
+exact_int_decimal: fn(n: Int, frac: Int, grouped: Bool) -> String Never! {
+    whole: if grouped -> grouped_int(n) else -> "{n}"
     if frac <= 0 -> return whole
     "{whole}.{"0".repeat(frac)}"
 }
 
 // The exact decimal spelling rail rejects everything except an optional
 // sign and ASCII digits. Malformed spellings return trimmed and unchanged.
-fn hex_decimal(value: String, width: Int) -> String Never! {
-    n :: decimal_spelling(value) ?? return value.trim()
+hex_decimal: fn(value: String, width: Int) -> String Never! {
+    n: decimal_spelling(value) ?? return value.trim()
     hex(n, width)
 }
 
-fn bin_decimal(value: String) -> String Never! {
-    n :: decimal_spelling(value) ?? return value.trim()
+bin_decimal: fn(value: String) -> String Never! {
+    n: decimal_spelling(value) ?? return value.trim()
     bin(n)
 }
 
-fn oct_decimal(value: String) -> String Never! {
-    n :: decimal_spelling(value) ?? return value.trim()
+oct_decimal: fn(value: String) -> String Never! {
+    n: decimal_spelling(value) ?? return value.trim()
     oct(n)
 }
 
-fn decimal_spelling(value: String) -> Int? Never! {
-    text :: value.trim().copy()
-    negative :: text.starts_with("-")
-    digits :: if negative || text.starts_with("+") -> slice(text, 1, unicode.scalar_count(text)) else -> text
+decimal_spelling: fn(value: String) -> Int? Never! {
+    text: value.trim().copy()
+    negative: text.starts_with("-")
+    digits: if negative || text.starts_with("+") -> slice(text, 1, unicode.scalar_count(text)) else -> text
     if digits == "" -> return None
     loop byte in digits.bytes() {
         if byte < (U8{48}) || byte > (U8{57}) -> return None
     }
-    magnitude :: digits.parse<Int>() ?? return None
+    magnitude: digits.parse<Int>() ?? return None
     Val(if negative -> -magnitude else -> magnitude)
 }
 
 // Owner ruling #4588: the mantissa rounds half away from zero, like
 // `decimal`, and a zero prints no sign. The mantissa is the exact decimal
 // expansion of the binary value, so a carry renormalizes (9.999 -> 1.00e1).
-fn sci(n: Float, frac: Int) -> String Never! {
+sci: fn(n: Float, frac: Int) -> String Never! {
     if !math.is_finite(n) -> return "{n}"
-    precision :: if frac < 0 -> 0 else -> frac
-    bits :: math.to_bits(n)
-    sign :: if bits < 0 -> "-" else -> ""
+    precision: if frac < 0 -> 0 else -> frac
+    bits: math.to_bits(n)
+    sign: if bits < 0 -> "-" else -> ""
     if n == 0.0 -> return "{scaled_decimal(0, precision)}e0"
-    binary_exponent :: (bits >> 52).bit_and(2047)
+    binary_exponent: (bits >> 52).bit_and(2047)
     numerator := bits.bit_and(4503599627370495)
     shift := -1074
     if binary_exponent != 0 {
@@ -132,19 +132,19 @@ fn sci(n: Float, frac: Int) -> String Never! {
     "{sign}{scaled_decimal(rounded, precision)}e{exponent}"
 }
 
-fn scaled_decimal(n: Int, precision: Int) -> String Never! {
-    digits :: radix(n, 10)
+scaled_decimal: fn(n: Int, precision: Int) -> String Never! {
+    digits: radix(n, 10)
     if precision == 0 -> return digits
-    body :: pad_left(digits, precision + 1, "0")
-    split :: body.bytes().len() - precision
+    body: pad_left(digits, precision + 1, "0")
+    split: body.bytes().len() - precision
     "{slice(body, 0, split)}.{slice(body, split, body.bytes().len())}"
 }
 
 // Exact positive rational rounding, half away from zero, shared by the
 // scientific and fixed formats.
-fn round_ratio_half_away(numerator: Int, denominator: Int) -> Int Never! {
+round_ratio_half_away: fn(numerator: Int, denominator: Int) -> Int Never! {
     rounded := numerator /% denominator
-    remainder :: numerator % denominator
+    remainder: numerator % denominator
     if remainder * 2 >= denominator -> rounded = rounded + 1
     rounded
 }
@@ -152,21 +152,21 @@ fn round_ratio_half_away(numerator: Int, denominator: Int) -> Int Never! {
 // Expand only one complete outer fragment, with quoted delimiters ignored and
 // commas split only at the current structural depth; each item but the last
 // keeps its comma.
-fn pretty(value: String) -> String Never! { pretty_fragment(value, 0) }
+pretty: fn(value: String) -> String Never! { pretty_fragment(value, 0) }
 
-fn pretty_fragment(value: String, indent: Int) -> String Never! {
-    text :: value.trim().copy()
-    open_at :: first_structure(text) ?? return text
-    raw :: text.bytes()
-    open :: raw[open_at]
-    close :: structure_close(open) ?? return text
-    end :: matching_close(text, open, close) ?? return text
+pretty_fragment: fn(value: String, indent: Int) -> String Never! {
+    text: value.trim().copy()
+    open_at: first_structure(text) ?? return text
+    raw: text.bytes()
+    open: raw[open_at]
+    close: structure_close(open) ?? return text
+    end: matching_close(text, open, close) ?? return text
     if byte_slice(text, end + 1, raw.len()).trim() != "" -> return text
-    prefix :: byte_slice(text, 0, open_at).trim_end().copy()
-    body :: byte_slice(text, open_at + 1, end)
-    trimmed_body :: body.trim().copy()
-    open_text :: String.from_bytes([U8]{open}) ?? ""
-    close_text :: String.from_bytes([U8]{close}) ?? ""
+    prefix: byte_slice(text, 0, open_at).trim_end().copy()
+    body: byte_slice(text, open_at + 1, end)
+    trimmed_body: body.trim().copy()
+    open_text: String.from_bytes([U8]{open}) ?? ""
+    close_text: String.from_bytes([U8]{close}) ?? ""
     if trimmed_body == "" -> return "{prefix} {open_text}{close_text}".trim_start().copy()
     if open == (U8{91}) && (trimmed_body == ":" || trimmed_body.lower() == "redacted") -> return text
     out := if prefix == "" -> open_text else -> "{prefix} {open_text}"
@@ -176,9 +176,9 @@ fn pretty_fragment(value: String, indent: Int) -> String Never! {
     escaped := false
     start := 0
     i := 0
-    body_raw :: body.bytes()
+    body_raw: body.bytes()
     loop i < body_raw.len() {
-        ch :: body_raw[i]
+        ch: body_raw[i]
         if quoted {
             if escaped -> escaped = false
             else if ch == (U8{92}) -> escaped = true
@@ -188,37 +188,37 @@ fn pretty_fragment(value: String, indent: Int) -> String Never! {
         } else if structure_close(ch) == .Val(expected) {
             &stack.push(expected)
         } else if stack.len() > 0 && stack[stack.len() - 1] == ch {
-            _ :: &stack.pop()
+            _: &stack.pop()
         } else if ch == (U8{44}) && stack.len() == 0 {
-            item :: byte_slice(body, start, i).trim().copy()
+            item: byte_slice(body, start, i).trim().copy()
             if item != "" -> &items.push(pretty_fragment(item, indent + 2))
             start = i + 1
         }
         i = i + 1
     }
-    item :: byte_slice(body, start, body_raw.len()).trim().copy()
+    item: byte_slice(body, start, body_raw.len()).trim().copy()
     if item != "" -> &items.push(pretty_fragment(item, indent + 2))
     loop (index, expanded) in items {
-        separator :: if index + 1 < items.len() -> "," else -> ""
+        separator: if index + 1 < items.len() -> "," else -> ""
         out = "{out}\n{spaces(indent + 2)}{expanded}{separator}"
     }
     "{out}\n{spaces(indent)}{close_text}"
 }
 
-fn structure_close(open: U8) -> U8? Never! {
+structure_close: fn(open: U8) -> U8? Never! {
     if open == (U8{123}) -> return Val(U8{125})
     if open == (U8{91}) -> return Val(U8{93})
     if open == (U8{40}) -> return Val(U8{41})
     None
 }
 
-fn first_structure(value: String) -> Int? Never! {
+first_structure: fn(value: String) -> Int? Never! {
     quoted := false
     escaped := false
-    raw :: value.bytes()
+    raw: value.bytes()
     i := 0
     loop i < raw.len() {
-        ch :: raw[i]
+        ch: raw[i]
         if quoted {
             if escaped -> escaped = false
             else if ch == (U8{92}) -> escaped = true
@@ -233,15 +233,15 @@ fn first_structure(value: String) -> Int? Never! {
     None
 }
 
-fn matching_close(value: String, open: U8, close: U8) -> Int? Never! {
+matching_close: fn(value: String, open: U8, close: U8) -> Int? Never! {
     stack := [U8]{close}
     quoted := false
     escaped := false
     seen_start := false
-    raw :: value.bytes()
+    raw: value.bytes()
     i := 0
     loop i < raw.len() {
-        ch :: raw[i]
+        ch: raw[i]
         if !seen_start {
             if ch == open -> seen_start = true
         } else if quoted {
@@ -253,7 +253,7 @@ fn matching_close(value: String, open: U8, close: U8) -> Int? Never! {
         } else if structure_close(ch) == .Val(expected) {
             &stack.push(expected)
         } else if stack.len() > 0 && stack[stack.len() - 1] == ch {
-            _ :: &stack.pop()
+            _: &stack.pop()
             if stack.len() == 0 -> return Val(i)
         }
         i = i + 1
@@ -261,30 +261,37 @@ fn matching_close(value: String, open: U8, close: U8) -> Int? Never! {
     None
 }
 
-fn byte_slice(value: String, start: Int, end: Int) -> String Never! {
+byte_slice: fn(value: String, start: Int, end: Int) -> String Never! {
     String.from_bytes(slice_b(value.bytes(), start, end)) ?? ""
 }
 
-/// SI units (1000), one decimal below 10 and rounded at or above 10.
-fn bytes(n: Int) -> String Never! {
-    sign :: if n < 0 -> "-" else -> ""
-    units :: ["B", "KB", "MB", "GB", "TB", "PB", "EB"]
-    size := Float{abs_int(n)}
+/// SI units (1000), one decimal below 10 and rounded at or above 10, half
+/// away from zero, in exact Int arithmetic: no magnitude passes through Float.
+bytes: fn(n: Int) -> String Never! {
+    sign: if n < 0 -> "-" else -> ""
+    units: ["B", "KB", "MB", "GB", "TB", "PB", "EB"]
+    size: abs_int(n)
+    scale := 1
     unit := 0
-    loop size >= 1000.0 && unit + 1 < units.len() {
-        size /= 1000.0
+    loop unit + 1 < units.len() && size /% scale >= 1000 {
+        scale *= 1000
         unit += 1
     }
-    shown :: if {
-        unit == 0 -> "{abs_int(n)}"
-        size >= 10.0 -> "{math.round(size)}"
-        else -> trim_point_zero(float_fixed(size, 1))
+    whole: size /% scale
+    rest: size %% scale
+    shown: if {
+        unit == 0 -> "{whole}"
+        whole >= 10 -> "{whole + (if rest * 2 >= scale -> 1 else -> 0)}"
+        else -> {
+            tenths: (size * 20 + scale) /% (scale * 2)
+            if tenths %% 10 == 0 -> "{tenths /% 10}" else -> "{tenths /% 10}.{tenths %% 10}"
+        }
     }
     "{sign}{shown} {units[unit]}"
 }
 
 /// `n` is milliseconds. Composite output is bounded to three non-zero units.
-fn duration(n: Int) -> String Never! {
+duration: fn(n: Int) -> String Never! {
     sign := ""
     rest := n
     if rest < 0 {
@@ -292,13 +299,13 @@ fn duration(n: Int) -> String Never! {
         rest = -rest
     }
     if rest < 1000 -> return "{sign}{rest}ms"
-    days :: rest /% 86400000
+    days: rest /% 86400000
     rest %%= 86400000
-    hours :: rest /% 3600000
+    hours: rest /% 3600000
     rest %%= 3600000
-    minutes :: rest /% 60000
+    minutes: rest /% 60000
     rest %%= 60000
-    seconds :: rest /% 1000
+    seconds: rest /% 1000
     parts := [String]{}
     if days > 0 -> &parts.push("{days}d")
     if hours > 0 -> &parts.push("{hours}h")
@@ -307,24 +314,24 @@ fn duration(n: Int) -> String Never! {
     "{sign}{parts.take(3).join(" ")}"
 }
 
-fn abs_int(n: Int) -> Int Never! { if n < 0 -> -n else -> n }
+abs_int: fn(n: Int) -> Int Never! { if n < 0 -> -n else -> n }
 
-fn grouped_int(n: Int) -> String Never! {
-    sign :: if n < 0 -> "-" else -> ""
+grouped_int: fn(n: Int) -> String Never! {
+    sign: if n < 0 -> "-" else -> ""
     "{sign}{grouped_digits(radix(abs_int(n), 10))}"
 }
 
-fn radix_signed_width(n: Int, base: Int, width: Int) -> String Never! {
-    sign :: if n < 0 -> "-" else -> ""
+radix_signed_width: fn(n: Int, base: Int, width: Int) -> String Never! {
+    sign: if n < 0 -> "-" else -> ""
     "{sign}{pad_left(radix(abs_int(n), base), width, "0")}"
 }
 
-fn radix(n: Int, base: Int) -> String Never! {
+radix: fn(n: Int, base: Int) -> String Never! {
     if n == 0 -> return "0"
     digits := [U8]{}
     x := n
     loop x > 0 {
-        d :: x % base
+        d: x % base
         if d < 10 -> &digits.push(U8{48 + d}) else -> &digits.push(U8{87 + d})
         x /%= base
     }
@@ -337,9 +344,9 @@ fn radix(n: Int, base: Int) -> String Never! {
 // scale built by repeated `* 10.0`, half away from zero. Past the Int range
 // the value's exact binary expansion rounds half away at the same place. A
 // value that rounds to zero prints no sign.
-fn float_fixed(n: Float, frac: Int) -> String Never! {
+float_fixed: fn(n: Float, frac: Int) -> String Never! {
     if !math.is_finite(n) -> return "{n}"
-    precision :: if frac < 0 -> 0 else -> frac
+    precision: if frac < 0 -> 0 else -> frac
     scale := Float{1.0}
     places := 0
     loop places < precision {
@@ -347,14 +354,14 @@ fn float_fixed(n: Float, frac: Int) -> String Never! {
         if !math.is_finite(scale) -> break
         places = places + 1
     }
-    product :: n * scale
+    product: n * scale
     if product > -9223372036854775808.0 && product < 9223372036854775808.0 {
-        whole :: math.round(product)
-        sign :: if whole < 0 -> "-" else -> ""
+        whole: math.round(product)
+        sign: if whole < 0 -> "-" else -> ""
         return "{sign}{scaled_decimal(if whole < 0 -> -whole else -> whole, precision)}"
     }
-    bits :: math.to_bits(n)
-    binary_exponent :: (bits >> 52).bit_and(2047)
+    bits: math.to_bits(n)
+    binary_exponent: (bits >> 52).bit_and(2047)
     numerator := bits.bit_and(4503599627370495)
     shift := -1074
     if binary_exponent != 0 {
@@ -369,25 +376,25 @@ fn float_fixed(n: Float, frac: Int) -> String Never! {
         numerator = numerator * 10
         i = i + 1
     }
-    rounded :: round_ratio_half_away(numerator, denominator)
-    sign :: if bits < 0 && rounded != 0 -> "-" else -> ""
+    rounded: round_ratio_half_away(numerator, denominator)
+    sign: if bits < 0 && rounded != 0 -> "-" else -> ""
     "{sign}{scaled_decimal(rounded, precision)}"
 }
 
-fn trim_point_zero(text: String) -> String Never! {
+trim_point_zero: fn(text: String) -> String Never! {
     if text.ends_with(".0") -> text.slice(0, unicode.scalar_count(text) - 2) else -> text.copy()
 }
 
 // Groups the whole part of a fixed decimal; sign and fraction are kept verbatim.
-fn group_decimal(text: String) -> String Never! {
-    sign :: if text.starts_with("-") || text.starts_with("+") -> text.slice(0, 1) else -> ""
-    body :: text.slice(unicode.scalar_count(sign), unicode.scalar_count(text))
-    dot :: body.index_of(".") ?? unicode.scalar_count(body)
+group_decimal: fn(text: String) -> String Never! {
+    sign: if text.starts_with("-") || text.starts_with("+") -> text.slice(0, 1) else -> ""
+    body: text.slice(unicode.scalar_count(sign), unicode.scalar_count(text))
+    dot: body.index_of(".") ?? unicode.scalar_count(body)
     "{sign}{grouped_digits(body.slice(0, dot))}{body.slice(dot, unicode.scalar_count(body))}"
 }
 
-fn grouped_digits(text: String) -> String Never! {
-    raw :: text.bytes()
+grouped_digits: fn(text: String) -> String Never! {
+    raw: text.bytes()
     out := [U8]{}
     loop i in 0..<raw.len() {
         if i > 0 && (raw.len() - i) % 3 == 0 -> &out.push(U8{44})
@@ -398,19 +405,19 @@ fn grouped_digits(text: String) -> String Never! {
 
 
 // Empty fill means space, and each centered side begins its own fill cycle.
-fn pad_mode(text: String, width: Int, fill: String, mode: Int) -> String Never! {
-    need :: width - unicode.scalar_count(text)
+pad_mode: fn(text: String, width: Int, fill: String, mode: Int) -> String Never! {
+    need: width - unicode.scalar_count(text)
     if need <= 0 -> return text.copy()
-    units :: unicode.scalars(if fill == "" -> " " else -> fill)
+    units: unicode.scalars(if fill == "" -> " " else -> fill)
     if mode == 2 {
-        left :: need /% 2
+        left: need /% 2
         return "{pad_fill(units, left)}{text}{pad_fill(units, need - left)}"
     }
-    added :: pad_fill(units, need)
+    added: pad_fill(units, need)
     if mode == 0 -> "{added}{text}" else -> "{text}{added}"
 }
 
-fn pad_fill(units: [String], need: Int) -> String Never! {
+pad_fill: fn(units: [String], need: Int) -> String Never! {
     out := ""
     i := 0
     loop i < need {
@@ -420,7 +427,7 @@ fn pad_fill(units: [String], need: Int) -> String Never! {
     out
 }
 
-fn spaces(n: Int) -> String {
+spaces: fn(n: Int) -> String {
     out := ""
     i := 0
     loop i < n {
@@ -431,8 +438,8 @@ fn spaces(n: Int) -> String {
 }
 
 
-fn slice(text: String, start: Int, end: Int) -> String Never! {
-    units :: unicode.scalars(text)
+slice: fn(text: String, start: Int, end: Int) -> String Never! {
+    units: unicode.scalars(text)
     out := ""
     i := start
     loop i < end && i < units.len() {
@@ -442,7 +449,7 @@ fn slice(text: String, start: Int, end: Int) -> String Never! {
     out
 }
 
-fn slice_b(raw: [U8], start: Int, end: Int) -> [U8] {
+slice_b: fn(raw: [U8], start: Int, end: Int) -> [U8] {
     out := [U8]{}
     i := start
     loop {

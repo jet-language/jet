@@ -1,16 +1,16 @@
 // Tests are mapped to this paired packet test file by Wave 0799.
 use {
     jet_ast.[CtValue]
-    repl_docs_test_files :: core.files.host.retained_descriptor
-    repl_docs_test_paths :: core.files.runtime.kernel_path_components
-    repl_docs_test_target :: core.sys.target
+    repl_docs_test_files: core.files.host.retained_descriptor
+    repl_docs_test_paths: core.files.runtime.kernel_path_components
+    repl_docs_test_target: core.sys.target
     std.os.unix.fs.[symlink] // GATE #4494: native symlink creation.
-    repl_docs_test_process :: std.process // GATE #4494: native process id.
+    repl_docs_test_process: std.process // GATE #4494: native process id.
 }
 
 #Test("builtin_list_filter_uses_shared_fact") {
-    session :: Session.new()
-    doc :: lookup(session, "List.filter") ?? panic("List.filter docs")
+    session: Session.new()
+    doc: lookup(session, "List.filter") ?? panic("List.filter docs")
     assert(doc.starts_with("List.filter(f: fn(T) -> Bool) -> List<T>\n"))
     assert(doc.contains("Keeps items where f(item) is true."))
     assert(doc.contains("Source: core.collections"))
@@ -18,22 +18,22 @@ use {
 #Test("session_binding_lookup_shows_live_value") {
     session := Session.new()
     session.scope["answer"] = CtValue.Int(42)
-    doc :: lookup(session, "answer") ?? panic("binding should resolve")
-    assert(doc.starts_with("answer: Int :: 42\n"))
+    doc: lookup(session, "answer") ?? panic("binding should resolve")
+    assert(doc.starts_with("answer: 42\nType: Int\n"))
     assert(doc.contains("Source: this session"))
 }
 #Test("completion_dedups_shadowed_session_item") {
     session := Session.new()
-    &session.item_srcs.push("fn answer() -> Int {{ return 1 }}")
+    &session.item_srcs.push("answer: fn() -> Int {{ return 1 }}")
     session.scope["answer"] = CtValue.Int(42)
-    candidates :: completion_candidates(session, "ans", None)
+    candidates: completion_candidates(session, "ans", None)
     assert_eq(candidates.len(), 1)
     assert_eq(candidates[0].identity, "session:binding:answer")
 }
 #Test("core_import_alias_completes_module_members") {
     session := Session.new()
     session.core_imports["math"] = "core.math"
-    candidates :: dotted_completion_candidates(session, "math", "sq")
+    candidates: dotted_completion_candidates(session, "math", "sq")
     assert_eq(candidates.len(), 1)
     assert_eq(candidates[0].name, "sqrt")
     assert_eq(candidates[0].module_path, "core.math")
@@ -42,19 +42,19 @@ use {
     session := Session.new()
     session.core_imports["items"] = "core.math"
     session.scope["items"] = CtValue.List([CtValue]{CtValue.Int(1), CtValue.Int(2)})
-    candidates :: dotted_completion_candidates(session, "items", "f")
+    candidates: dotted_completion_candidates(session, "items", "f")
     assert(candidates.any((c) -> c.name == "filter"))
     assert(!candidates.any((c) -> c.name == "floor"))
 }
 #Test("core_import_alias_docs_resolve_member") {
     session := Session.new()
     session.core_imports["math"] = "core.math"
-    doc :: lookup(session, "math.sqrt") ?? panic("math.sqrt docs")
+    doc: lookup(session, "math.sqrt") ?? panic("math.sqrt docs")
     assert(doc.contains("core.math.sqrt"))
     assert(doc.contains("Source: core.math"))
 }
 #Test("syntax_docs_use_the_registry_dictionary") {
-    doc :: lookup(Session.new(), "^") ?? panic("^ docs")
+    doc: lookup(Session.new(), "^") ?? panic("^ docs")
     assert(doc.contains("Before a name (move)") && doc.contains("Before a parameter's type"))
     assert(doc.contains("Afterwards:"))
     assert(!doc.contains("SIGIL_MOVE") && !doc.contains("D-"))
@@ -63,7 +63,7 @@ use {
     if repl_docs_test_target.selected_family() == .Unix {
         root := repl_docs_test_files.temp_dir()
         repl_docs_test_paths.push(&root, repl_docs_test_paths.from_text("jet-repl-docs-temp-symlink-{repl_docs_test_process.id()}", root.platform))
-        _ :: repl_docs_test_files.remove_dir_all(root)
+        _: repl_docs_test_files.remove_dir_all(root)
         repl_docs_test_files.create_dir_all(root) ?? panic("create temp root")
         target := root.copy()
         repl_docs_test_paths.push(&target, repl_docs_test_paths.from_text("outside.txt", root.platform))
@@ -73,6 +73,6 @@ use {
         symlink(target, link) ?? panic("create symlink")
         assert(write_temp_file_at(link, "attacker\n").is_err())
         assert_eq(repl_docs_test_files.read_to_string(target) ?? panic("read target"), "must survive\n")
-        _ :: repl_docs_test_files.remove_dir_all(root)
+        _: repl_docs_test_files.remove_dir_all(root)
     }
 }

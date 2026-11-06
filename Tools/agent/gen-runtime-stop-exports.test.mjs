@@ -2,100 +2,100 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { runtimeStopExports, generatedRuntimeStopRegistry, checkRuntimeStopRegistry } from "./gen-runtime-stop-exports.mjs";
 
-const root = "fn scheduler_panic_publish_record(record: I64) -> Bool { false }\nfn rt_task_panic_publish(message: I64, length: I64, form: I64) -> Bool { scheduler_panic_publish_record(message) }\n";
+const root = "scheduler_panic_publish_record: fn(record: I64) -> Bool { false }\nrt_task_panic_publish: fn(message: I64, length: I64, form: I64) -> Bool { scheduler_panic_publish_record(message) }\n";
 function closure(source) { return runtimeStopExports([["Fixture.jet", root + source]]); }
 
 test("private named-call closure includes same-line and separate-line exports, sorted", () => {
   assert.deepEqual(closure(`
-fn private_stop() { rt_task_panic_publish(I64{0}, I64{0}, I64{0}) }
-fn middle() { private_stop() }
-#Export(c) fn z_export() { middle() }
+private_stop: fn() { rt_task_panic_publish(I64{0}, I64{0}, I64{0}) }
+middle: fn() { private_stop() }
+#Export(c) z_export: fn() { middle() }
 #Export(c)
-fn a_export() { private_stop() }
-#Export(c) fn ordinary() -> I64 { I64{0} }
+a_export: fn() { private_stop() }
+#Export(c) ordinary: fn() -> I64 { I64{0} }
 `), ["a_export", "z_export"]);
 });
 
 test("connected recursion converges and disconnected recursion is not a stop", () => {
   assert.deepEqual(closure(`
-fn left() { right() }
-fn right() {
+left: fn() { right() }
+right: fn() {
     left()
     rt_task_panic_publish(I64{0}, I64{0}, I64{0})
 }
-fn unrelated_a() { unrelated_b() }
-fn unrelated_b() { unrelated_a() }
-#Export(c) fn stopped() { left() }
-#Export(c) fn ordinary() { unrelated_a() }
+unrelated_a: fn() { unrelated_b() }
+unrelated_b: fn() { unrelated_a() }
+#Export(c) stopped: fn() { left() }
+#Export(c) ordinary: fn() { unrelated_a() }
 `), ["stopped"]);
 });
 
 test("nested comments, UTF-16 offsets and literal prose cannot add declarations or calls", () => {
   assert.deepEqual(closure(String.raw`
 // λ and 𐐀 do not shift the following source offsets.
-/* outer /* #Export(c) fn fake() { rt_task_panic_publish(0, 0, 0) } */ comment */
-#Export(c) fn ordinary() {
+/* outer /* #Export(c) fake: fn() { rt_task_panic_publish(0, 0, 0) } */ comment */
+#Export(c) ordinary: fn() {
     // rt_task_panic_publish(0, 0, 0)
-    message :: "rt_task_panic_publish(0, 0, 0), \"quoted\""
-    escaped :: "{{rt_task_panic_publish(0, 0, 0)}}"
-    triple :: """
-#Export(c) fn fake_text() {{ rt_task_panic_publish(0, 0, 0) }}
+    message: "rt_task_panic_publish(0, 0, 0), \"quoted\""
+    escaped: "{{rt_task_panic_publish(0, 0, 0)}}"
+    triple: """
+#Export(c) fake_text: fn() {{ rt_task_panic_publish(0, 0, 0) }}
 """
-    char :: '{'
+    char: '{'
 }
 `), []);
 });
 
 test("actual string interpolation expressions are calls, not prose", () => {
   assert.deepEqual(closure(`
-fn helper() { rt_task_panic_publish(I64{0}, I64{0}, I64{0}) }
-#Export(c) fn interpolated() { message :: "value {helper()}" }
+helper: fn() { rt_task_panic_publish(I64{0}, I64{0}, I64{0}) }
+#Export(c) interpolated: fn() { message: "value {helper()}" }
 `), ["interpolated"]);
-  assert.deepEqual(closure('#Export(c) fn interpolated() { message :: """value {rt_task_panic_publish // comment\r\n (I64{0}, I64{0}, I64{0})}""" }'), ["interpolated"]);
-  assert.deepEqual(closure('#Export(c) fn ordinary() { rt_task_panic_publish /* comment */\r\n (I64{0}, I64{0}, I64{0}) }'), []);
+  assert.deepEqual(closure('#Export(c) interpolated: fn() { message: """value {rt_task_panic_publish // comment\r\n (I64{0}, I64{0}, I64{0})}""" }'), ["interpolated"]);
+  assert.deepEqual(closure('#Export(c) ordinary: fn() { rt_task_panic_publish /* comment */\r\n (I64{0}, I64{0}, I64{0}) }'), []);
 });
 
 test("an imported declaration cannot adopt the following global initializer as its body", () => {
   assert.deepEqual(closure(`
-#Import(c) fn imported(value: I64) = "imported"
-GLOBAL :: comptime { I64{0} }
-#Export(c) fn ordinary() { imported(I64{0}) }
+#Import(c) imported: fn(value: I64) = "imported"
+GLOBAL: comptime { I64{0} }
+#Export(c) ordinary: fn() { imported(I64{0}) }
 `), []);
 });
 
 test("cross-file private calls and typed literals retain balanced function boundaries", () => {
   assert.deepEqual(runtimeStopExports([
-    ["Root.jet", root + "fn helper() {\n    value :: I64{0}\n    rt_task_panic_publish(value, value, value)\n}"],
-    ["Caller.jet", "#Export(c) fn caller() { if true { helper() } }"],
+    ["Root.jet", root + "helper: fn() {\n    value: I64{0}\n    rt_task_panic_publish(value, value, value)\n}"],
+    ["Caller.jet", "#Export(c) caller: fn() { if true { helper() } }"],
   ]), ["caller"]);
 });
 
 test("one actual sink includes Task, Root, Sentry, Parallel and public record callers, not stop snapshots", () => {
   assert.deepEqual(closure(`
-#Export(c) fn task() { rt_task_panic_publish(I64{0}, I64{0}, I64{0}) }
-fn root_owned() { scheduler_panic_publish_record(I64{0}) }
-#Export(c) fn root() { root_owned() }
-#Export(c) fn sentry() { scheduler_panic_publish_record(I64{0}) }
-#Export(c) fn parallel() { if true { scheduler_panic_publish_record(I64{0}) } }
-#Export(c) fn control_publish() { if true { scheduler_panic_publish_record(I64{0}) } }
-#Export(c) fn status() { I64{0} }
-#Export(c) fn cleanup_enter() { status() }
-#Export(c) fn cleanup_leave() {}
+#Export(c) task: fn() { rt_task_panic_publish(I64{0}, I64{0}, I64{0}) }
+root_owned: fn() { scheduler_panic_publish_record(I64{0}) }
+#Export(c) root: fn() { root_owned() }
+#Export(c) sentry: fn() { scheduler_panic_publish_record(I64{0}) }
+#Export(c) parallel: fn() { if true { scheduler_panic_publish_record(I64{0}) } }
+#Export(c) control_publish: fn() { if true { scheduler_panic_publish_record(I64{0}) } }
+#Export(c) status: fn() { I64{0} }
+#Export(c) cleanup_enter: fn() { status() }
+#Export(c) cleanup_leave: fn() {}
 `), ["control_publish", "parallel", "root", "sentry", "task"]);
 });
 
 test("generated registry is the exact literal symbol list and stale bytes fail", () => {
-  const symbols = closure("#Export(c) fn stopped() { rt_task_panic_publish(I64{0}, I64{0}, I64{0}) }");
+  const symbols = closure("#Export(c) stopped: fn() { rt_task_panic_publish(I64{0}, I64{0}, I64{0}) }");
   const expected = `// Generated by Tools/agent/gen-runtime-stop-exports.mjs; do not edit.
 // Named-call closure from scheduler_panic_publish_record in JetRuntime/Source/*.jet.
 // Direct named calls and stop-rail hooks (_rail_code words) only; other foreign/dynamic callback effects are separate.
 // Both compiler halves consume these Panic stop facts, not returned Results.
 // The symbols land as literal data: no compile-time execution host is needed.
-RUNTIME_STOP_EXPORTS :: comptime { [String]{
+RUNTIME_STOP_EXPORTS: comptime { [String]{
     "stopped",
 } }
 
-fn runtime_export_can_stop(symbol: String) -> Bool Never! {
+runtime_export_can_stop: fn(symbol: String) -> Bool Never! {
     loop candidate in RUNTIME_STOP_EXPORTS {
         if candidate == symbol -> return true
     }
@@ -109,11 +109,11 @@ fn runtime_export_can_stop(symbol: String) -> Bool Never! {
 
 test("shift and less-or-equal operators cannot open generic call arguments", () => {
   assert.deepEqual(closure(`
-fn rotate(word: I64, shift: I64) -> I64 {
+rotate: fn(word: I64, shift: I64) -> I64 {
     (word << shift).bit_or(word >> (I64{32} - shift)).bit_and(I64{0xffffffff})
 }
-#Export(c) fn ordinary(word: I64) -> I64 { rotate(word, I64{7}) }
-#Export(c) fn checked(word: I64, limit: I64) {
+#Export(c) ordinary: fn(word: I64) -> I64 { rotate(word, I64{7}) }
+#Export(c) checked: fn(word: I64, limit: I64) {
     if word <= (limit) -> rt_task_panic_publish(word, word, word)
 }
 `), ["checked"]);
@@ -121,30 +121,30 @@ fn rotate(word: I64, shift: I64) -> I64 {
 
 test("spaced comparisons followed by a later '> (' are not generic call heads", () => {
   assert.deepEqual(closure(`
-fn advance(at: I64, length: I64, data: I64) -> I64 {
+advance: fn(at: I64, length: I64, data: I64) -> I64 {
     loop at < length && data > (I64{32}) -> at += I64{1}
     at
 }
-#Export(c) fn ordinary(at: I64, length: I64) -> I64 { advance(at, length, I64{0}) }
-#Export(c) fn checked(value: I64) { rt_task_panic_publish(value, value, value) }
+#Export(c) ordinary: fn(at: I64, length: I64) -> I64 { advance(at, length, I64{0}) }
+#Export(c) checked: fn(value: I64) { rt_task_panic_publish(value, value, value) }
 `), ["checked"]);
-  assert.throws(() => closure("#Export(c) fn generic_caller() { external<T>(I64{0}) }"), /unsupported generic call external/);
+  assert.throws(() => closure("#Export(c) generic_caller: fn() { external<T>(I64{0}) }"), /unsupported generic call external/);
 });
 
 test("missing publication root or malformed source fails instead of emitting incomplete facts", () => {
-  assert.throws(() => runtimeStopExports([["Missing.jet", "#Export(c) fn ordinary() {}"]]), /missing runtime panic publication root/);
-  assert.throws(() => closure("fn broken() {"), /unclosed broken body/);
+  assert.throws(() => runtimeStopExports([["Missing.jet", "#Export(c) ordinary: fn() {}"]]), /missing runtime panic publication root/);
+  assert.throws(() => closure("broken: fn() {"), /unclosed broken body/);
   assert.throws(() => closure("/* unclosed"), /unclosed runtime source comment/);
-  assert.throws(() => closure("fn generic<T>(value: T) { value }"), /unsupported generic call|unsupported function declaration/);
-  assert.throws(() => closure("#Export(c) fn generic_caller() { external<T<U>>() }"), /unsupported generic call/);
-  assert.throws(() => closure("fn indirect(callback: I64) { callback() }"), /unsupported bound-value call callback/);
-  assert.throws(() => closure("fn indirect() { callback :: helper\n callback() }"), /unsupported bound-value call callback/);
-  assert.throws(() => closure("fn indirect() { (callback)() }"), /unsupported computed call/);
-  assert.throws(() => closure('fn indirect() { text :: """{(callback) /* comment\r\n */ ()}""" }'), /unsupported computed call/);
-  assert.throws(() => closure("fn indirect() { callbacks[I64{0}]() }"), /unsupported computed call/);
-  assert.deepEqual(closure("#Export(c) fn foreign_member() { foreign.rt_task_panic_publish() }"), []);
-  assert.deepEqual(closure("#Export(c) fn arms() { if {\n true -> rt_task_panic_publish(I64{0}, I64{0}, I64{0})\n (true) -> rt_task_panic_publish(I64{0}, I64{0}, I64{0})\n } }"), ["arms"]);
-  assert.deepEqual(closure("fn ordinary(left: I64, right: I64) -> Bool {\n if left != right -> return (left ^ I64{1}) < (right ^ I64{1})\r\n (left ^ I64{0}) < (right ^ I64{0})\n }"), []);
+  assert.throws(() => closure("generic: fn<T>(value: T) { value }"), /unsupported generic call|unsupported function declaration/);
+  assert.throws(() => closure("#Export(c) generic_caller: fn() { external<T<U>>() }"), /unsupported generic call/);
+  assert.throws(() => closure("indirect: fn(callback: I64) { callback() }"), /unsupported bound-value call callback/);
+  assert.throws(() => closure("indirect: fn() { callback: helper\n callback() }"), /unsupported bound-value call callback/);
+  assert.throws(() => closure("indirect: fn() { (callback)() }"), /unsupported computed call/);
+  assert.throws(() => closure('indirect: fn() { text: """{(callback) /* comment\r\n */ ()}""" }'), /unsupported computed call/);
+  assert.throws(() => closure("indirect: fn() { callbacks[I64{0}]() }"), /unsupported computed call/);
+  assert.deepEqual(closure("#Export(c) foreign_member: fn() { foreign.rt_task_panic_publish() }"), []);
+  assert.deepEqual(closure("#Export(c) arms: fn() { if {\n true -> rt_task_panic_publish(I64{0}, I64{0}, I64{0})\n (true) -> rt_task_panic_publish(I64{0}, I64{0}, I64{0})\n } }"), ["arms"]);
+  assert.deepEqual(closure("ordinary: fn(left: I64, right: I64) -> Bool {\n if left != right -> return (left ^ I64{1}) < (right ^ I64{1})\r\n (left ^ I64{0}) < (right ^ I64{0})\n }"), []);
 });
 
 test("a stop-rail hook is a named edge to every export installed in it; other code words are not", () => {
@@ -152,27 +152,27 @@ test("a stop-rail hook is a named edge to every export installed in it; other co
   const source = `
 trap_root_rail_code := I64{0}
 print_code := I64{0}
-fn coll_call3(code: I64, a: I64, b: I64, c: I64) -> I64 { I64{0} }
-fn rt_root_address() -> I64 { I64{0} }
-fn rt_other_address() -> I64 { I64{0} }
-fn install() {
+coll_call3: fn(code: I64, a: I64, b: I64, c: I64) -> I64 { I64{0} }
+rt_root_address: fn() -> I64 { I64{0} }
+rt_other_address: fn() -> I64 { I64{0} }
+install: fn() {
     trap_root_rail_code = rt_root_address()
     print_code = rt_other_address()
 }
-#Export(c) fn root_half(op: I64, a: I64, b: I64) -> I64 {
+#Export(c) root_half: fn(op: I64, a: I64, b: I64) -> I64 {
     rt_task_panic_publish(a, b, op)
     I64{1}
 }
-#Export(c) fn other_half(op: I64, a: I64, b: I64) -> I64 {
+#Export(c) other_half: fn(op: I64, a: I64, b: I64) -> I64 {
     rt_task_panic_publish(a, b, op)
     I64{1}
 }
-#Export(c) fn direct() { _ := coll_call3(trap_root_rail_code, I64{0}, I64{0}, I64{0}) }
-#Export(c) fn bound() {
-    rail :: trap_root_rail_code
+#Export(c) direct: fn() { _ := coll_call3(trap_root_rail_code, I64{0}, I64{0}, I64{0}) }
+#Export(c) bound: fn() {
+    rail: trap_root_rail_code
     _ := coll_call3(rail, I64{0}, I64{0}, I64{0})
 }
-#Export(c) fn callback() { _ := coll_call3(print_code, I64{0}, I64{0}, I64{0}) }
+#Export(c) callback: fn() { _ := coll_call3(print_code, I64{0}, I64{0}, I64{0}) }
 `;
   assert.deepEqual(runtimeStopExports([["Fixture.jet", root + source]], addresses), ["bound", "direct", "other_half", "root_half"]);
   assert.throws(() => runtimeStopExports([["Fixture.jet", root + source]]), /unknown runtime function address rt_root_address installed in trap_root_rail_code/);

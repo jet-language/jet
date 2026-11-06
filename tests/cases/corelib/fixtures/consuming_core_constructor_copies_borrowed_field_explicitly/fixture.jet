@@ -1,14 +1,14 @@
 
-use json :: core.encoding.json
+use json: core.encoding.json
 
-struct Address { text: String }
-struct Email { addr: String, nested: Address, items: [Address] }
+Address: struct { text: String }
+Email: struct { addr: String, nested: Address, items: [Address] }
 
-fn pick() -> Int {
+pick: fn() -> Int {
     return 0
 }
 
-fn encoded(e: Email, i: Int) -> String {
+encoded: fn(e: Email, i: Int) -> String {
     shallow := Dyn.Text(e.addr.copy())
     nested := Dyn.Text(e.nested.text.copy())
     indexed := Dyn.Text(e.items[0].text.copy())
@@ -19,11 +19,11 @@ fn encoded(e: Email, i: Int) -> String {
     return "{json.to_string(shallow)}|{json.to_string(nested)}|{json.to_string(indexed)}|{json.to_string(computed)}|{json.to_string(called)}|{json.to_string(parenthesized)}|{json.to_string(conditional)}"
 }
 
-fn slice_data(xs: [Dyn]) -> Dyn {
+slice_data: fn(xs: [Dyn]) -> Dyn {
     return Dyn.Array(xs[0..1])
 }
 
-fn run() {
+run: fn() {
     e := Email{addr: "a@b.com", nested: Address{text: "inside"}, items: [Address{text: "zero"}, Address{text: "item"}]}
     sliced := slice_data([Dyn.Text("slice0"), Dyn.Text("slice1")])
     print("{encoded(e, 0)}|{json.to_string(sliced)}")

@@ -1,15 +1,15 @@
-fn bump(counter: Atomic<Int>, by: Int) -> Int {
+bump: fn(counter: Atomic<Int>, by: Int) -> Int {
     counter.add(by)
 }
 
-fn run() {
-    counter :: Atomic<Int>.try_new(5) ?? panic("no counter")
-    old :: bump(counter, 2)
+run: fn() {
+    counter: Atomic<Int>.try_new(5) ?? panic("no counter")
+    old: bump(counter, 2)
     print("counter {old} {counter.load()}")
-    flag :: Atomic<Bool>.try_new(false) ?? panic("no flag")
-    swapped :: flag.compare_exchange(false, true)
+    flag: Atomic<Bool>.try_new(false) ?? panic("no flag")
+    swapped: flag.compare_exchange(false, true)
     print("flag {swapped} {flag.load()}")
-    word :: Atomic<Int>.try_new(9) ?? return
+    word: Atomic<Int>.try_new(9) ?? return
     word.store(11)
     print("word {word.load()}")
 }

@@ -1,10 +1,10 @@
 // Claims ported from crates/jetpack/src/CLI/cc.rs #[cfg(test)].
 
-fn cli_test_cc_parse(args: [String]) -> DriverOptions {
+cli_test_cc_parse: fn(args: [String]) -> DriverOptions {
     cli_cc_parse_args("cc", args) ?? panic("driver arguments must parse")
 }
 
-fn cli_test_cc_parse_error(args: [String]) -> String {
+cli_test_cc_parse_error: fn(args: [String]) -> String {
     if cli_cc_parse_args("cc", args) == {
         .Ok(_) -> panic("driver arguments must be refused")
         .Err(error) -> error.message
@@ -12,13 +12,13 @@ fn cli_test_cc_parse_error(args: [String]) -> String {
 }
 
 #Test("cc common separate value flags do not become source inputs") {
-    options :: cli_test_cc_parse([String]{"-c", "-D", "FEATURE=1", "-x", "c", "-std", "c11", "-l", "m", "main.c"})
+    options: cli_test_cc_parse([String]{"-c", "-D", "FEATURE=1", "-x", "c", "-std", "c11", "-l", "m", "main.c"})
     assert_eq(options.sources, [String]{"main.c"})
     assert_eq(options.argv, [String]{"-c", "-D", "FEATURE=1", "-x", "c", "-std", "c11", "-l", "m", "main.c"})
 }
 
 #Test("cc host toolchain overrides are rejected before graph creation") {
-    arguments :: [String]{"--sysroot=/host", "-B/host-tools", "-fuse-ld=gold"}
+    arguments: [String]{"--sysroot=/host", "-B/host-tools", "-fuse-ld=gold"}
     loop argument in arguments {
         assert(cli_test_cc_parse_error([String]{argument, "main.c"}).contains("pinned Hangar"))
     }
@@ -33,32 +33,32 @@ fn cli_test_cc_parse_error(args: [String]) -> String {
 }
 
 #Test("cc standalone compiler probes are bounded and do not need sources") {
-    probes :: [(argument: String, probe: DriverProbe)]{
+    probes: [(argument: String, probe: DriverProbe)]{
         (argument: "-dumpmachine", probe: DriverProbe.DumpMachine),
         (argument: "-print-sysroot", probe: DriverProbe.PrintSysroot),
         (argument: "-dumpversion", probe: DriverProbe.DumpVersion)
     }
     loop entry in probes {
-        options :: cli_test_cc_parse([String]{entry.argument})
+        options: cli_test_cc_parse([String]{entry.argument})
         assert_eq(options.probe, Val(entry.probe))
         assert_eq(options.sources.len(), 0)
     }
     cli_test_cc_parse_error([String]{"-dumpmachine", "-v"})
     cli_test_cc_parse_error([String]{"-dumpmachine", "main.c"})
-    options :: cli_test_cc_parse([String]{"-v"})
+    options: cli_test_cc_parse([String]{"-v"})
     assert(options.verbose)
     assert_eq(options.sources.len(), 0)
 }
 
 #Test("cc separator keeps source names from being scanned as driver options") {
-    options :: cli_test_cc_parse([String]{"--", "--project-root", "literal.c"})
+    options: cli_test_cc_parse([String]{"--", "--project-root", "literal.c"})
     assert_eq(options.sources, [String]{"--project-root", "literal.c"})
 }
 
 // A pack-layout descriptor for `target`, built from the facts a pack target
 // entry records.
-fn cli_test_cc_pack_descriptor(target: String) -> CcToolchainDescriptor {
-    facts :: [String: String]{
+cli_test_cc_pack_descriptor: fn(target: String) -> CcToolchainDescriptor {
+    facts: [String: String]{
         "cc.bundle.sha256": "sha256-bundle",
         "cc.compiler.root.sha256": "sha256-pack",
         "cc.sysroot": "sysroot",
@@ -74,25 +74,25 @@ fn cli_test_cc_pack_descriptor(target: String) -> CcToolchainDescriptor {
         "cc.linker": CC_PACK_LLD,
         "cc.linker.sha256": "lld"
     }
-    plan :: ProviderPlanFacts.from_facts([String: String]{"action.kind": "cc-toolchain-provision", "action.recipe": CC_TOOLCHAIN_RECIPE_ID}) ?? panic("plan facts")
-    producer :: ProducerRecord{provider: CC_TOOLCHAIN_PRODUCER, immutable_source: "jet-release:pack", source_digest: "sha256-bundle", plan: plan, toolchain_facts: CC_TOOLCHAIN_RECIPE_ID, policy_facts: "", facts: facts}
-    envelope :: Envelope{output_hash: "sha256-bundle", platform: "", signature: "", provenance: ""}
+    plan: ProviderPlanFacts.from_facts([String: String]{"action.kind": "cc-toolchain-provision", "action.recipe": CC_TOOLCHAIN_RECIPE_ID}) ?? panic("plan facts")
+    producer: ProducerRecord{provider: CC_TOOLCHAIN_PRODUCER, immutable_source: "jet-release:pack", source_digest: "sha256-bundle", plan: plan, toolchain_facts: CC_TOOLCHAIN_RECIPE_ID, policy_facts: "", facts: facts}
+    envelope: Envelope{output_hash: "sha256-bundle", platform: "", signature: "", provenance: ""}
     provider_cc_pack_descriptor("entry", "/hangar/entry", "/hangar/objects/sha256-pack", [String]{"sha256-pack"}, envelope, producer) ?? panic("pack descriptor")
 }
 
 #Test("cc pack argv names the target, sysroot, resource directory, loader and the pack's own link runtime") {
-    musl :: cli_test_cc_pack_descriptor("aarch64-unknown-linux-musl")
-    sysroot :: "--sysroot={musl.sysroot_path()}"
-    resource :: "-resource-dir={musl.resource_dir_path()}"
+    musl: cli_test_cc_pack_descriptor("aarch64-unknown-linux-musl")
+    sysroot: "--sysroot={musl.sysroot_path()}"
+    resource: "-resource-dir={musl.resource_dir_path()}"
     assert_eq(cli_cc_toolchain_argv(musl, "cc", true, false), [String]{"--target=aarch64-unknown-linux-musl", sysroot, resource})
     assert_eq(cli_cc_toolchain_argv(musl, "cc", false, false), [String]{"--target=aarch64-unknown-linux-musl", sysroot, resource, "-fuse-ld=lld", "--rtlib=compiler-rt", "--unwindlib=none", "-static"})
-    gnu :: cli_test_cc_pack_descriptor("x86_64-unknown-linux-gnu")
-    head :: "--target=x86_64-unknown-linux-gnu"
-    gnu_sysroot :: "--sysroot={gnu.sysroot_path()}"
-    gnu_resource :: "-resource-dir={gnu.resource_dir_path()}"
+    gnu: cli_test_cc_pack_descriptor("x86_64-unknown-linux-gnu")
+    head: "--target=x86_64-unknown-linux-gnu"
+    gnu_sysroot: "--sysroot={gnu.sysroot_path()}"
+    gnu_resource: "-resource-dir={gnu.resource_dir_path()}"
     assert_eq(cli_cc_toolchain_argv(gnu, "c++", false, false), [String]{head, gnu_sysroot, gnu_resource, "--driver-mode=g++", "-fuse-ld=lld", "--rtlib=compiler-rt", "--unwindlib=none", "-Wl,--dynamic-linker=/lib64/ld-linux-x86-64.so.2", "-nostdlib++"})
     assert_eq(cli_cc_toolchain_argv(gnu, "cc", false, true), [String]{head, gnu_sysroot, gnu_resource, "-fuse-ld=lld", "--rtlib=compiler-rt", "--unwindlib=none"})
-    arm :: cli_test_cc_pack_descriptor("aarch64-unknown-linux-gnu")
+    arm: cli_test_cc_pack_descriptor("aarch64-unknown-linux-gnu")
     assert(cli_cc_toolchain_argv(arm, "cc", false, false).contains("-Wl,--dynamic-linker=/lib/ld-linux-aarch64.so.1"))
     assert(musl.sysroot_path().ends_with("/sysroot"))
     assert(musl.resource_dir_path().ends_with("/compiler/lib/clang/21"))

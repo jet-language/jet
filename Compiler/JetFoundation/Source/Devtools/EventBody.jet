@@ -1,41 +1,41 @@
 // Sole typed first-party event-body owner.
-enum JetDevtoolsQueryState {
+JetDevtoolsQueryState: enum {
     Fetching
     Fresh
     Stale
     Invalidated
 }
-enum JetDevtoolsMutationLifecycle {
+JetDevtoolsMutationLifecycle: enum {
     Started
     Committed
     Failed
     RolledBack
 }
-enum JetDevtoolsFormState {
+JetDevtoolsFormState: enum {
     Pristine
     Dirty
     Valid
     Invalid
 }
-enum JetDevtoolsTraceKind {
+JetDevtoolsTraceKind: enum {
     Request
     Render
     Job
     Reload
     Frame
 }
-struct JetDevtoolsSourceSpan { source_id: String, file: String, start_line: U32, start_column: U32, end_line: U32, end_column: U32 }
-struct JetDevtoolsFunctionIdentity { function_id: String, name: String, source: JetDevtoolsSourceSpan }
-struct JetDevtoolsGameLaunchPhase { phase: String, status: String, detail: String }
+JetDevtoolsSourceSpan: struct { source_id: String, file: String, start_line: U32, start_column: U32, end_line: U32, end_column: U32 }
+JetDevtoolsFunctionIdentity: struct { function_id: String, name: String, source: JetDevtoolsSourceSpan }
+JetDevtoolsGameLaunchPhase: struct { phase: String, status: String, detail: String }
 
-fn jet_devtools_source_span_new(^source_id: String, ^file: String, start_line: U32, start_column: U32, end_line: U32, end_column: U32) -> JetDevtoolsSourceSpan Never! {
+jet_devtools_source_span_new: fn(^source_id: String, ^file: String, start_line: U32, start_column: U32, end_line: U32, end_column: U32) -> JetDevtoolsSourceSpan Never! {
     JetDevtoolsSourceSpan{source_id: ^source_id, file: ^file, start_line: start_line, start_column: start_column, end_line: end_line, end_column: end_column}
 }
-fn jet_devtools_function_identity_new(^function_id: String, ^name: String, ^source: JetDevtoolsSourceSpan) -> JetDevtoolsFunctionIdentity Never! {
+jet_devtools_function_identity_new: fn(^function_id: String, ^name: String, ^source: JetDevtoolsSourceSpan) -> JetDevtoolsFunctionIdentity Never! {
     JetDevtoolsFunctionIdentity{function_id: ^function_id, name: ^name, source: ^source}
 }
 
-enum JetDevtoolsEventBody {
+JetDevtoolsEventBody: enum {
     Build(status: String, tier: String, diagnostics: [String], kept: U64, reset: U64)
     Route(path: String, matched: Bool, render_mode: String, reason: String)
     Query(name: String, state: JetDevtoolsQueryState, footprint: U64)

@@ -6,14 +6,14 @@ use jet_pkg_model.[
 ]
 
 #Test("current release status is separate from package semver") {
-    status :: pkg_current_release_status()
+    status: pkg_current_release_status()
     assert_eq(status.channel, "prerelease")
     assert_eq(status.disposition, "current")
     assert_eq(status.readiness, "not-ready")
     assert_eq(status.policy, "future-1.0")
     assert_eq(status.policy_disposition, "planned")
     assert(!status.policy_active)
-    banner :: pkg_version_banner()
+    banner: pkg_version_banner()
     assert(banner.contains("release status: prerelease"))
     assert(banner.contains("release disposition: current"))
     assert(banner.contains("release readiness: not-ready"))
@@ -21,12 +21,12 @@ use jet_pkg_model.[
 }
 
 #Test("malformed authority outer value uses E1221") {
-    authorities :: [String]{"authority: []", "authority: {{}}\nauthority: {{}}"}
+    authorities: [String]{"authority: []", "authority: {{}}\nauthority: {{}}"}
     loop authority in authorities {
-        raw :: "name: \"demo\"\nversion: \"0.1.0\"\n{authority}\n"
+        raw: "name: \"demo\"\nversion: \"0.1.0\"\n{authority}\n"
         if PackageFacts.parse(raw, "package.jet") == {
             .Err(error) -> {
-                is_effects :: if error == {
+                is_effects: if error == {
                     .BadEffectsBlock(_) -> true
                     else -> false
                 }
@@ -42,12 +42,12 @@ use jet_pkg_model.[
 }
 
 #Test("package policy surface parses and rejects duplicate license entries") {
-    raw :: "\nname: \"consumer\"\nversion: \"0.1.0\"\nlicense: \"MIT\"\npolicy: {{\n    licenses: .Allow([\"MIT\", \"Apache-2.0\"]),\n    sources: {{ \"Acme.*\": [\"internal\"] }},\n}}\n"
-    manifest :: Manifest.parse("package.jet", raw) ?? panic("package policy parses")
+    raw: "\nname: \"consumer\"\nversion: \"0.1.0\"\nlicense: \"MIT\"\npolicy: {{\n    licenses: .Allow([\"MIT\", \"Apache-2.0\"]),\n    sources: {{ \"Acme.*\": [\"internal\"] }},\n}}\n"
+    manifest: Manifest.parse("package.jet", raw) ?? panic("package policy parses")
     assert_eq(manifest.policy.licenses, Val([String]{"MIT", "Apache-2.0"}))
     assert_eq(manifest.policy.source_maps, [PolicySourceMap]{PolicySourceMap{pattern: "Acme.*", sources: [String]{"internal"}}})
 
-    duplicate :: "name: \"consumer\"\nversion: \"0.1.0\"\npolicy: {{ licenses: .Allow([\"MIT\", \"MIT\"]) }}\n"
+    duplicate: "name: \"consumer\"\nversion: \"0.1.0\"\npolicy: {{ licenses: .Allow([\"MIT\", \"MIT\"]) }}\n"
     if Manifest.parse("package.jet", duplicate) == {
         .Err(error) -> {
             assert_eq(error.diagnostic.code, "E1215")

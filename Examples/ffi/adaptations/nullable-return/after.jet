@@ -1,13 +1,13 @@
-#Import module c.names {
-    fn find_name_native(id: U64) -> String? = "find_name"
+#Import c.names: module {
+    find_name_native: fn(id: U64) -> String? = "find_name"
 }
 
 // Unrun expectation: NULL is lifted to absence; a non-null result keeps the
 // foreign storage identity and does not introduce a copy or fabricated value.
-fn find_name(id: U64) -> String? {
+find_name: fn(id: U64) -> String? {
     return find_name_native(id)
 }
 
-fn run() -> String? {
+run: fn() -> String? {
     return find_name(7)
 }

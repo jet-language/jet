@@ -1,6 +1,6 @@
 # tests/fmt.rs::fmt_simplify_one_line_return_is_ast_equal_and_stable at tests/fmt.rs:1159; hand-port
-# Claim: plain fmt gives `fn answer() -> Int { return 42 }` and no `:: 42` (tests/fmt.rs:1162-1169)
-# Claim: simplify output is exactly `fn answer() -> Int { 42 }` + newline (tests/fmt.rs:1174)
+# Claim: plain fmt gives `answer: fn() -> Int { return 42 }` and no `:: 42` (tests/fmt.rs:1162-1169)
+# Claim: simplify output is exactly `answer: fn() -> Int { 42 }` + newline (tests/fmt.rs:1174)
 # Claim: simplify output is stable (tests/fmt.rs:1187-1190)
 # Claim: wide body stays braced, no ` :: ` (tests/fmt.rs:1192-1199)
 # Claim: commented body stays braced (tests/fmt.rs:1201-1207)
@@ -14,13 +14,13 @@ step: jet fmt one/plain.jet
 exit: 0 # tests/fmt.rs:1161 plain format
 step: sh {work}/step-2.sh
 exit: 0 # tests/fmt.rs:1162-1169
-stdout: ~ "fn answer() -> Int { return 42 }" # tests/fmt.rs:1162-1169
+stdout: ~ "answer: fn() -> Int { return 42 }" # tests/fmt.rs:1162-1169
 stdout: !~ ":: 42" # tests/fmt.rs:1162-1169
 step: jet fmt --simplify one/simp.jet
 exit: 0 # tests/fmt.rs:1172-1174 simplify
 step: sh {work}/step-4.sh
 exit: 0 # tests/fmt.rs:1174 exact output
-stdout: = "fn answer() -> Int { 42 }\n" # tests/fmt.rs:1174 exact output
+stdout: = "answer: fn() -> Int { 42 }\n" # tests/fmt.rs:1174 exact output
 step: jet fmt --simplify --check one/simp.jet
 exit: 0 # tests/fmt.rs:1189-1190 second simplify pass is identical
 step: jet fmt --simplify one/wide.jet

@@ -1,11 +1,11 @@
 use {
-    s3_unicode_files :: core.files
-    s3_unicode_text :: core.text
-    s3_unicode_parse :: core.text.parse
-    s3_unicode_fmt :: core.text.fmt
+    s3_unicode_files: core.files
+    s3_unicode_text: core.text
+    s3_unicode_parse: core.text.parse
+    s3_unicode_fmt: core.text.fmt
 }
 
-fn s3_unicode_scalar(cp: Int) -> String Never! {
+s3_unicode_scalar: fn(cp: Int) -> String Never! {
     if cp < 0 || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff) -> return ""
     bytes := [U8]{}
     if cp < 128 {
@@ -27,7 +27,7 @@ fn s3_unicode_scalar(cp: Int) -> String Never! {
 }
 
 // Reuses Core.text.wrap's Unicode splitter and the public Core.text primitives.
-fn s3_unicode_split_ws(text: String) -> [String] Never! {
+s3_unicode_split_ws: fn(text: String) -> [String] Never! {
     out := [String]{}
     current := ""
     loop scalar in s3_unicode_text.scalars(text) {
@@ -45,23 +45,23 @@ fn s3_unicode_split_ws(text: String) -> [String] Never! {
 }
 
 // Original cps(): invalid hex/scalars are filtered out.
-fn s3_unicode_cps(field: String) -> String Never! {
+s3_unicode_cps: fn(field: String) -> String Never! {
     out := ""
     loop token in s3_unicode_split_ws(field) {
-        cp :: s3_unicode_parse.parse_int_base(token, 16) ?? next
-        scalar :: s3_unicode_scalar(cp)
+        cp: s3_unicode_parse.parse_int_base(token, 16) ?? next
+        scalar: s3_unicode_scalar(cp)
         out = "{out}{scalar}"
     }
     out
 }
 
-struct S3UnicodeBreak {
+S3UnicodeBreak: struct {
     full: String,
     segments: [String],
 }
 
 // Original parse_break(): malformed hex/scalar => None; empty => None.
-fn s3_unicode_break(line: String) -> S3UnicodeBreak? Never! {
+s3_unicode_break: fn(line: String) -> S3UnicodeBreak? Never! {
     full := ""
     current := ""
     segments := [String]{}
@@ -73,8 +73,8 @@ fn s3_unicode_break(line: String) -> S3UnicodeBreak? Never! {
                 current = ""
             }
         } else if token != "×" {
-            cp :: s3_unicode_parse.parse_int_base(token, 16) ?? return None
-            scalar :: s3_unicode_scalar(cp)
+            cp: s3_unicode_parse.parse_int_base(token, 16) ?? return None
+            scalar: s3_unicode_scalar(cp)
             if scalar == "" -> return None
             full = "{full}{scalar}"
             current = "{current}{scalar}"
@@ -86,39 +86,39 @@ fn s3_unicode_break(line: String) -> S3UnicodeBreak? Never! {
     Val(S3UnicodeBreak{full: full, segments: segments})
 }
 
-fn s3_unicode_clean(raw: String) -> String Never! {
+s3_unicode_clean: fn(raw: String) -> String Never! {
     // Rust raw.split('#').next().unwrap_or("").trim().
-    head :: s3_unicode_parse.split(raw, "#")[0]
+    head: s3_unicode_parse.split(raw, "#")[0]
     head.trim().copy()
 }
 
 // Port of tests/text_unicode.rs:431-451, preserving every scalar-name row.
-#Test fn s3_unicode_scalar_names() {
-    unicode_data :: s3_unicode_files.read_text("data/ucd/UnicodeData.txt") ?? panic("missing UnicodeData")
+#Test s3_unicode_scalar_names: fn() {
+    unicode_data: s3_unicode_files.read_text("data/ucd/UnicodeData.txt") ?? panic("missing UnicodeData")
     checked := 0
     loop raw in unicode_data.lines() {
-        fields :: s3_unicode_parse.split(raw, ";")
+        fields: s3_unicode_parse.split(raw, ";")
         if fields.len() < 14 -> next
-        cp :: s3_unicode_parse.parse_int_base(fields[0], 16) ?? panic("invalid UnicodeData hex")
+        cp: s3_unicode_parse.parse_int_base(fields[0], 16) ?? panic("invalid UnicodeData hex")
         name := fields[1].copy()
         if name.ends_with(", First>") || name.ends_with(", Last>") -> next
         if name == "<control>" -> name = fields[10].copy()
         if name == "" || name.starts_with("<") -> next
-        scalar :: s3_unicode_scalar(cp)
+        scalar: s3_unicode_scalar(cp)
         if scalar == "" -> next
-        hex :: s3_unicode_fmt.hex(cp, 4).to_upper()
-        expected :: "U+{hex} {name}"
-        got :: s3_unicode_text.inspect(scalar)
+        hex: s3_unicode_fmt.hex(cp, 4).to_upper()
+        expected: "U+{hex} {name}"
+        got: s3_unicode_text.inspect(scalar)
         assert(got.len() > 0, "scalar inspector must have first row")
         assert_eq(got[0], expected, "name mismatch for U+{hex}")
         checked += 1
     }
     assert(checked > 30000, "pinned UnicodeData name rows unexpectedly low: {checked}")
-    family :: s3_unicode_text.inspect("👨‍👩‍👦")
+    family: s3_unicode_text.inspect("👨‍👩‍👦")
     assert_eq(family[1], "U+200D ZERO WIDTH JOINER")
     print(checked)
 }
 
-fn run() {
+run: fn() {
     s3_unicode_scalar_names()
 }

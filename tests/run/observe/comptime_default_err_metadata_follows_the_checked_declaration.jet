@@ -7,7 +7,7 @@ impl IOError -> Err {
     return Err("store unavailable", code: "E_STORE")
 }
 
-fn read_store() -> Int IOError! {
+read_store: fn() -> Int IOError! {
     return Err(IOError.InvalidInput(IOContext{
         operation: .Read,
         resource: None,
@@ -16,50 +16,50 @@ fn read_store() -> Int IOError! {
     }))
 }
 
-fn get_user() -> Int Err! {
-    value :: read_store()?("loading store")
+get_user: fn() -> Int Err! {
+    value: read_store()?("loading store")
     value
 }
 
-fn fresh_errors() -> String {
-    literal :: Err{message: "plain", code: Val("E1"), cause: None}
-    call :: Err("plain", code: "E1")
-    caused :: Err{message: "outer", code: None, cause: Val(Err("inner"))}
-    inner :: caused.cause ?? Err("none")
+fresh_errors: fn() -> String {
+    literal: Err{message: "plain", code: Val("E1"), cause: None}
+    call: Err("plain", code: "E1")
+    caused: Err{message: "outer", code: None, cause: Val(Err("inner"))}
+    inner: caused.cause ?? Err("none")
     "{literal == call} {literal.message} {literal.code ?? "none"} {literal.cause == None} {inner.message}"
 }
 
-fn kept_errors() -> String {
+kept_errors: fn() -> String {
     if get_user() == .Err(failed) {
-        kept :: failed.copy()
-        bare :: Err("store unavailable", code: "E_STORE")
+        kept: failed.copy()
+        bare: Err("store unavailable", code: "E_STORE")
         return "{kept == failed} {kept == bare} {kept.message} {kept.code ?? "none"}"
     }
     "no error"
 }
 
-fn failure() -> Err {
+failure: fn() -> Err {
     if get_user() == .Err(failed) -> return failed
     Err("no error")
 }
 
-FRESH :: comptime { fresh_errors() }
-KEPT :: comptime { kept_errors() }
-VALUE :: comptime { Err{message: "outer", code: Val("E1"), cause: Val(Err("inner"))} }
-FAILED :: comptime { failure() }
+FRESH: comptime { fresh_errors() }
+KEPT: comptime { kept_errors() }
+VALUE: comptime { Err{message: "outer", code: Val("E1"), cause: Val(Err("inner"))} }
+FAILED: comptime { failure() }
 
-fn run() {
+run: fn() {
     print(FRESH)
     print(KEPT)
     print(VALUE.message)
     print(VALUE.code ?? "none")
     print(VALUE.cause ?? Err("none"))
-    built :: Err{message: "outer", code: Val("E1"), cause: Val(Err("inner"))}
+    built: Err{message: "outer", code: Val("E1"), cause: Val(Err("inner"))}
     print(VALUE == built)
     print(FAILED.message)
     print(FAILED.code ?? "none")
-    bare :: Err("store unavailable", code: "E_STORE")
+    bare: Err("store unavailable", code: "E_STORE")
     print(FAILED == bare)
-    here :: failure()
+    here: failure()
     print(FAILED == here)
 }

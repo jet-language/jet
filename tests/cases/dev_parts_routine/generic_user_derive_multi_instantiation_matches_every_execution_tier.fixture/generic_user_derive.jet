@@ -1,35 +1,35 @@
 
 derive T.Access {
-    info :: T.reflect()
-    param :: info.type_params[0].name
-    fn make(value: ^@param) -> @name<@param> {
+    info: T.reflect()
+    param: info.type_params[0].name
+    make: fn(value: ^@param) -> @name<@param> {
         return @name<@param>{ value: value }
     }
-    fn marker() -> Int { 17 }
-    fn get_value(self) -> @param { self.value.copy() }
-    fn type_name(self) -> String { T.$name }
+    marker: fn() -> Int { 17 }
+    get_value: fn(self) -> @param { self.value.copy() }
+    type_name: fn(self) -> String { T.$name }
 }
 
 derive T.NumericAccess {
-    info :: T.reflect()
-    param :: info.type_params[0].name
-    fn replace(&self, value: ^@param) -> @param {
+    info: T.reflect()
+    param: info.type_params[0].name
+    replace: fn(&self, value: ^@param) -> @param {
         self.value = value
         return self.value.copy()
     }
-    fn plus(self, rhs: @param) -> @param { self.value + rhs }
-    fn equal_to(self, rhs: @param) -> Bool { self.value == rhs }
+    plus: fn(self, rhs: @param) -> @param { self.value + rhs }
+    equal_to: fn(self, rhs: @param) -> Bool { self.value == rhs }
 }
 
 #Access
-struct Box<T: Printable> { value: T }
+Box: struct<T: Printable> { value: T }
 #Access
-struct StaticOnly<T: Printable> { value: T }
-struct Wrapper<U: Printable> { boxed: Box<U> }
+StaticOnly: struct<T: Printable> { value: T }
+Wrapper: struct<U: Printable> { boxed: Box<U> }
 #NumericAccess
-struct NumericBox<T: [Printable, Add, Equatable]> { value: T }
+NumericBox: struct<T: [Printable, Add, Equatable]> { value: T }
 
-fn run() {
+run: fn() {
     number := Box<Int>.make(7)
     decimal := Box<Float>{ value: 2.5 }
     flag := Box<Bool>{ value: true }

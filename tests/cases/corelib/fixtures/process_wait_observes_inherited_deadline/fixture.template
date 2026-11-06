@@ -1,11 +1,11 @@
-package { name: "process_wait_deadline", authority: { allow: [Exec, Time] } }
+package: { name: "process_wait_deadline", authority: { allow: [Exec, Time] } }
 use {
-    process :: core.process
-    time :: core.time
+    process: core.process
+    time: core.time
 }
 
-fn run() {
-    child :: process.cmd(["{work}/sleep.sh"]).spawn() ?? panic("spawn failed")
+run: fn() {
+    child: process.cmd(["{work}/sleep.sh"]).spawn() ?? panic("spawn failed")
     #Context(deadline: time.unix_ns() /% 1_000_000 + 20) {
         child.wait() ?? panic("wait failed")
     }

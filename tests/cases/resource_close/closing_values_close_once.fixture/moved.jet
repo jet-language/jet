@@ -1,80 +1,80 @@
 // Each value below closes exactly once: `^held` moves the variable out as the tail value.
-use files :: core.files
+use files: core.files
 
-struct Res { name: String }
+Res: struct { name: String }
 impl Res.Close {
-    fn close(^self) { print("close {self.name}") }
+    close: fn(^self) { print("close {self.name}") }
 }
 
 // Closes through the FileReader it holds, and the Res beside it.
-struct Checked {
+Checked: struct {
     tracer: Res
     handle: files.FileReader
 }
 
-fn some_res(name: String) -> Res? { Val(Res{name: name}) }
+some_res: fn(name: String) -> Res? { Val(Res{name: name}) }
 
-fn ok_res(name: String) -> Res Err! { Ok(Res{name: name}) }
+ok_res: fn(name: String) -> Res Err! { Ok(Res{name: name}) }
 
-fn some_checked(name: String) -> Checked? {
-    handle :: files.open("data.txt") ?? return None
+some_checked: fn(name: String) -> Checked? {
+    handle: files.open("data.txt") ?? return None
     Val(Checked{tracer: Res{name: name}, handle: handle})
 }
 
-fn ok_checked(name: String) -> Checked Err! {
-    handle :: files.open("data.txt") ?? return Err("open")
+ok_checked: fn(name: String) -> Checked Err! {
+    handle: files.open("data.txt") ?? return Err("open")
     Ok(Checked{tracer: Res{name: name}, handle: handle})
 }
 
-fn moved_option_res(name: String) -> Res? {
-    held :: some_res(name)
+moved_option_res: fn(name: String) -> Res? {
+    held: some_res(name)
     ^held
 }
 
-fn check_option_res() {
+check_option_res: fn() {
     if moved_option_res("moved option res") == {
         .Val(got) -> print("got {got.name}")
         .None -> print("none")
     }
 }
 
-fn moved_result_res(name: String) -> Res Err! {
-    held :: ok_res(name)
+moved_result_res: fn(name: String) -> Res Err! {
+    held: ok_res(name)
     ^held
 }
 
-fn check_result_res() {
+check_result_res: fn() {
     if moved_result_res("moved result res") == {
         .Ok(got) -> print("got {got.name}")
         .Err(error) -> print("failed {error}")
     }
 }
 
-fn moved_option_reader(name: String) -> Checked? {
-    held :: some_checked(name)
+moved_option_reader: fn(name: String) -> Checked? {
+    held: some_checked(name)
     ^held
 }
 
-fn check_option_reader() {
+check_option_reader: fn() {
     if moved_option_reader("moved option reader") == {
         .Val(got) -> print("got {got.tracer.name}")
         .None -> print("none")
     }
 }
 
-fn moved_result_reader(name: String) -> Checked Err! {
-    held :: ok_checked(name)
+moved_result_reader: fn(name: String) -> Checked Err! {
+    held: ok_checked(name)
     ^held
 }
 
-fn check_result_reader() {
+check_result_reader: fn() {
     if moved_result_reader("moved result reader") == {
         .Ok(got) -> print("got {got.tracer.name}")
         .Err(error) -> print("failed {error}")
     }
 }
 
-fn run() {
+run: fn() {
     check_option_res()
     check_result_res()
     check_option_reader()

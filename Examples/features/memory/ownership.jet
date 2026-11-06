@@ -2,28 +2,28 @@
 // `^` to move, `x.copy()` to copy (D-SHAPE-COPY1=A). Functions below use read borrows by
 // default, explicit write borrows, or explicit takes. Return borrowed windows
 // with `-> View<T> from source`, keeping the named source alive.
-fn show(msg: String) { print(msg) }
+show: fn(msg: String) { print(msg) }
 
-fn bump(n: &Int) { n += 1 }
+bump: fn(n: &Int) { n += 1 }
 
-fn archive(name: ^String) -> String { name }
+archive: fn(name: ^String) -> String { name }
 
-fn headline(text: String) -> String { "== {text} ==" }
+headline: fn(text: String) -> String { "== {text} ==" }
 
-fn length(text: String) -> Int { text.len() }
+length: fn(text: String) -> Int { text.len() }
 
-fn apply(reader: fn(String) -> Int, text: String) -> Int { reader(text) }
+apply: fn(reader: fn(String) -> Int, text: String) -> Int { reader(text) }
 
-fn run() {
+run: fn() {
     score := 41
     bump(&score)
     print(score)
-    greeting :: "hello"
+    greeting: "hello"
     show(greeting)
     print(greeting)
     print(apply(length, greeting))
     print(apply((text: String) -> text.len(), greeting))
-    saved :: archive(^"vault")
+    saved: archive(^"vault")
     print(saved)
     print(headline("Jet"))
 }

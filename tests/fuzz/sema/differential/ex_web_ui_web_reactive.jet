@@ -1,18 +1,18 @@
 // D-WEBBACKEND1 M2 + D-RENDERTGT2=A (c133/c123 Phase 7): a reactive signal
 // drives a DOM-backend render loop, compiled to JS (and runnable natively).
 use {
-    ui :: core.ui
-    reactive :: core.reactive
+    ui: core.ui
+    reactive: core.reactive
 }
 
-fn run() {
-    backend :: ui.null_backend()
-    label :: reactive.signal("hello")
+run: fn() {
+    backend: ui.null_backend()
+    label: reactive.signal("hello")
     ui.reactive_render(() -> {
-        node :: ui.node(label.get(), 100.0, 20.0)
-        constraint :: ui.constraint(0.0, 0.0, 200.0, 100.0)
-        size :: backend.measure(node, constraint)
-        frame :: ui.rect(0.0, 0.0, size.width, size.height)
+        node: ui.node(label.get(), 100.0, 20.0)
+        constraint: ui.constraint(0.0, 0.0, 200.0, 100.0)
+        size: backend.measure(node, constraint)
+        frame: ui.rect(0.0, 0.0, size.width, size.height)
         backend.layout(node, frame)
         backend.paint(node)
     })

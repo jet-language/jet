@@ -52,11 +52,11 @@ check(socketWords, ["ip: I64", "port: I64", "flow: I64", "scope: I64"], "-> I64"
 reject({ ...socketWords, name: "jet_unlisted" }, ["ip: I64", "port: I64", "flow: I64", "scope: I64"], "-> I64");
 const resolverPort = { ...route([["JetCString"], ["u16"]], "i64", ["*mut u64", "i64", "JetCString"]), name: "jet_net_raw_resolve_ordered" };
 check(resolverPort, ["host: I64", "port: I64", "data: I64", "len: I64", "error: I64"], "-> I64");
-const maskedFlag = "#Export(c) fn jet_rt_record_new_jet_resolve_error(kind: I64, flag: I64, os: I64, text: I64) -> I64 { if (flag.bit_and(I64{255})) != I64{0} { return kind } kind }";
+const maskedFlag = "#Export(c) jet_rt_record_new_jet_resolve_error: fn(kind: I64, flag: I64, os: I64, text: I64) -> I64 { if (flag.bit_and(I64{255})) != I64{0} { return kind } kind }";
 assert.ok(parseRuntimeExports(maskedFlag, "Source/Test.jet").has("jet_rt_record_new_jet_resolve_error"));
 assert.throws(() => parseRuntimeExports(maskedFlag.replace("flag.bit_and(I64{255})", "flag"), "Source/Test.jet"), /low-8-bit mask/);
 assert.throws(() => parseRuntimeExports(maskedFlag.replace("flag.bit_and(I64{255})", "flag /* flag.bit_and(I64{255}) */"), "Source/Test.jet"), /low-8-bit mask/);
-assert.throws(() => parseRuntimeExports(maskedFlag.replace("flag.bit_and(I64{255})", "flag") + "\nfn unrelated(flag: I64) { flag.bit_and(I64{255}) }", "Source/Test.jet"), /low-8-bit mask/);
+assert.throws(() => parseRuntimeExports(maskedFlag.replace("flag.bit_and(I64{255})", "flag") + "\nunrelated: fn(flag: I64) { flag.bit_and(I64{255}) }", "Source/Test.jet"), /low-8-bit mask/);
 assert.throws(() => parseRuntimeExports(maskedFlag.replace("flag.bit_and(I64{255})", '"flag.bit_and(I64{255})"'), "Source/Test.jet"), /low-8-bit mask/);
 assert.throws(() => parseRuntimeExports(maskedFlag.replace("flag.bit_and(I64{255})", "flag.bit_and(I64{65535})"), "Source/Test.jet"), /low-8-bit mask/);
 const narrowFlag = maskedFlag.replace("flag: I64", "flag: U8").replace("(flag.bit_and(I64{255})) != I64{0}", "flag != U8{0}");
@@ -77,24 +77,24 @@ for (const carrier of ["F64", "F32", "Float32"]) {
 }
 reject(route([["f32"]], "f64"), ["value: Float"], "-> Float");
 reject(route([["f64"]], "f32"), ["value: Float"], "-> Float");
-const parsedFloat = parseRuntimeExports("#Export(c) fn jet_float(value: Float) -> Float { value }", "Source/Test.jet").get("jet_float");
+const parsedFloat = parseRuntimeExports("#Export(c) jet_float: fn(value: Float) -> Float { value }", "Source/Test.jet").get("jet_float");
 assert.deepEqual(parsedFloat, definition(["value: Float"], "-> Float"));
 validateRuntimeRoute(floating, parsedFloat);
 
-const source = "#Export(c)\nfn jet_a(a: I64, b: U64,) -> I64 { return a }\n#Export(c) fn jet_b(out: I64) { }\nfn internal() { }\n";
+const source = "#Export(c)\njet_a: fn(a: I64, b: U64,) -> I64 { return a }\n#Export(c) jet_b: fn(out: I64) { }\ninternal: fn() { }\n";
 const parsed = parseRuntimeExports(source, "Source/Test.jet");
 assert.deepEqual([...parsed.keys()], ["jet_a", "jet_b"]);
 assert.deepEqual(parsed.get("jet_a"), definition(["a: I64", "b: U64"], "-> I64"));
 assert.deepEqual(parsed.get("jet_b"), definition(["out: I64"]));
-assert.throws(() => parseRuntimeExports(source + "#Export(c) fn jet_a() {}", "Source/Test.jet"), /duplicate/);
-assert.throws(() => parseRuntimeExports("#Export(c) fn generic<T>(value: T) {}", "Source/Test.jet"), /unparsed/);
-const failing = parseRuntimeExports("#Export(c) fn failing(value: I64) -> I64 Never! {}", "Source/Test.jet").get("failing");
+assert.throws(() => parseRuntimeExports(source + "#Export(c) jet_a: fn() {}", "Source/Test.jet"), /duplicate/);
+assert.throws(() => parseRuntimeExports("#Export(c) generic: fn<T>(value: T) {}", "Source/Test.jet"), /unparsed/);
+const failing = parseRuntimeExports("#Export(c) failing: fn(value: I64) -> I64 Never! {}", "Source/Test.jet").get("failing");
 assert.throws(() => validateRuntimeRoute(route([["i64"]], "i64"), failing), /does not match C ABI/);
-const lifecycle = parseRuntimeExports("// runtime-init: 3\n#Export(c) fn jet_init() { }\n// runtime-fini: 1\n#Export(c) fn jet_fini() { }\n", "Source/Test.jet");
+const lifecycle = parseRuntimeExports("// runtime-init: 3\n#Export(c) jet_init: fn() { }\n// runtime-fini: 1\n#Export(c) jet_fini: fn() { }\n", "Source/Test.jet");
 assert.equal(lifecycle.get("jet_init").lifecycle, "init 3");
 assert.equal(lifecycle.get("jet_fini").lifecycle, "fini 1");
-assert.throws(() => parseRuntimeExports("// runtime-init: 65536\n#Export(c) fn jet_init() { }\n", "Source/Test.jet"), /exceeds 65535/);
-const guarded = parseRuntimeExports("// runtime-init: 3 when jet_root\n#Export(c) fn jet_start() { }\n// runtime-fini: 1 when jet_a,jet_b\n#Export(c) fn jet_stop() { }\n", "Source/Test.jet");
+assert.throws(() => parseRuntimeExports("// runtime-init: 65536\n#Export(c) jet_init: fn() { }\n", "Source/Test.jet"), /exceeds 65535/);
+const guarded = parseRuntimeExports("// runtime-init: 3 when jet_root\n#Export(c) jet_start: fn() { }\n// runtime-fini: 1 when jet_a,jet_b\n#Export(c) jet_stop: fn() { }\n", "Source/Test.jet");
 assert.equal(guarded.get("jet_start").lifecycle, "init 3 jet_root");
 assert.equal(guarded.get("jet_stop").lifecycle, "fini 1 jet_a,jet_b");
 assert.match(runtimeLifecycleList(guarded), /^jet_start init 3 jet_root$/m);

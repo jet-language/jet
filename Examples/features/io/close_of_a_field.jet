@@ -1,50 +1,50 @@
 // A Close method may close a field it owns directly, `close(^self.inner)`,
 // the same as through a binding (`inner := ^self.inner; close(^inner)`):
 // the field's own Close runs once, at that point.
-package {
+package: {
     name: "close_of_a_field"
     authority: { allow: [IO, Mem.Alloc] }
 }
 
-struct Inner {
+Inner: struct {
     label: String
 }
 
 impl Inner.Close {
-    fn close(^self) -[IO]> { print("close inner {self.label}") }
+    close: fn(^self) -[IO]> { print("close inner {self.label}") }
 }
 
-struct Direct {
+Direct: struct {
     inner: Inner
 }
 
 impl Direct.Close {
-    fn close(^self) -[IO]> {
+    close: fn(^self) -[IO]> {
         print("close direct")
         close(^self.inner)
     }
 }
 
-struct Bound {
+Bound: struct {
     inner: Inner
 }
 
 impl Bound.Close {
-    fn close(^self) -[IO]> {
+    close: fn(^self) -[IO]> {
         inner := ^self.inner
         close(^inner)
     }
 }
 
-fn scoped() -[IO]> {
-    held :: Direct{inner: Inner{label: "scoped"}}
+scoped: fn() -[IO]> {
+    held: Direct{inner: Inner{label: "scoped"}}
     print("scope ends with {held.inner.label}")
 }
 
-fn run() {
-    direct :: Direct{inner: Inner{label: "direct"}}
+run: fn() {
+    direct: Direct{inner: Inner{label: "direct"}}
     close(^direct)
-    bound :: Bound{inner: Inner{label: "bound"}}
+    bound: Bound{inner: Inner{label: "bound"}}
     close(^bound)
     scoped()
     print("done")

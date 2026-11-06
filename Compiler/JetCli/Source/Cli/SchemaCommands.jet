@@ -5,7 +5,7 @@ use {
     jet_sema.[SchemaSnapshot, snapshot_from_struct]
 }
 
-fn jet_cli_schema_status_text(snapshots: [SchemaSnapshot], pending: [String]) -> String Never! {
+jet_cli_schema_status_text: fn(snapshots: [SchemaSnapshot], pending: [String]) -> String Never! {
     if snapshots.len() == 0 -> return "no published schemas yet.\nnote: a `#PublishedSchema` struct is snapshotted into .jet/cache/schema/ on `jet registry publish`.\n"
     out := "published schemas in this project:\n\n"
     loop snapshot in snapshots {
@@ -22,31 +22,31 @@ fn jet_cli_schema_status_text(snapshots: [SchemaSnapshot], pending: [String]) ->
 // The host supplies the same authorized load-only request used by source
 // explain. None means no readable entry/request: status intentionally ignores
 // that advisory failure, but still lists valid canonical snapshots.
-fn jet_cli_schema_status_host(root: String, request: JetDriverCompileRequest?) -> JetDriverVerbOutput {
-    snapshots :: load_all_snapshots(root)
+jet_cli_schema_status_host: fn(root: String, request: JetDriverCompileRequest?) -> JetDriverVerbOutput {
+    snapshots: load_all_snapshots(root)
     pending := [String]{}
     if snapshots.len() > 0 && request == .Val(prepared) {
-        loaded :: jet_driver_source_query(prepared)
+        loaded: jet_driver_source_query(prepared)
         if loaded.complete {
-            items :: loop source_module in loaded.modules -> source_module.program.items
+            items: loop source_module in loaded.modules -> source_module.program.items
             pending = jet_driver_schema_pending_breaks(items, jet_driver_load_schema_snapshots(root))
         }
     }
     JetDriverVerbOutput{stdout: jet_cli_schema_status_text(snapshots, pending), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
-fn jet_cli_schema_squash_summary(count: Int, before: String) -> String Never! {
+jet_cli_schema_squash_summary: fn(count: Int, before: String) -> String Never! {
     if count == 0 -> return "no `#PublishedSchema` structs found — nothing to squash.\n"
     "\nok: {count} snapshot(s) re-baselined. Migration blocks for versions before {before} are no longer required.\nnote: this rewrote .jet/cache/schema/ only — your source is unchanged. Commit the updated snapshots.\n"
 }
 
-fn jet_cli_schema_squash_host(root: String, request: JetDriverCompileRequest?, before: String, color: Bool, json: Bool) -> JetDriverVerbOutput {
-    prepared :: request ?? return jet_cli_maintenance_error("E2105", "couldn't load the project to read its current schema shape", None, color, json)
-    loaded :: jet_driver_source_query(prepared)
+jet_cli_schema_squash_host: fn(root: String, request: JetDriverCompileRequest?, before: String, color: Bool, json: Bool) -> JetDriverVerbOutput {
+    prepared: request ?? return jet_cli_maintenance_error("E2105", "couldn't load the project to read its current schema shape", None, color, json)
+    loaded: jet_driver_source_query(prepared)
     if !loaded.complete -> return jet_cli_maintenance_error("E2105", "couldn't load the project to read its current schema shape", None, color, json)
     // This public loader fact is supplied by SolSema2's source-query seam;
     // do not infer a version from syntax, display paths, or identity strings.
-    version :: loaded.entry_package_version ?? "0.0.0"
+    version: loaded.entry_package_version ?? "0.0.0"
     count := 0
     out := ""
     loop source_module in loaded.modules {

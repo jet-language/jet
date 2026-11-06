@@ -405,7 +405,7 @@
       const defaultExpr = fallback.trim() ? "{" + fallback.trim() + "}" : "";
       return name.trim() + ": " + type.trim() + defaultExpr;
     }).filter((p) => !p.startsWith(":"));
-    return "fn " + ((fnMeta && fnMeta.name) || nodeTitle || "function") + "(" + params.join(", ") + ")" + ret + functionEffectSuffix(fnMeta, fnMeta && fnMeta.signature);
+    return ((fnMeta && fnMeta.name) || nodeTitle || "function") + ": fn(" + params.join(", ") + ")" + ret + functionEffectSuffix(fnMeta, fnMeta && fnMeta.signature);
   }
 
   function applyFunctionPins(graph, fnMeta, nodeTitle, retOverride) {
@@ -542,7 +542,7 @@
     const originalSignature = String(fnMeta.signature || "");
     const effect = functionEffectSuffix(fnMeta, originalSignature);
     const ret = fnMeta.returns && fnMeta.returns !== "Void" ? " " + fnMeta.returns : "";
-    return "fn " + (fnMeta.name || graph.title || "function") + "(" + params + ")" + ret + effect;
+    return (fnMeta.name || graph.title || "function") + ": fn(" + params + ")" + ret + effect;
   }
 
   function functionEffectSuffix(fnMeta, signature) {

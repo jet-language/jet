@@ -1,4 +1,4 @@
-package {
+package: {
     name: "core.text"
     version: "0.0.1"
     edition: "2026"
@@ -22,51 +22,51 @@ package {
 // `splitn` / `rsplitn` take a maximum part count, matching Rust `splitn`.
 
 
-module fmt
-module parse
-module wrap
-module html
-module combinators
+fmt: module
+parse: module
+wrap: module
+html: module
+combinators: module
 
 use {
-    segment_tables :: __core_text_segmentation_tables
-    text_unicode_string :: core.text.runtime.kernel_unicode_string
-    text_width :: core.text.runtime.kernel_text_width
-    text_asset :: core.text.runtime.unicode_assets
-    text_tables :: core.text.runtime.top_unicode_tables
-    text_unicode_name_index :: core.text.runtime.assets.unicode_name_index
-    collation_table :: __core_text_collation_table
-    text_normal :: core.text.runtime.kernel_text_normal
-    text_ccc :: core.text.runtime.assets.unicode_ccc
+    segment_tables: __core_text_segmentation_tables
+    text_unicode_string: core.text.runtime.kernel_unicode_string
+    text_width: core.text.runtime.kernel_text_width
+    text_asset: core.text.runtime.unicode_assets
+    text_tables: core.text.runtime.top_unicode_tables
+    text_unicode_name_index: core.text.runtime.assets.unicode_name_index
+    collation_table: __core_text_collation_table
+    text_normal: core.text.runtime.kernel_text_normal
+    text_ccc: core.text.runtime.assets.unicode_ccc
 }
 
 /// Byte-offset cursor into UTF-8 text. Line and column are 1-based.
-struct Cursor {
+Cursor: struct {
     offset: Int
     line: Int
     column: Int
 }
 
 /// Cursor at the start of `text` (offset 0, line 1, column 1).
-fn cursor(_text: String) -> Cursor Never! {
+cursor: fn(_text: String) -> Cursor Never! {
     Cursor{offset: 0, line: 1, column: 1}
 }
 
 /// Advance `cur` by one UTF-8 scalar in `text`. Past the end is a no-op.
-fn cursor_advance(text: String, cur: Cursor) -> Cursor Never! {
-    raw :: text.bytes()
+cursor_advance: fn(text: String, cur: Cursor) -> Cursor Never! {
+    raw: text.bytes()
     if cur.offset < 0 -> return Cursor{offset: 0, line: 1, column: 1}
     if cur.offset >= raw.len() -> return cur.copy()
-    width :: text_unicode_string.utf8_width_at(raw, cur.offset)
-    next :: cur.offset + width
+    width: text_unicode_string.utf8_width_at(raw, cur.offset)
+    next: cur.offset + width
     if raw[cur.offset] == (U8{10}) -> return Cursor{offset: next, line: cur.line + 1, column: 1}
     Cursor{offset: next, line: cur.line, column: cur.column + 1}
 }
 
 /// Byte length of UTF-8 `text`. Equal to `text.bytes().len()`.
-fn byte_count(text: String) -> Int Never! { text.bytes().len() }
+byte_count: fn(text: String) -> Int Never! { text.bytes().len() }
 
-fn is_ascii(text: String) -> Bool Never! {
+is_ascii: fn(text: String) -> Bool Never! {
     loop b in text.bytes() {
         if b > (U8{127}) -> return false
     }
@@ -74,9 +74,9 @@ fn is_ascii(text: String) -> Bool Never! {
 }
 
 /// Unicode scalar count (replacement character U+FFFD counts as one).
-fn scalar_count(text: String) -> Int Never! { decode_scalars(text).len() }
+scalar_count: fn(text: String) -> Int Never! { decode_scalars(text).len() }
 
-fn scalars(text: String) -> [String] Never! {
+scalars: fn(text: String) -> [String] Never! {
     out := [String]{}
     loop cp in decode_scalars(text) -> &out.push(encode_cp(cp))
     out
@@ -84,63 +84,63 @@ fn scalars(text: String) -> [String] Never! {
 
 /// Full Unicode lowercase mapping (`"İ"` lowers to `"i̇"`). The String method
 /// routes to the one shared runtime case table, so both spellings agree (I9).
-fn lower(text: String) -> String Never! { text.to_lower() }
+lower: fn(text: String) -> String Never! { text.to_lower() }
 
 /// Full Unicode uppercase mapping (`"ß"` uppers to `"SS"`), through the same
 /// shared runtime case table as the String method.
-fn upper(text: String) -> String Never! { text.to_upper() }
+upper: fn(text: String) -> String Never! { text.to_upper() }
 
 /// Unicode full case folding (CaseFolding.txt status C+F): `"Straße"` folds to
 /// `"strasse"`. The String method routes to the one shared runtime fold table.
-fn casefold(text: String) -> String Never! { text.casefold() }
+casefold: fn(text: String) -> String Never! { text.casefold() }
 
-fn caseless_eq(left: String, right: String) -> Bool Never! { casefold(left) == casefold(right) }
+caseless_eq: fn(left: String, right: String) -> Bool Never! { casefold(left) == casefold(right) }
 
-fn nfc(text: String) -> String Never! { compose(decompose(text, false)) }
-fn nfd(text: String) -> String Never! { encode_cps(decompose(text, false)) }
-fn nfkc(text: String) -> String Never! { compose(decompose(text, true)) }
-fn nfkd(text: String) -> String Never! { encode_cps(decompose(text, true)) }
+nfc: fn(text: String) -> String Never! { compose(decompose(text, false)) }
+nfd: fn(text: String) -> String Never! { encode_cps(decompose(text, false)) }
+nfkc: fn(text: String) -> String Never! { compose(decompose(text, true)) }
+nfkd: fn(text: String) -> String Never! { encode_cps(decompose(text, true)) }
 
-fn graphemes(text: String) -> [String] Never! { split_graphemes(text) }
-fn words(text: String) -> [String] Never! { split_words(text) }
-fn sentences(text: String) -> [String] Never! { split_sentences(text) }
+graphemes: fn(text: String) -> [String] Never! { split_graphemes(text) }
+words: fn(text: String) -> [String] Never! { split_words(text) }
+sentences: fn(text: String) -> [String] Never! { split_sentences(text) }
 /// Unicode 17.0.0 scalar labels: `U+XXXX NAME`, with legacy control names.
 /// Scalars absent from the pinned name index are labeled `UNASSIGNED`.
-fn inspect(text: String) -> [String] Never! {
+inspect: fn(text: String) -> [String] Never! {
     out := [String]{}
     loop cp in decode_scalars(text) -> &out.push("{hex_cp(cp)} {unicode_name(cp)}")
     out
 }
 
 /// `"index:scalar"` pairs, index in bytes.
-fn char_indices(text: String) -> [String] Never! {
+char_indices: fn(text: String) -> [String] Never! {
     out := [String]{}
     loop pair in decode_indexed(text) -> &out.push("{pair.index}:{encode_cp(pair.cp)}")
     out
 }
 
-fn display_width(text: String) -> Int Never! {
+display_width: fn(text: String) -> Int Never! {
     total := 0
     loop cluster in split_graphemes(text) -> total = total + text_width.cluster_width(decode_scalars(cluster))
     total
 }
 
-fn grapheme_views(text: String) -> [String] Never! { graphemes(text) }
-fn word_views(text: String) -> [String] Never! { words(text) }
-fn line_views(text: String) -> [String] Never! { split_lines(text) }
-fn byte_views(text: String) -> [String] Never! {
+grapheme_views: fn(text: String) -> [String] Never! { graphemes(text) }
+word_views: fn(text: String) -> [String] Never! { words(text) }
+line_views: fn(text: String) -> [String] Never! { split_lines(text) }
+byte_views: fn(text: String) -> [String] Never! {
     out := [String]{}
     loop b in text_unicode_string.utf8_bytes(text) -> &out.push("{b}")
     out
 }
 
-fn is_alphabetic(text: String) -> Bool Never! {
-    raw :: text.bytes()
+is_alphabetic: fn(text: String) -> Bool Never! {
+    raw: text.bytes()
     if raw.len() == 0 -> return false
-    bytes :: raw[0..<raw.len()]
+    bytes: raw[0..<raw.len()]
     at := 0
     loop at < bytes.len() {
-        byte :: bytes[at]
+        byte: bytes[at]
         if byte >= (U8{128}) -> break
         if !ascii_alpha(byte) -> return false
         at += 1
@@ -149,13 +149,13 @@ fn is_alphabetic(text: String) -> Bool Never! {
     alphabetic_suffix(bytes, at, segment_tables.UNICODE_ALPHABETIC)
 }
 
-fn is_numeric(text: String) -> Bool Never! {
-    raw :: text.bytes()
+is_numeric: fn(text: String) -> Bool Never! {
+    raw: text.bytes()
     if raw.len() == 0 -> return false
-    bytes :: raw[0..<raw.len()]
+    bytes: raw[0..<raw.len()]
     at := 0
     loop at < bytes.len() {
-        byte :: bytes[at]
+        byte: bytes[at]
         if byte >= (U8{128}) -> break
         if byte < (U8{48}) || byte > (U8{57}) -> return false
         at += 1
@@ -164,7 +164,7 @@ fn is_numeric(text: String) -> Bool Never! {
     numeric_suffix(bytes, at, segment_tables.UNICODE_NUMERIC)
 }
 
-fn is_whitespace(text: String) -> Bool Never! {
+is_whitespace: fn(text: String) -> Bool Never! {
     if text.bytes().len() == 0 -> return false
     loop cp in decode_scalars(text) {
         if !is_space_cp(cp) -> return false
@@ -174,7 +174,7 @@ fn is_whitespace(text: String) -> Bool Never! {
 
 /// True iff any scalar is Unicode 17 Cc.
 /// Empty text is false. Scan UTF-8 bytes without per-scalar allocation.
-fn has_control(value: String) -> Bool Never! {
+has_control: fn(value: String) -> Bool Never! {
     after_c2 := false
     loop b in value.bytes() {
         if b < (U8{32}) || b == (U8{127}) -> return true
@@ -184,10 +184,10 @@ fn has_control(value: String) -> Bool Never! {
     false
 }
 
-fn trim(text: String) -> String Never! { trim_end(trim_start(text)) }
+trim: fn(text: String) -> String Never! { trim_end(trim_start(text)) }
 
-fn trim_start(text: String) -> String Never! {
-    pairs :: decode_indexed(text)
+trim_start: fn(text: String) -> String Never! {
+    pairs: decode_indexed(text)
     i := 0
     loop i < pairs.len() {
         if !is_space_cp(pairs[i].cp) -> break
@@ -197,8 +197,8 @@ fn trim_start(text: String) -> String Never! {
     slice_bytes(text.bytes(), pairs[i].index, text.bytes().len())
 }
 
-fn trim_end(text: String) -> String Never! {
-    pairs :: decode_indexed(text)
+trim_end: fn(text: String) -> String Never! {
+    pairs: decode_indexed(text)
     end := text.bytes().len()
     i := pairs.len() - 1
     loop i >= 0 {
@@ -212,25 +212,25 @@ fn trim_end(text: String) -> String Never! {
 }
 
 /// Pad on the left until `width` UTF-8 scalars. Empty `fill` returns text unchanged.
-fn pad_start(text: String, width: Int, fill: String) -> String Never! { pad_side(text, width, fill, true) }
+pad_start: fn(text: String, width: Int, fill: String) -> String Never! { pad_side(text, width, fill, true) }
 
-fn pad_end(text: String, width: Int, fill: String) -> String Never! { pad_side(text, width, fill, false) }
+pad_end: fn(text: String, width: Int, fill: String) -> String Never! { pad_side(text, width, fill, false) }
 
-fn center(text: String, width: Int, fill: String) -> String Never! {
-    extra :: width - scalar_count(text)
+center: fn(text: String, width: Int, fill: String) -> String Never! {
+    extra: width - scalar_count(text)
     if extra <= 0 || scalar_count(fill) == 0 -> return text.copy()
-    left :: extra /% 2
+    left: extra /% 2
     pad_end(pad_start(text, scalar_count(text) + left, fill), width, fill)
 }
 
-fn starts_any(text: String, prefixes: [String]) -> Bool Never! {
+starts_any: fn(text: String, prefixes: [String]) -> Bool Never! {
     loop p in prefixes {
         if starts_with(text, p) -> return true
     }
     false
 }
 
-fn ends_any(text: String, suffixes: [String]) -> Bool Never! {
+ends_any: fn(text: String, suffixes: [String]) -> Bool Never! {
     loop s in suffixes {
         if ends_with(text, s) -> return true
     }
@@ -238,22 +238,22 @@ fn ends_any(text: String, suffixes: [String]) -> Bool Never! {
 }
 
 /// At most `n` parts. `n <= 0` yields an empty list.
-fn splitn(text: String, sep: String, n: Int) -> [String] Never! { split_limit(text, sep, n, false) }
+splitn: fn(text: String, sep: String, n: Int) -> [String] Never! { split_limit(text, sep, n, false) }
 
-fn rsplitn(text: String, sep: String, n: Int) -> [String] Never! { split_limit(text, sep, n, true) }
+rsplitn: fn(text: String, sep: String, n: Int) -> [String] Never! { split_limit(text, sep, n, true) }
 
 
-fn ascii_alpha(b: U8) -> Bool {
-    n :: b
+ascii_alpha: fn(b: U8) -> Bool {
+    n: b
     (n >= 65 && n <= 90) || (n >= 97 && n <= 122)
 }
 
-fn ascii_space(b: U8) -> Bool {
-    n :: b
+ascii_space: fn(b: U8) -> Bool {
+    n: b
     n == 32 || n == 9 || n == 10 || n == 11 || n == 12 || n == 13
 }
 
-fn slice_bytes(raw: [U8], start: Int, end: Int) -> String {
+slice_bytes: fn(raw: [U8], start: Int, end: Int) -> String {
     out := [U8]{}
     lo := start
     hi := end
@@ -268,9 +268,9 @@ fn slice_bytes(raw: [U8], start: Int, end: Int) -> String {
     }
 }
 
-fn starts_with(text: String, prefix: String) -> Bool {
-    a :: text_unicode_string.utf8_bytes(text)
-    b :: text_unicode_string.utf8_bytes(prefix)
+starts_with: fn(text: String, prefix: String) -> Bool {
+    a: text_unicode_string.utf8_bytes(text)
+    b: text_unicode_string.utf8_bytes(prefix)
     if b.len() > a.len() -> return false
     loop i in 0..<b.len() {
         if a[i] != b[i] -> return false
@@ -278,20 +278,20 @@ fn starts_with(text: String, prefix: String) -> Bool {
     true
 }
 
-fn ends_with(text: String, suffix: String) -> Bool {
-    a :: text_unicode_string.utf8_bytes(text)
-    b :: text_unicode_string.utf8_bytes(suffix)
+ends_with: fn(text: String, suffix: String) -> Bool {
+    a: text_unicode_string.utf8_bytes(text)
+    b: text_unicode_string.utf8_bytes(suffix)
     if b.len() > a.len() -> return false
-    off :: a.len() - b.len()
+    off: a.len() - b.len()
     loop i in 0..<b.len() {
         if a[off + i] != b[i] -> return false
     }
     true
 }
 
-fn pad_side(text: String, width: Int, fill: String, left: Bool) -> String {
-    extra :: width - scalar_count(text)
-    units :: scalars(fill)
+pad_side: fn(text: String, width: Int, fill: String, left: Bool) -> String {
+    extra: width - scalar_count(text)
+    units: scalars(fill)
     if extra <= 0 || units.len() == 0 -> return text.copy()
     added := [String]{}
     i := 0
@@ -307,7 +307,7 @@ fn pad_side(text: String, width: Int, fill: String, left: Bool) -> String {
     "{prefix}{text}{suffix}"
 }
 
-fn split_limit(text: String, sep: String, n: Int, from_right: Bool) -> [String] {
+split_limit: fn(text: String, sep: String, n: Int, from_right: Bool) -> [String] {
     if n <= 0 -> return [String]{}
     if n == 1 || text_unicode_string.utf8_bytes(sep).len() == 0 -> return [String]{text}
     parts := [String]{}
@@ -317,7 +317,7 @@ fn split_limit(text: String, sep: String, n: Int, from_right: Bool) -> [String] 
             &parts.push(rest)
             return parts
         }
-        at :: find_sep(rest, sep, from_right)
+        at: find_sep(rest, sep, from_right)
         if at < 0 {
             &parts.push(rest)
             return parts
@@ -332,11 +332,11 @@ fn split_limit(text: String, sep: String, n: Int, from_right: Bool) -> [String] 
     }
 }
 
-fn find_sep(text: String, sep: String, from_right: Bool) -> Int {
-    hay :: text.bytes()
-    needle :: sep.bytes()
+find_sep: fn(text: String, sep: String, from_right: Bool) -> Int {
+    hay: text.bytes()
+    needle: sep.bytes()
     if needle.len() == 0 || needle.len() > hay.len() -> return -1
-    last :: hay.len() - needle.len()
+    last: hay.len() - needle.len()
     if from_right {
         i := last
         loop {
@@ -351,29 +351,29 @@ fn find_sep(text: String, sep: String, from_right: Bool) -> Int {
     -1
 }
 
-fn match_at(hay: [U8], needle: [U8], start: Int) -> Bool {
+match_at: fn(hay: [U8], needle: [U8], start: Int) -> Bool {
     loop i in 0..<needle.len() {
         if hay[start + i] != needle[i] -> return false
     }
     true
 }
 
-struct IndexedCp {
+IndexedCp: struct {
     index: Int
     cp: Int
 }
 
-fn decode_scalars(text: String) -> [Int] Never! { text_width.decode_scalars(text) }
+decode_scalars: fn(text: String) -> [Int] Never! { text_width.decode_scalars(text) }
 
-fn decode_indexed(text: String) -> [IndexedCp] Never! {
-    raw :: text_unicode_string.utf8_bytes(text)
+decode_indexed: fn(text: String) -> [IndexedCp] Never! {
+    raw: text_unicode_string.utf8_bytes(text)
     out := [IndexedCp]{}
     i := 0
     loop {
         if i >= raw.len() -> return out
         start := i
         first := Int.from_u8(raw[i])
-        width :: text_unicode_string.utf8_width_at(raw, i)
+        width: text_unicode_string.utf8_width_at(raw, i)
         if width == 1 {
             if first < 128 {
                 &out.push(IndexedCp{index: start, cp: first})
@@ -408,13 +408,13 @@ fn decode_indexed(text: String) -> [IndexedCp] Never! {
     }
 }
 
-fn encode_cp(cp: Int) -> String {
+encode_cp: fn(cp: Int) -> String {
     out := [U8]{}
     text_unicode_string.append_cp(&out, cp)
     String.from_bytes(out) ?? ""
 }
 
-fn encode_cps(cps: [Int]) -> String {
+encode_cps: fn(cps: [Int]) -> String {
     out := ""
     loop cp in cps -> out = "{out}{encode_cp(cp)}"
     out
@@ -422,42 +422,42 @@ fn encode_cps(cps: [Int]) -> String {
 
 // Read parameters borrow the canonical tables without creating owned locals.
 // Their stable-place windows stay inside the suffix scan and never escape.
-fn alphabetic_suffix(bytes: View<U8>, offset: Int, table: [U8]) -> Bool Never! {
-    window :: table[0..<table.len()]
+alphabetic_suffix: fn(bytes: View<U8>, offset: Int, table: [U8]) -> Bool Never! {
+    window: table[0..<table.len()]
     at := offset
     loop at < bytes.len() {
-        scalar :: unicode_scalar_at(bytes, at)
+        scalar: unicode_scalar_at(bytes, at)
         if !is_alpha_cp(scalar.cp, window) -> return false
         at = scalar.end
     }
     true
 }
 
-fn numeric_suffix(bytes: View<U8>, offset: Int, table: [U8]) -> Bool Never! {
-    window :: table[0..<table.len()]
+numeric_suffix: fn(bytes: View<U8>, offset: Int, table: [U8]) -> Bool Never! {
+    window: table[0..<table.len()]
     at := offset
     loop at < bytes.len() {
-        scalar :: unicode_scalar_at(bytes, at)
+        scalar: unicode_scalar_at(bytes, at)
         if !is_digit_cp(scalar.cp, window) -> return false
         at = scalar.end
     }
     true
 }
 
-fn is_alpha_cp(cp: Int, table: View<U8>) -> Bool Never! {
+is_alpha_cp: fn(cp: Int, table: View<U8>) -> Bool Never! {
     if cp < 128 -> return (cp >= 65 && cp <= 90) || (cp >= 97 && cp <= 122)
     segment_contains(table, cp)
 }
 
-fn is_digit_cp(cp: Int, table: View<U8>) -> Bool Never! {
+is_digit_cp: fn(cp: Int, table: View<U8>) -> Bool Never! {
     if cp < 128 -> return cp >= 48 && cp <= 57
     segment_contains(table, cp)
 }
 
 // Callers pass bytes of a valid UTF-8 String and an offset at a scalar start.
 // Read one scalar in place instead of materializing both decoder vectors.
-fn unicode_scalar_at(raw: View<U8>, at: Int) -> (cp: Int, end: Int) Never! {
-    first :: Int.from_u8(raw[at])
+unicode_scalar_at: fn(raw: View<U8>, at: Int) -> (cp: Int, end: Int) Never! {
+    first: Int.from_u8(raw[at])
     if first < 128 -> return (cp: first, end: at + 1)
     width := 2
     cp := first.bit_and(31)
@@ -474,7 +474,7 @@ fn unicode_scalar_at(raw: View<U8>, at: Int) -> (cp: Int, end: Int) Never! {
     (cp: cp, end: at + width)
 }
 
-fn is_space_cp(cp: Int) -> Bool {
+is_space_cp: fn(cp: Int) -> Bool {
     if cp >= 9 && cp <= 13 -> return true
     if cp == 32 || cp == 133 || cp == 160 -> return true
     if cp == 5760 || cp == 8239 || cp == 8287 || cp == 12288 -> return true
@@ -483,7 +483,7 @@ fn is_space_cp(cp: Int) -> Bool {
     false
 }
 
-fn combining_class(cp: Int) -> Int {
+combining_class: fn(cp: Int) -> Int {
     if cp >= 768 && cp <= 879 -> return 230
     if cp >= 7616 && cp <= 7679 -> return 230
     if cp >= 8400 && cp <= 8432 -> return 230
@@ -491,52 +491,52 @@ fn combining_class(cp: Int) -> Int {
     0
 }
 
-fn is_extend(cp: Int) -> Bool { combining_class(cp) != 0 || (cp >= 0xFE00 && cp <= 0xFE0F) || (cp >= 0x1F3FB && cp <= 0x1F3FF) || cp == 0x200C || cp == 0x200D || cp == 0xFF9E || cp == 0xFF9F }
+is_extend: fn(cp: Int) -> Bool { combining_class(cp) != 0 || (cp >= 0xFE00 && cp <= 0xFE0F) || (cp >= 0x1F3FB && cp <= 0x1F3FF) || cp == 0x200C || cp == 0x200D || cp == 0xFF9E || cp == 0xFF9F }
 
-C_SBASE :: 44032
-C_LBASE :: 4352
-C_VBASE :: 4449
-C_TBASE :: 4519
-C_LCOUNT :: 19
-C_VCOUNT :: 21
-C_TCOUNT :: 28
-C_NCOUNT :: 588
-C_SCOUNT :: 11172
+C_SBASE: 44032
+C_LBASE: 4352
+C_VBASE: 4449
+C_TBASE: 4519
+C_LCOUNT: 19
+C_VCOUNT: 21
+C_TCOUNT: 28
+C_NCOUNT: 588
+C_SCOUNT: 11172
 
-fn hangul_decompose(cp: Int) -> [Int] {
-    sindex :: cp - C_SBASE
+hangul_decompose: fn(cp: Int) -> [Int] {
+    sindex: cp - C_SBASE
     if sindex < 0 || sindex >= C_SCOUNT -> return [Int]{cp}
-    l :: C_LBASE + sindex /% C_NCOUNT
-    v :: C_VBASE + (sindex % C_NCOUNT) /% C_TCOUNT
-    t :: C_TBASE + sindex % C_TCOUNT
+    l: C_LBASE + sindex /% C_NCOUNT
+    v: C_VBASE + (sindex % C_NCOUNT) /% C_TCOUNT
+    t: C_TBASE + sindex % C_TCOUNT
     if t == C_TBASE -> return [Int]{l, v}
     [Int]{l, v, t}
 }
 
-fn hangul_compose(a: Int, b: Int) -> Int? {
-    lindex :: a - C_LBASE
+hangul_compose: fn(a: Int, b: Int) -> Int? {
+    lindex: a - C_LBASE
     if lindex >= 0 && lindex < C_LCOUNT {
-        vindex :: b - C_VBASE
+        vindex: b - C_VBASE
         if vindex >= 0 && vindex < C_VCOUNT -> return Val(C_SBASE + (lindex * C_VCOUNT + vindex) * C_TCOUNT)
     }
-    sindex :: a - C_SBASE
+    sindex: a - C_SBASE
     if sindex >= 0 && sindex < C_SCOUNT && sindex % C_TCOUNT == 0 {
-        tindex :: b - C_TBASE
+        tindex: b - C_TBASE
         if tindex > 0 && tindex < C_TCOUNT -> return Val(a + tindex)
     }
     None
 }
 
-fn decompose(text: String, compat: Bool) -> [Int] {
+decompose: fn(text: String, compat: Bool) -> [Int] {
     raw := [Int]{}
     loop cp in decode_scalars(text) {
-        pieces :: decompose_cp(cp, compat)
+        pieces: decompose_cp(cp, compat)
         loop p in pieces -> &raw.push(p)
     }
     canon_order(raw)
 }
 
-fn decompose_cp(cp: Int, compat: Bool) -> [Int] {
+decompose_cp: fn(cp: Int, compat: Bool) -> [Int] {
     if cp >= C_SBASE && cp < C_SBASE + C_SCOUNT -> return hangul_decompose(cp)
     if cp == 192 -> return [Int]{65, 768}
     if cp == 193 -> return [Int]{65, 769}
@@ -608,14 +608,14 @@ fn decompose_cp(cp: Int, compat: Bool) -> [Int] {
     [Int]{cp}
 }
 
-fn canon_order(cps: [Int]) -> [Int] {
+canon_order: fn(cps: [Int]) -> [Int] {
     out := [Int]{}
     loop c in cps -> &out.push(c)
     i := 1
     loop {
         if i >= out.len() -> return out
-        cc :: combining_class(out[i])
-        prev :: combining_class(out[i - 1])
+        cc: combining_class(out[i])
+        prev: combining_class(out[i - 1])
         if cc != 0 && prev > cc {
             tmp := out[i]
             out[i] = out[i - 1]
@@ -629,15 +629,15 @@ fn canon_order(cps: [Int]) -> [Int] {
     }
 }
 
-fn compose(cps: [Int]) -> String {
+compose: fn(cps: [Int]) -> String {
     if cps.len() == 0 -> return ""
     out := [Int]{}
     starter := -1
     last_class := -1
     loop cp in cps {
-        cc :: combining_class(cp)
+        cc: combining_class(cp)
         if starter >= 0 {
-            composed :: compose_pair(out[starter], cp)
+            composed: compose_pair(out[starter], cp)
             if composed != None && last_class < cc {
                 out[starter] = composed
                 next
@@ -654,8 +654,8 @@ fn compose(cps: [Int]) -> String {
     encode_cps(out)
 }
 
-fn compose_pair(a: Int, b: Int) -> Int? {
-    h :: hangul_compose(a, b)
+compose_pair: fn(a: Int, b: Int) -> Int? {
+    h: hangul_compose(a, b)
     if h != None -> return Val(h)
     if b == 768 {
         if a == 65 -> return Val(192)
@@ -728,8 +728,8 @@ fn compose_pair(a: Int, b: Int) -> Int? {
     None
 }
 
-fn split_graphemes(text: String) -> [String] {
-    cps :: decode_scalars(text)
+split_graphemes: fn(text: String) -> [String] {
+    cps: decode_scalars(text)
     if cps.len() == 0 -> return [String]{}
     out := [String]{}
     cluster := [Int]{cps[0]}
@@ -740,8 +740,8 @@ fn split_graphemes(text: String) -> [String] {
             &out.push(encode_cps(cluster))
             return out
         }
-        prev :: cluster[cluster.len() - 1]
-        cur :: cps[i]
+        prev: cluster[cluster.len() - 1]
+        cur: cps[i]
         break_here := grapheme_break(prev, cur)
         // GB11 needs a pictographic Extend* prefix before the ZWJ.
         if prev == 0x200D && is_emoji(cur) -> break_here = !has_emoji_zwj_prefix(cluster)
@@ -758,7 +758,7 @@ fn split_graphemes(text: String) -> [String] {
     }
 }
 
-fn grapheme_break(prev: Int, cur: Int) -> Bool {
+grapheme_break: fn(prev: Int, cur: Int) -> Bool {
     // GB3 CR × LF
     if prev == 13 && cur == 10 -> return false
     // GB4 / GB5
@@ -776,10 +776,10 @@ fn grapheme_break(prev: Int, cur: Int) -> Bool {
     if is_ri(prev) && is_ri(cur) -> return false
     true
 }
-fn has_emoji_zwj_prefix(cluster: [Int]) -> Bool {
+has_emoji_zwj_prefix: fn(cluster: [Int]) -> Bool {
     i := cluster.len() - 2
     loop i >= 0 {
-        cp :: cluster[i]
+        cp: cluster[i]
         if cp == 0x200D -> return false
         if !is_extend(cp) -> return is_emoji(cp)
         i = i - 1
@@ -788,102 +788,102 @@ fn has_emoji_zwj_prefix(cluster: [Int]) -> Bool {
 }
 
 
-fn is_grapheme_control(cp: Int) -> Bool { (cp < 32 && cp != 9 && cp != 10 && cp != 13) || (cp >= 127 && cp <= 159) }
-fn is_l(cp: Int) -> Bool { cp >= C_LBASE && cp < C_LBASE + C_LCOUNT }
-fn is_v(cp: Int) -> Bool { cp >= C_VBASE && cp < C_VBASE + C_VCOUNT }
-fn is_t(cp: Int) -> Bool { cp >= C_TBASE + 1 && cp < C_TBASE + C_TCOUNT }
-fn is_lv(cp: Int) -> Bool {
-    s :: cp - C_SBASE
+is_grapheme_control: fn(cp: Int) -> Bool { (cp < 32 && cp != 9 && cp != 10 && cp != 13) || (cp >= 127 && cp <= 159) }
+is_l: fn(cp: Int) -> Bool { cp >= C_LBASE && cp < C_LBASE + C_LCOUNT }
+is_v: fn(cp: Int) -> Bool { cp >= C_VBASE && cp < C_VBASE + C_VCOUNT }
+is_t: fn(cp: Int) -> Bool { cp >= C_TBASE + 1 && cp < C_TBASE + C_TCOUNT }
+is_lv: fn(cp: Int) -> Bool {
+    s: cp - C_SBASE
     s >= 0 && s < C_SCOUNT && s % C_TCOUNT == 0
 }
-fn is_lvt(cp: Int) -> Bool {
-    s :: cp - C_SBASE
+is_lvt: fn(cp: Int) -> Bool {
+    s: cp - C_SBASE
     s >= 0 && s < C_SCOUNT && s % C_TCOUNT != 0
 }
-fn is_ri(cp: Int) -> Bool { cp >= 127462 && cp <= 127487 }
-fn is_emoji(cp: Int) -> Bool { (cp >= 0x1F300 && cp <= 0x1FAFF) || (cp >= 0x2600 && cp <= 0x27BF) }
+is_ri: fn(cp: Int) -> Bool { cp >= 127462 && cp <= 127487 }
+is_emoji: fn(cp: Int) -> Bool { (cp >= 0x1F300 && cp <= 0x1FAFF) || (cp >= 0x2600 && cp <= 0x27BF) }
 
 // UAX #29 WB/SB algorithm adapted from 7c42badbb's text segmentation port. Tags
 // are the generator's WORD_TAGS / SENTENCE_TAGS.
-WB_CR :: 1
-WB_LF :: 2
-WB_NEWLINE :: 3
-WB_EXTEND :: 4
-WB_ZWJ :: 5
-WB_RI :: 6
-WB_FORMAT :: 7
-WB_KATAKANA :: 8
-WB_HEBREW :: 9
-WB_ALETTER :: 10
-WB_SINGLEQUOTE :: 11
-WB_DOUBLEQUOTE :: 12
-WB_MIDNUMLET :: 13
-WB_MIDLETTER :: 14
-WB_MIDNUM :: 15
-WB_NUMERIC :: 16
-WB_EXTENDNUMLET :: 17
-WB_WSEGSPACE :: 18
-SB_CR :: 1
-SB_LF :: 2
-SB_EXTEND :: 3
-SB_SEP :: 4
-SB_FORMAT :: 5
-SB_SP :: 6
-SB_LOWER :: 7
-SB_UPPER :: 8
-SB_OLETTER :: 9
-SB_NUMERIC :: 10
-SB_ATERM :: 11
-SB_SCONTINUE :: 12
-SB_STERM :: 13
-SB_CLOSE :: 14
+WB_CR: 1
+WB_LF: 2
+WB_NEWLINE: 3
+WB_EXTEND: 4
+WB_ZWJ: 5
+WB_RI: 6
+WB_FORMAT: 7
+WB_KATAKANA: 8
+WB_HEBREW: 9
+WB_ALETTER: 10
+WB_SINGLEQUOTE: 11
+WB_DOUBLEQUOTE: 12
+WB_MIDNUMLET: 13
+WB_MIDLETTER: 14
+WB_MIDNUM: 15
+WB_NUMERIC: 16
+WB_EXTENDNUMLET: 17
+WB_WSEGSPACE: 18
+SB_CR: 1
+SB_LF: 2
+SB_EXTEND: 3
+SB_SEP: 4
+SB_FORMAT: 5
+SB_SP: 6
+SB_LOWER: 7
+SB_UPPER: 8
+SB_OLETTER: 9
+SB_NUMERIC: 10
+SB_ATERM: 11
+SB_SCONTINUE: 12
+SB_STERM: 13
+SB_CLOSE: 14
 
 // JUCD schema 1, explicit little-endian 3-byte scalar range endpoints.
 // Tables are checksum-verified and round-tripped by the generator, not decoded
 // into another allocation at startup. Header size is 40 bytes.
-fn segment_uint(table: View<U8>, at: Int) -> Int Never! {
+segment_uint: fn(table: View<U8>, at: Int) -> Int Never! {
     Int.from_u8(table[at]).bit_or((Int.from_u8(table[at + 1]) << 8)).bit_or((Int.from_u8(table[at + 2]) << 16))
 }
-fn segment_row(table: View<U8>, cp: Int, stride: Int) -> Int Never! {
+segment_row: fn(table: View<U8>, cp: Int, stride: Int) -> Int Never! {
     low := 0
     high := (table.len() - 40) /% stride
     loop low < high {
-        mid :: (low + high) /% 2
-        row :: 40 + mid * stride
+        mid: (low + high) /% 2
+        row: 40 + mid * stride
         if cp < segment_uint(table, row) -> high = mid
         else if cp > segment_uint(table, row + 3) -> low = mid + 1
         else -> return row
     }
     -1
 }
-fn segment_tag(table: View<U8>, cp: Int) -> Int Never! {
-    row :: segment_row(table, cp, 7)
+segment_tag: fn(table: View<U8>, cp: Int) -> Int Never! {
+    row: segment_row(table, cp, 7)
     if row < 0 -> return 0
     Int.from_u8(table[row + 6])
 }
-fn segment_contains(table: View<U8>, cp: Int) -> Bool Never! { segment_row(table, cp, 6) >= 0 }
+segment_contains: fn(table: View<U8>, cp: Int) -> Bool Never! { segment_row(table, cp, 6) >= 0 }
 
-struct WordUnit { class: Int, first: Int, last: Int, end: Int }
-fn is_word_newline(class: Int) -> Bool Never! { class == WB_NEWLINE || class == WB_CR || class == WB_LF }
-fn is_ahletter(class: Int) -> Bool Never! { class == WB_ALETTER || class == WB_HEBREW }
-fn is_midletter_q(class: Int) -> Bool Never! { class == WB_MIDLETTER || class == WB_MIDNUMLET || class == WB_SINGLEQUOTE }
-fn is_midnum_q(class: Int) -> Bool Never! { class == WB_MIDNUM || class == WB_MIDNUMLET || class == WB_SINGLEQUOTE }
+WordUnit: struct { class: Int, first: Int, last: Int, end: Int }
+is_word_newline: fn(class: Int) -> Bool Never! { class == WB_NEWLINE || class == WB_CR || class == WB_LF }
+is_ahletter: fn(class: Int) -> Bool Never! { class == WB_ALETTER || class == WB_HEBREW }
+is_midletter_q: fn(class: Int) -> Bool Never! { class == WB_MIDLETTER || class == WB_MIDNUMLET || class == WB_SINGLEQUOTE }
+is_midnum_q: fn(class: Int) -> Bool Never! { class == WB_MIDNUM || class == WB_MIDNUMLET || class == WB_SINGLEQUOTE }
 
 // WB4: ignore Extend/Format/ZWJ after any non-newline unit, retaining its
 // actual last scalar class for WB3c and WB3d. Ends are exclusive byte offsets.
-fn word_reduce(pairs: [IndexedCp], byte_len: Int) -> [WordUnit] Never! {
+word_reduce: fn(pairs: [IndexedCp], byte_len: Int) -> [WordUnit] Never! {
     units := [WordUnit]{}
-    table :: segment_tables.UNICODE_WORD_BREAK
-    window :: table[0..<table.len()]
+    table: segment_tables.UNICODE_WORD_BREAK
+    window: table[0..<table.len()]
     loop i in 0..<pairs.len() {
-        cp :: pairs[i].cp
-        class :: segment_tag(window, cp)
-        end :: if i + 1 < pairs.len() -> pairs[i + 1].index else -> byte_len
-        count :: units.len()
+        cp: pairs[i].cp
+        class: segment_tag(window, cp)
+        end: if i + 1 < pairs.len() -> pairs[i + 1].index else -> byte_len
+        count: units.len()
         if count > 0 && (class == WB_EXTEND || class == WB_FORMAT || class == WB_ZWJ) {
-            base :: units[count - 1].class
+            base: units[count - 1].class
             if !is_word_newline(base) {
-                first :: units[count - 1].first
+                first: units[count - 1].first
                 units[count - 1] = WordUnit{class: base, first: first, last: class, end: end}
                 next
             }
@@ -892,10 +892,10 @@ fn word_reduce(pairs: [IndexedCp], byte_len: Int) -> [WordUnit] Never! {
     }
     units
 }
-fn word_break_at(units: [WordUnit], i: Int, pictographic: View<U8>) -> Bool Never! {
-    pc :: units[i].class
-    cc :: units[i + 1].class
-    n :: units.len()
+word_break_at: fn(units: [WordUnit], i: Int, pictographic: View<U8>) -> Bool Never! {
+    pc: units[i].class
+    cc: units[i + 1].class
+    n: units.len()
     if pc == WB_CR && cc == WB_LF -> return false // WB3
     if is_word_newline(pc) || is_word_newline(cc) -> return true // WB3a/b
     if units[i].last == WB_ZWJ && segment_contains(pictographic, units[i + 1].first) -> return false // WB3c
@@ -916,31 +916,31 @@ fn word_break_at(units: [WordUnit], i: Int, pictographic: View<U8>) -> Bool Neve
     if pc == WB_EXTENDNUMLET && (is_ahletter(cc) || cc == WB_NUMERIC || cc == WB_KATAKANA) -> return false // WB13b
     true // WB999
 }
-fn word_boundaries(pairs: [IndexedCp], byte_len: Int) -> [Int] Never! {
+word_boundaries: fn(pairs: [IndexedCp], byte_len: Int) -> [Int] Never! {
     out := [Int]{}
     if pairs.len() == 0 -> return out
-    units :: word_reduce(pairs, byte_len)
-    pictographic :: segment_tables.UNICODE_EXTENDED_PICTOGRAPHIC
-    pictographic_window :: pictographic[0..<pictographic.len()]
+    units: word_reduce(pairs, byte_len)
+    pictographic: segment_tables.UNICODE_EXTENDED_PICTOGRAPHIC
+    pictographic_window: pictographic[0..<pictographic.len()]
     ri_run := 0
     loop i in 0..<units.len() {
-        class :: units[i].class
+        class: units[i].class
         ri_run = if class == WB_RI -> ri_run + 1 else -> 0
         if i + 1 < units.len() {
-            split :: if class == WB_RI && units[i + 1].class == WB_RI -> ri_run % 2 == 0 else -> word_break_at(units, i, pictographic_window)
+            split: if class == WB_RI && units[i + 1].class == WB_RI -> ri_run % 2 == 0 else -> word_break_at(units, i, pictographic_window)
             if split -> &out.push(units[i].end)
         }
     }
     &out.push(byte_len)
     out
 }
-fn split_words(text: String) -> [String] Never! {
-    raw :: text.bytes()
-    pairs :: decode_indexed(text)
-    alphabetic :: segment_tables.UNICODE_ALPHABETIC
-    numeric :: segment_tables.UNICODE_NUMERIC
-    alphabetic_window :: alphabetic[0..<alphabetic.len()]
-    numeric_window :: numeric[0..<numeric.len()]
+split_words: fn(text: String) -> [String] Never! {
+    raw: text.bytes()
+    pairs: decode_indexed(text)
+    alphabetic: segment_tables.UNICODE_ALPHABETIC
+    numeric: segment_tables.UNICODE_NUMERIC
+    alphabetic_window: alphabetic[0..<alphabetic.len()]
+    numeric_window: numeric[0..<numeric.len()]
     out := [String]{}
     start := 0
     at := 0
@@ -956,12 +956,12 @@ fn split_words(text: String) -> [String] Never! {
     out
 }
 
-struct SentenceUnit { class: Int, end: Int }
-fn is_sentence_para(class: Int) -> Bool Never! { class == SB_SEP || class == SB_CR || class == SB_LF }
-fn sentence_lower_follows(units: [SentenceUnit], from: Int) -> Bool Never! {
+SentenceUnit: struct { class: Int, end: Int }
+is_sentence_para: fn(class: Int) -> Bool Never! { class == SB_SEP || class == SB_CR || class == SB_LF }
+sentence_lower_follows: fn(units: [SentenceUnit], from: Int) -> Bool Never! {
     k := from
     loop k < units.len() {
-        class :: units[k].class
+        class: units[k].class
         if class == SB_LOWER -> return true
         if class == SB_OLETTER || class == SB_UPPER || is_sentence_para(class) || class == SB_STERM || class == SB_ATERM -> return false
         k = k + 1
@@ -970,13 +970,13 @@ fn sentence_lower_follows(units: [SentenceUnit], from: Int) -> Bool Never! {
 }
 // SB998/SB999 do NOT break. SB11 places the boundary after SATerm Close* Sp*
 // unless the SB8/SB8a/SB9/SB10 context suppresses it.
-fn sentence_breaks(units: [SentenceUnit]) -> [Bool] Never! {
-    n :: units.len()
+sentence_breaks: fn(units: [SentenceUnit]) -> [Bool] Never! {
+    n: units.len()
     breaks := [Bool]{}
     loop _ in 1..<n -> &breaks.push(false)
     i := 0
     loop i + 1 < n {
-        current :: units[i].class
+        current: units[i].class
         if current == SB_CR && units[i + 1].class == SB_LF {
             i = i + 1 // SB3
             next
@@ -997,13 +997,13 @@ fn sentence_breaks(units: [SentenceUnit]) -> [Bool] Never! {
             }
             j := i + 1
             loop j < n && units[j].class == SB_CLOSE -> j = j + 1
-            close_end :: j
+            close_end: j
             loop j < n && units[j].class == SB_SP -> j = j + 1
-            sp_end :: j
-            sb9 :: close_end < n && is_sentence_para(units[close_end].class)
-            sb10 :: sp_end < n && (units[sp_end].class == SB_SP || is_sentence_para(units[sp_end].class))
-            sb8a :: sp_end < n && (units[sp_end].class == SB_SCONTINUE || units[sp_end].class == SB_STERM || units[sp_end].class == SB_ATERM)
-            sb8 :: current == SB_ATERM && sentence_lower_follows(units, sp_end)
+            sp_end: j
+            sb9: close_end < n && is_sentence_para(units[close_end].class)
+            sb10: sp_end < n && (units[sp_end].class == SB_SP || is_sentence_para(units[sp_end].class))
+            sb8a: sp_end < n && (units[sp_end].class == SB_SCONTINUE || units[sp_end].class == SB_STERM || units[sp_end].class == SB_ATERM)
+            sb8: current == SB_ATERM && sentence_lower_follows(units, sp_end)
             if !(sb9 || sb10 || sb8a || sb8) && sp_end > 0 && sp_end - 1 < breaks.len() -> breaks[sp_end - 1] = true // SB11
             i = if sp_end > i -> sp_end else -> i + 1
             next
@@ -1012,18 +1012,18 @@ fn sentence_breaks(units: [SentenceUnit]) -> [Bool] Never! {
     }
     breaks
 }
-fn sentence_boundaries(pairs: [IndexedCp], byte_len: Int) -> [Int] Never! {
+sentence_boundaries: fn(pairs: [IndexedCp], byte_len: Int) -> [Int] Never! {
     out := [Int]{}
     if pairs.len() == 0 -> return out
     units := [SentenceUnit]{}
-    table :: segment_tables.UNICODE_SENTENCE_BREAK
-    window :: table[0..<table.len()]
+    table: segment_tables.UNICODE_SENTENCE_BREAK
+    window: table[0..<table.len()]
     loop i in 0..<pairs.len() {
-        class :: segment_tag(window, pairs[i].cp)
-        end :: if i + 1 < pairs.len() -> pairs[i + 1].index else -> byte_len
-        count :: units.len()
+        class: segment_tag(window, pairs[i].cp)
+        end: if i + 1 < pairs.len() -> pairs[i + 1].index else -> byte_len
+        count: units.len()
         if count > 0 && (class == SB_EXTEND || class == SB_FORMAT) {
-            base :: units[count - 1].class
+            base: units[count - 1].class
             if !is_sentence_para(base) {
                 units[count - 1] = SentenceUnit{class: base, end: end}
                 next
@@ -1031,27 +1031,27 @@ fn sentence_boundaries(pairs: [IndexedCp], byte_len: Int) -> [Int] Never! {
         }
         &units.push(SentenceUnit{class: class, end: end})
     }
-    breaks :: sentence_breaks(units)
+    breaks: sentence_breaks(units)
     loop i in 0..<breaks.len() {
         if breaks[i] -> &out.push(units[i].end)
     }
     &out.push(byte_len)
     out
 }
-fn split_sentences(text: String) -> [String] Never! {
-    raw :: text.bytes()
+split_sentences: fn(text: String) -> [String] Never! {
+    raw: text.bytes()
     out := [String]{}
     start := 0
     loop end in sentence_boundaries(decode_indexed(text), raw.len()) {
-        sentence :: slice_bytes(raw, start, end).trim()
+        sentence: slice_bytes(raw, start, end).trim()
         if sentence != "" -> &out.push(sentence)
         start = end
     }
     out
 }
 
-fn split_lines(text: String) -> [String] {
-    raw :: text.bytes()
+split_lines: fn(text: String) -> [String] {
+    raw: text.bytes()
     if raw.len() == 0 -> return [String]{}
     out := [String]{}
     start := 0
@@ -1071,9 +1071,9 @@ fn split_lines(text: String) -> [String] {
 }
 
 
-fn hex_cp(cp: Int) -> String {
+hex_cp: fn(cp: Int) -> String {
     hex := "0123456789ABCDEF"
-    hb :: hex.bytes()
+    hb: hex.bytes()
     n := cp
     digits := [U8]{}
     if n == 0 -> &digits.push(U8{48})
@@ -1100,14 +1100,14 @@ fn hex_cp(cp: Int) -> String {
 // (Tools/agent/gen-unicode-tables.mjs; control scalars carry their Unicode 1.0
 // names), or `UNASSIGNED` when the index has no row: one binary search over the
 // asset's sorted rows and one copy of the name's UTF-8 bytes.
-fn unicode_name(cp: Int) -> String Never! {
+unicode_name: fn(cp: Int) -> String Never! {
     // #4318/#4392: capture the static list once and keep its borrows in scope.
-    asset :: text_unicode_name_index.UNICODE_NAME_INDEX
+    asset: text_unicode_name_index.UNICODE_NAME_INDEX
     assert(text_asset.valid(asset, 8, 11), "invalid Unicode asset schema/version/extent")
-    pool_start :: text_asset.uint(asset[0..<asset.len()], 28, 4)
-    index :: asset[40..<pool_start]
-    names :: asset[pool_start..<asset.len()]
-    span :: text_tables.name_span(index, names, cp) ?? return "UNASSIGNED"
+    pool_start: text_asset.uint(asset[0..<asset.len()], 28, 4)
+    index: asset[40..<pool_start]
+    names: asset[pool_start..<asset.len()]
+    span: text_tables.name_span(index, names, cp) ?? return "UNASSIGNED"
     name := [U8]{}
     loop at in span.start..<(span.start + span.length) -> &name.push(names[at])
     String.from_bytes(name) ?? "UNASSIGNED"
@@ -1122,22 +1122,22 @@ fn unicode_name(cp: Int) -> String Never! {
 
 /// Compares `left` and `right` in Unicode's default collation order, the
 /// order English speakers read (`apple` < `Banana` < `éclair` < `zebra`).
-fn collate(left: String, right: String) -> Ordering Never! {
+collate: fn(left: String, right: String) -> Ordering Never! {
     compare_collation_keys(collation_key(left), collation_key(right))
 }
 
 /// The bytes whose byte order is `collate` order: sort by
 /// `collation_key(value)` to build one key per item instead of comparing
 /// with `collate` at every step.
-fn collation_key(value: String) -> [U8] Never! {
-    scalars :: decode_scalars(text_normal.normalize(value, false, false))
-    elements :: collation_elements(scalars)
+collation_key: fn(value: String) -> [U8] Never! {
+    scalars: decode_scalars(text_normal.normalize(value, false, false))
+    elements: collation_elements(scalars)
     key := [U8]{}
     loop level in 0..<3 {
-        width :: if level == 2 -> 1 else -> 2
+        width: if level == 2 -> 1 else -> 2
         at := level
         loop at < elements.len() {
-            weight :: elements[at]
+            weight: elements[at]
             if weight != 0 -> push_collation_weight(&key, weight, width)
             at += 3
         }
@@ -1147,7 +1147,7 @@ fn collation_key(value: String) -> [U8] Never! {
     key
 }
 
-fn compare_collation_keys(left: [U8], right: [U8]) -> Ordering Never! {
+compare_collation_keys: fn(left: [U8], right: [U8]) -> Ordering Never! {
     at := 0
     loop at < left.len() && at < right.len() {
         if left[at] != right[at] -> return if left[at] < right[at] -> Ordering.Less else -> Ordering.Greater
@@ -1156,34 +1156,34 @@ fn compare_collation_keys(left: [U8], right: [U8]) -> Ordering Never! {
     left.len() <=> right.len()
 }
 
-fn push_collation_weight(key: &[U8], weight: Int, width: Int) Never! {
+push_collation_weight: fn(key: &[U8], weight: Int, width: Int) Never! {
     loop at in 0..<width -> &key.push(U8{(weight >> (8 * (width - 1 - at))).bit_and(Int{255})})
 }
 
-COLLATION_ABSENT :: 16777215
+COLLATION_ABSENT: 16777215
 
 // UTS #10 S2: the collation elements of NFD scalars as flat (primary,
 // secondary, tertiary) triples. Each step takes the longest contiguous table
 // key, then extends it with unblocked non-starters (discontiguous contraction).
-fn collation_elements(scalars: [Int]) -> [Int] Never! {
+collation_elements: fn(scalars: [Int]) -> [Int] Never! {
     // #4318/#4392: bind each asset once and keep its views in this scope.
-    elements_asset :: collation_table.COLLATION_ELEMENTS
-    contractions_asset :: collation_table.COLLATION_CONTRACTIONS
-    ideographs_asset :: collation_table.COLLATION_UNIFIED_IDEOGRAPHS
-    ccc_asset :: text_ccc.UNICODE_CCC
+    elements_asset: collation_table.COLLATION_ELEMENTS
+    contractions_asset: collation_table.COLLATION_CONTRACTIONS
+    ideographs_asset: collation_table.COLLATION_UNIFIED_IDEOGRAPHS
+    ccc_asset: text_ccc.UNICODE_CCC
     assert(text_asset.valid(elements_asset, 9, 7), "invalid collation asset schema/version/extent")
     assert(text_asset.valid(contractions_asset, 10, 13), "invalid collation asset schema/version/extent")
     assert(text_asset.valid(ideographs_asset, 2, 6), "invalid collation asset schema/version/extent")
     assert(text_asset.valid(ccc_asset, 3, 7), "invalid Unicode asset schema/version/extent")
-    elements_bytes :: elements_asset[0..<elements_asset.len()]
-    contractions_bytes :: contractions_asset[0..<contractions_asset.len()]
-    ideographs_bytes :: ideographs_asset[0..<ideographs_asset.len()]
-    ccc_bytes :: ccc_asset[0..<ccc_asset.len()]
-    singles :: elements_asset[40..<text_asset.uint(elements_bytes, 28, 4)]
-    pool :: elements_asset[text_asset.uint(elements_bytes, 28, 4)..<elements_asset.len()]
-    contractions :: contractions_asset[40..<text_asset.uint(contractions_bytes, 28, 4)]
-    ideographs :: ideographs_asset[40..<text_asset.uint(ideographs_bytes, 28, 4)]
-    ccc :: ccc_asset[40..<text_asset.uint(ccc_bytes, 28, 4)]
+    elements_bytes: elements_asset[0..<elements_asset.len()]
+    contractions_bytes: contractions_asset[0..<contractions_asset.len()]
+    ideographs_bytes: ideographs_asset[0..<ideographs_asset.len()]
+    ccc_bytes: ccc_asset[0..<ccc_asset.len()]
+    singles: elements_asset[40..<text_asset.uint(elements_bytes, 28, 4)]
+    pool: elements_asset[text_asset.uint(elements_bytes, 28, 4)..<elements_asset.len()]
+    contractions: contractions_asset[40..<text_asset.uint(contractions_bytes, 28, 4)]
+    ideographs: ideographs_asset[40..<text_asset.uint(ideographs_bytes, 28, 4)]
+    ccc: ccc_asset[40..<text_asset.uint(ccc_bytes, 28, 4)]
     out := [Int]{}
     taken := [Bool]{}
     loop _scalar in scalars -> &taken.push(false)
@@ -1197,7 +1197,7 @@ fn collation_elements(scalars: [Int]) -> [Int] Never! {
         row := -1
         next_at := at + 1
         loop next_at < scalars.len() && key.len() < 3 && !taken[next_at] {
-            found :: collation_contraction_row(contractions, key, scalars[next_at])
+            found: collation_contraction_row(contractions, key, scalars[next_at])
             if found < 0 -> break
             &key.push(scalars[next_at])
             row = found
@@ -1208,10 +1208,10 @@ fn collation_elements(scalars: [Int]) -> [Int] Never! {
         skipped_class := 0
         probe := next_at
         loop probe < scalars.len() && key.len() < 3 {
-            class :: text_asset.range_tag(ccc, scalars[probe], 0)
+            class: text_asset.range_tag(ccc, scalars[probe], 0)
             if class == 0 -> break
             if !taken[probe] {
-                found :: if class > skipped_class -> collation_contraction_row(contractions, key, scalars[probe]) else -> -1
+                found: if class > skipped_class -> collation_contraction_row(contractions, key, scalars[probe]) else -> -1
                 if found >= 0 {
                     &key.push(scalars[probe])
                     taken[probe] = true
@@ -1223,8 +1223,8 @@ fn collation_elements(scalars: [Int]) -> [Int] Never! {
             probe += 1
         }
         if row >= 0 {
-            first :: text_asset.uint(contractions, row + 9, 3)
-            count :: text_asset.uint(contractions, row + 12, 1)
+            first: text_asset.uint(contractions, row + 9, 3)
+            count: text_asset.uint(contractions, row + 12, 1)
             collation_push_elements(&out, pool, first, count)
         } else {
             collation_single_elements(&out, singles, pool, ideographs, scalars[at])
@@ -1235,14 +1235,14 @@ fn collation_elements(scalars: [Int]) -> [Int] Never! {
 }
 
 // The byte offset of the contraction row for `key` + `scalar`, or -1.
-fn collation_contraction_row(contractions: View<U8>, key: [Int], scalar: Int) -> Int Never! {
-    target :: collation_rank(key, scalar)
+collation_contraction_row: fn(contractions: View<U8>, key: [Int], scalar: Int) -> Int Never! {
+    target: collation_rank(key, scalar)
     low := 0
     high := contractions.len() /% 13
     loop low < high {
-        mid :: (low + high) /% 2
-        row :: mid * 13
-        rank :: collation_row_rank(contractions, row)
+        mid: (low + high) /% 2
+        row: mid * 13
+        rank: collation_row_rank(contractions, row)
         if {
             rank < target -> low = mid + 1
             rank > target -> high = mid
@@ -1254,7 +1254,7 @@ fn collation_contraction_row(contractions: View<U8>, key: [Int], scalar: Int) ->
 
 // Keys order as the generator sorted them: three 21-bit places, the first
 // scalar as is and later ones plus one, with zero past the key's end.
-fn collation_rank(key: [Int], scalar: Int) -> Int Never! {
+collation_rank: fn(key: [Int], scalar: Int) -> Int Never! {
     rank := 0
     used := 0
     loop part in key {
@@ -1267,18 +1267,18 @@ fn collation_rank(key: [Int], scalar: Int) -> Int Never! {
     rank
 }
 
-fn collation_row_rank(contractions: View<U8>, row: Int) -> Int Never! {
+collation_row_rank: fn(contractions: View<U8>, row: Int) -> Int Never! {
     rank := text_asset.uint(contractions, row, 3)
     loop place in 1..<3 {
-        scalar :: text_asset.uint(contractions, row + place * 3, 3)
+        scalar: text_asset.uint(contractions, row + place * 3, 3)
         rank = rank * 2097152 + (if scalar == COLLATION_ABSENT -> 0 else -> scalar + 1)
     }
     rank
 }
 
-fn collation_push_elements(out: &[Int], pool: View<U8>, first: Int, count: Int) Never! {
+collation_push_elements: fn(out: &[Int], pool: View<U8>, first: Int, count: Int) Never! {
     loop index in first..<first + count {
-        at :: index * 5
+        at: index * 5
         &out.push(text_asset.uint(pool, at, 2))
         &out.push(text_asset.uint(pool, at + 2, 2))
         &out.push(text_asset.uint(pool, at + 4, 1))
@@ -1287,13 +1287,13 @@ fn collation_push_elements(out: &[Int], pool: View<U8>, first: Int, count: Int) 
 
 // A single scalar's table elements, or its UTS #10 section 10.1.3 implicit
 // weights when the table does not list it.
-fn collation_single_elements(out: &[Int], singles: View<U8>, pool: View<U8>, ideographs: View<U8>, scalar: Int) Never! {
+collation_single_elements: fn(out: &[Int], singles: View<U8>, pool: View<U8>, ideographs: View<U8>, scalar: Int) Never! {
     low := 0
     high := singles.len() /% 7
     loop low < high {
-        mid :: (low + high) /% 2
-        row :: mid * 7
-        found :: text_asset.uint(singles, row, 3)
+        mid: (low + high) /% 2
+        row: mid * 7
+        found: text_asset.uint(singles, row, 3)
         if {
             found < scalar -> low = mid + 1
             found > scalar -> high = mid
@@ -1303,7 +1303,7 @@ fn collation_single_elements(out: &[Int], singles: View<U8>, pool: View<U8>, ide
             }
         }
     }
-    implicit :: collation_implicit(ideographs, scalar)
+    implicit: collation_implicit(ideographs, scalar)
     &out.push(implicit.base)
     &out.push(32)
     &out.push(2)
@@ -1313,14 +1313,14 @@ fn collation_single_elements(out: &[Int], singles: View<U8>, pool: View<U8>, ide
 }
 
 // UTS #10 (UCA 17.0.0) section 10.1.3: [.AAAA.0020.0002][.BBBB.0000.0000].
-fn collation_implicit(ideographs: View<U8>, scalar: Int) -> (base: Int, trail: Int) Never! {
+collation_implicit: fn(ideographs: View<U8>, scalar: Int) -> (base: Int, trail: Int) Never! {
     if (scalar >= 94208 && scalar <= 100351) || (scalar >= 101632 && scalar <= 101759) -> return (base: 64256, trail: (scalar - 94208).bit_or(32768))
     if (scalar >= 100352 && scalar <= 101119) || (scalar >= 101760 && scalar <= 101887) -> return (base: 64257, trail: (scalar - 100352).bit_or(32768))
     if scalar >= 110960 && scalar <= 111359 -> return (base: 64258, trail: (scalar - 110960).bit_or(32768))
     if scalar >= 101120 && scalar <= 101631 -> return (base: 64259, trail: (scalar - 101120).bit_or(32768))
-    trail :: scalar.bit_and(32767).bit_or(32768)
+    trail: scalar.bit_and(32767).bit_or(32768)
     if !text_asset.contains(ideographs, scalar) -> return (base: 64448 + (scalar >> 15), trail: trail)
     // Core Han: the CJK Unified Ideographs and CJK Compatibility Ideographs blocks.
-    core_han :: (scalar >= 19968 && scalar <= 40959) || (scalar >= 63744 && scalar <= 64255)
+    core_han: (scalar >= 19968 && scalar <= 40959) || (scalar >= 63744 && scalar <= 64255)
     (base: (if core_han -> 64320 else -> 64384) + (scalar >> 15), trail: trail)
 }

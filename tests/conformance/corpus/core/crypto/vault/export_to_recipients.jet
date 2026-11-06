@@ -1,12 +1,12 @@
 // core-conformance: core.crypto.vault.export_to_recipients
 use {
-    crypto :: core.crypto
-    vault :: core.crypto.vault
+    crypto: core.crypto
+    vault: core.crypto.vault
 }
 
-fn run() -[Secret, IO]> {
-    current :: vault.current<crypto.SigningKey>("__core_conformance_export_recipients") ?? return
-    recipient :: crypto.X25519PublicKey.from_bytes([
+run: fn() -[Secret, IO]> {
+    current: vault.current<crypto.SigningKey>("__core_conformance_export_recipients") ?? return
+    recipient: crypto.X25519PublicKey.from_bytes([
         0xde,
         0x9e,
         0xdb,
@@ -40,6 +40,6 @@ fn run() -[Secret, IO]> {
         0x2b,
         0x4f
     ]) ?? return
-    result :: vault.export_to_recipients<crypto.SigningKey>(current, [recipient]) ?? return
+    result: vault.export_to_recipients<crypto.SigningKey>(current, [recipient]) ?? return
     print(result.bytes().len())
 }

@@ -1,10 +1,10 @@
-use mem :: core.mem
+use mem: core.mem
 
 // The board dossier comes first so driver code can name the target facts it
 // consumes. The host path uses the same records and state transitions as a
 // target build; only the MMIO/vector/DMA/flash providers are not available.
-module embedded {
-    struct MemoryRegion {
+embedded: module {
+    MemoryRegion: struct {
         name: String
         origin: Int
         bytes: Int
@@ -12,14 +12,14 @@ module embedded {
         access: String
     }
 
-    struct PeripheralBase {
+    PeripheralBase: struct {
         name: String
         address: Int
         bytes: Int
         access: String
     }
 
-    struct BoardDescription {
+    BoardDescription: struct {
         name: String
         mcu: String
         triple: String
@@ -41,7 +41,7 @@ module embedded {
         host_replay: String
     }
 
-    struct TargetDossier {
+    TargetDossier: struct {
         target: String
         mcu: String
         toolchain: String
@@ -61,7 +61,7 @@ module embedded {
 
     // The proof profile uses QEMU MPS2 AN386: 4 MiB image memory and
     // SSRAM, 64 KiB APB space, and the CMSDK UART0. DMA is not provided.
-    fn board() -> BoardDescription {
+    board: fn() -> BoardDescription {
         return BoardDescription{
             name: "board.sensor_v1",
             mcu: "MPS2 AN386 Cortex-M4",
@@ -108,7 +108,7 @@ module embedded {
         }
     }
 
-    fn target_dossier() -> TargetDossier {
+    target_dossier: fn() -> TargetDossier {
         return TargetDossier{
             target: "board.sensor_v1",
             mcu: "MPS2 AN386 Cortex-M4",
@@ -130,19 +130,19 @@ module embedded {
 
     // C-layout records for host replay. The UART fields match CMSDK offsets;
     // GPIO, timer, and DMA records are driver state, not target MMIO claims.
-    #Layout(c) struct GpioRegisters {
+    #Layout(c) GpioRegisters: struct {
         mode: U32
         output: U32
         input: U32
     }
 
-    #Layout(c) struct TimerRegisters {
+    #Layout(c) TimerRegisters: struct {
         counter: U32
         compare: U32
         status: U32
     }
 
-    #Layout(c) struct UartRegisters {
+    #Layout(c) UartRegisters: struct {
         data: U32
         state: U32
         control: U32
@@ -150,12 +150,12 @@ module embedded {
         bauddiv: U32
     }
 
-    #Layout(c) struct DmaRegisters {
+    #Layout(c) DmaRegisters: struct {
         status: U32
         clear: U32
     }
 
-    struct RegisterBlock {
+    RegisterBlock: struct {
         gpio: GpioRegisters
         timer: TimerRegisters
         uart: UartRegisters
@@ -163,7 +163,7 @@ module embedded {
         mmio_echo: Int
     }
 
-    fn registers() -> RegisterBlock {
+    registers: fn() -> RegisterBlock {
         return RegisterBlock{
             gpio: GpioRegisters{mode: U32{0}, output: U32{0}, input: U32{0}},
             timer: TimerRegisters{counter: U32{0}, compare: U32{0}, status: U32{0}},
@@ -176,22 +176,22 @@ module embedded {
     // The address is documented and passed by the caller, but host replay must
     // not dereference it. The single unsafe audit writes a stack cell instead;
     // a target MMIO provider will replace this boundary under D-FOUND-BOARD1.
-    fn mmio_replay(_documented_address: Int, value: Int) -> Int {
+    mmio_replay: fn(_documented_address: Int, value: Int) -> Int {
         cell := 0
         #Unsafe("host replay uses a stack cell for the CMSDK UART0 control register and never dereferences the target address") {
-            pointer :: mem.Ptr<Int>.from_addr(mem.address_of(cell))
+            pointer: mem.Ptr<Int>.from_addr(mem.address_of(cell))
             mem.volatile_write(pointer, value)
             return mem.volatile_read(pointer)
         }
     }
 
-    fn gpio_init(registers: &RegisterBlock) {
+    gpio_init: fn(registers: &RegisterBlock) {
         registers.gpio.mode = U32{1}
         registers.gpio.output = U32{0}
         registers.gpio.input = U32{0}
     }
 
-    fn gpio_write(registers: &RegisterBlock, high: Bool) {
+    gpio_write: fn(registers: &RegisterBlock, high: Bool) {
         if high {
             registers.gpio.output = U32{1}
         } else {
@@ -199,13 +199,13 @@ module embedded {
         }
     }
 
-    fn timer_init(registers: &RegisterBlock, period: Int) {
+    timer_init: fn(registers: &RegisterBlock, period: Int) {
         registers.timer.counter = U32{0}
         registers.timer.compare = U32{period}
         registers.timer.status = U32{0}
     }
 
-    fn timer_advance(registers: &RegisterBlock) -> Bool {
+    timer_advance: fn(registers: &RegisterBlock) -> Bool {
         counter := registers.timer.counter
         counter += U32{1}
         registers.timer.counter = counter
@@ -218,23 +218,23 @@ module embedded {
         return false
     }
 
-    fn uart_init(registers: &RegisterBlock) {
+    uart_init: fn(registers: &RegisterBlock) {
         registers.uart.control = U32{1}
         registers.uart.data = U32{0}
     }
 
-    fn uart_control_write(registers: &RegisterBlock, value: Int) -> Int {
+    uart_control_write: fn(registers: &RegisterBlock, value: Int) -> Int {
         registers.uart.control = U32{value}
         registers.mmio_echo = mmio_replay(0x40004008, value)
         return registers.mmio_echo
     }
 
-    fn dma_init(registers: &RegisterBlock) {
+    dma_init: fn(registers: &RegisterBlock) {
         registers.dma.status = U32{0}
         registers.dma.clear = U32{0}
     }
 
-    struct InterruptQueue {
+    InterruptQueue: struct {
         slots: [Int#4]
         head: Int
         tail: Int
@@ -242,7 +242,7 @@ module embedded {
         dropped: Int
     }
 
-    fn interrupt_queue() -> InterruptQueue {
+    interrupt_queue: fn() -> InterruptQueue {
         return InterruptQueue{
             slots: [Int#4]{0, 0, 0, 0},
             head: 0,
@@ -255,7 +255,7 @@ module embedded {
     // The bounded handoff is reusable queue policy. D-FOUND-BOARD1 still has
     // no vector-table/ISR registration seam, so this function is not claimed
     // to be a hardware interrupt handler.
-    fn interrupt_enqueue(queue: &InterruptQueue, event: Int) -> Bool {
+    interrupt_enqueue: fn(queue: &InterruptQueue, event: Int) -> Bool {
         if queue.count >= queue.slots.len() {
             queue.dropped += 1
             return false
@@ -266,15 +266,15 @@ module embedded {
         return true
     }
 
-    fn task_drain(queue: &InterruptQueue) -> Int? {
+    task_drain: fn(queue: &InterruptQueue) -> Int? {
         if queue.count == 0 -> return None
-        event :: queue.slots[queue.head]
+        event: queue.slots[queue.head]
         queue.head = (queue.head + 1) % queue.slots.len()
         queue.count -= 1
         return Val(event)
     }
 
-    struct DmaBuffer {
+    DmaBuffer: struct {
         words: [Int#4]
         checksum: Int
         owner: Int
@@ -282,7 +282,7 @@ module embedded {
         completed: Bool
     }
 
-    fn dma_buffer(words: [Int#4]) -> DmaBuffer {
+    dma_buffer: fn(words: [Int#4]) -> DmaBuffer {
         return DmaBuffer{
             words: words,
             checksum: 0,
@@ -294,15 +294,15 @@ module embedded {
 
     // Pin establishes address stability for this read. It does not map memory
     // for a device and it does not complete a transfer (D-PIN3).
-    fn dma_checksum(buffer: &DmaBuffer) -> Int {
-        pinned :: mem.pin(&buffer)
+    dma_checksum: fn(buffer: &DmaBuffer) -> Int {
+        pinned: mem.pin(&buffer)
         return pinned.words[0] + pinned.words[1] + pinned.words[2] + pinned.words[3]
     }
 
     // Host replay uses the same ownership transitions that a target provider
     // must drive. Source/destination remain unmapped until D-FOUND-BOARD1
     // supplies the target DMA mapping boundary.
-    fn dma_submit(buffer: &DmaBuffer, registers: &RegisterBlock) -> Bool {
+    dma_submit: fn(buffer: &DmaBuffer, registers: &RegisterBlock) -> Bool {
         if buffer.owner != 0 || buffer.submitted -> return false
         buffer.checksum = dma_checksum(buffer)
         registers.dma.status = U32{0}
@@ -313,7 +313,7 @@ module embedded {
         return true
     }
 
-    fn dma_complete(buffer: &DmaBuffer, registers: &RegisterBlock) -> Bool {
+    dma_complete: fn(buffer: &DmaBuffer, registers: &RegisterBlock) -> Bool {
         if buffer.owner != 1 || !buffer.submitted -> return false
         registers.dma.status = U32{1}
         buffer.completed = true
@@ -323,7 +323,7 @@ module embedded {
 
     // A completed CPU-owned buffer may be reused. Reuse clears the transfer
     // markers; submitting while the device owns it is rejected above.
-    fn dma_reuse(buffer: &DmaBuffer) -> Bool {
+    dma_reuse: fn(buffer: &DmaBuffer) -> Bool {
         if buffer.owner != 0 || !buffer.submitted || !buffer.completed -> return false
         buffer.checksum = 0
         buffer.submitted = false
@@ -331,11 +331,11 @@ module embedded {
         return true
     }
 
-    fn dma_mapping_status() -> String {
+    dma_mapping_status: fn() -> String {
         return "D-FOUND-BOARD1: target DMA mapping/provider boundary open"
     }
 
-    struct UartRing {
+    UartRing: struct {
         bytes: [U8#8]
         head: Int
         tail: Int
@@ -343,7 +343,7 @@ module embedded {
         dropped: Int
     }
 
-    fn uart_ring() -> UartRing {
+    uart_ring: fn() -> UartRing {
         return UartRing{
             bytes: [U8#8]{0, 0, 0, 0, 0, 0, 0, 0},
             head: 0,
@@ -355,7 +355,7 @@ module embedded {
 
     // RX and TX use the same bounded ring policy. Enqueue reports full without
     // overwriting old bytes; dequeue returns None for empty, never a sentinel.
-    fn uart_enqueue(ring: &UartRing, byte: U8) -> Bool {
+    uart_enqueue: fn(ring: &UartRing, byte: U8) -> Bool {
         if ring.count >= ring.bytes.len() {
             ring.dropped += 1
             return false
@@ -366,15 +366,15 @@ module embedded {
         return true
     }
 
-    fn uart_dequeue(ring: &UartRing) -> U8? {
+    uart_dequeue: fn(ring: &UartRing) -> U8? {
         if ring.count == 0 -> return None
-        byte :: ring.bytes[ring.head]
+        byte: ring.bytes[ring.head]
         ring.head = (ring.head + 1) % ring.bytes.len()
         ring.count -= 1
         return Val(byte)
     }
 
-    struct ControlState {
+    ControlState: struct {
         setpoint: Int
         integrator: Int
         actuator: Int
@@ -384,7 +384,7 @@ module embedded {
         deadline_us: Int
     }
 
-    fn control_state(setpoint: Int, deadline_us: Int) -> ControlState {
+    control_state: fn(setpoint: Int, deadline_us: Int) -> ControlState {
         return ControlState{
             setpoint: setpoint,
             integrator: 0,
@@ -398,8 +398,8 @@ module embedded {
 
     // Deterministic fixed-point control tick. The returned work value is a
     // measured/maintained library estimate, not compiler WCET proof.
-    fn control_tick(state: &ControlState, sample: Int) -> Int {
-        error :: state.setpoint - sample
+    control_tick: fn(state: &ControlState, sample: Int) -> Int {
+        error: state.setpoint - sample
         state.integrator += error
         if state.integrator > 8192 -> state.integrator = 8192
         if state.integrator < -8192 -> state.integrator = -8192
@@ -410,7 +410,7 @@ module embedded {
         return state.wcet_estimate_us
     }
 
-    fn control_account(state: &ControlState, work_us: Int) -> Bool {
+    control_account: fn(state: &ControlState, work_us: Int) -> Bool {
         if work_us > state.deadline_us {
             state.deadline_misses += 1
             return false
@@ -418,31 +418,31 @@ module embedded {
         return true
     }
 
-    fn control_timing_status() -> String {
+    control_timing_status: fn() -> String {
         return "D-FOUND-REALTIME1: deadline comparison is accounting, not WCET proof"
     }
 
-    enum SlotState {
+    SlotState: enum {
         Empty
         Pending(Int)
         Confirmed(Int)
         Rejected(Int)
     }
 
-    struct SlotPolicy {
+    SlotPolicy: struct {
         active: Int
         trial: SlotState
         rollback_count: Int
     }
 
-    fn slot_policy(active: Int) -> SlotPolicy {
+    slot_policy: fn(active: Int) -> SlotPolicy {
         return SlotPolicy{active: active, trial: SlotState.Empty, rollback_count: 0}
     }
 
     // Authentication is an input from the image verifier. Keeping this policy
     // separate from flash persistence avoids claiming a signer or bootloader
     // that the current Core API does not provide.
-    fn stage_image(slots: &SlotPolicy, image_digest: Int, authenticated: Bool) -> Bool {
+    stage_image: fn(slots: &SlotPolicy, image_digest: Int, authenticated: Bool) -> Bool {
         if !authenticated {
             slots.trial = SlotState.Rejected(image_digest)
             return false
@@ -451,7 +451,7 @@ module embedded {
         return true
     }
 
-    fn confirm_trial(slots: &SlotPolicy) -> Bool {
+    confirm_trial: fn(slots: &SlotPolicy) -> Bool {
         if slots.trial == {
             .Pending(digest) -> {
                 slots.trial = SlotState.Confirmed(digest)
@@ -461,7 +461,7 @@ module embedded {
         }
     }
 
-    fn activate_confirmed(slots: &SlotPolicy) -> Bool {
+    activate_confirmed: fn(slots: &SlotPolicy) -> Bool {
         if slots.trial == {
             .Confirmed(digest) -> {
                 slots.active = digest
@@ -472,7 +472,7 @@ module embedded {
         }
     }
 
-    fn rollback_trial(slots: &SlotPolicy) -> Bool {
+    rollback_trial: fn(slots: &SlotPolicy) -> Bool {
         if slots.trial == {
             .Pending(_) -> {
                 slots.trial = SlotState.Empty
@@ -488,7 +488,7 @@ module embedded {
         }
     }
 
-    fn slot_state(slots: &SlotPolicy) -> String {
+    slot_state: fn(slots: &SlotPolicy) -> String {
         if slots.trial == {
             .Empty -> return "empty"
             .Pending(_) -> return "pending"
@@ -500,7 +500,7 @@ module embedded {
     // A receipt is only reproducible after real build, programmer, and debug
     // output are supplied. Empty captures remain visibly incomplete; no device
     // output is fabricated by the host replay.
-    struct ReleaseReceipt {
+    ReleaseReceipt: struct {
         target: String
         image: String
         build_command: String
@@ -510,7 +510,7 @@ module embedded {
         captured: Bool
     }
 
-    fn release_receipt(target: String, image: String, build_output: String, flash_output: String, debug_output: String) -> ReleaseReceipt {
+    release_receipt: fn(target: String, image: String, build_output: String, flash_output: String, debug_output: String) -> ReleaseReceipt {
         captured := build_output != "" && flash_output != "" && debug_output != ""
         return ReleaseReceipt{
             target: target,
@@ -523,7 +523,7 @@ module embedded {
         }
     }
 
-    fn open_core_gates() -> [String] { [
+    open_core_gates: fn() -> [String] { [
         "D-FOUND-BOARD1 (G2): vector-table to bounded ISR provider is not exposed",
         "D-FOUND-BOARD1 (G3): target DMA mapping and ownership provider is not exposed",
         "D-FOUND-BOARD1 (G7): target-backed typed MMIO bindings are not exposed",

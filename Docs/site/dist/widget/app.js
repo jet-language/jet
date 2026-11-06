@@ -1890,7 +1890,7 @@ const JET_RUNTIME_STOP_METADATA = Object.freeze({
 export async function jet_main() {
   const __jet___source_file = "counter.jet";
   const __jet___source_fn = "run";
-  const __jet___source_line = "fn run() {";
+  const __jet___source_line = "run: fn() {";
   const __jet___stack_frame = jet_stack_enter(__jet___source_file, 7, __jet___source_fn, __jet___source_line);
   try {
     jetDom.enterRenderScope("run");

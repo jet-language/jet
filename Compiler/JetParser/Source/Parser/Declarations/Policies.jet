@@ -26,9 +26,9 @@ use {
     ]
 }
 
-fn parser_policy_file_decl_ahead(state: &JetParserState) -> Bool Never! {
+parser_policy_file_decl_ahead: fn(state: &JetParserState) -> Bool Never! {
     if parser_current_kind(&state) != TOKEN_HASH -> return false
-    name :: parser_lookahead(&state, 1)
+    name: parser_lookahead(&state, 1)
     if name.kind != TOKEN_IDENT || parser_value(state, name) != "Policy" -> return false
     if parser_kind_at(&state, 2) != TOKEN_LPAREN -> return false
     // A callable policy starts with a policy call.
@@ -36,12 +36,12 @@ fn parser_policy_file_decl_ahead(state: &JetParserState) -> Bool Never! {
     offset := 2
     depth := 0
     loop parser_kind_at(&state, offset) != TOKEN_EOF {
-        kind :: parser_kind_at(&state, offset)
+        kind: parser_kind_at(&state, offset)
         if kind == TOKEN_LPAREN -> depth += 1
         if kind == TOKEN_RPAREN {
             depth -= 1
             if depth == 0 {
-                after :: parser_kind_at(&state, offset + 1)
+                after: parser_kind_at(&state, offset + 1)
                 return after == TOKEN_SEMI || after == TOKEN_EOF
             }
         }
@@ -50,9 +50,9 @@ fn parser_policy_file_decl_ahead(state: &JetParserState) -> Bool Never! {
     true
 }
 
-fn parser_parse_policy_file_decl(state: &JetParserState, program: &Program) {
-    marker :: parser_parse_marker(&state)
-    declarations :: parser_policy_declarations_from_marker(&state, marker, PolicyScope.Module) ?? {
+parser_parse_policy_file_decl: fn(state: &JetParserState, program: &Program) {
+    marker: parser_parse_marker(&state)
+    declarations: parser_policy_declarations_from_marker(&state, marker, PolicyScope.Module) ?? {
         parser_sync_top(&state)
         return
     }
@@ -61,7 +61,7 @@ fn parser_parse_policy_file_decl(state: &JetParserState, program: &Program) {
 
 // `#Policy(...) { … }` scopes its declarations to the block
 // (Rust `at_policy_stmt`). Each declaration targets the whole statement.
-fn parser_policy_block_stmt(state: &JetParserState, marker: Marker, body: [Stmt], span: Span) -> Stmt? {
+parser_policy_block_stmt: fn(state: &JetParserState, marker: Marker, body: [Stmt], span: Span) -> Stmt? {
     declarations := parser_policy_declarations_from_marker(&state, marker, PolicyScope.Block) ?? return None
     loop index in 0..<declarations.len() -> declarations[index].target = Val(span)
     loop declaration in declarations -> &state.block_policy_declarations.push(declaration)
@@ -73,12 +73,12 @@ fn parser_policy_block_stmt(state: &JetParserState, marker: Marker, body: [Stmt]
 // Returns the declaration targeting `target`, or None when the mode is
 // absent or `.None`. A package-level mode written at a gate is E3108;
 // other argument shapes are left to sema's typed marker-argument check.
-fn parser_unsafe_obligation_policy(state: &JetParserState, marker: Marker, scope: PolicyScope, target: Span) -> PolicyDeclaration? {
-    values :: parser_marker_bindings(marker, [String]{"reason", "obligations"}) ?? return None
-    written :: values[1] ?? return None
+parser_unsafe_obligation_policy: fn(state: &JetParserState, marker: Marker, scope: PolicyScope, target: Span) -> PolicyDeclaration? {
+    values: parser_marker_bindings(marker, [String]{"reason", "obligations"}) ?? return None
+    written: values[1] ?? return None
     if written == .EnumLit(type_name, variant, _, args, _, span, _) {
         if type_name != "" || args.len() > 0 -> return None
-        value :: if variant == {
+        value: if variant == {
             "Track" -> PolicyValue.Track
             "Skip" -> PolicyValue.Skip
             "GateOnly" | "Obligations" | "PerSite" -> {
@@ -96,9 +96,9 @@ fn parser_unsafe_obligation_policy(state: &JetParserState, marker: Marker, scope
 
 // Rust `CallablePolicyChain::parse(..).is_ok()`: every argument is a policy
 // call (`retry(3)`) whose own arguments are plain positional values.
-fn parser_callable_policy_marker(marker: Marker) -> Bool Never! {
+parser_callable_policy_marker: fn(marker: Marker) -> Bool Never! {
     loop index in 0..<marker.args.len() {
-        expr :: parser_marker_expression(marker, index) ?? return false
+        expr: parser_marker_expression(marker, index) ?? return false
         if expr == .Call(call, _) {
             loop argument in call.args {
                 if argument.label != None || argument.spread -> return false
@@ -111,19 +111,19 @@ fn parser_callable_policy_marker(marker: Marker) -> Bool Never! {
 }
 
 // One declaration per argument, or None after reporting the first refusal.
-fn parser_policy_declarations_from_marker(state: &JetParserState, marker: Marker, scope: PolicyScope) -> [PolicyDeclaration]? {
+parser_policy_declarations_from_marker: fn(state: &JetParserState, marker: Marker, scope: PolicyScope) -> [PolicyDeclaration]? {
     out := [PolicyDeclaration]{}
     loop index in 0..<marker.args.len() {
-        expr :: parser_marker_expression(marker, index) ?? {
+        expr: parser_marker_expression(marker, index) ?? {
             parser_marker_shape_error(&state, marker)
             return None
         }
-        label :: parser_marker_label(marker, index)
+        label: parser_marker_label(marker, index)
         name := label
         name_span := marker.span
         mode := PolicyValue?{None}
         if label == "copies" || label == "sentries" {
-            variant :: if expr == {
+            variant: if expr == {
                 .EnumLit(type_name, written, _, args, _, _, _) -> if type_name == "" && args.len() == 0 -> written else -> ""
                 else -> ""
             }
@@ -145,7 +145,7 @@ fn parser_policy_declarations_from_marker(state: &JetParserState, marker: Marker
                 return None
             }
         }
-        key :: policy_key_parse(name) ?? {
+        key: policy_key_parse(name) ?? {
             // A registered rule outside policy inheritance stays at its own
             // site, so the refusal points there instead of at the policy keys.
             if marker_registered_site_bound(name) {
@@ -155,7 +155,7 @@ fn parser_policy_declarations_from_marker(state: &JetParserState, marker: Marker
             }
             return None
         }
-        value :: if key == {
+        value: if key == {
             .Copies -> mode ?? {
                 parser_add_error_code(&state, "E0355", name_span, "`copies` needs an explicit mode", "read-only views copy at owning destinations by default; the policy only restores explicit-copy syntax", "write `copies: .Explicit`")
                 return None

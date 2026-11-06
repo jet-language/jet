@@ -27,7 +27,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const COMMANDS = ["run", "check", "build"];
-const HELLO = 'fn run() {\n    print("hello")\n}\n';
+const HELLO = 'run: fn() {\n    print("hello")\n}\n';
 
 function parseArgs(argv) {
   const args = { jet: "", out: join(ROOT, "Compiler/JetCli/hot-text.list") };

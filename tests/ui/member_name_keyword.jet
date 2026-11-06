@@ -2,17 +2,17 @@
 // `p.effect` is a field access, so
 // the error is sema's missing field, not a parse error. At the start of an
 // item, `effect` still declares an effect.
-effect Log.Audit
+Log.Audit: effect
 
-struct Point {
+Point: struct {
     x: Int
     y: Int
 }
 
-fn audit() -[Log.Audit]> {}
+audit: fn() -[Log.Audit]> {}
 
-fn run() {
+run: fn() {
     audit()
-    p :: Point{x: 1, y: 2}
+    p: Point{x: 1, y: 2}
     print(p.effect)
 }

@@ -176,7 +176,7 @@ function complexityForDirectory(directory) {
       const lines = source.length === 0 ? 0 : source.split("\n").length;
       const lineList = source.split("\n");
       const comments = lineList.filter((line) => /^\s*\/\//.test(line)).length;
-      const declarations = (source.match(/^\s*(?:pub\s+)?(?:fn|struct|enum|module|impl|trait)\b/gm) ?? []).length;
+      const declarations = (source.match(/^\s*(?:pub\s+)?(?:impl\b|[A-Za-z_][\w.]*(?:<[^>\n]*>)?:\s*(?:fn|struct|enum|module|trait)\b)/gm) ?? []).length;
       const controlForms = (source.match(/\b(?:if|loop|match|task|return|break|continue)\b/g) ?? []).length;
       return {
         path: relativePath,

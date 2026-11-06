@@ -1,12 +1,12 @@
 
 use {
-    encoding :: core.encoding
-    jsonl :: core.encoding.jsonl
-    files :: core.files
+    encoding: core.encoding
+    jsonl: core.encoding.jsonl
+    files: core.files
 }
 
-fn run() {
-    output :: files.create("{work}/out.jsonl") ?? panic("create")
+run: fn() {
+    output: files.create("{work}/out.jsonl") ?? panic("create")
     writer := jsonl.writer(^output) ?? panic("writer")
     &writer.write(Dyn.Text("alpha")) ?? panic("write")
     &writer.write(Dyn.Array([Dyn.Int(1), Dyn.Text("beta")])) ?? panic("write")
@@ -23,7 +23,7 @@ fn run() {
         }
     }
 
-    input :: files.open("{work}/input.jsonl") ?? panic("open")
+    input: files.open("{work}/input.jsonl") ?? panic("open")
     reader := jsonl.reader(^input) ?? panic("reader")
     if &reader.next() == {
         .Val(value) -> { print(value.text() ?? "bad") }
@@ -32,8 +32,8 @@ fn run() {
     }
     if &reader.next() == {
         .Val(value) -> {
-            first :: value.at(0) ?? Dyn.Int(-1)
-            second :: value.at(1) ?? Dyn.Text("bad")
+            first: value.at(0) ?? Dyn.Int(-1)
+            second: value.at(1) ?? Dyn.Text("bad")
             print(first.int() ?? -1)
             print(second.text() ?? "bad")
         }
@@ -51,9 +51,9 @@ fn run() {
         .Err(_) -> panic("eof again")
     }
 
-    malformed_input :: files.open("{work}/malformed.jsonl") ?? panic("open malformed")
+    malformed_input: files.open("{work}/malformed.jsonl") ?? panic("open malformed")
     malformed_reader := jsonl.reader(^malformed_input) ?? panic("reader malformed")
-    first_malformed :: &malformed_reader.next() ?? panic("first malformed record")
+    first_malformed: &malformed_reader.next() ?? panic("first malformed record")
     if &malformed_reader.next() == {
         .Val(_) | .None -> { print("malformed-missed") }
         .Err(first) -> {
@@ -70,7 +70,7 @@ fn run() {
 
     limits := encoding.EncodingLimits.safe()
     limits.max_item_bytes = 2
-    limited_output :: files.create("{work}/limited.jsonl") ?? panic("limited create")
+    limited_output: files.create("{work}/limited.jsonl") ?? panic("limited create")
     limited_writer := jsonl.writer(^limited_output, limits) ?? panic("limited writer")
     if &limited_writer.write(Dyn.Text("three")) == {
         .Ok(_) -> { print("limit-missed") }

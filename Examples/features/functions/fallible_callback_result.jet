@@ -2,11 +2,11 @@
 // `return Ok(..)` and `return Err(..)` against that expected result (no
 // written lambda result type), and the enclosing `run` stays infallible.
 #Error
-enum Reject {
+Reject: enum {
     Odd
 }
 
-fn each(values: [Int], handler: fn(Int) -> Int Reject!) -> Int {
+each: fn(values: [Int], handler: fn(Int) -> Int Reject!) -> Int {
     total := 0
     loop value in values {
         total += handler(value) ?? 1
@@ -14,7 +14,7 @@ fn each(values: [Int], handler: fn(Int) -> Int Reject!) -> Int {
     total
 }
 
-fn run() {
+run: fn() {
     print(each([2, 3, 4], (value: Int) -> {
         if value % 2 == 1 { return Err(Reject.Odd) }
         return Ok(value * 10)

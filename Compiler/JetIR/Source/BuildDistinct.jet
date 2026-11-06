@@ -7,7 +7,7 @@ use jet_foundation.[Span, TIntegerBounds, TNumericOp, Type]
 // `value.as(Name)` and the other conversions into a distinct type: a cast
 // reaches the base first; a fallible cast with a range checks it, one
 // without is Ok; every other conversion is the numeric method's.
-fn ir_distinct_convert(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, argument: Int, operation: TNumericOp, range: TIntegerBounds?, fallible: Bool, span: Span) -> Int Never! {
+ir_distinct_convert: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, argument: Int, operation: TNumericOp, range: TIntegerBounds?, fallible: Bool, span: Span) -> Int Never! {
     if operation == {
         .CastAs(_) -> {}
         else -> return ir_numeric_method(&m, p, &b, ty, argument, operation, span)
@@ -20,10 +20,10 @@ fn ir_distinct_convert(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, argu
             return ir_fail_slot(&b, span, "fallible distinct conversion into {ir_type_name(ty)}")
         }
     }
-    value :: ir_expr(&m, p, &b, argument)
+    value: ir_expr(&m, p, &b, argument)
     if ir_failed(b) || value < 0 -> return -1
     if fallible && range == .Val(bounds) {
-        int_row :: ir_type_row(&m, Type.Int) ?? 0
+        int_row: ir_type_row(&m, Type.Int) ?? 0
         exact := value
         if ir_kind_of(m, b, value) != .Int {
             exact = ir_numeric_cast(&m, p, &b, value, int_row, span)
@@ -31,7 +31,7 @@ fn ir_distinct_convert(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, argu
         }
         return ir_distinct_in_range(&m, p, &b, ty, exact, bounds.lo, bounds.hi, span)
     }
-    target :: ir_value_type(&m, p, success) ?? return ir_type_fail(&b, span, success)
+    target: ir_value_type(&m, p, success) ?? return ir_type_fail(&b, span, success)
     cast := value
     if b.f.slot_type[value] != target {
         cast = ir_numeric_cast(&m, p, &b, value, target, span)
@@ -41,9 +41,9 @@ fn ir_distinct_convert(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, argu
     cast
 }
 
-fn ir_distinct_in_range(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, low: Int, high: Int, span: Span) -> Int Never! {
-    int_row :: ir_type_row(&m, Type.Int) ?? 0
-    lo :: ir_int_constant(&m, &b, int_row, low)
-    hi :: ir_int_constant(&m, &b, int_row, high)
+ir_distinct_in_range: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, low: Int, high: Int, span: Span) -> Int Never! {
+    int_row: ir_type_row(&m, Type.Int) ?? 0
+    lo: ir_int_constant(&m, &b, int_row, low)
+    hi: ir_int_constant(&m, &b, int_row, high)
     ir_route(&m, p, &b, "jet_inline_range_from_int", [Int]{value, lo, hi}, [Bool]{false, false, false}, ty, span)
 }

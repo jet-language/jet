@@ -4,18 +4,18 @@
 // data line (source SHA256SUMS below); non-scalar surrogate rows cannot form UTF-8.
 // Borrowed word_views (Text.rs:699-763) remain held on #4392.
 use {
-    text_public :: core.text
-    text_segments :: core.text.runtime.kernel_text_segments
-    text_segment_string :: core.text.runtime.kernel_unicode_string
+    text_public: core.text
+    text_segments: core.text.runtime.kernel_text_segments
+    text_segment_string: core.text.runtime.kernel_unicode_string
 }
 
-fn segment_text(points: [Int]) -> String Never! {
+segment_text: fn(points: [Int]) -> String Never! {
     out := [U8]{}
     loop cp in points -> text_segment_string.append_cp(&out, cp)
     String.from_bytes(out) ?? panic("segment fixture")
 }
 
-fn break_hex(token: String) -> Int Never! {
+break_hex: fn(token: String) -> Int Never! {
     value := 0
     loop b in token.bytes() {
         digit := Int.from_u8(b)
@@ -27,7 +27,7 @@ fn break_hex(token: String) -> Int Never! {
 
 // tests/text_unicode.rs:176-206 parse_break/check_break: ÷ closes a nonempty
 // expected segment, × continues it, hex tokens append one scalar.
-fn break_case(row: String, sentence: Bool) Never! {
+break_case: fn(row: String, sentence: Bool) Never! {
     full := [U8]{}
     current := [U8]{}
     expected := [String]{}
@@ -40,13 +40,13 @@ fn break_case(row: String, sentence: Bool) Never! {
             }
             next
         }
-        cp :: break_hex(token)
+        cp: break_hex(token)
         text_segment_string.append_cp(&full, cp)
         text_segment_string.append_cp(&current, cp)
     }
     if current.len() > 0 -> &expected.push(String.from_bytes(current) ?? panic("break segment"))
-    input :: String.from_bytes(full) ?? panic("break input")
-    actual :: if sentence -> text_segments.sentence_segments(input) else -> text_segments.word_segments(input)
+    input: String.from_bytes(full) ?? panic("break input")
+    actual: if sentence -> text_segments.sentence_segments(input) else -> text_segments.word_segments(input)
     assert_eq(actual, expected)
 }
 
@@ -71,21 +71,21 @@ fn break_case(row: String, sentence: Bool) Never! {
 #Test("word segments Hebrew quotes regional indicators ZWJ Format and newlines") {
     // WB7a Hebrew × Single_Quote; WB7b/WB7c Hebrew " Hebrew.
     assert_eq(text_public.words(segment_text([Int]{0x05D0, 0x27})), [String]{segment_text([Int]{0x05D0, 0x27})})
-    gershayim :: segment_text([Int]{0x05D0, 0x22, 0x05D1})
+    gershayim: segment_text([Int]{0x05D0, 0x22, 0x05D1})
     assert_eq(text_public.words(gershayim), [String]{gershayim})
     assert_eq(text_segments.word_segments(segment_text([Int]{0x05D0, 0x22, 0x61})), [String]{segment_text([Int]{0x05D0}), segment_text([Int]{0x22}), "a"})
     // WB15/WB16 RI pairs; no Alphabetic/Numeric scalar so words() drops them.
-    flags :: segment_text([Int]{0x1F1FA, 0x1F1F8, 0x1F1EB, 0x1F1F7, 0x1F1E9})
+    flags: segment_text([Int]{0x1F1FA, 0x1F1F8, 0x1F1EB, 0x1F1F7, 0x1F1E9})
     assert_eq(text_segments.word_segments(flags), [String]{segment_text([Int]{0x1F1FA, 0x1F1F8}), segment_text([Int]{0x1F1EB, 0x1F1F7}), segment_text([Int]{0x1F1E9})})
     assert_eq(text_public.words(flags), [String]{})
     // WB3c ZWJ × Extended_Pictographic after WB4 attaches the ZWJ to "a".
-    zwj :: segment_text([Int]{0x61, 0x200D, 0x1F468})
+    zwj: segment_text([Int]{0x61, 0x200D, 0x1F468})
     assert_eq(text_public.words(zwj), [String]{zwj})
     // WB4 Format/Extend attach; WB8 then joins the digits.
-    soft :: segment_text([Int]{0x31, 0xAD, 0x32, 0x301})
+    soft: segment_text([Int]{0x31, 0xAD, 0x32, 0x301})
     assert_eq(text_public.words(soft), [String]{soft})
     // WB3/WB3a/WB3b and WB4 does not attach Extend after a newline.
-    crlf :: segment_text([Int]{0x61, 13, 10, 0x308, 0x62})
+    crlf: segment_text([Int]{0x61, 13, 10, 0x308, 0x62})
     assert_eq(text_segments.word_segments(crlf), [String]{"a", segment_text([Int]{13, 10}), segment_text([Int]{0x308}), "b"})
     assert_eq(text_public.words(crlf), [String]{"a", "b"})
 }
@@ -105,28 +105,28 @@ fn break_case(row: String, sentence: Bool) Never! {
 }
 
 #Test("sentences paragraph separators and non-ASCII whitespace trim") {
-    newline :: segment_text([Int]{0x61, 10, 0x62, 13, 10, 0x63})
+    newline: segment_text([Int]{0x61, 10, 0x62, 13, 10, 0x63})
     assert_eq(text_segments.sentence_segments(newline), [String]{segment_text([Int]{0x61, 10}), segment_text([Int]{0x62, 13, 10}), "c"})
     assert_eq(text_public.sentences(newline), [String]{"a", "b", "c"})
-    separators :: segment_text([Int]{0x61, 0x2029, 0x2029, 0x62})
+    separators: segment_text([Int]{0x61, 0x2029, 0x2029, 0x62})
     assert_eq(text_segments.sentence_segments(separators), [String]{segment_text([Int]{0x61, 0x2029}), segment_text([Int]{0x2029}), "b"})
     assert_eq(text_public.sentences(separators), [String]{"a", "b"})
-    blank :: segment_text([Int]{0x20, 0x20, 10, 0x3000, 0x20})
+    blank: segment_text([Int]{0x20, 0x20, 10, 0x3000, 0x20})
     assert_eq(text_public.sentences(blank), [String]{})
     // U+2003 é space 漢 😀 U+0301 . U+3000 Ж ! U+00A0: SB5 attaches the accent,
     // SB11 breaks after the ideographic space, interior whitespace is kept.
-    mixed :: segment_text([Int]{0x2003, 0xE9, 0x20, 0x6F22, 0x1F600, 0x301, 0x2E, 0x3000, 0x416, 0x21, 0xA0})
-    first :: segment_text([Int]{0xE9, 0x20, 0x6F22, 0x1F600, 0x301, 0x2E})
-    second :: segment_text([Int]{0x416, 0x21})
+    mixed: segment_text([Int]{0x2003, 0xE9, 0x20, 0x6F22, 0x1F600, 0x301, 0x2E, 0x3000, 0x416, 0x21, 0xA0})
+    first: segment_text([Int]{0xE9, 0x20, 0x6F22, 0x1F600, 0x301, 0x2E})
+    second: segment_text([Int]{0x416, 0x21})
     assert_eq(text_public.sentences(mixed), [String]{first, second})
-    accent :: segment_text([Int]{0x78, 0x301, 0x20, 0x3000})
+    accent: segment_text([Int]{0x78, 0x301, 0x20, 0x3000})
     assert_eq(text_public.sentences(accent), [String]{segment_text([Int]{0x78, 0x301})})
 }
 
 // WordBreakTest.txt sha256 1de23a75f37904abc7d206239ee8d34f8fdf0fb4ab32a7174dfbabbde25419b2: 1944 applicable vectors.
 
 #Test("WordBreakTest-17.0.0 vectors 1-150") {
-    rows :: [String]{
+    rows: [String]{
         "÷ 000D ÷ 000D ÷",
         "÷ 000D ÷ 0308 ÷ 000D ÷",
         "÷ 000D × 000A ÷",
@@ -282,7 +282,7 @@ fn break_case(row: String, sentence: Bool) Never! {
 }
 
 #Test("WordBreakTest-17.0.0 vectors 151-300") {
-    rows :: [String]{
+    rows: [String]{
         "÷ 000B ÷ 0022 ÷",
         "÷ 000B ÷ 0308 ÷ 0022 ÷",
         "÷ 000B ÷ 0027 ÷",
@@ -438,7 +438,7 @@ fn break_case(row: String, sentence: Bool) Never! {
 }
 
 #Test("WordBreakTest-17.0.0 vectors 301-450") {
-    rows :: [String]{
+    rows: [String]{
         "÷ 3031 ÷ 000D ÷",
         "÷ 3031 × 0308 ÷ 000D ÷",
         "÷ 3031 ÷ 000A ÷",
@@ -594,7 +594,7 @@ fn break_case(row: String, sentence: Bool) Never! {
 }
 
 #Test("WordBreakTest-17.0.0 vectors 451-600") {
-    rows :: [String]{
+    rows: [String]{
         "÷ 0041 ÷ 0022 ÷",
         "÷ 0041 × 0308 ÷ 0022 ÷",
         "÷ 0041 ÷ 0027 ÷",
@@ -750,7 +750,7 @@ fn break_case(row: String, sentence: Bool) Never! {
 }
 
 #Test("WordBreakTest-17.0.0 vectors 601-750") {
-    rows :: [String]{
+    rows: [String]{
         "÷ 002E ÷ 000D ÷",
         "÷ 002E × 0308 ÷ 000D ÷",
         "÷ 002E ÷ 000A ÷",
@@ -906,7 +906,7 @@ fn break_case(row: String, sentence: Bool) Never! {
 }
 
 #Test("WordBreakTest-17.0.0 vectors 751-900") {
-    rows :: [String]{
+    rows: [String]{
         "÷ 005F ÷ 0022 ÷",
         "÷ 005F × 0308 ÷ 0022 ÷",
         "÷ 005F ÷ 0027 ÷",
@@ -1062,7 +1062,7 @@ fn break_case(row: String, sentence: Bool) Never! {
 }
 
 #Test("WordBreakTest-17.0.0 vectors 901-1050") {
-    rows :: [String]{
+    rows: [String]{
         "÷ 0022 ÷ 000D ÷",
         "÷ 0022 × 0308 ÷ 000D ÷",
         "÷ 0022 ÷ 000A ÷",
@@ -1218,7 +1218,7 @@ fn break_case(row: String, sentence: Bool) Never! {
 }
 
 #Test("WordBreakTest-17.0.0 vectors 1051-1200") {
-    rows :: [String]{
+    rows: [String]{
         "÷ 200D ÷ 0022 ÷",
         "÷ 200D × 0308 ÷ 0022 ÷",
         "÷ 200D ÷ 0027 ÷",
@@ -1374,7 +1374,7 @@ fn break_case(row: String, sentence: Bool) Never! {
 }
 
 #Test("WordBreakTest-17.0.0 vectors 1201-1350") {
-    rows :: [String]{
+    rows: [String]{
         "÷ 0000 ÷ 000D ÷",
         "÷ 0000 × 0308 ÷ 000D ÷",
         "÷ 0000 ÷ 000A ÷",
@@ -1530,7 +1530,7 @@ fn break_case(row: String, sentence: Bool) Never! {
 }
 
 #Test("WordBreakTest-17.0.0 vectors 1351-1500") {
-    rows :: [String]{
+    rows: [String]{
         "÷ 0061 ÷ 003A ÷ 0022 ÷",
         "÷ 0061 ÷ 003A × 0308 ÷ 0022 ÷",
         "÷ 0061 ÷ 003A ÷ 0027 ÷",
@@ -1686,7 +1686,7 @@ fn break_case(row: String, sentence: Bool) Never! {
 }
 
 #Test("WordBreakTest-17.0.0 vectors 1501-1650") {
-    rows :: [String]{
+    rows: [String]{
         "÷ 0061 ÷ 002C ÷ 000D ÷",
         "÷ 0061 ÷ 002C × 0308 ÷ 000D ÷",
         "÷ 0061 ÷ 002C ÷ 000A ÷",
@@ -1842,7 +1842,7 @@ fn break_case(row: String, sentence: Bool) Never! {
 }
 
 #Test("WordBreakTest-17.0.0 vectors 1651-1800") {
-    rows :: [String]{
+    rows: [String]{
         "÷ 0031 ÷ 0027 ÷ 0022 ÷",
         "÷ 0031 ÷ 0027 × 0308 ÷ 0022 ÷",
         "÷ 0031 ÷ 0027 ÷ 0027 ÷",
@@ -1998,7 +1998,7 @@ fn break_case(row: String, sentence: Bool) Never! {
 }
 
 #Test("WordBreakTest-17.0.0 vectors 1801-1944") {
-    rows :: [String]{
+    rows: [String]{
         "÷ 000D × 000A ÷ 0061 ÷ 000A ÷ 0308 ÷",
         "÷ 0061 × 0308 ÷",
         "÷ 0020 × 200D ÷ 0646 ÷",
@@ -2150,7 +2150,7 @@ fn break_case(row: String, sentence: Bool) Never! {
 // SentenceBreakTest.txt sha256 12cb47d028ded0c1cb8a28558f95479cbcd24559c46977015c82f3b50a1cc6e4: 512 applicable vectors.
 
 #Test("SentenceBreakTest-17.0.0 vectors 1-150") {
-    rows :: [String]{
+    rows: [String]{
         "÷ 000D ÷ 000D ÷",
         "÷ 000D ÷ 0308 × 000D ÷",
         "÷ 000D × 000A ÷",
@@ -2306,7 +2306,7 @@ fn break_case(row: String, sentence: Bool) Never! {
 }
 
 #Test("SentenceBreakTest-17.0.0 vectors 151-300") {
-    rows :: [String]{
+    rows: [String]{
         "÷ 0009 × 000D ÷",
         "÷ 0009 × 0308 × 000D ÷",
         "÷ 0009 × 000A ÷",
@@ -2462,7 +2462,7 @@ fn break_case(row: String, sentence: Bool) Never! {
 }
 
 #Test("SentenceBreakTest-17.0.0 vectors 301-450") {
-    rows :: [String]{
+    rows: [String]{
         "÷ 002E × 000D ÷",
         "÷ 002E × 0308 × 000D ÷",
         "÷ 002E × 000A ÷",
@@ -2618,7 +2618,7 @@ fn break_case(row: String, sentence: Bool) Never! {
 }
 
 #Test("SentenceBreakTest-17.0.0 vectors 451-512") {
-    rows :: [String]{
+    rows: [String]{
         "÷ 000D × 000A ÷ 0061 × 000A ÷ 0308 ÷",
         "÷ 0061 × 0308 ÷",
         "÷ 0020 × 200D × 0646 ÷",

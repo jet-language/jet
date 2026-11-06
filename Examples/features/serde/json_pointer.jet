@@ -4,26 +4,26 @@
 // leading zeros are errors. A JSON null member is a value; a missing member is
 // a located error naming the failing step.
 use {
-    encoding :: core.encoding
-    json :: core.encoding.json
+    encoding: core.encoding
+    json: core.encoding.json
 }
 
-fn kind_name(kind: encoding.EncodingErrorKind) -> String {
+kind_name: fn(kind: encoding.EncodingErrorKind) -> String {
     if kind == encoding.EncodingErrorKind.Syntax -> return "Syntax"
     if kind == encoding.EncodingErrorKind.Limit -> return "Limit"
     "other"
 }
 
-fn show(tree: Dyn, path: String) {
-    selected :: json.pointer(tree, path) ?? {
+show: fn(tree: Dyn, path: String) {
+    selected: json.pointer(tree, path) ?? {
         print("`{path}` -> {kind_name(err.kind)} at `{err.path}`: {err.reason}")
         return
     }
     print("`{path}` -> {json.canonical(selected) ?? panic("canonical")}")
 }
 
-fn run() {
-    doc :: json.parse("{{\"user\":{{\"name\":\"Alice\",\"tags\":[\"admin\",\"ops\"]}},\"\":0,\"a/b\":1,\"m~n\":2,\"nothing\":null,\"arr\":[10,20]}}") ?? panic("parse")
+run: fn() {
+    doc: json.parse("{{\"user\":{{\"name\":\"Alice\",\"tags\":[\"admin\",\"ops\"]}},\"\":0,\"a/b\":1,\"m~n\":2,\"nothing\":null,\"arr\":[10,20]}}") ?? panic("parse")
     show(doc, "/user/name")
     show(doc, "/user/tags/1")
     show(doc, "")

@@ -5,28 +5,28 @@
 // distinguishes `announce` from the single-trait `log_all` example: it
 // calls `{p}` (needs `Renderable`, listed first) AND `p.shout()` (needs
 // `Loud`, listed second) on the same loop variable.
-trait Loud {
-    fn shout(self) -> String
+Loud: trait {
+    shout: fn(self) -> String
 }
 
-struct Point {
+Point: struct {
     x: Int
     y: Int
 
     impl Display {
-        fn display(self) -> String { "({self.x}, {self.y})" }
+        display: fn(self) -> String { "({self.x}, {self.y})" }
     }
 
     impl Loud {
-        fn shout(self) -> String { "POINT!" }
+        shout: fn(self) -> String { "POINT!" }
     }
 }
 
-fn announce(parts: ...[Renderable, Loud]) {
+announce: fn(parts: ...[Renderable, Loud]) {
     loop p in parts -> print("{p} says {p.shout()}")
 }
 
-fn run() {
-    p :: Point{x: 3, y: 4}
+run: fn() {
+    p: Point{x: 3, y: 4}
     announce(p)
 }

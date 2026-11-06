@@ -11,7 +11,7 @@
 // `return false`, and ordering reads the `rhs` variant ordinal once and orders
 // different variants by ordinal before comparing payloads.
 derive T.Equatable {
-    fn equal(self, rhs: T) -> Bool {
+    equal: fn(self, rhs: T) -> Bool {
         comptime if T.$kind == "enum" {
             comptime loop left in T.$fields {
                 if self == {
@@ -53,7 +53,7 @@ derive T.Equatable {
 }
 
 derive T.Comparable {
-    fn compare(self, rhs: T) -> Ordering {
+    compare: fn(self, rhs: T) -> Ordering {
         comptime if T.$kind == "enum" {
             jet_rhs_variant_index := 0
             comptime loop right in T.$fields {

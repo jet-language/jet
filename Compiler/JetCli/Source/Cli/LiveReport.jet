@@ -1,29 +1,29 @@
 // run_inspect_live and LiveInspect::render. Every output comes from the
 // validated retained snapshot, never source guesses.
 
-fn jet_cli_live_text(snapshot: JetCLILiveSnapshot) -> String Never! {
+jet_cli_live_text: fn(snapshot: JetCLILiveSnapshot) -> String Never! {
     event_lines := snapshot.events
     if event_lines == None -> event_lines = Val(jet_cli_live_event_render(snapshot.event_records) ?? return "jet inspect live · invalid snapshot: {err.message}\n")
     out := "jet inspect live · pid {snapshot.pid}\nprotocol={snapshot.protocol} session={snapshot.session_id} source={snapshot.source_id} build={snapshot.build_id} revision={snapshot.revision} world={snapshot.world_id}\n\ntask tree\n"
     if snapshot.tasks.len() == 0 -> out = "{out}  (no live tasks)\n"
     loop live_task in snapshot.tasks {
-        deadline :: if live_task.deadline_ms == .Val(value) -> "{value}" else -> "-"
-        wait :: if live_task.wait == "" -> "-" else -> live_task.wait
+        deadline: if live_task.deadline_ms == .Val(value) -> "{value}" else -> "-"
+        wait: if live_task.wait == "" -> "-" else -> live_task.wait
         out = "{out}  task {jet_cli_inspect_pad("{live_task.id}", 5)} parent {jet_cli_inspect_pad("{live_task.parent}", 5)} {jet_cli_inspect_pad(live_task.state, 8)} wait={wait} deadline={deadline} cancelled={live_task.cancelled}\n"
     }
     out = "{out}\nchannels\n"
     if snapshot.channels.len() == 0 -> out = "{out}  (no live channels)\n"
     loop channel in snapshot.channels {
-        capacity :: if channel.capacity == .Val(value) -> "{value}" else -> "∞"
+        capacity: if channel.capacity == .Val(value) -> "{value}" else -> "∞"
         out = "{out}  channel {jet_cli_inspect_pad("{channel.id}", 5)} depth {channel.depth}/{capacity} blocked send={channel.send_waiters} recv={channel.recv_waiters} closed={channel.closed}\n"
     }
-    effects :: snapshot.effects
-    resources :: snapshot.resources
+    effects: snapshot.effects
+    resources: snapshot.resources
     out = "{out}\neffects: compute={effects.get("compute") ?? 0} waiting={effects.get("waiting") ?? 0} channel={effects.get("channel") ?? 0} time={effects.get("time") ?? 0} io={effects.get("io") ?? 0}\nresources: workers={resources.get("workers") ?? 0} running={resources.get("running") ?? 0} queued={resources.get("queued") ?? 0} cancelled={resources.get("cancelled") ?? 0} arenas={resources.get("arenas") ?? 0} arena_allocations={resources.get("arena_allocations") ?? 0} arena_bytes={resources.get("arena_bytes") ?? 0}\n\nvalues\n"
     if snapshot.values.len() == 0 -> out = "{out}  (no live value decisions)\n"
     loop value in snapshot.values {
-        reason :: if value.reason == "" -> "" else -> " reason={value.reason}"
-        rendered :: if value.rendered_value == .Val(shown) -> " value={shown}" else -> ""
+        reason: if value.reason == "" -> "" else -> " reason={value.reason}"
+        rendered: if value.rendered_value == .Val(shown) -> " value={shown}" else -> ""
         out = "{out}  {value.value_id} type={value.type_identity} {value.disposition}{reason}{rendered}\n"
     }
     if event_lines == .Val(events) {
@@ -36,7 +36,7 @@ fn jet_cli_live_text(snapshot: JetCLILiveSnapshot) -> String Never! {
     }
     out
 }
-fn jet_cli_live_identity_fields(snapshot: JetCLILiveSnapshot) -> [JetCLIStatusField] Never! {
+jet_cli_live_identity_fields: fn(snapshot: JetCLILiveSnapshot) -> [JetCLIStatusField] Never! {
     [JetCLIStatusField]{
         jet_cli_status_field("scope", jet_cli_status_text("live")), jet_cli_status_field("pid", jet_cli_status_int(snapshot.pid)),
         jet_cli_status_field("protocol", jet_cli_status_text(snapshot.protocol)), jet_cli_status_field("session_id", jet_cli_status_text(snapshot.session_id)),
@@ -44,7 +44,7 @@ fn jet_cli_live_identity_fields(snapshot: JetCLILiveSnapshot) -> [JetCLIStatusFi
         jet_cli_status_field("revision", jet_cli_status_text(snapshot.revision)), jet_cli_status_field("world_id", jet_cli_status_text(snapshot.world_id)),
     }
 }
-fn jet_cli_live_json_report(snapshot: JetCLILiveSnapshot, plane: String) -> String Never! {
+jet_cli_live_json_report: fn(snapshot: JetCLILiveSnapshot, plane: String) -> String Never! {
     values := [JetCLIStatusValue]{}
     grouped := [String:[String]]{}
     names := [String]{}
@@ -62,7 +62,7 @@ fn jet_cli_live_json_report(snapshot: JetCLILiveSnapshot, plane: String) -> Stri
     &names.sort()
     shapes := [JetCLIStatusValue]{}
     loop name in names {
-        ids :: grouped.get(name) ?? [String]{}
+        ids: grouped.get(name) ?? [String]{}
         &shapes.push(jet_cli_status_object([jet_cli_status_field("type_identity", jet_cli_status_text(name)), jet_cli_status_field("value_ids", jet_cli_status_array(ids.map(id -> jet_cli_status_text(id))))]))
     }
     fields := [JetCLIStatusField]{jet_cli_status_field("plane", jet_cli_status_text(plane))}

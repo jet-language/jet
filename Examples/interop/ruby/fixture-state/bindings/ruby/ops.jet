@@ -1,24 +1,24 @@
 use {
-    abi :: c.jet_ruby_ops
-    json :: core.encoding.json
+    abi: c.jet_ruby_ops
+    json: core.encoding.json
 }
 
-#Import module c.jet_ruby_ops {
-    fn open() -> Int = "jet_ruby_ops_open"
-    fn take_error() -> Int = "jet_ruby_ops_take_error"
-    fn cancel(handle: Int) = "jet_ruby_ops_cancel"
-    fn close(handle: Int) = "jet_ruby_ops_close"
-    fn transform(handle: Int, input: String, deadline_ms: Int) -> String = "jet_ruby_ops_invoke_transform"
-    fn fail_call(handle: Int, input: String, deadline_ms: Int) -> String = "jet_ruby_ops_invoke_fail_call"
-    fn sleep_call(handle: Int, input: String, deadline_ms: Int) -> String = "jet_ruby_ops_invoke_sleep_call"
+#Import c.jet_ruby_ops: module {
+    open: fn() -> Int = "jet_ruby_ops_open"
+    take_error: fn() -> Int = "jet_ruby_ops_take_error"
+    cancel: fn(handle: Int) = "jet_ruby_ops_cancel"
+    close: fn(handle: Int) = "jet_ruby_ops_close"
+    transform: fn(handle: Int, input: String, deadline_ms: Int) -> String = "jet_ruby_ops_invoke_transform"
+    fail_call: fn(handle: Int, input: String, deadline_ms: Int) -> String = "jet_ruby_ops_invoke_fail_call"
+    sleep_call: fn(handle: Int, input: String, deadline_ms: Int) -> String = "jet_ruby_ops_invoke_sleep_call"
 }
 
-struct Session {
+Session: struct {
     priv value: Int
 }
 
 #Error
-enum RubyError {
+RubyError: enum {
     NotRunning
     Timeout
     Cancelled
@@ -28,20 +28,20 @@ enum RubyError {
 }
 
 impl Session.Close {
-    fn close(^self) { abi.close(self.value) }
+    close: fn(^self) { abi.close(self.value) }
 }
 
-fn close(session: ^Session) { abi.close(session.value) }
+close: fn(session: ^Session) { abi.close(session.value) }
 
-fn open() -> Session RubyError! {
-    handle :: abi.open()
+open: fn() -> Session RubyError! {
+    handle: abi.open()
     if abi.take_error() != 0 -> return Err(RubyError.NotRunning)
     return Ok(Session{value: handle})
 }
 
-fn cancel(session: Session) { abi.cancel(session.value) }
+cancel: fn(session: Session) { abi.cancel(session.value) }
 
-fn decode_response(raw: String, code: Int) -> Dyn RubyError! {
+decode_response: fn(raw: String, code: Int) -> Dyn RubyError! {
     if code == 1 -> return Err(RubyError.NotRunning)
     if code == 2 -> return Err(RubyError.Timeout)
     if code == 3 -> return Err(RubyError.Cancelled)
@@ -53,20 +53,20 @@ fn decode_response(raw: String, code: Int) -> Dyn RubyError! {
     return Ok(&response.field("value") ?? Dyn.Null)
 }
 
-fn transform(session: Session, input: Dyn, deadline_ms: Int) -> Dyn RubyError! {
-    raw :: abi.transform(session.value, json.to_string(input) ?? return Err(RubyError.Protocol), deadline_ms)
-    code :: abi.take_error()
+transform: fn(session: Session, input: Dyn, deadline_ms: Int) -> Dyn RubyError! {
+    raw: abi.transform(session.value, json.to_string(input) ?? return Err(RubyError.Protocol), deadline_ms)
+    code: abi.take_error()
     return decode_response(raw, code)
 }
 
-fn fail_call(session: Session, input: Dyn, deadline_ms: Int) -> Dyn RubyError! {
-    raw :: abi.fail_call(session.value, json.to_string(input) ?? return Err(RubyError.Protocol), deadline_ms)
-    code :: abi.take_error()
+fail_call: fn(session: Session, input: Dyn, deadline_ms: Int) -> Dyn RubyError! {
+    raw: abi.fail_call(session.value, json.to_string(input) ?? return Err(RubyError.Protocol), deadline_ms)
+    code: abi.take_error()
     return decode_response(raw, code)
 }
 
-fn sleep_call(session: Session, input: Dyn, deadline_ms: Int) -> Dyn RubyError! {
-    raw :: abi.sleep_call(session.value, json.to_string(input) ?? return Err(RubyError.Protocol), deadline_ms)
-    code :: abi.take_error()
+sleep_call: fn(session: Session, input: Dyn, deadline_ms: Int) -> Dyn RubyError! {
+    raw: abi.sleep_call(session.value, json.to_string(input) ?? return Err(RubyError.Protocol), deadline_ms)
+    code: abi.take_error()
     return decode_response(raw, code)
 }

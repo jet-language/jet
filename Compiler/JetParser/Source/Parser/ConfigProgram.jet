@@ -13,9 +13,9 @@ use {
 
 // The typed program for one config value. Each global the expression reads
 // becomes one ALL_CAPS module constant, and each read is respelled to it.
-fn jet_config_program(expr: Expr, source: String, funcs: [String: Func], globals: [String: CtValue]) -> String ComptimeEvalError! {
-    bytes :: source.bytes()
-    span :: jet_config_value_extent(expr, lex_config(bytes).tokens) ?? return Err(jet_config_eval_error(expr, "this config value has no source text to evaluate"))
+jet_config_program: fn(expr: Expr, source: String, funcs: [String: Func], globals: [String: CtValue]) -> String ComptimeEvalError! {
+    bytes: source.bytes()
+    span: jet_config_value_extent(expr, lex_config(bytes).tokens) ?? return Err(jet_config_eval_error(expr, "this config value has no source text to evaluate"))
     if span.start < 0 || span.end > bytes.len() || span.start > span.end -> return Err(jet_config_eval_error(expr, "this config value has no source text to evaluate"))
     sites := [ComptimeNameSite]{}
     loop site in comptime_walk_identifiers(expr) {
@@ -38,18 +38,18 @@ fn jet_config_program(expr: Expr, source: String, funcs: [String: Func], globals
         constant := constants.get(site.name) ?? ""
         if constant == "" {
             constant = "JET_CONFIG_GLOBAL_{constants.len()}"
-            value :: globals[site.name]
-            literal :: jet_config_literal(value) ?? return Err(jet_config_eval_error(expr, "`{site.name}` holds a value this config value can't read as literal data"))
+            value: globals[site.name]
+            literal: jet_config_literal(value) ?? return Err(jet_config_eval_error(expr, "`{site.name}` holds a value this config value can't read as literal data"))
             constants[site.name] = constant
-            &lines.push("{constant} :: {literal}")
+            &lines.push("{constant}: {literal}")
         }
         &text.push(String.from_bytes(bytes.slice(cursor, site.span.start)) ?? "")
         &text.push(constant)
         cursor = site.span.end
     }
     &text.push(String.from_bytes(bytes.slice(cursor, span.end)) ?? "")
-    body :: text.join("")
-    &lines.push("{JET_CONFIG_VALUE_NAME} :: comptime {{ {body} }}")
+    body: text.join("")
+    &lines.push("{JET_CONFIG_VALUE_NAME}: comptime {{ {body} }}")
     &lines.push("")
     Ok(lines.join("\n"))
 }
@@ -60,15 +60,15 @@ fn jet_config_program(expr: Expr, source: String, funcs: [String: Func], globals
 // `1 + missing()` would lose the argument list. A call runs to its closing
 // `)`, found on the lexed tokens so that a string, a comment or a nested call
 // never stands in for it. None when the tokens hold no closing `)`.
-fn jet_config_value_extent(expr: Expr, tokens: [Token]) -> Span? Never! {
+jet_config_value_extent: fn(expr: Expr, tokens: [Token]) -> Span? Never! {
     Val(Span{start: jet_config_value_start(expr), end: jet_config_value_end(expr, tokens) ?? return None})
 }
 
 // The first byte: the leftmost operand, receiver or base of a postfix or
 // infix form, else the expression's own span.
-fn jet_config_value_start(expr: Expr) -> Int Never! {
-    own :: expr_span(expr).start
-    start :: if expr == {
+jet_config_value_start: fn(expr: Expr) -> Int Never! {
+    own: expr_span(expr).start
+    start: if expr == {
         .Binary(_, left, _, _, _) -> jet_config_value_start(left)
         .CompareChain(operands, _, _, _, _) -> if operands.len() > 0 -> jet_config_value_start(operands[0]) else -> own
         .Range(first, _, _, _, _) -> jet_config_value_start(first)
@@ -86,9 +86,9 @@ fn jet_config_value_start(expr: Expr) -> Int Never! {
 
 // The end of the last byte: a call's closing `)`, the rightmost operand of a
 // prefix or infix form, else the expression's own span.
-fn jet_config_value_end(expr: Expr, tokens: [Token]) -> Int? Never! {
-    own :: expr_span(expr).end
-    end :: if expr == {
+jet_config_value_end: fn(expr: Expr, tokens: [Token]) -> Int? Never! {
+    own: expr_span(expr).end
+    end: if expr == {
         .Call(call, _) -> jet_config_call_close(call.name_span.end, call.args, tokens) ?? return None
         .MethodCall(_, _, method_span, _, _, args, _) -> jet_config_call_close(method_span.end, args, tokens) ?? return None
         .OptMethodCall(_, _, method_span, _, args, _, _) -> jet_config_call_close(method_span.end, args, tokens) ?? return None
@@ -106,7 +106,7 @@ fn jet_config_value_end(expr: Expr, tokens: [Token]) -> Int? Never! {
 // last argument, inside the parentheses (depth 1); without, after the callee,
 // where the next `(` opens them (depth 0). Tokens before `from` are skipped by
 // binary search; comment and string tokens never count as parentheses.
-fn jet_config_call_close(callee_end: Int, args: [CallArg], tokens: [Token]) -> Int? Never! {
+jet_config_call_close: fn(callee_end: Int, args: [CallArg], tokens: [Token]) -> Int? Never! {
     from := callee_end
     depth := 0
     if args.len() > 0 {
@@ -116,11 +116,11 @@ fn jet_config_call_close(callee_end: Int, args: [CallArg], tokens: [Token]) -> I
     low := 0
     high := tokens.len()
     loop low < high {
-        middle :: (low + high) /% 2
+        middle: (low + high) /% 2
         if tokens[middle].span.start < from -> low = middle + 1 else -> high = middle
     }
     loop index in low..<tokens.len() {
-        kind :: tokens[index].kind
+        kind: tokens[index].kind
         if kind == TOKEN_LPAREN -> depth += 1
         if kind == TOKEN_RPAREN {
             depth -= 1

@@ -6,7 +6,7 @@ if (process.argv.length !== 3) {
 
 const source = `${process.argv[2]}/project/examples/main.jet`;
 const lines = readFileSync(source, "utf8").split(/\r?\n/);
-const definitions = lines.filter((line) => line.startsWith("fn ")).length;
+const definitions = lines.filter((line) => /^[A-Za-z_]\w*: fn\(/.test(line)).length;
 const references = lines.filter((line) => /^\s*(?:print|prepare)\(/.test(line)).length;
 console.log(`definitions=${definitions}`);
 console.log(`references=${references}`);

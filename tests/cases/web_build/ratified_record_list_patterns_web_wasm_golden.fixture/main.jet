@@ -1,19 +1,19 @@
 #Target(Wasm)
 // D-PAT-RECORD1=A: the pattern has the shape of the value it reads.
-struct Point {
+Point: struct {
     x: Int
     y: Int
 }
-struct Route {
+Route: struct {
     origin: Point
     words: [String]
 }
-enum Message {
+Message: enum {
     Route(Route)
     Empty
 }
 
-fn command(words: [String]) -> String {
+command: fn(words: [String]) -> String {
     if words == {
         [] -> "usage"
         ["add", name, ..rest] -> "add {name}, {rest.len()} extra"
@@ -22,7 +22,7 @@ fn command(words: [String]) -> String {
     }
 }
 
-fn describe(message: Message) -> String {
+describe: fn(message: Message) -> String {
     if message == {
         .Route(Route{origin: Point{x: 0, y}, words: [first, ..rest]}) -> "axis {y}: {first}, {rest.len()} remaining"
         .Route(Route{origin: Point{x, y}, words: []}) -> "empty at {x},{y}"
@@ -31,7 +31,7 @@ fn describe(message: Message) -> String {
     }
 }
 
-fn run() {
+run: fn() {
     print(command([String]{}))
     print(command(["add", "jet", "fast", "safe"]))
     print(command(["help"]))
@@ -40,9 +40,9 @@ fn run() {
     print(describe(Message.Route(Route{origin: Point{x: 3, y: 2}, words: []})))
     print(describe(Message.Route(Route{origin: Point{x: 3, y: 2}, words: ["go"]})))
     print(describe(Message.Empty))
-    point :: Point{x: 0, y: 7}
+    point: Point{x: 0, y: 7}
     if point == Point{x: 0, y} -> print("axis {y}")
-    words :: ["first", "second", "third"]
+    words: ["first", "second", "third"]
     if words == [first, ..rest] -> print("{first}: {rest[0]} {rest[1]}")
     print(words.len())
 }

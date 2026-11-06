@@ -6,10 +6,10 @@
 //
 // D-SOA2D: the layout is serialization-transparent — `json.to_string` of a
 // columnar list is byte-identical to the array-of-structs form.
-use json :: core.encoding.json
+use json: core.encoding.json
 
 #[Codable, Layout(columnar)]
-struct Particle {
+Particle: struct {
     x: Float
     y: Float
     mass: Float
@@ -17,26 +17,26 @@ struct Particle {
 
 // Same fields, default (array-of-structs) layout — the transparency baseline.
 #Codable
-struct PlainParticle {
+PlainParticle: struct {
     x: Float
     y: Float
     mass: Float
 }
 
-fn total_mass(ps: [Particle]) -> Float {
+total_mass: fn(ps: [Particle]) -> Float {
     sum := 0.0
     loop p in ps -> sum += p.mass
     return sum
 }
 
-fn run() {
+run: fn() {
     // Construct a columnar list with an ordinary list literal.
     ps := [Particle]{Particle{x: 0.0, y: 0.0, mass: 1.0}, Particle{x: 1.0, y: 2.0, mass: 3.0}}
     // Push grows every column together.
     &ps.push(Particle{x: 4.0, y: 5.0, mass: 6.0})
     print(ps.len())  // 3
     // Index-read yields a whole gathered Particle.
-    third :: ps[2]
+    third: ps[2]
     print(third.x)  // 4.0
     // Field-read goes straight to the field's column (the cache-friendly path).
     print(ps[1].y)  // 2.0
@@ -44,8 +44,8 @@ fn run() {
     print(total_mass(ps))  // 10.0
     // Serialization transparency: identical output for columnar vs plain.
     plain := [PlainParticle]{PlainParticle{x: 0.0, y: 0.0, mass: 1.0}, PlainParticle{x: 1.0, y: 2.0, mass: 3.0}, PlainParticle{x: 4.0, y: 5.0, mass: 6.0}}
-    columnar_json :: json.to_string(ps)
-    plain_json :: json.to_string(plain)
+    columnar_json: json.to_string(ps)
+    plain_json: json.to_string(plain)
     print(columnar_json)
     assert(columnar_json == plain_json, "columnar layout must serialize identically to AoS")
     print("serialization transparent")

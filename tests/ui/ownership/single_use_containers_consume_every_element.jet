@@ -1,28 +1,28 @@
-#SingleUse struct Lease {
+#SingleUse Lease: struct {
     name: String
 }
 
-struct Box<T> {
+Box: struct<T> {
     item: T
 }
 
-fn acquire(name: String) -> Lease { Lease{name: name.copy()} }
+acquire: fn(name: String) -> Lease { Lease{name: name.copy()} }
 
-fn try_acquire(name: String) -> Lease Err! { Ok(acquire(name)) }
+try_acquire: fn(name: String) -> Lease Err! { Ok(acquire(name)) }
 
-fn release(lease: ^Lease) { print("released {lease.name}") }
+release: fn(lease: ^Lease) { print("released {lease.name}") }
 
-fn unbox(boxed: ^Box<Lease>) -> Lease { boxed.item }
+unbox: fn(boxed: ^Box<Lease>) -> Lease { boxed.item }
 
-fn release_list() {
-    leases :: [Lease]{acquire("list a"), acquire("list b")}
+release_list: fn() {
+    leases: [Lease]{acquire("list a"), acquire("list b")}
     loop lease in leases {
         release(^lease)
     }
 }
 
-fn release_nested() {
-    groups :: [[Lease?]]{[Lease?]{acquire("nested"), None}}
+release_nested: fn() {
+    groups: [[Lease?]]{[Lease?]{acquire("nested"), None}}
     loop group in groups {
         loop maybe in group {
             if ^maybe == {
@@ -33,7 +33,7 @@ fn release_nested() {
     }
 }
 
-fn release_drained_list() {
+release_drained_list: fn() {
     leases := [Lease]{acquire("drain a"), acquire("drain b")}
     loop leases.len() > 0 {
         if &leases.pop() == {
@@ -43,22 +43,22 @@ fn release_drained_list() {
     }
 }
 
-fn release_option() {
-    maybe :: Lease?{acquire("option")}
-    lease :: ^maybe ?? return
+release_option: fn() {
+    maybe: Lease?{acquire("option")}
+    lease: ^maybe ?? return
     release(^lease)
 }
 
-fn release_option_match() {
-    maybe :: Lease?{acquire("option match")}
+release_option_match: fn() {
+    maybe: Lease?{acquire("option match")}
     if ^maybe == {
         .Val(lease) -> release(^lease)
         .None -> {}
     }
 }
 
-fn release_results() {
-    outcomes :: [Lease Err!]{try_acquire("result")}
+release_results: fn() {
+    outcomes: [Lease Err!]{try_acquire("result")}
     loop outcome in outcomes {
         if ^outcome == {
             .Ok(lease) -> release(^lease)
@@ -67,28 +67,28 @@ fn release_results() {
     }
 }
 
-fn release_map() {
-    table :: [String: Lease]{"map": acquire("map")}
+release_map: fn() {
+    table: [String: Lease]{"map": acquire("map")}
     loop (key, lease) in ^table {
         print(key)
         release(^lease)
     }
 }
 
-fn release_tuple() {
-    pair :: (first: acquire("tuple"), count: 1)
-    (first, count) :: ^pair
+release_tuple: fn() {
+    pair: (first: acquire("tuple"), count: 1)
+    (first, count): ^pair
     print(count)
     release(^first)
 }
 
-fn release_generic() {
-    boxed :: Box<Lease>{item: acquire("generic")}
-    lease :: unbox(^boxed)
+release_generic: fn() {
+    boxed: Box<Lease>{item: acquire("generic")}
+    lease: unbox(^boxed)
     release(^lease)
 }
 
-fn run() {
+run: fn() {
     release_list()
     release_nested()
     release_drained_list()

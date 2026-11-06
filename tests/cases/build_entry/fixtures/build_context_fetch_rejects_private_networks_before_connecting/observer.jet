@@ -3,17 +3,17 @@
 // ANY accepted connection = true; expiration OR ANY other error = false.
 // TestLead1 approved this exact Boolean equivalence; no deadline-zero shortcut.
 use {
-    net :: core.net
-    files :: core.files
-    process :: core.process
+    net: core.net
+    files: core.files
+    process: core.process
 }
-fn run() {
-    args :: process.args()
+run: fn() {
+    args: process.args()
     listener := net.tcp_listen("127.0.0.1:0") ?? panic("listen")
-    address :: net.listener_local_socket_addr(listener) ?? panic("address")
+    address: net.listener_local_socket_addr(listener) ?? panic("address")
     files.write(args[0], "{net.socket_port(address)}") ?? panic("publish port")
-    budget :: Duration.milliseconds(1000) ?? panic("observer budget")
-    connected :: if &listener.accept(deadline: budget) == {
+    budget: Duration.milliseconds(1000) ?? panic("observer budget")
+    connected: if &listener.accept(deadline: budget) == {
         .Ok(_) -> true
         .Err(_) -> false
     }

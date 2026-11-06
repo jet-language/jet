@@ -5,30 +5,30 @@
 // of `K` (D-SERDE10) — the derive injects no Encode/Decode bound on `K`.
 // (D-MEM1 S6: this demo struct was originally named `Id<K>` — renamed to
 // `Tagged<K>` once `Id<T>` became the reserved `Pool<T>` handle type.)
-use json :: core.encoding.json
+use json: core.encoding.json
 
 #Codable
-struct Wrap<T> {
+Wrap: struct<T> {
     value: T
 }
 
 #Codable
-struct Tagged<K> {
+Tagged: struct<K> {
     raw: Int
     #Skip marker: K?
 }
 
-fn run() [FieldError]! {
-    wi :: Wrap<Int>{value: 7}
+run: fn() [FieldError]! {
+    wi: Wrap<Int>{value: 7}
     print(json.to_string(wi) ?? panic("JSON encode"))
-    back :: json.decode<Wrap<Int>>("{{\"value\":42}}")
+    back: json.decode<Wrap<Int>>("{{\"value\":42}}")
     print(back.value)
-    ws :: Wrap<String>{value: "hi"}
+    ws: Wrap<String>{value: "hi"}
     print(json.to_string(ws) ?? panic("JSON encode"))
     // Phantom param: K never reaches the wire, so Tagged<Wrap<Int>> encodes with
     // no Encode bound on K. The #Skip field is omitted from the wire entirely.
-    id :: Tagged<Wrap<Int>>{raw: 9, marker: None}
+    id: Tagged<Wrap<Int>>{raw: 9, marker: None}
     print(json.to_string(id) ?? panic("JSON encode"))
-    rid :: json.decode<Tagged<Wrap<Int>>>("{{\"raw\":3}}")
+    rid: json.decode<Tagged<Wrap<Int>>>("{{\"raw\":3}}")
     print(rid.raw)
 }

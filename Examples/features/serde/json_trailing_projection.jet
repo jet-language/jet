@@ -1,15 +1,15 @@
 // Selective decoding keeps full validation: a typed projection that reads one
 // field and the full Dyn parse both reject malformed data in skipped fields
 // and trailing bytes after the root.
-use json :: core.encoding.json
+use json: core.encoding.json
 
-struct Small {
+Small: struct {
     a: Int
 }
 
-fn full(label: String, text: String) {
-    tree :: json.parse(text) ?? {
-        kind :: if err.kind == {
+full: fn(label: String, text: String) {
+    tree: json.parse(text) ?? {
+        kind: if err.kind == {
             .Syntax -> "Syntax"
             .Truncated -> "Truncated"
             .Unsupported -> "Unsupported"
@@ -23,16 +23,16 @@ fn full(label: String, text: String) {
     print("{label} full: ok {json.to_string(tree) ?? panic("JSON encode")}")
 }
 
-fn projected(label: String, text: String) {
-    value :: json.decode<Small>(text) ?? {
+projected: fn(label: String, text: String) {
+    value: json.decode<Small>(text) ?? {
         print("{label} projected: {err}")
         return
     }
     print("{label} projected: ok a={value.a}")
 }
 
-fn run() {
-    cases :: [
+run: fn() {
+    cases: [
         (label: "valid", text: "{{\"a\":1,\"b\":[1,2]}}"),
         (label: "trailing garbage", text: "{{\"a\":1,\"b\":[1,2]}} x"),
         (label: "second root", text: "{{\"a\":1}} {{\"a\":2}}"),

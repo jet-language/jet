@@ -1,20 +1,20 @@
 
-BASE :: comptime { 40 }
+BASE: comptime { 40 }
 
-module cache<K>(capacity: Int) {
-    COMPUTED_SIZE :: comptime { BASE + capacity }
-    struct Entry { items: [K#capacity] }
-    fn size() -> Int { COMPUTED_SIZE }
+cache: module<K>(capacity: Int) {
+    COMPUTED_SIZE: comptime { BASE + capacity }
+    Entry: struct { items: [K#capacity] }
+    size: fn() -> Int { COMPUTED_SIZE }
 }
 
-module x :: cache<Int>(64)
+x: cache<Int>(64)
 
-module plain_template<K> {
-    fn identity(value: K) -> K { value }
+plain_template: module<K> {
+    identity: fn(value: K) -> K { value }
 }
-module plain :: plain_template<Int>
+plain: plain_template<Int>
 
-fn run() {
+run: fn() {
     print(x.size())
     print(plain.identity(7))
 }

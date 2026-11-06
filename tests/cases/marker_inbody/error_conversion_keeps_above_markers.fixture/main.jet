@@ -1,35 +1,35 @@
 // A marker written above an error conversion is its impl's marker: one that
 // only an impl takes is accepted, and the conversion still runs.
-struct Audited {
+Audited: struct {
     impl Marker {
-        sites :: [.Impl]
+        sites: [.Impl]
     }
 }
 
 #Error
-enum FileErr {
+FileErr: enum {
     NotFound(String)
 }
 
 #Error
-enum AppErr {
+AppErr: enum {
     File(FileErr)
 }
 
 #Audited
 impl FileErr -> AppErr { AppErr.File(self) }
 
-fn read_config(path: String) -> String FileErr! {
+read_config: fn(path: String) -> String FileErr! {
     if path == "" -> return Err(FileErr.NotFound("(empty path)"))
     Ok("42")
 }
 
-fn load(path: String) -> String AppErr! {
-    raw :: read_config(path)
+load: fn(path: String) -> String AppErr! {
+    raw: read_config(path)
     Ok(raw)
 }
 
-fn run() {
+run: fn() {
     print(load("config.txt") ?? "none")
     if load("") == {
         .Ok(value) -> { print(value) }

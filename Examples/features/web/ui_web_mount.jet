@@ -2,23 +2,23 @@
 // into the page's `#jet-app` element, one element per leaf at its frame; a
 // button click runs its Jet handler, and the effect's repaint replaces the
 // elements.
-package {
+package: {
     name: "ui_web_mount"
     authority: { allow: [Browser, Mem.Alloc] }
 }
 
 use {
-    ui :: core.ui
-    reactive :: core.reactive
+    ui: core.ui
+    reactive: core.reactive
 }
 
 #Target(Web)
-fn run() {
-    clicks :: reactive.signal(0)
-    backend :: ui.null_backend()
+run: fn() {
+    clicks: reactive.signal(0)
+    backend: ui.null_backend()
     ui.reactive_render(() -> {
-        current :: clicks.get()
-        tree :: ui.box([
+        current: clicks.get()
+        tree: ui.box([
             ui.node_color("count: {current}", 120.0, 32.0, "#3366ff"),
             ui.button("increment") {
                 clicks.set(clicks.get() + 1)

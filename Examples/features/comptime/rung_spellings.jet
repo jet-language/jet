@@ -1,4 +1,4 @@
-package {
+package: {
     name: "rung_spellings"
     authority: { allow: [FS.Read, IO] }
 }
@@ -10,21 +10,21 @@ package {
 // Prelude's effect type, named without a declaration. The retired
 // `T.@layout` is E0302 and `@build.os` teaches `$build.os`
 // (E-OSTARGET-BUILD-CONTEXT).
-use files :: core.files
+use files: core.files
 
 #Layout(c)
-struct Point {
+Point: struct {
     x: Int
     y: Int
 }
 
-POINT_LAYOUT :: comptime { Point.$layout }
+POINT_LAYOUT: comptime { Point.$layout }
 
-fn bounded(path: String) -[FS.Read]> String { files.read(path) ?? "" }
+bounded: fn(path: String) -[FS.Read]> String { files.read(path) ?? "" }
 
-fn hash(text: String) -[]> Int { text.len() }
+hash: fn(text: String) -[]> Int { text.len() }
 
-fn run() {
+run: fn() {
     comptime if $build.os == {
         .Linux -> print("os: linux")
         .MacOS -> print("os: macos")

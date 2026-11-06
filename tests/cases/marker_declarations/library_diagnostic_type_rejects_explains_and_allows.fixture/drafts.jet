@@ -1,28 +1,28 @@
-struct DraftRoute {
+DraftRoute: struct {
     name: String
 
     impl Diagnostic {
-        severity :: .Warning
-        fn what(self) -> String { "`{self.name}` is a draft route" }
-        fn why(self) -> String { "a draft route has not been reviewed" }
-        fn fix(self) -> String { "review the route, then remove `#Draft`" }
+        severity: .Warning
+        what: fn(self) -> String { "`{self.name}` is a draft route" }
+        why: fn(self) -> String { "a draft route has not been reviewed" }
+        fix: fn(self) -> String { "review the route, then remove `#Draft`" }
     }
 }
 
-struct Draft {
+Draft: struct {
     impl Marker {
-        sites :: [.Function]
+        sites: [.Function]
 
-        fn expand(self, target: Target) {
+        expand: fn(self, target: Target) {
             reject(DraftRoute{name: target.name})
         }
     }
 }
 
 #Draft
-fn shown() {}
+shown: fn() {}
 
 #[Allow(drafts.DraftRoute, "the release checklist reviews this route"), Draft]
-fn reviewed() {}
+reviewed: fn() {}
 
-fn run() {}
+run: fn() {}

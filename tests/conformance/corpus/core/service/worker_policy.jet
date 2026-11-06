@@ -1,10 +1,10 @@
-use service :: core.service
+use service: core.service
 
-fn checked_worker() {}
+checked_worker: fn() {}
 
-fn run() {
+run: fn() {
     tree := service.tree("workers")
-    endpoint :: tree.worker("worker", checked_worker, capacity: 2) ?? panic("worker")
+    endpoint: tree.worker("worker", checked_worker, capacity: 2) ?? panic("worker")
     tree.group("supervisor", ["worker"]) ?? panic("group")
     tree.start() ?? panic("start")
     tree.send(endpoint, "message") ?? panic("send")

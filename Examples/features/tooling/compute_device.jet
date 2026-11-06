@@ -1,25 +1,25 @@
-package {
+package: {
     name: "tooling_compute_device"
     version: "0.1.0"
     authority: { allow: [GPU, IO, Mem.Alloc] }
 }
 
 // D-COMPUTE-PLACE1=D (#1138): device, stream, placement, transfer receipts.
-use compute :: core.compute
+use compute: core.compute
 
-fn run() {
-    t :: compute.ones([2, 2]) ?? panic("ones")
+run: fn() {
+    t: compute.ones([2, 2]) ?? panic("ones")
     print("device:{compute.device(t)}")
     print("placement:{compute.placement(t)}")
 
-    cpu :: compute.device_cpu()
-    moved :: compute.on_device(t, cpu) ?? panic("on_device")
+    cpu: compute.device_cpu()
+    moved: compute.on_device(t, cpu) ?? panic("on_device")
     print("moved:{compute.device(moved)}")
 
-    stream :: compute.stream_new()
+    stream: compute.stream_new()
     compute.stream_sync(stream) ?? panic("sync")
     print("stream:ok")
 
-    xfer :: compute.transfer(moved, compute.device_cpu()) ?? panic("transfer")
+    xfer: compute.transfer(moved, compute.device_cpu()) ?? panic("transfer")
     print("transfer:{compute.transfer_show(xfer)}")
 }

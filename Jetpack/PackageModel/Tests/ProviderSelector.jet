@@ -4,7 +4,7 @@
 use jet_pkg_model.[ProviderSelector]
 
 #Test("bare selector is a version and features are lossless") {
-    selector :: ProviderSelector.parse("#2.0.17&features=lua,ssl")
+    selector: ProviderSelector.parse("#2.0.17&features=lua,ssl")
     assert_eq(selector.version, "2.0.17")
     assert_eq(selector.revision, "")
     assert_eq(selector.features, [String]{"lua", "ssl"})
@@ -12,8 +12,8 @@ use jet_pkg_model.[ProviderSelector]
 }
 
 #Test("digest selector requires a real digest shape") {
-    valid :: ProviderSelector.parse("#digest=sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+    valid: ProviderSelector.parse("#digest=sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
     assert(valid.is_exact())
-    invalid :: ProviderSelector.parse("#digest=0123456789abcdef0123456789abcdef")
+    invalid: ProviderSelector.parse("#digest=0123456789abcdef0123456789abcdef")
     assert(!invalid.is_exact())
 }

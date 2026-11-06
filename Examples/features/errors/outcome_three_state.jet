@@ -1,23 +1,23 @@
 // A `User? DBError!` value has three states, matched as
 // `.Val(user)`, `.None` and `.Err(e)`. Only the failure passes up by itself;
 // a missing user is ordinary data that never skips code.
-struct User {
+User: struct {
     name: String
 }
 
 #Error
-enum DBError {
+DBError: enum {
     Down
 }
 
-fn read_user(id: Int) -> User? DBError! {
+read_user: fn(id: Int) -> User? DBError! {
     if id == 0 -> return Err(DBError.Down)
     if id == 7 -> return Ok(Val(User{name: "priya"}))
     Ok(None)
 }
 
 // Value form: each of the three states answers.
-fn describe(id: Int) -> String {
+describe: fn(id: Int) -> String {
     if read_user(id) == {
         .Val(user) -> "user {user.name}"
         .None -> "no such user"
@@ -26,7 +26,7 @@ fn describe(id: Int) -> String {
 }
 
 // Statement form.
-fn report(id: Int) {
+report: fn(id: Int) {
     if read_user(id) == {
         .Val(user) -> print("found {user.name}")
         .None -> print("nobody with id {id}")
@@ -36,13 +36,13 @@ fn report(id: Int) {
 
 // No `.Err` arm here: the failure passes up to the caller by itself. A
 // missing user stays a value, so the line after the lookup still runs.
-fn greet(id: Int) -> String? DBError! {
-    user :: read_user(id)
+greet: fn(id: Int) -> String? DBError! {
+    user: read_user(id)
     print("looked up {id}")
     Ok(user?.name)
 }
 
-fn run() {
+run: fn() {
     loop id in [7, 3, 0] -> print(describe(id))
     loop id in [7, 3, 0] -> report(id)
     loop id in [7, 3, 0] {

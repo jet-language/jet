@@ -11,12 +11,12 @@ use {
     jet_devserver.TerminalStyleReload.[TerminalStyleHostAdapter]
     jet_driver.Package.[ReleaseDevtoolsPolicy]
 }
-fn handle_connection(stream: TcpStream, status: &DevStatus, debug_sessions: &DebugSessions, session: &ResidentDevSession, canvas_file: String, listener_kind: ListenerKind, bind_host: String, session_secret: String) Err! {
+handle_connection: fn(stream: TcpStream, status: &DevStatus, debug_sessions: &DebugSessions, session: &ResidentDevSession, canvas_file: String, listener_kind: ListenerKind, bind_host: String, session_secret: String) Err! {
     handle_connection_with_root(^stream, status, debug_sessions, session, canvas_file, listener_kind, bind_host, session_secret, &OSPath.new("build"))
 }
-fn handle_connection_with_root(stream: TcpStream, status: &DevStatus, debug_sessions: &DebugSessions, session: &ResidentDevSession, canvas_file: String, listener_kind: ListenerKind, bind_host: String, session_secret: String, static_root: &OSPath) Err! {
-    browser_state :: Arc.new(Mutex.new(.None))
-    paused_evaluate :: Arc.new(Mutex.new(PausedEvaluateHost.new()))
-    terminal_style :: Arc.new(TerminalStyleHostAdapter.new())
+handle_connection_with_root: fn(stream: TcpStream, status: &DevStatus, debug_sessions: &DebugSessions, session: &ResidentDevSession, canvas_file: String, listener_kind: ListenerKind, bind_host: String, session_secret: String, static_root: &OSPath) Err! {
+    browser_state: Arc.new(Mutex.new(.None))
+    paused_evaluate: Arc.new(Mutex.new(PausedEvaluateHost.new()))
+    terminal_style: Arc.new(TerminalStyleHostAdapter.new())
     return handle_connection_with_root_and_policy(^stream, status, debug_sessions, session, canvas_file, listener_kind, bind_host, session_secret, static_root, &browser_state, &paused_evaluate, &terminal_style, &ReleaseDevtoolsPolicy.development(), SocketAddr.new(IpAddr.V4(Ipv4Addr.LOCALHOST), 0))
 }

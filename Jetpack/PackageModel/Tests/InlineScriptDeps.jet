@@ -9,20 +9,20 @@ use {
     ]
     jet_foundation.[Span]
     jetpack_foundation.[MAX_TREE_DEPTH]
-    files :: core.files
+    files: core.files
 }
 
-fn pkg_inline_deps_test_dep(name: String) -> InlineDep Never! {
+pkg_inline_deps_test_dep: fn(name: String) -> InlineDep Never! {
     InlineDep{name: name, selector: "1.0.0", span: Span{start: 0, end: 0}}
 }
 
-fn pkg_inline_deps_test_candidates(pairs: [String]) -> [(version: String, dir: String)] Never! {
+pkg_inline_deps_test_candidates: fn(pairs: [String]) -> [(version: String, dir: String)] Never! {
     out := [(version: String, dir: String)]{}
     loop index in 0..<(pairs.len() /% 2) -> &out.push((version: pairs[index * 2], dir: pairs[index * 2 + 1]))
     out
 }
 
-fn pkg_inline_deps_test_unresolved(dep: InlineDep, script_dir: String) -[FS, Env]> InlineDepUnresolved Never! {
+pkg_inline_deps_test_unresolved: fn(dep: InlineDep, script_dir: String) -[FS, Env]> InlineDepUnresolved Never! {
     if pkg_inline_deps_resolve(dep, script_dir) == {
         .Ok(_) -> panic("hostile inline dependency must not resolve")
         .Err(error) -> error
@@ -45,49 +45,49 @@ fn pkg_inline_deps_test_unresolved(dep: InlineDep, script_dir: String) -[FS, Env
     assert(!pkg_inline_deps_is_pinned("18446744073709551616.1.2"))
     assert(pkg_inline_deps_is_pinned("+1.4.2"))
     assert(!pkg_inline_deps_is_pinned("01.4.2"))
-    selected :: pkg_inline_deps_best_match("18446744073709551615", [(version: String, dir: String)]{(version: "18446744073709551615.0.1", dir: "older"), (version: "18446744073709551615.0.2", dir: "newer")}) ?? panic("full unsigned selector")
+    selected: pkg_inline_deps_best_match("18446744073709551615", [(version: String, dir: String)]{(version: "18446744073709551615.0.1", dir: "older"), (version: "18446744073709551615.0.2", dir: "newer")}) ?? panic("full unsigned selector")
     assert_eq(selected.dir, "newer")
 }
 
 #Test("exact match does not accept incompatible or malformed versions") {
-    candidates :: pkg_inline_deps_test_candidates([String]{"1.4.2", "exact", "1.4.3", "newer", "1.4.2.1", "malformed"})
-    chosen :: pkg_inline_deps_best_match("1.4.2", candidates) ?? panic("exact version matches")
+    candidates: pkg_inline_deps_test_candidates([String]{"1.4.2", "exact", "1.4.3", "newer", "1.4.2.1", "malformed"})
+    chosen: pkg_inline_deps_best_match("1.4.2", candidates) ?? panic("exact version matches")
     assert_eq(chosen.version, "1.4.2")
     assert_eq(pkg_inline_deps_best_match("1.4.1", candidates), None)
 }
 
 #Test("cache identity is order independent but binds all facts") {
-    left :: InlineDepResolved{name: "textkit", selector: "1.4", resolved_version: "1.4.2", dir: "/first/checkout", content_hash: "sha256-source"}
+    left: InlineDepResolved{name: "textkit", selector: "1.4", resolved_version: "1.4.2", dir: "/first/checkout", content_hash: "sha256-source"}
     right := left
     right.name = "other"
     right.dir = "/second/checkout"
-    first :: pkg_inline_deps_cache_identity("sha256-script", [InlineDepResolved]{left, right}, "jet-1", "x86_64")
-    reordered :: pkg_inline_deps_cache_identity("sha256-script", [InlineDepResolved]{right, left}, "jet-1", "x86_64")
+    first: pkg_inline_deps_cache_identity("sha256-script", [InlineDepResolved]{left, right}, "jet-1", "x86_64")
+    reordered: pkg_inline_deps_cache_identity("sha256-script", [InlineDepResolved]{right, left}, "jet-1", "x86_64")
     assert_eq(first.digest(), reordered.digest())
-    identities :: [ScriptDependencyIdentity]{left.dependency_identity(), right.dependency_identity()}
-    changed_source :: ScriptCacheIdentity.new("sha256-script-edited", identities, "jet-1", "x86_64")
-    changed_toolchain :: ScriptCacheIdentity.new("sha256-script", identities, "jet-2", "x86_64")
+    identities: [ScriptDependencyIdentity]{left.dependency_identity(), right.dependency_identity()}
+    changed_source: ScriptCacheIdentity.new("sha256-script-edited", identities, "jet-1", "x86_64")
+    changed_toolchain: ScriptCacheIdentity.new("sha256-script", identities, "jet-2", "x86_64")
     assert(first.digest() != changed_source.digest())
     assert(first.digest() != changed_toolchain.digest())
 }
 
 #Test("best match prefers prefix and highest") {
-    candidates :: pkg_inline_deps_test_candidates([String]{"1.4.0", "a", "1.4.2", "b", "2.0.0", "c"})
-    loose :: pkg_inline_deps_best_match("1.4", candidates) ?? panic("prefix match")
+    candidates: pkg_inline_deps_test_candidates([String]{"1.4.0", "a", "1.4.2", "b", "2.0.0", "c"})
+    loose: pkg_inline_deps_best_match("1.4", candidates) ?? panic("prefix match")
     assert_eq(loose.version, "1.4.2")
-    exact :: pkg_inline_deps_best_match("1.4.0", candidates) ?? panic("exact match")
+    exact: pkg_inline_deps_best_match("1.4.0", candidates) ?? panic("exact match")
     assert_eq(exact.version, "1.4.0")
     assert_eq(pkg_inline_deps_best_match("9.9", candidates), None)
 }
 
 #Test("resolve rejects recursive symlink as structured failure") {
-    root :: files.temp_dir("jet-script-deps-symlink") ?? panic("scratch")
-    package :: files.join(root.path, ".jet/inline-deps/hostile/1.0.0")
+    root: files.temp_dir("jet-script-deps-symlink") ?? panic("scratch")
+    package: files.join(root.path, ".jet/inline-deps/hostile/1.0.0")
     files.create_dir_all(files.join(package, "src")) ?? panic("package tree")
     files.write(files.join(package, "src/value.jet"), "stable\n") ?? panic("source file")
     files.symlink(".", files.join(package, "src/loop")) ?? panic("loop link")
-    dependency :: pkg_inline_deps_test_dep("hostile")
-    error :: pkg_inline_deps_test_unresolved(dependency, root.path)
+    dependency: pkg_inline_deps_test_dep("hostile")
+    error: pkg_inline_deps_test_unresolved(dependency, root.path)
     if error == {
         .InvalidTree(tree_error) -> if tree_error == {
             .Symlink(path) -> assert(path.ends_with("src/loop"))
@@ -95,13 +95,13 @@ fn pkg_inline_deps_test_unresolved(dep: InlineDep, script_dir: String) -[FS, Env
         }
         else -> panic("expected an invalid tree failure")
     }
-    diagnostic :: pkg_inline_deps_e1253(dependency, error)
+    diagnostic: pkg_inline_deps_e1253(dependency, error)
     assert_eq(diagnostic.code, "E1253")
     assert(diagnostic.why.contains("symlink"))
 }
 
 #Test("resolve rejects oversized recursive source as structured failure") {
-    root :: files.temp_dir("jet-script-deps-depth") ?? panic("scratch")
+    root: files.temp_dir("jet-script-deps-depth") ?? panic("scratch")
     current := files.join(root.path, ".jet/inline-deps/hostile/1.0.0")
     files.create_dir_all(current) ?? panic("package root")
     loop index in 0..<(MAX_TREE_DEPTH + 2) {
@@ -109,7 +109,7 @@ fn pkg_inline_deps_test_unresolved(dep: InlineDep, script_dir: String) -[FS, Env
         files.create_dir(current) ?? panic("nested directory")
     }
     files.write(files.join(current, "payload.jet"), "stable\n") ?? panic("payload")
-    error :: pkg_inline_deps_test_unresolved(pkg_inline_deps_test_dep("hostile"), root.path)
+    error: pkg_inline_deps_test_unresolved(pkg_inline_deps_test_dep("hostile"), root.path)
     if error == {
         .InvalidTree(tree_error) -> if tree_error == {
             .TooLarge(_, limit) -> assert_eq(limit, MAX_TREE_DEPTH)

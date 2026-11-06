@@ -36,20 +36,20 @@ test('the source identity covers compiler inputs only', t => {
     const root = tree({
         'Compiler/package.jet': 'name: "compiler"\n',
         'Compiler/JetCli/package.jet': manifest('jet_cli'),
-        'Compiler/JetCli/run.jet': 'fn run() {}\n',
-        'Compiler/JetCli/Source/Cli/Registry.jet': 'JET_CLI_BINARY :: "jet"\nJET_CLI_VERSION :: "0.0.1"\n',
+        'Compiler/JetCli/run.jet': 'run: fn() {}\n',
+        'Compiler/JetCli/Source/Cli/Registry.jet': 'JET_CLI_BINARY: "jet"\nJET_CLI_VERSION: "0.0.1"\n',
         'Compiler/JetCli/Tests/package.jet': manifest('jet_cli_tests'),
-        'Compiler/JetCli/Tests/T.jet': 'fn t() {}\n',
-        'Core/Text.jet': 'fn text() {}\n',
+        'Compiler/JetCli/Tests/T.jet': 't: fn() {}\n',
+        'Core/Text.jet': 'text: fn() {}\n',
         'Docs/README.md': 'docs\n',
     });
     t.after(() => rmSync(root, { recursive: true, force: true }));
     const before = compilerSourceIdentity(root);
     assert.match(before, /^jet@0\.0\.1#[0-9a-f]{64}$/);
-    writeFileSync(join(root, 'Compiler/JetCli/Tests/T.jet'), 'fn t2() {}\n');
+    writeFileSync(join(root, 'Compiler/JetCli/Tests/T.jet'), 't2: fn() {}\n');
     writeFileSync(join(root, 'Docs/README.md'), 'other\n');
     assert.equal(compilerSourceIdentity(root), before, 'test packages and other trees are not compiler inputs');
-    writeFileSync(join(root, 'Core/Text.jet'), 'fn text2() {}\n');
+    writeFileSync(join(root, 'Core/Text.jet'), 'text2: fn() {}\n');
     const core = compilerSourceIdentity(root);
     assert.notEqual(core, before);
     writeFileSync(join(root, 'Compiler/package.jet'), 'name: "compiler2"\n');
@@ -59,19 +59,19 @@ test('the source identity covers compiler inputs only', t => {
 test('package members follow the driver walk', t => {
     const root = tree({
         'Compiler/JetCli/package.jet': manifest('jet_cli'),
-        'Compiler/JetCli/run.jet': 'fn run() {}\n',
-        'Compiler/JetCli/Source/A.jet': 'fn a() {}\n',
-        'Compiler/JetCli/Source/Deep/B.jet': 'fn b() {}\n',
+        'Compiler/JetCli/run.jet': 'run: fn() {}\n',
+        'Compiler/JetCli/Source/A.jet': 'a: fn() {}\n',
+        'Compiler/JetCli/Source/Deep/B.jet': 'b: fn() {}\n',
         'Compiler/JetCli/Source/notes.md': 'data\n',
-        'Compiler/JetCli/Source/script.jet': '#!/usr/bin/env jet\nfn run() {}\n',
-        'Compiler/JetCli/Source/config.jet': 'x :: 1\n',
-        'Compiler/JetCli/.hidden/C.jet': 'fn c() {}\n',
-        'Compiler/JetCli/build/D.jet': 'fn d() {}\n',
-        'Compiler/JetCli/target/E.jet': 'fn e() {}\n',
+        'Compiler/JetCli/Source/script.jet': '#!/usr/bin/env jet\nrun: fn() {}\n',
+        'Compiler/JetCli/Source/config.jet': 'x: 1\n',
+        'Compiler/JetCli/.hidden/C.jet': 'c: fn() {}\n',
+        'Compiler/JetCli/build/D.jet': 'd: fn() {}\n',
+        'Compiler/JetCli/target/E.jet': 'e: fn() {}\n',
         'Compiler/JetCli/Tests/package.jet': manifest('jet_cli_tests'),
-        'Compiler/JetCli/Tests/T.jet': 'fn t() {}\n',
+        'Compiler/JetCli/Tests/T.jet': 't: fn() {}\n',
         'Compiler/JetCli/Locked/.jet/lock': '',
-        'Compiler/JetCli/Locked/L.jet': 'fn l() {}\n',
+        'Compiler/JetCli/Locked/L.jet': 'l: fn() {}\n',
     });
     t.after(() => rmSync(root, { recursive: true, force: true }));
     symlinkSync(join(root, 'Compiler/JetCli/Source'), join(root, 'Compiler/JetCli/Linked'));
@@ -92,28 +92,28 @@ test('package members follow the driver walk', t => {
 test('a fixture unit blanks package imports and repeated Core imports in place and leaves out package entries', t => {
     const root = tree({
         'Compiler/JetCli/package.jet': manifest('jet_cli', { jet_foundation: '../JetFoundation' }),
-        'Compiler/JetCli/run.jet': 'fn run() {}\n',
-        'Compiler/JetCli/Source/Cli.jet': 'use jet_foundation.[found]\nuse files :: core.files\nfn cli() { found() }\n',
+        'Compiler/JetCli/run.jet': 'run: fn() {}\n',
+        'Compiler/JetCli/Source/Cli.jet': 'use jet_foundation.[found]\nuse files: core.files\ncli: fn() { found() }\n',
         'Compiler/JetFoundation/package.jet': manifest('jet_foundation'),
-        'Compiler/JetFoundation/Source/Found.jet': 'use files :: core.files\nuse core.text.[Text, Rune]\nfn found() {}',
-        'Compiler/JetFoundation/Source/More.jet': 'use {\n    core.text.[Rune, Glyph]\n    files :: core.files\n}\nfn more() {}\n',
+        'Compiler/JetFoundation/Source/Found.jet': 'use files: core.files\nuse core.text.[Text, Rune]\nfound: fn() {}',
+        'Compiler/JetFoundation/Source/More.jet': 'use {\n    core.text.[Rune, Glyph]\n    files: core.files\n}\nmore: fn() {}\n',
     });
     t.after(() => rmSync(root, { recursive: true, force: true }));
     const unit = compilerFixtureUnit(root);
-    assert.ok(!unit.includes('fn run()'));
+    assert.ok(!unit.includes('run: fn()'));
     assert.ok(!unit.includes('use jet_foundation'));
-    assert.equal(unit.match(/use files :: core\.files/g).length, 1);
+    assert.equal(unit.match(/use files: core\.files/g).length, 1);
     assert.ok(unit.includes('use core.text.[Text, Rune]'));
     assert.ok(unit.includes('use core.text.[      Glyph]'), 'a repeated grouped Core member is blanked in place');
-    assert.ok(unit.indexOf('fn found()') < unit.indexOf('fn cli()'), 'dependencies come first');
-    assert.equal(compilerFixtureUnit(root, ['Compiler/JetFoundation']).includes('fn cli()'), false);
+    assert.ok(unit.indexOf('found: fn()') < unit.indexOf('cli: fn()'), 'dependencies come first');
+    assert.equal(compilerFixtureUnit(root, ['Compiler/JetFoundation']).includes('cli: fn()'), false);
 });
 
 test('unblockUses keeps every offset and leaves pub blocks', () => {
-    const source = 'use {\n    jet_lexer.[\n        lex,\n    ]\n    // note\n    fs :: core.files\n}\npub use {\n    core.sys\n}\nmodule m {\n    use {\n        core.term\n    }\n}\n';
+    const source = 'use {\n    jet_lexer.[\n        lex,\n    ]\n    // note\n    fs: core.files\n}\npub use {\n    core.sys\n}\nm: module {\n    use {\n        core.term\n    }\n}\n';
     const flat = unblockUses(source);
     assert.equal(flat.length, source.length);
-    assert.equal(flat, '     \nuse jet_lexer.[\n        lex,\n    ]\n    // note\nuse fs :: core.files\n \npub use {\n    core.sys\n}\nmodule m {\n         \n    use core.term\n     \n}\n');
+    assert.equal(flat, '     \nuse jet_lexer.[\n        lex,\n    ]\n    // note\nuse fs: core.files\n \npub use {\n    core.sys\n}\nm: module {\n         \n    use core.term\n     \n}\n');
 });
 
 test('the repository compiler closure is the CLI and its dependencies', () => {

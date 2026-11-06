@@ -1,5 +1,5 @@
 // Read-only observations of canonical native kernels, never alternate locks.
-#Export(c) fn jet_rt_sync_fixture_condition_count(condition: I64) -> I64 {
+#Export(c) jet_rt_sync_fixture_condition_count: fn(condition: I64) -> I64 {
     sync_mutex_lock(condition + I64{8})
     node := sync_load(condition + I64{16})
     count := I64{0}
@@ -10,8 +10,8 @@
     sync_mutex_unlock(condition + I64{8})
     count
 }
-#Export(c) fn jet_rt_sync_fixture_condition_fifo(condition: I64) {
-    nodes :: jet_rt_alloc(I64{144}, I64{8})
+#Export(c) jet_rt_sync_fixture_condition_fifo: fn(condition: I64) {
+    nodes: jet_rt_alloc(I64{144}, I64{8})
     thread_zero(nodes, I64{144})
     condition_register(condition, nodes)
     condition_register(condition, nodes + I64{48})

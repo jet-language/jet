@@ -37,13 +37,13 @@
 <p class="diag-copy fix" data-registry-field="fix">Transition the value into `{required}` first — call the transition that reaches it (e.g. `pay` to reach `Confirmed`).</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0150</code>: <code>tests/ui/protocol_out_of_order.stderr</code>.</p>
-<pre class="diag">Error [jet.ValueThrownAway]: This protocol_out_of_order.Payment.Client value is thrown away
-  --&gt; protocol_out_of_order.jet:18:8
+<pre class="diag">Error [jet.ValueThrownAway]: This Payment.Client value is thrown away
+  --&gt; tests/ui/protocol_out_of_order.jet:18:8
     |
  18 |     h1.Charge(500) ?? panic(&quot;charge failed&quot;)
     |        ^^^^^^^^^^^^^^^^^^^^
  Why: `run` has no return type, so it returns nothing and the value of its last line is lost
- Fix: If `run` should return it, write `-&gt; protocol_out_of_order.Payment.Client` after its parameter list; to discard it on purpose, write `.drop(&quot;reason&quot;)`
+ Fix: If `run` should return it, write `-&gt; Payment.Client` after its parameter list; to discard it on purpose, write `.drop(&quot;reason&quot;)`
 More: jet-lang.dev/e/E0433
 
 Error [jet.TypestateWrongState]: `Charge` needs `Payment.Client` in state `S2`, but `h1` is in state `S1`

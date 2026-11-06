@@ -1,10 +1,10 @@
 use {
-    compute :: core.compute
-    files :: core.files
+    compute: core.compute
+    files: core.files
 }
 
-fn image_fixture_path() -> String {
-    candidates :: [
+image_fixture_path: fn() -> String {
+    candidates: [
         "Examples/features/foundations/arrays/fixtures/rgb_2x2.ppm",
         "fixtures/rgb_2x2.ppm",
     ]
@@ -14,37 +14,37 @@ fn image_fixture_path() -> String {
     panic("image fixture is not installed")
 }
 
-fn double(value: Float) -[]> Float { value * 2.0 }
+double: fn(value: Float) -[]> Float { value * 2.0 }
 
-fn run() {
+run: fn() {
     // Dense Tensor algebra remains the substrate for every higher-level value.
-    flat :: compute.from_list([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]) ?? panic("dense values")
-    matrix :: compute.reshape(flat, [2, 3]) ?? panic("dense reshape")
-    transposed :: compute.transpose(matrix) ?? panic("transpose")
-    row :: compute.vec(3, 10.0) ?? panic("row")
-    broadcast :: compute.broadcast_to(row, [2, 3]) ?? panic("broadcast")
-    summed :: compute.add(matrix, broadcast) ?? panic("broadcast add")
+    flat: compute.from_list([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]) ?? panic("dense values")
+    matrix: compute.reshape(flat, [2, 3]) ?? panic("dense reshape")
+    transposed: compute.transpose(matrix) ?? panic("transpose")
+    row: compute.vec(3, 10.0) ?? panic("row")
+    broadcast: compute.broadcast_to(row, [2, 3]) ?? panic("broadcast")
+    summed: compute.add(matrix, broadcast) ?? panic("broadcast add")
     if compute.shape(matrix) != [2, 3] -> panic("dense shape")
     if compute.shape(transposed) != [3, 2] -> panic("transpose shape")
     if compute.to_list(transposed) != ([Float]{1.0, 4.0, 2.0, 5.0, 3.0, 6.0}) -> panic("transpose values")
     if compute.to_list(summed) != ([Float]{11.0, 12.0, 13.0, 14.0, 15.0, 16.0}) -> panic("broadcast values")
 
     // Named dimensions and coordinates stay in a user record beside Tensor.
-    coordinates :: [Coordinate]{
+    coordinates: [Coordinate]{
         coordinate("row", ["r0", "r1"]),
         coordinate("col", ["c0", "c1", "c2"]),
     }
-    labeled :: labeled(matrix, ["row", "col"], coordinates)
-    col_two :: lookup(labeled, "col", "c2") ?? panic("column lookup")
-    south_margin :: cell(labeled, "r1", "c2") ?? panic("cell lookup")
-    missing :: lookup(labeled, "col", "c9")
+    labeled: labeled(matrix, ["row", "col"], coordinates)
+    col_two: lookup(labeled, "col", "c2") ?? panic("column lookup")
+    south_margin: cell(labeled, "r1", "c2") ?? panic("cell lookup")
+    missing: lookup(labeled, "col", "c9")
     if col_two != 3.0 -> panic("column coordinate value")
     if south_margin != 6.0 -> panic("row/column coordinate value")
     if missing != None -> panic("missing coordinate accepted")
 
     // A ChunkedArray indexes real source Tensor storage and materializes only
     // the requested window before applying the callback.
-    chunk_source :: compute.from_list(
+    chunk_source: compute.from_list(
     [
         0.0,
         1.0,
@@ -114,21 +114,21 @@ fn run() {
     ) ?? panic("chunk source")
     plan := chunked(chunk_source, 8)
     if chunk_count(plan) != 8 -> panic("chunk count")
-    indexed_tensor :: read_chunk(plan, 1)
+    indexed_tensor: read_chunk(plan, 1)
     if compute.to_list(indexed_tensor) != ([Float]{8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0}) {
         panic("indexed chunk")
     }
-    first_tensor :: map_chunk(&plan, 0, double)
-    tail_tensor :: map_chunk(&plan, 7, double)
-    first :: compute.to_list(first_tensor)
-    tail :: compute.to_list(tail_tensor)
+    first_tensor: map_chunk(&plan, 0, double)
+    tail_tensor: map_chunk(&plan, 7, double)
+    first: compute.to_list(first_tensor)
+    tail: compute.to_list(tail_tensor)
     if first != ([Float]{0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0}) -> panic("first chunk")
     if tail != ([Float]{112.0, 114.0, 116.0, 118.0, 120.0, 122.0, 124.0, 126.0}) -> panic("tail chunk")
     if plan.reads != 2 -> panic("indexed read count")
 
     all_plan := chunked(chunk_source, 8)
-    mapped_tensor :: map_all(&all_plan, double)
-    mapped :: compute.to_list(mapped_tensor)
+    mapped_tensor: map_all(&all_plan, double)
+    mapped: compute.to_list(mapped_tensor)
     expected_mapped := [Float]{}
     loop value in 0..<64 -> &expected_mapped.push(Float.from_int(value * 2))
     if mapped != expected_mapped -> panic("mapped chunk values")
@@ -136,37 +136,37 @@ fn run() {
 
     // Decode a real checked-in image, transform its Tensor pixels, and write a
     // PPM result that is decoded again for an exact storage round trip.
-    fixture_path :: image_fixture_path()
-    fixture :: files.read(fixture_path) ?? panic("image fixture read")
-    image :: decode_ppm(fixture) ?? panic("image decode")
-    source_pixels :: compute.to_list(image.pixels)
+    fixture_path: image_fixture_path()
+    fixture: files.read(fixture_path) ?? panic("image fixture read")
+    image: decode_ppm(fixture) ?? panic("image decode")
+    source_pixels: compute.to_list(image.pixels)
     if image.width != 2 || image.height != 2 || image.channels != 3 -> panic("image metadata")
     if source_pixels != ([Float]{1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0}) {
         panic("image pixels")
     }
 
-    resized :: resize_nearest(image, 4, 4)
-    resized_pixels :: compute.to_list(resized.pixels)
-    corner :: compute.get(resized.pixels, [3, 3, 2]) ?? panic("resized corner")
+    resized: resize_nearest(image, 4, 4)
+    resized_pixels: compute.to_list(resized.pixels)
+    corner: compute.get(resized.pixels, [3, 3, 2]) ?? panic("resized corner")
     if resized.width != 4 || resized.height != 4 || resized.channels != 3 {
         panic("resized metadata")
     }
     if corner != 1.0 -> panic("resized nearest corner")
     if resized_pixels.len() != 48 -> panic("resized storage")
 
-    gray :: grayscale(image)
-    gray_pixels :: compute.to_list(gray.pixels)
+    gray: grayscale(image)
+    gray_pixels: compute.to_list(gray.pixels)
     if gray.width != 2 || gray.height != 2 || gray.channels != 1 -> panic("gray metadata")
     // A white pixel sums the weights left to right, as grayscale does.
     if gray_pixels != ([Float]{0.3, 0.59, 0.11, 0.3 + 0.59 + 0.11}) -> panic("gray pixels")
 
-    output :: encode_ppm(resized)
-    temp :: files.temp_dir("arrays-image") ?? panic("image output directory")
-    output_path :: Path.from(temp.path).join("resized.ppm").to_string()
+    output: encode_ppm(resized)
+    temp: files.temp_dir("arrays-image") ?? panic("image output directory")
+    output_path: Path.from(temp.path).join("resized.ppm").to_string()
     files.write(output_path, output) ?? panic("image output write")
-    written :: files.read(output_path) ?? panic("image output read")
+    written: files.read(output_path) ?? panic("image output read")
     if !files.exists(output_path) || written != output -> panic("image output round trip")
-    round_trip :: decode_ppm(written) ?? panic("image output decode")
+    round_trip: decode_ppm(written) ?? panic("image output decode")
     if compute.shape(round_trip.pixels) != [4, 4, 3] -> panic("round-trip shape")
     if compute.to_list(round_trip.pixels) != resized_pixels -> panic("round-trip pixels")
 

@@ -3,26 +3,26 @@
 // inspection. A value bound out of the local is still its own copy: later
 // writes to the local never reach it.
 
-enum Shape {
+Shape: enum {
     Named(name: String)
     Pair(left: String, right: String)
     Empty
 }
 
-fn shape_for(n: Int) -> Shape {
+shape_for: fn(n: Int) -> Shape {
     if n == 0 -> return Shape.Named{name: "zero"}
     if n == 1 -> return Shape.Pair{left: "one", right: "uno"}
     Shape.Empty
 }
 
-fn label_for(n: Int) -> String? {
+label_for: fn(n: Int) -> String? {
     if n > 1 -> return Val("big {n}")
     None
 }
 
 // A variant test and payload read of a local, then a second match on it.
-fn describe(n: Int) -> String {
-    shape :: shape_for(n)
+describe: fn(n: Int) -> String {
+    shape: shape_for(n)
     if shape == .Named(name) -> return "named {name}"
     if shape == {
         .Pair(left, right) -> "pair {left}/{right}"
@@ -31,7 +31,7 @@ fn describe(n: Int) -> String {
 }
 
 // An option test on a local that is filled in afterwards.
-fn filled(n: Int) -> String {
+filled: fn(n: Int) -> String {
     label := label_for(n)
     if label == None {
         label = Val("small")
@@ -40,7 +40,7 @@ fn filled(n: Int) -> String {
 }
 
 // The bound payload keeps its value after the local is replaced.
-fn replaced(n: Int) -> String {
+replaced: fn(n: Int) -> String {
     shape := shape_for(n)
     if shape == .Named(name) {
         shape = Shape.Empty
@@ -49,20 +49,20 @@ fn replaced(n: Int) -> String {
     "unchanged"
 }
 
-fn kept_after_reset(n: Int) -> String {
+kept_after_reset: fn(n: Int) -> String {
     label := label_for(n)
-    text :: label ?? return "none"
+    text: label ?? return "none"
     label = None
     if label == None -> return "kept {text}"
     "lost"
 }
 
 // Comparisons of owned strings, including inside a loop that rebinds them.
-fn ordered(words: [String]) -> Int {
+ordered: fn(words: [String]) -> Int {
     count := 0
     previous := ""
     loop word in words {
-        current :: "{word}"
+        current: "{word}"
         if previous < current -> count += 1
         if current == previous -> count += 10
         previous = current
@@ -70,7 +70,7 @@ fn ordered(words: [String]) -> Int {
     count
 }
 
-struct Segment {
+Segment: struct {
     starts: [Int]
     names: [String]
     label: String
@@ -78,19 +78,19 @@ struct Segment {
 
 // Indexing, lengths, and comparisons of an owned local's fields read the
 // fields in place; a write between two reads is still seen by the later one.
-fn field_reads(n: Int) -> String {
+field_reads: fn(n: Int) -> String {
     segment := Segment{starts: [Int]{0, 3, n}, names: [String]{"a", "l"}, label: "l"}
     total := 0
     loop i in 0..<segment.starts.len() -> total += segment.starts[i]
-    same :: segment.names[1] == segment.label
-    before :: "{segment.starts[2]}"
+    same: segment.names[1] == segment.label
+    before: "{segment.starts[2]}"
     segment.starts[2] = 7
     segment.label = "m"
     "{total} {same} {segment.names[1] == segment.label} {before} {segment.starts[2]} {segment.starts == segment.starts}"
 }
 
 // The same reads through a loop item that aliases a list element.
-fn segment_sum(segments: [Segment]) -> Int {
+segment_sum: fn(segments: [Segment]) -> Int {
     total := 0
     loop segment in segments {
         if segment.starts.len() == 0 || segment.starts[0] != 0 -> total += 100
@@ -100,7 +100,7 @@ fn segment_sum(segments: [Segment]) -> Int {
     total
 }
 
-fn run() {
+run: fn() {
     print(describe(0))
     print(describe(1))
     print(describe(2))

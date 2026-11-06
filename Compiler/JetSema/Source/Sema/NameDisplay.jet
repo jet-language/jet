@@ -1,39 +1,39 @@
 // generic-instance/inline-module display paths, reused from
 // origin/port/compiler CheckProgram.jet. Identity paths remain untouched.
 use jet_foundation.[NameFacts, NameDisplayPath, Item, Func, CodeModule]
-fn sema_name_strip_prefix(name: String, prefix: String) -> String Never! {
+sema_name_strip_prefix: fn(name: String, prefix: String) -> String Never! {
     if !name.starts_with(prefix) -> return name.copy()
     name.slice(prefix.len(), name.len())
 }
-fn sema_name_display_add(facts: &NameFacts, module_index: Int, module_alias: String, internal: String, display: String) Never! {
+sema_name_display_add: fn(facts: &NameFacts, module_index: Int, module_alias: String, internal: String, display: String) Never! {
     &facts.display_paths.push(NameDisplayPath{module_index: module_index, internal_path: "{module_alias}.{internal}", display_path: display})
 }
-fn sema_name_display_methods(facts: &NameFacts, module_index: Int, module_alias: String, internal: String, display: String, methods: [Func]) Never! {
+sema_name_display_methods: fn(facts: &NameFacts, module_index: Int, module_alias: String, internal: String, display: String, methods: [Func]) Never! {
     loop method in methods -> sema_name_display_add(&facts, module_index, module_alias, "{internal}.{method.name}", "{display}.{method.name}")
 }
-fn sema_name_display_item(facts: &NameFacts, module_index: Int, module_alias: String, scope: String, internal_prefix: String, display_prefix: String, item: Item) Never! {
-    type_prefix :: sema_inline_type_prefix(scope)
-    value_prefix :: sema_genmod_value_name(scope, "")
+sema_name_display_item: fn(facts: &NameFacts, module_index: Int, module_alias: String, scope: String, internal_prefix: String, display_prefix: String, item: Item) Never! {
+    type_prefix: sema_inline_type_prefix(scope)
+    value_prefix: sema_genmod_value_name(scope, "")
     if item == {
         .Struct(definition) -> {
-            internal :: sema_name_scoped(internal_prefix, definition.name)
-            display :: "{display_prefix}.{sema_name_strip_prefix(definition.name, type_prefix)}"
+            internal: sema_name_scoped(internal_prefix, definition.name)
+            display: "{display_prefix}.{sema_name_strip_prefix(definition.name, type_prefix)}"
             sema_name_display_add(&facts, module_index, module_alias, internal, display)
             loop field in definition.fields -> sema_name_display_add(&facts, module_index, module_alias, "{internal}.{field.name}", "{display}.{field.name}")
             sema_name_display_methods(&facts, module_index, module_alias, internal, display, definition.methods)
             loop implementation in definition.trait_impls -> sema_name_display_methods(&facts, module_index, module_alias, internal, display, implementation.methods)
         }
         .Enum(definition) -> {
-            internal :: sema_name_scoped(internal_prefix, definition.name)
-            display :: "{display_prefix}.{sema_name_strip_prefix(definition.name, type_prefix)}"
+            internal: sema_name_scoped(internal_prefix, definition.name)
+            display: "{display_prefix}.{sema_name_strip_prefix(definition.name, type_prefix)}"
             sema_name_display_add(&facts, module_index, module_alias, internal, display)
             loop variant in definition.variants -> sema_name_display_add(&facts, module_index, module_alias, "{internal}.{variant.name}", "{display}.{variant.name}")
             sema_name_display_methods(&facts, module_index, module_alias, internal, display, definition.methods)
             loop implementation in definition.trait_impls -> sema_name_display_methods(&facts, module_index, module_alias, internal, display, implementation.methods)
         }
         .Trait(definition) -> {
-            internal :: sema_name_scoped(internal_prefix, definition.name)
-            display :: "{display_prefix}.{sema_name_strip_prefix(definition.name, type_prefix)}"
+            internal: sema_name_scoped(internal_prefix, definition.name)
+            display: "{display_prefix}.{sema_name_strip_prefix(definition.name, type_prefix)}"
             sema_name_display_add(&facts, module_index, module_alias, internal, display)
             loop method in definition.methods -> sema_name_display_add(&facts, module_index, module_alias, "{internal}.{method.name}", "{display}.{method.name}")
         }
@@ -41,14 +41,14 @@ fn sema_name_display_item(facts: &NameFacts, module_index: Int, module_alias: St
         .Const(definition) -> sema_name_display_add(&facts, module_index, module_alias, sema_name_scoped(internal_prefix, definition.name), "{display_prefix}.{sema_name_strip_prefix(definition.name, value_prefix)}")
         .Func(function) -> sema_name_display_add(&facts, module_index, module_alias, sema_name_scoped(internal_prefix, function.name), "{display_prefix}.{function.name}")
         .Impl(implementation) -> {
-            internal :: sema_name_scoped(internal_prefix, implementation.type_name)
-            display :: "{display_prefix}.{sema_name_strip_prefix(implementation.type_name, type_prefix)}"
+            internal: sema_name_scoped(internal_prefix, implementation.type_name)
+            display: "{display_prefix}.{sema_name_strip_prefix(implementation.type_name, type_prefix)}"
             sema_name_display_add(&facts, module_index, module_alias, internal, display)
             sema_name_display_methods(&facts, module_index, module_alias, internal, display, implementation.methods)
         }
         .CodeModule(child) -> {
-            internal :: sema_name_scoped(internal_prefix, child.name)
-            display :: "{display_prefix}.{sema_name_strip_prefix(child.name, value_prefix)}"
+            internal: sema_name_scoped(internal_prefix, child.name)
+            display: "{display_prefix}.{sema_name_strip_prefix(child.name, value_prefix)}"
             sema_name_display_add(&facts, module_index, module_alias, internal, display)
             if child.body == .Val(body) {
                 loop nested in body -> sema_name_display_item(&facts, module_index, module_alias, child.name, internal, display, nested)
@@ -57,7 +57,7 @@ fn sema_name_display_item(facts: &NameFacts, module_index: Int, module_alias: St
         else -> {}
     }
 }
-fn sema_name_display_selected(item: Item, type_prefix: String, value_prefix: String?) -> Bool Never! {
+sema_name_display_selected: fn(item: Item, type_prefix: String, value_prefix: String?) -> Bool Never! {
     if item == {
         .Struct(definition) -> definition.name.starts_with(type_prefix)
         .Enum(definition) -> definition.name.starts_with(type_prefix)
@@ -69,9 +69,9 @@ fn sema_name_display_selected(item: Item, type_prefix: String, value_prefix: Str
         else -> false
     }
 }
-fn sema_name_plain_display_paths(facts: &NameFacts, module_index: Int, module_alias: String, instance: CodeModule, source_path: String, display_path: String, items: [Item]) Never! {
-    scope :: sema_inline_type_alias(source_path)
-    type_prefix :: sema_inline_type_prefix(scope)
+sema_name_plain_display_paths: fn(facts: &NameFacts, module_index: Int, module_alias: String, instance: CodeModule, source_path: String, display_path: String, items: [Item]) Never! {
+    scope: sema_inline_type_alias(source_path)
+    type_prefix: sema_inline_type_prefix(scope)
     loop item in items {
         if sema_name_display_selected(item, type_prefix, None) -> sema_name_display_item(&facts, module_index, module_alias, scope, "", display_path, item)
     }
@@ -81,7 +81,7 @@ fn sema_name_plain_display_paths(facts: &NameFacts, module_index: Int, module_al
         }
     }
 }
-fn sema_name_add_display_paths(facts: &NameFacts, module_index: Int, module_alias: String, items: [Item]) Never! {
+sema_name_add_display_paths: fn(facts: &NameFacts, module_index: Int, module_alias: String, items: [Item]) Never! {
     loop item in items {
         if item == .CodeModule(instance) {
             if instance.instance_identity != None {
@@ -89,8 +89,8 @@ fn sema_name_add_display_paths(facts: &NameFacts, module_index: Int, module_alia
                 if instance.body == .Val(body) {
                     loop nested in body -> sema_name_display_item(&facts, module_index, module_alias, instance.name, instance.name, instance.name, nested)
                 }
-                type_prefix :: sema_inline_type_prefix(instance.name)
-                value_prefix :: sema_genmod_value_name(instance.name, "")
+                type_prefix: sema_inline_type_prefix(instance.name)
+                value_prefix: sema_genmod_value_name(instance.name, "")
                 loop lifted in items {
                     if sema_name_display_selected(lifted, type_prefix, Val(value_prefix)) -> sema_name_display_item(&facts, module_index, module_alias, instance.name, "", instance.name, lifted)
                 }

@@ -2,67 +2,67 @@
 // the box drops when the function returns, so the returned value must be
 // read before that drop. The checked heap poisons a freed block, so a read
 // after the drop would print `true` for every field.
-struct Facts {
+Facts: struct {
     copyable: Bool
     cloneable: Bool
     resource: Bool
     complete: Bool
 }
 
-fn known(copyable: Bool, resource: Bool) -> Facts {
+known: fn(copyable: Bool, resource: Bool) -> Facts {
     Facts{copyable: copyable, cloneable: !resource, resource: resource, complete: true}
 }
 
-fn param_facts(name: String, params: [String]) -> Facts? {
+param_facts: fn(name: String, params: [String]) -> Facts? {
     loop param in params {
         if param == name -> return Val(known(false, false))
     }
     None
 }
 
-fn checked_facts(name: String, params: [String]) -> Facts Err! {
+checked_facts: fn(name: String, params: [String]) -> Facts Err! {
     loop param in params {
         if param == name -> return Ok(known(false, false))
     }
     Err("no {name}")
 }
 
-fn show(label: String, f: Facts) {
+show: fn(label: String, f: Facts) {
     print("{label}: {f.copyable} {f.cloneable} {f.resource} {f.complete}")
 }
 
-fn arrow_return(params: [String]) -> Facts {
+arrow_return: fn(params: [String]) -> Facts {
     if param_facts("T", params) == .Val(facts) -> return facts
     known(true, true)
 }
 
-fn block_return(params: [String]) -> Facts {
+block_return: fn(params: [String]) -> Facts {
     if param_facts("T", params) == .Val(facts) {
         return facts
     }
     known(true, true)
 }
 
-fn bound_first(params: [String]) -> Facts {
-    found :: param_facts("T", params)
+bound_first: fn(params: [String]) -> Facts {
+    found: param_facts("T", params)
     if found == .Val(facts) -> return facts
     known(true, true)
 }
 
-fn result_payload(params: [String]) -> Facts {
+result_payload: fn(params: [String]) -> Facts {
     if checked_facts("T", params) == .Ok(facts) -> return facts
     known(true, true)
 }
 
-fn matched(params: [String]) -> Facts {
+matched: fn(params: [String]) -> Facts {
     if param_facts("T", params) == {
         .Val(facts) -> facts
         None -> known(true, true)
     }
 }
 
-fn run() {
-    params :: [String]{"T"}
+run: fn() {
+    params: [String]{"T"}
     show("arrow", arrow_return(params))
     show("block", block_return(params))
     show("bound", bound_first(params))

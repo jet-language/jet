@@ -1,17 +1,17 @@
 
 use {
-    encoding :: core.encoding
-    xml :: core.encoding.xml
-    files :: core.files
+    encoding: core.encoding
+    xml: core.encoding.xml
+    files: core.files
 }
 
-fn run() {
+run: fn() {
     // EncodingLimits fail first even when XMLLimits are also illegal.
     enc_bad := encoding.EncodingLimits.safe()
     enc_bad.buffer_bytes = 1
     xml_bad := xml.XMLParseOptions.safe()
     xml_bad.limits.max_depth = 0
-    input1 :: files.open("probe.xml") ?? panic("open1")
+    input1: files.open("probe.xml") ?? panic("open1")
     if xml.reader(^input1, enc_bad, xml_bad) == {
         .Ok(_) -> { print("accepted") }
         .Err(error) -> {
@@ -30,7 +30,7 @@ fn run() {
     xml_depth := xml.XMLParseOptions.safe()
     xml_depth.limits.max_depth = 0
     xml_depth.limits.max_nodes = 0
-    input2 :: files.open("probe.xml") ?? panic("open2")
+    input2: files.open("probe.xml") ?? panic("open2")
     if xml.reader(^input2, enc_ok, xml_depth) == {
         .Ok(_) -> { print("accepted") }
         .Err(error) -> {
@@ -49,7 +49,7 @@ fn run() {
     xml_cross := xml.XMLParseOptions.safe()
     xml_cross.limits.max_depth = 2
     xml_cross.limits.max_entity_depth = 3
-    input3 :: files.open("probe.xml") ?? panic("open3")
+    input3: files.open("probe.xml") ?? panic("open3")
     if xml.reader(^input3, enc_ok2, xml_cross) == {
         .Ok(_) -> { print("accepted") }
         .Err(error) -> {
@@ -70,10 +70,10 @@ fn run() {
     xml_loose := xml.XMLParseOptions.safe()
     xml_loose.limits.max_depth = 8
     xml_loose.limits.max_entity_depth = 8
-    input4 :: files.open("probe.xml") ?? panic("open4")
-    reader :: xml.reader(^input4, enc_tight, xml_loose) ?? panic("fused reader")
+    input4: files.open("probe.xml") ?? panic("open4")
+    reader: xml.reader(^input4, enc_tight, xml_loose) ?? panic("fused reader")
     loop true {
-        result :: reader.next()
+        result: reader.next()
         if result == {
             .Ok(maybe) -> {
                 if maybe == {
@@ -97,10 +97,10 @@ fn run() {
     xml_tight := xml.XMLParseOptions.safe()
     xml_tight.limits.max_depth = 1
     xml_tight.limits.max_entity_depth = 1
-    deep_input :: files.open("probe.xml") ?? panic("open deep")
-    deep_reader :: xml.reader(^deep_input, enc_loose, xml_tight) ?? panic("xml-tight reader")
+    deep_input: files.open("probe.xml") ?? panic("open deep")
+    deep_reader: xml.reader(^deep_input, enc_loose, xml_tight) ?? panic("xml-tight reader")
     loop true {
-        result :: deep_reader.next()
+        result: deep_reader.next()
         if result == {
             .Ok(maybe) -> {
                 if maybe == {

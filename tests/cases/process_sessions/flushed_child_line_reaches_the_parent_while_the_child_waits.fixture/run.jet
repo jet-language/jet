@@ -1,9 +1,9 @@
 use {
-    fs :: core.files
-    process :: core.process
-    sys :: core.sys
-    term :: core.term
-    time :: core.time
+    fs: core.files
+    process: core.process
+    sys: core.sys
+    term: core.term
+    time: core.time
 }
 
 // The child prints `ready` into its stdout pipe, flushes, and waits until the
@@ -11,7 +11,7 @@ use {
 // buffer fills, at a flush or when the process stops (D-STDOUT-BUFFER1), so
 // the explicit flush is what lets the parent read the line while the child
 // still runs; without it both sides wait out the child's bound.
-fn child(go: Path) {
+child: fn(go: Path) {
     print("ready")
     out := term.stdout()
     &out.flush() ?? panic("child flush")
@@ -27,15 +27,15 @@ fn child(go: Path) {
     print("child saw the answer")
 }
 
-fn run() {
-    args :: process.args()
+run: fn() {
+    args: process.args()
     if args.len() > 1 && (args.get(0) ?? "") == "--child" {
         child(Path.from(args.get(1) ?? panic("missing answer path")))
         return
     }
-    scratch :: fs.temp_dir("jet-flushed-child") ?? panic("temp dir")
-    go :: Path.from(scratch.path).join("go")
-    worker :: process.cmd([sys.executable(), "--child", go.to_string()])
+    scratch: fs.temp_dir("jet-flushed-child") ?? panic("temp dir")
+    go: Path.from(scratch.path).join("go")
+    worker: process.cmd([sys.executable(), "--child", go.to_string()])
         .stdout(.Stream)
         .spawn() ?? panic("spawn child")
     answered := false
@@ -46,5 +46,5 @@ fn run() {
             answered = true
         }
     }
-    _ :: worker.wait() ?? panic("wait child")
+    _: worker.wait() ?? panic("wait child")
 }

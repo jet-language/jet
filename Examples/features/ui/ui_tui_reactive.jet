@@ -1,4 +1,4 @@
-package {
+package: {
     name: "ui_ui_tui_reactive"
     version: "0.1.0"
     authority: { allow: [Browser, Exec, IO, Mem.Alloc] }
@@ -7,16 +7,16 @@ package {
 // D-RENDERTGT1=A + D-RENDERTGT2=A (c133 M2): TUI backend + reactive render loop.
 // D-UI-MOUNT1=A: one-call mount over measure/layout/paint.
 use {
-    ui :: core.ui
-    reactive :: core.reactive
+    ui: core.ui
+    reactive: core.reactive
 }
 
-fn run() {
-    backend :: ui.tui_backend()
-    label :: reactive.signal("hi")
+run: fn() {
+    backend: ui.tui_backend()
+    label: reactive.signal("hi")
     ui.reactive_render(
     () -> {
-        node :: ui.node(label.get(), 2.0, 1.0)
+        node: ui.node(label.get(), 2.0, 1.0)
         ui.mount(backend, node)
     },
     )

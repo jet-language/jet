@@ -13,13 +13,13 @@ Each value marks one declaration:
 
 ```jet
 #Meta(maturity: .Experimental)
-fn experimental_label() -> String { "exp" }
+experimental_label: fn() -> String { "exp" }
 
 #Meta(maturity: .Tested)
-fn tested_label() -> String { "tested" }
+tested_label: fn() -> String { "tested" }
 
 #Meta(maturity: .Hardened)
-fn hardened_label() -> String { "hard" }
+hardened_label: fn() -> String { "hard" }
 ```
 
 Attach the same metadata to public API declarations. Fallible declarations

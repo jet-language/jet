@@ -5,14 +5,14 @@
 // Cross-job dependency = a plain call (`seed_data` calls `greet` below).
 // I5 golden runs both job paths (see Examples/features/expected/devloop/job_runner.case).
 #[Job(.Ship), Doc("Say hello from a shipped project job")]
-fn greet() { print("hello from job") }
+greet: fn() { print("hello from job") }
 
 #[Job(.Dev), Doc("Seed local data"), Every(5min)]
-fn seed_data() {
+seed_data: fn() {
     greet()
     print("seeded")
 }
 
-#Job(.Internal) fn inspect_job() { print("internal job") }
+#Job(.Internal) inspect_job: fn() { print("internal job") }
 
-fn run() { print("use jet run <this-file> -- greet") }
+run: fn() { print("use jet run <this-file> -- greet") }

@@ -1,49 +1,49 @@
 // D-CONF-GENSPELL1=A: generic module templates and aliases.
 //
 // A generic module is a module template parameterised by types and values.
-// `module cache<K>(capacity: Int)` defines the template; `module int_cache :: cache<Int>(32)`
+// `cache: module<K>(capacity: Int)` defines the template; `int_cache: cache<Int>(32)`
 // instantiates it, producing a concrete module with all type params resolved.
-module cache<K>(capacity: Int) {
-    BASE :: comptime { capacity }
+cache: module<K>(capacity: Int) {
+    BASE: comptime { capacity }
 
-    COMPUTED_SIZE :: comptime { BASE + 1 }
+    COMPUTED_SIZE: comptime { BASE + 1 }
 
-    struct Entry {
+    Entry: struct {
         key: K
         limit: Int -> capacity
     }
 
-    enum Slot {
+    Slot: enum {
         Empty
         Value(K)
     }
 
-    fn entry(k: K) -> Entry { return Entry{key: k} }
+    entry: fn(k: K) -> Entry { return Entry{key: k} }
 
-    fn slot(k: K) -> Slot { Slot.Value(k) }
+    slot: fn(k: K) -> Slot { Slot.Value(k) }
 
-    fn key_of(k: K) -> String { return "key" }
+    key_of: fn(k: K) -> String { return "key" }
 
-    fn describe() -> String { "generic cache" }
+    describe: fn() -> String { "generic cache" }
 
-    fn size() -> Int { COMPUTED_SIZE }
+    size: fn() -> Int { COMPUTED_SIZE }
 }
 
 // Forward alias chain: declaration order does not affect resolution.
-module forward_cache :: int_cache
+forward_cache: int_cache
 
-module int_cache :: cache<Int>(32)
+int_cache: cache<Int>(32)
 
-enum Mode {
+Mode: enum {
     Fast
     Safe
 }
 
-module tier_zero(flag: Bool, count: Int, letter: Char, label: String, mode: Mode) {
+tier_zero: module(flag: Bool, count: Int, letter: Char, label: String, mode: Mode) {
     // A marker argument is fixed metadata; module value parameters reach the
     // body, not the marker.
     #Meta(category: "tier zero")
-    fn show() {
+    show: fn() {
         print(flag)
         print(count)
         print(letter)
@@ -52,12 +52,12 @@ module tier_zero(flag: Bool, count: Int, letter: Char, label: String, mode: Mode
     }
 }
 
-module values :: tier_zero(true, 7, 'J', "jet", Mode.Fast)
+values: tier_zero(true, 7, 'J', "jet", Mode.Fast)
 
-trait Token {
+Token: trait {
 }
 
-struct GoodToken {
+GoodToken: struct {
 
 }
 
@@ -67,63 +67,63 @@ impl GoodToken.Token {
 
 // The annotation decides the kind: `Item` is a type slot because `Token` is a
 // trait, while `count` is an `Int` value slot. Their spelling follows that kind.
-module annotation_kinds<Item: Token>(count: Int) {
-    fn count() -> Int { count }
+annotation_kinds: module<Item: Token>(count: Int) {
+    count: fn() -> Int { count }
 }
 
-module kinds :: annotation_kinds<GoodToken>(8)
+kinds: annotation_kinds<GoodToken>(8)
 
-module fixed_buffer<T>(capacity: Int) {
-    struct Buffer {
+fixed_buffer: module<T>(capacity: Int) {
+    Buffer: struct {
         items: [T#capacity]
     }
 
-    fn echo(values: [T#capacity]) -> [T#capacity] { return values.copy() }
+    echo: fn(values: [T#capacity]) -> [T#capacity] { return values.copy() }
 }
 
-module three_ints :: fixed_buffer<Int>(3)
+three_ints: fixed_buffer<Int>(3)
 
-module local_laws<T> {
-    trait Reveal {
-        type Output
-        fn reveal(self) -> T
+local_laws: module<T> {
+    Reveal: trait {
+        Output: type
+        reveal: fn(self) -> T
     }
 
-    struct Wrapped {
+    Wrapped: struct {
         value: T
     }
 
     impl Wrapped.Reveal {
-        type Output = T
+        Output: T
 
-        fn reveal(self) -> T { self.value }
+        reveal: fn(self) -> T { self.value }
     }
 
-    enum SourceErr {
+    SourceErr: enum {
         Bad(T)
     }
 
-    enum TargetErr {
+    TargetErr: enum {
         Wrapped(SourceErr)
     }
 
     impl SourceErr -> TargetErr { return TargetErr.Wrapped(self) }
 }
 
-module int_laws :: local_laws<Int>
+int_laws: local_laws<Int>
 
-fn run() {
-    k :: int_cache.key_of(42)
-    d :: int_cache.describe()
-    n :: int_cache.size()
-    e :: int_cache.entry(42)
-    s :: int_cache.slot(7)
+run: fn() {
+    k: int_cache.key_of(42)
+    d: int_cache.describe()
+    n: int_cache.size()
+    e: int_cache.entry(42)
+    s: int_cache.slot(7)
     print(k)
     print(d)
     print(n)
     print(e.key)
     print(e.limit)
-    forwarded :: forward_cache.entry(9)
+    forwarded: forward_cache.entry(9)
     print(forward_cache.size())
     print(forwarded.key)
     if s == {
@@ -133,10 +133,10 @@ fn run() {
 
     values.show()
     print(kinds.count())
-    input :: [Int#3]{1, 2, 3}
-    fixed :: three_ints.echo(input)
-    buffer :: three_ints.Buffer{items: fixed}
+    input: [Int#3]{1, 2, 3}
+    fixed: three_ints.echo(input)
+    buffer: three_ints.Buffer{items: fixed}
     print(buffer.items[2])
-    wrapped :: int_laws.Wrapped{value: 91}
+    wrapped: int_laws.Wrapped{value: 91}
     print(wrapped.reveal())
 }

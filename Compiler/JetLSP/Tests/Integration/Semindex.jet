@@ -5,17 +5,17 @@ use {
 }
 // GATE #4494: native filesystem and process identity.
 
-fn fixture(name: String) -> OSPath { OSPath.from(env.manifest_dir()).join("Examples/features").join(name) }
+fixture: fn(name: String) -> OSPath { OSPath.from(env.manifest_dir()).join("Examples/features").join(name) }
 
-fn temp_fixture(name: String, src: String) -> OSPath {
-    dir :: env.temp_dir().join("jet_semindex_{process.id()}")
+temp_fixture: fn(name: String, src: String) -> OSPath {
+    dir: env.temp_dir().join("jet_semindex_{process.id()}")
     fs.create_dir_all(dir).expect("semindex temp dir")
-    path :: dir.join(name)
+    path: dir.join(name)
     fs.write(path, src).expect("write semindex fixture")
     ^path
 }
 
-fn fact(identity: String, name: String, qualified_name: String, kind: SemanticSymbolKind, provenance: SemanticProvenance) -> SemanticSymbol {
+fact: fn(identity: String, name: String, qualified_name: String, kind: SemanticSymbolKind, provenance: SemanticProvenance) -> SemanticSymbol {
     SemanticSymbol {
         identity: identity.clone(), name: name.clone(), qualified_name: qualified_name.clone(),
         owner: qualified_name.split_once('.').map((owner, _) -> owner.to_string()),

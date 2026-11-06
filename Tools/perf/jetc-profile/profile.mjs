@@ -55,7 +55,7 @@ function sourceIndex(mapFile, repo) {
     const mapped = createHash('sha256').update(bytes).digest('hex') === file.sha256;
     const lines = bytes.toString('utf8').split('\n');
     for (let line = 0; line < lines.length; line++) {
-      const declaration = /^\s*(?:pub\s+)?(?:fn|struct|enum|trait|type|const)\s+([$\p{L}_][\p{L}\p{N}_$]*)/u.exec(lines[line]);
+      const declaration = /^\s*(?:pub\s+)?([$\p{L}_][\p{L}\p{N}_$]*):\s*(?:fn|struct|enum|trait)\b/u.exec(lines[line]);
       if (!declaration) continue;
       const location = `${file.path}:${line + 1}`;
       const entries = index.get(declaration[1]) ?? [];

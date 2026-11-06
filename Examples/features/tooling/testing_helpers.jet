@@ -1,33 +1,33 @@
-package {
+package: {
     name: "tooling_testing_helpers"
     version: "0.1.0"
     authority: { allow: [Env, FS, IO, Mem.Alloc, Time] }
 }
 
 use {
-    testing :: core.testing
-    fs :: core.files
+    testing: core.testing
+    fs: core.files
 }
 
-module perf.testing {
+perf.testing: module {
     budgets: [Budget{name: "parse", scope: .Test("parse"), metric: .BenchTime(.P50), provider: .BenchMeasurement("parse"), comparison: .AbsoluteFrom("local/testing-helpers"), limit: .AtMost(5ms), enforcement: .Warn}]
 }
 
-fn run() {
-    temp :: testing.temp_dir("demo")
+run: fn() {
+    temp: testing.temp_dir("demo")
     print(temp.len() > 0)
     print(testing.snap("demo-output", "hello"))
-    clock :: testing.fake_clock(42)
+    clock: testing.fake_clock(42)
     rng := testing.fake_rng(7)
     print(clock.now())
-    roll :: &rng.int(1, 3)
+    roll: &rng.int(1, 3)
     print(roll >= 1)
 }
 
 // D-TESTFAULT1=A: the test runner fails each reachable FS.Write site once;
 // ordinary fallible returns make every injected iteration graceful.
-#Test(faults: [FS.Write]) fn sqlite_style_fail_nth_effect_loop_is_deterministic() {
-    path :: testing.temp_dir("sqlite-fault")
+#Test(faults: [FS.Write]) sqlite_style_fail_nth_effect_loop_is_deterministic: fn() {
+    path: testing.temp_dir("sqlite-fault")
     fs.write(path, "journal") ?? return
     values := List.try_with_capacity(1) ?? return
     &values.try_push(1) ?? return

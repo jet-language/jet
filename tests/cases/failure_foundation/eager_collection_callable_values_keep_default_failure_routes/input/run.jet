@@ -1,39 +1,39 @@
 
-fn key(value: Int) -> Int {
+key: fn(value: Int) -> Int {
     if value == 0 -> return Err("zero")
     value
 }
 
-fn positive(value: Int) -> Bool {
+positive: fn(value: Int) -> Bool {
     if value == 0 -> return Err("zero")
     value > 0
 }
 
-fn mapped(values: [Int], callback: fn(Int) -> Int) -> [Int] {
+mapped: fn(values: [Int], callback: fn(Int) -> Int) -> [Int] {
     values.map(callback)
 }
 
-fn filtered(values: [Int], callback: fn(Int) -> Bool) -> [Int] {
+filtered: fn(values: [Int], callback: fn(Int) -> Bool) -> [Int] {
     values.filter(callback)
 }
 
-fn nested(values: [[Int]], callback: fn(Int) -> Int) -> [[Int]] {
+nested: fn(values: [[Int]], callback: fn(Int) -> Int) -> [[Int]] {
     values.map(items -> items.map(callback))
 }
 
-fn ascending(values: [Int], callback: fn(Int) -> Int) -> [Int] {
+ascending: fn(values: [Int], callback: fn(Int) -> Int) -> [Int] {
     items := values
     &items.sort_by(callback)
     items
 }
 
-fn descending(values: [Int], callback: fn(Int) -> Int) -> [Int] {
+descending: fn(values: [Int], callback: fn(Int) -> Int) -> [Int] {
     items := values
     &items.sort_by_desc(callback)
     items
 }
 
-fn run() {
+run: fn() {
     print((mapped([1, 2], key) ?? [-1]).len())
     print((mapped([1, 0, 2], key) ?? [-1]).len())
     print((filtered([-1, 2], positive) ?? [-1, -2]).len())

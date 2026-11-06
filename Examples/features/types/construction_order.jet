@@ -3,43 +3,43 @@
 // its fields. Omitted fields then take their declared defaults, in
 // declaration order. Moves follow the same order, so a field written first
 // may read a value that a later field consumes.
-fn mark(label: String, n: Int) -> Int {
+mark: fn(label: String, n: Int) -> Int {
     print(label)
     n
 }
 
 #!Codable
-struct Row {
+Row: struct {
     z: Int{mark("default z", 7)}
     a: Int
     x: Int{mark("default x", 9)}
 }
 
-struct Pair {
+Pair: struct {
     first: Int
     second: Int
 }
 
-enum Event {
+Event: enum {
     Named(z: Int, a: Int, k: Int)
 }
 
-fn consume_owned(^s: String) -> Int Never! {
+consume_owned: fn(^s: String) -> Int Never! {
     s.len()
 }
 
 // `second` reads `s` before `first` takes it.
-fn build(^s: String) -> Pair Never! {
+build: fn(^s: String) -> Pair Never! {
     Pair{second: s.len(), first: consume_owned(^s)}
 }
 
-fn run() {
-    row :: Row{a: mark("a", 2), z: mark("z", 1)}
+run: fn() {
+    row: Row{a: mark("a", 2), z: mark("z", 1)}
     print("{row.z},{row.a},{row.x}")
-    defaulted :: Row{a: mark("only a", 4)}
+    defaulted: Row{a: mark("only a", 4)}
     print("{defaulted.z},{defaulted.a},{defaulted.x}")
-    pair :: build("abc")
+    pair: build("abc")
     print("{pair.first},{pair.second}")
-    event :: Event.Named{a: mark("a", 2), k: mark("k", 3), z: mark("z", 1)}
+    event: Event.Named{a: mark("a", 2), k: mark("k", 3), z: mark("z", 1)}
     if event == .Named{z: z, a: a, k: k} -> print("{z},{a},{k}")
 }

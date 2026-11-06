@@ -1,8 +1,8 @@
 Error [jet.StringViewOutlivesOwner]: `label` cannot be used directly here without an owning copy
-  --> tests/ui/copies_explicit_view_field.jet:12:24
+  --> tests/ui/copies_explicit_view_field.jet:12:22
     |
- 12 |     user :: User{name: label}
-    |                        ^^^^^
+ 12 |     user: User{name: label}
+    |                      ^^^^^
  Why: `label` is a zero-copy view into `text` (`.trim()`/`.after()`/`.before()`); this destination needs an owned `String`, and `copies: .Explicit` keeps the implicit materialization disabled
  Fix: Write `label.copy()` first, or remove `copies: .Explicit` to use the default owning copy
 More: jet-lang.dev/e/E2307

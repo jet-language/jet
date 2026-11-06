@@ -1,9 +1,9 @@
-#Export(c) fn jet_rt_handle_clone_env_error(value: I64) -> I64 { encoding_enum_clone(value) }
-#Export(c) fn jet_rt_handle_drop_env_error(value: I64) { encoding_enum_drop(value) }
-#Export(c) fn jet_rt_handle_eq_env_error(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }
-#Export(c) fn jet_rt_handle_show_env_error(value: I64) -> I64 {
-    kind :: encoding_word(wrapping(value + ENCODING_ENUM_TAG))
-    result :: jet_rt_string_builder_new()
+#Export(c) jet_rt_handle_clone_env_error: fn(value: I64) -> I64 { encoding_enum_clone(value) }
+#Export(c) jet_rt_handle_drop_env_error: fn(value: I64) { encoding_enum_drop(value) }
+#Export(c) jet_rt_handle_eq_env_error: fn(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }
+#Export(c) jet_rt_handle_show_env_error: fn(value: I64) -> I64 {
+    kind: encoding_word(wrapping(value + ENCODING_ENUM_TAG))
+    result: jet_rt_string_builder_new()
     if (kind == I64{0} || kind == I64{1}) {
         jet_rt_string_builder_push(result, rt_static_text("invalid environment vari"))
         if (kind == I64{0}) {
@@ -18,5 +18,5 @@
     }
     result
 }
-#Export(c) fn jet_rt_handle_debug_env_error(value: I64) -> I64 { jet_rt_handle_show_env_error(value) }
-#Export(c) fn jet_rt_handle_display_env_error(value: I64) -> I64 { jet_rt_handle_show_env_error(value) }
+#Export(c) jet_rt_handle_debug_env_error: fn(value: I64) -> I64 { jet_rt_handle_show_env_error(value) }
+#Export(c) jet_rt_handle_display_env_error: fn(value: I64) -> I64 { jet_rt_handle_show_env_error(value) }

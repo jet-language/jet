@@ -20,9 +20,9 @@ use {
 // stale/invalid lock and nearest workspace boundaries retain their own branches.
 // attach_package_facts is semindex_attach_package_facts in Open.jet.
 
-fn semindex_open(entry: OSPath) -[FS, Env]> SemIndex SemIndexError! {
-    entry_str :: entry.to_string_lossy()
-    (diags, bundle, facts) :: check_file_with_effect_facts(entry_str, None, false)
+semindex_open: fn(entry: OSPath) -[FS, Env]> SemIndex SemIndexError! {
+    entry_str: entry.to_string_lossy()
+    (diags, bundle, facts): check_file_with_effect_facts(entry_str, None, false)
     if !semindex_open_has_errors(diags) {
         if bundle == .Val(checked_bundle) {
             index := build_index(checked_bundle, facts)
@@ -34,9 +34,9 @@ fn semindex_open(entry: OSPath) -[FS, Env]> SemIndex SemIndexError! {
     Err(SemIndexError.Load{diagnostics: ^diags})
 }
 
-fn semindex_open_symbols(entry: OSPath) -[FS, Env]> SemanticSymbolIndex SemIndexError! {
-    entry_str :: entry.to_string_lossy()
-    (diags, bundle, facts) :: check_file_with_effect_facts(entry_str, None, false)
+semindex_open_symbols: fn(entry: OSPath) -[FS, Env]> SemanticSymbolIndex SemIndexError! {
+    entry_str: entry.to_string_lossy()
+    (diags, bundle, facts): check_file_with_effect_facts(entry_str, None, false)
     if !semindex_open_has_errors(diags) {
         if bundle == .Val(checked_bundle) {
             return Ok(build_symbol_db(checked_bundle, facts).symbols)
@@ -45,9 +45,9 @@ fn semindex_open_symbols(entry: OSPath) -[FS, Env]> SemanticSymbolIndex SemIndex
     Err(SemIndexError.Load{diagnostics: ^diags})
 }
 
-fn semindex_open_with_overlays(entry: OSPath, overlays: [(OSPath, String)]) -[FS, Env]> SemIndex SemIndexError! {
-    entry_str :: entry.to_string_lossy()
-    (diags, bundle, facts) :: check_file_with_overlays(entry_str, overlays, false)
+semindex_open_with_overlays: fn(entry: OSPath, overlays: [(OSPath, String)]) -[FS, Env]> SemIndex SemIndexError! {
+    entry_str: entry.to_string_lossy()
+    (diags, bundle, facts): check_file_with_overlays(entry_str, overlays, false)
     if !semindex_open_has_errors(diags) {
         if bundle == .Val(checked_bundle) {
             index := build_index(checked_bundle, facts)
@@ -59,9 +59,9 @@ fn semindex_open_with_overlays(entry: OSPath, overlays: [(OSPath, String)]) -[FS
     Err(SemIndexError.Load{diagnostics: ^diags})
 }
 
-fn semindex_open_structural_with_overlays(entry: OSPath, overlays: [(OSPath, String)]) -[FS, Env]> SemIndex SemIndexError! {
-    entry_str :: entry.to_string_lossy()
-    (diags, bundle, facts) :: check_file_with_overlays_and_import_root(entry_str, overlays)
+semindex_open_structural_with_overlays: fn(entry: OSPath, overlays: [(OSPath, String)]) -[FS, Env]> SemIndex SemIndexError! {
+    entry_str: entry.to_string_lossy()
+    (diags, bundle, facts): check_file_with_overlays_and_import_root(entry_str, overlays)
     if !semindex_open_has_errors(diags) {
         if bundle == .Val(checked_bundle) {
             index := build_index(checked_bundle, facts)
@@ -73,19 +73,19 @@ fn semindex_open_structural_with_overlays(entry: OSPath, overlays: [(OSPath, Str
     Err(SemIndexError.Load{diagnostics: ^diags})
 }
 
-fn semindex_open_with_overlays_and_diagnostics(entry: OSPath, overlays: [(OSPath, String)]) -[FS, Env]> (SemIndex, [Diagnostic]) SemIndexError! {
-    (index, diagnostics, _) :: semindex_open_with_overlays_diagnostics_and_inputs(entry, overlays)
+semindex_open_with_overlays_and_diagnostics: fn(entry: OSPath, overlays: [(OSPath, String)]) -[FS, Env]> (SemIndex, [Diagnostic]) SemIndexError! {
+    (index, diagnostics, _): semindex_open_with_overlays_diagnostics_and_inputs(entry, overlays)
     Ok((^index, ^diagnostics))
 }
 
-fn semindex_open_with_overlays_diagnostics_and_inputs(entry: OSPath, overlays: [(OSPath, String)]) -[FS, Env]> (SemIndex, [Diagnostic], [OSPath]) SemIndexError! {
-    entry_str :: entry.to_string_lossy()
-    (diags, bundle, facts) :: check_file_with_overlays(entry_str, overlays, false)
+semindex_open_with_overlays_diagnostics_and_inputs: fn(entry: OSPath, overlays: [(OSPath, String)]) -[FS, Env]> (SemIndex, [Diagnostic], [OSPath]) SemIndexError! {
+    entry_str: entry.to_string_lossy()
+    (diags, bundle, facts): check_file_with_overlays(entry_str, overlays, false)
     if bundle == {
         .Val(checked_bundle) -> {
             // Preserve physical loader membership and order, including modules
             // with no definitions. Expected diagnostics do not reject a bundle.
-            inputs :: loop module_ref in checked_bundle.modules -> module_ref.path.copy()
+            inputs: loop module_ref in checked_bundle.modules -> module_ref.path.copy()
             index := build_index(checked_bundle, facts)
             cache := WorkspaceDeclarationCache.new()
             semindex_attach_package_facts(&index, &cache, entry_str)

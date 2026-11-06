@@ -22,7 +22,7 @@
 use jet_foundation.[AutoVectorizationFacts, BodyIfCond, BodyPlace, BodyTree, NodeKind, StmtKind, Type, body_node, body_stmt, body_type, measure_literal_value]
 
 // What a scan of one loop body has read so far.
-struct SemaLoopScan {
+SemaLoopScan: struct {
     local: String
     extent: Int
     readable: Bool
@@ -39,18 +39,18 @@ struct SemaLoopScan {
 
 // Records the facts of every counted loop of `tree` that sema can prove
 // (none in a `#Scalar` function).
-fn sema_loop_facts(tree: &BodyTree, scalar: Bool) Never! {
+sema_loop_facts: fn(tree: &BodyTree, scalar: Bool) Never! {
     if scalar -> return
     loop index in 0..<tree.stmts.len() {
         if tree.stmts[index] == {
             .ForRange(label, local, start, end, step, exclusive, body, vectorization, span) -> {
                 if vectorization != None -> next
-                facts :: sema_loop_range_facts(tree, local.name, start, end, step, exclusive, body) ?? next
+                facts: sema_loop_range_facts(tree, local.name, start, end, step, exclusive, body) ?? next
                 tree.stmts[index] = StmtKind.ForRange{label: label, local: local, start: start, end: end, step: step, exclusive: exclusive, body: body, vectorization: Val(facts), span: span}
             }
             .Range(label, variable, source, start, end, step, exclusive, vectorization, body, span) -> {
                 if vectorization != None || source != None -> next
-                facts :: sema_loop_range_facts(tree, variable.name, start, end, step, exclusive, body) ?? next
+                facts: sema_loop_range_facts(tree, variable.name, start, end, step, exclusive, body) ?? next
                 tree.stmts[index] = StmtKind.Range{label: label, variable: variable, source: source, start: start, end: end, step: step, exclusive: exclusive, vectorization: Val(facts), body: body, span: span}
             }
             else -> {}
@@ -60,32 +60,32 @@ fn sema_loop_facts(tree: &BodyTree, scalar: Bool) Never! {
 
 // The facts of one counted loop over `local`, or None when its range or body
 // is outside what this pass reads.
-fn sema_loop_range_facts(tree: BodyTree, local: String, start: Int, end: Int, step: Int?, exclusive: Bool, body: [Int]) -> AutoVectorizationFacts? Never! {
+sema_loop_range_facts: fn(tree: BodyTree, local: String, start: Int, end: Int, step: Int?, exclusive: Bool, body: [Int]) -> AutoVectorizationFacts? Never! {
     if step != None -> return None
-    low :: sema_loop_int_literal(tree, start) ?? return None
-    high :: sema_loop_int_literal(tree, end) ?? return None
+    low: sema_loop_int_literal(tree, start) ?? return None
+    high: sema_loop_int_literal(tree, end) ?? return None
     if low < 0 || high >= SEMA_LOOP_EXTENT_LIMIT -> return None
-    extent :: if exclusive -> high else -> high + 1
+    extent: if exclusive -> high else -> high + 1
     scan := SemaLoopScan{local: local, extent: extent, readable: true, early_exit: false, effect_free: true, independent: true, aliasing_free: true, element: None, proven: [Int]{}, written: [String]{}, read_elsewhere: [String]{}}
     loop row in body -> sema_loop_scan_stmt(tree, row, &scan)
     if !scan.readable -> return None
     loop name in scan.read_elsewhere {
         if scan.written.contains(name) -> scan.independent = false
     }
-    element :: scan.element ?? return None
+    element: scan.element ?? return None
     Val(AutoVectorizationFacts{element_type: element, no_aliasing: scan.aliasing_free, no_early_exit: !scan.early_exit, effect_free_body: scan.effect_free, no_cross_iteration_deps: scan.independent, extent: Val(extent), proven_indexes: scan.proven})
 }
 
 // The range ends this pass reads (an inclusive end of Int.MAX has no extent).
-SEMA_LOOP_EXTENT_LIMIT :: 4611686018427387904
+SEMA_LOOP_EXTENT_LIMIT: 4611686018427387904
 
-fn sema_loop_int_literal(tree: BodyTree, id: Int) -> Int? Never! {
+sema_loop_int_literal: fn(tree: BodyTree, id: Int) -> Int? Never! {
     if body_node(tree, id).kind == .IntLit(value, _) -> return Val(value)
     None
 }
 
-fn sema_loop_scan_stmt(tree: BodyTree, row: Int, scan: &SemaLoopScan) Never! {
-    statement :: body_stmt(tree, row)
+sema_loop_scan_stmt: fn(tree: BodyTree, row: Int, scan: &SemaLoopScan) Never! {
+    statement: body_stmt(tree, row)
     if statement == {
         .Assign(place, op, value, _, _) -> {
             // A compound write of anything but a Float can overflow or divide by zero.
@@ -121,7 +121,7 @@ fn sema_loop_scan_stmt(tree: BodyTree, row: Int, scan: &SemaLoopScan) Never! {
     }
 }
 
-fn sema_loop_scan_condition(tree: BodyTree, condition: BodyIfCond, scan: &SemaLoopScan) Never! {
+sema_loop_scan_condition: fn(tree: BodyTree, condition: BodyIfCond, scan: &SemaLoopScan) Never! {
     if condition == {
         .Plain(value) -> sema_loop_scan_expr(tree, value, &scan)
         .And(left, right) -> {
@@ -134,10 +134,10 @@ fn sema_loop_scan_condition(tree: BodyTree, condition: BodyIfCond, scan: &SemaLo
 
 // A write through place expression `target`: `xs[i]` of a local list keeps
 // the rounds independent; any other place does not.
-fn sema_loop_scan_write(tree: BodyTree, target: Int, scan: &SemaLoopScan) Never! {
+sema_loop_scan_write: fn(tree: BodyTree, target: Int, scan: &SemaLoopScan) Never! {
     if body_node(tree, target).kind == .Index(base, index, _, _, _, _) {
         if scan.element == None -> scan.element = Val(body_type(tree, target))
-        name :: sema_loop_local_name(tree, base) ?? ""
+        name: sema_loop_local_name(tree, base) ?? ""
         if sema_loop_scan_access(tree, base, index, &scan) && name != "" {
             if !scan.written.contains(name) -> &scan.written.push(name)
         } else {
@@ -153,11 +153,11 @@ fn sema_loop_scan_write(tree: BodyTree, target: Int, scan: &SemaLoopScan) Never!
 // One read or write `base[index]`: whether it is at the loop index. An access
 // at the index of a local fixed list the extent covers is proven; any other
 // may stop the round.
-fn sema_loop_scan_access(tree: BodyTree, base: Int, index: Int, scan: &SemaLoopScan) -> Bool Never! {
-    name :: sema_loop_local_name(tree, base) ?? ""
+sema_loop_scan_access: fn(tree: BodyTree, base: Int, index: Int, scan: &SemaLoopScan) -> Bool Never! {
+    name: sema_loop_local_name(tree, base) ?? ""
     if name == "" -> scan.aliasing_free = false
-    at_index :: (sema_loop_local_name(tree, index) ?? "") == scan.local
-    length :: sema_loop_fixed_length(body_type(tree, base)) ?? -1
+    at_index: (sema_loop_local_name(tree, index) ?? "") == scan.local
+    length: sema_loop_fixed_length(body_type(tree, base)) ?? -1
     if at_index && name != "" && length >= scan.extent {
         &scan.proven.push(index)
     } else {
@@ -167,7 +167,7 @@ fn sema_loop_scan_access(tree: BodyTree, base: Int, index: Int, scan: &SemaLoopS
 }
 
 // The length of a fixed list `[T#N]` with a literal N.
-fn sema_loop_fixed_length(ty: Type) -> Int? Never! {
+sema_loop_fixed_length: fn(ty: Type) -> Int? Never! {
     if ty == {
         .Tagged(_, inner) -> return sema_loop_fixed_length(inner)
         .FixedList(_, length) -> return measure_literal_value(length)
@@ -175,19 +175,19 @@ fn sema_loop_fixed_length(ty: Type) -> Int? Never! {
     }
 }
 
-fn sema_loop_local_name(tree: BodyTree, id: Int) -> String? Never! {
+sema_loop_local_name: fn(tree: BodyTree, id: Int) -> String? Never! {
     if body_node(tree, id).kind == .Local(local) -> return Val(local.name)
     None
 }
 
-fn sema_loop_scan_expr(tree: BodyTree, id: Int, scan: &SemaLoopScan) Never! {
-    node :: body_node(tree, id)
+sema_loop_scan_expr: fn(tree: BodyTree, id: Int, scan: &SemaLoopScan) Never! {
+    node: body_node(tree, id)
     if node.kind == {
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Local(_) | .ConstRef(_) | .TraitConst(_, _, _) | .Unit -> {}
         .Binary(_, overflow, _, lhs, rhs) -> {
             // Float arithmetic and comparisons cannot stop; integer
             // arithmetic can overflow or divide by zero.
-            ty :: body_type(tree, id)
+            ty: body_type(tree, id)
             if overflow || (ty != Type.Float && ty != Type.Bool) -> scan.effect_free = false
             sema_loop_scan_expr(tree, lhs, &scan)
             sema_loop_scan_expr(tree, rhs, &scan)
@@ -195,7 +195,7 @@ fn sema_loop_scan_expr(tree: BodyTree, id: Int, scan: &SemaLoopScan) Never! {
         .CompareChain(operands, _, _) -> loop operand in operands -> sema_loop_scan_expr(tree, operand, &scan)
         .Unary(_, operand) -> {
             // An Int negation can overflow; Float and Bool operators cannot stop.
-            ty :: body_type(tree, id)
+            ty: body_type(tree, id)
             if ty != Type.Float && ty != Type.Bool -> scan.effect_free = false
             sema_loop_scan_expr(tree, operand, &scan)
         }
@@ -204,7 +204,7 @@ fn sema_loop_scan_expr(tree: BodyTree, id: Int, scan: &SemaLoopScan) Never! {
         .Index(base, index, _, _, _, _) -> {
             if scan.element == None -> scan.element = Val(body_type(tree, id))
             if !sema_loop_scan_access(tree, base, index, &scan) {
-                name :: sema_loop_local_name(tree, base) ?? ""
+                name: sema_loop_local_name(tree, base) ?? ""
                 if name != "" -> &scan.read_elsewhere.push(name)
             }
             sema_loop_scan_expr(tree, base, &scan)

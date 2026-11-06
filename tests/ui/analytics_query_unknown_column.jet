@@ -1,14 +1,14 @@
-use csv :: core.encoding.csv
+use csv: core.encoding.csv
 
 #Codable
-struct Sale {
+Sale: struct {
     item: String
     qty: Int
 }
 
-fn run() {
-    query :: csv.query<Sale>("sales.csv", SQL{"SELECT * FROM sales WHERE quntity > 1"})
+run: fn() {
+    query: csv.query<Sale>("sales.csv", SQL{"SELECT * FROM sales WHERE quntity > 1"})
         ?? panic("query")
-    rows :: query.collect() ?? panic("collect")
+    rows: query.collect() ?? panic("collect")
     print(rows)
 }

@@ -4,24 +4,24 @@
 // end still hands its move to the join, and the reuse after it is E0121. A
 // new loop variable is a new value, even when an earlier loop moved a
 // variable with the same name.
-struct Machine {
+Machine: struct {
     steps: Int
     soft_stop: Bool
 }
 
-fn finish(machine: ^Machine, ok: Bool) -> Bool {
+finish: fn(machine: ^Machine, ok: Bool) -> Bool {
     ok && machine.steps > 0
 }
 
-fn step(machine: &Machine) -> Int? {
+step: fn(machine: &Machine) -> Int? {
     machine.steps += 1
     if machine.steps > 3 -> return None
     Val(machine.steps)
 }
 
-fn fallback_block(limit: Int) -> Bool {
+fallback_block: fn(limit: Int) -> Bool {
     machine := Machine{steps: limit, soft_stop: false}
-    first :: step(&machine) ?? {
+    first: step(&machine) ?? {
         if machine.soft_stop -> return finish(^machine, true)
         return finish(^machine, false)
     }
@@ -29,23 +29,23 @@ fn fallback_block(limit: Int) -> Bool {
     finish(^machine, first > 0)
 }
 
-fn fallback_return(limit: Int) -> Bool {
+fallback_return: fn(limit: Int) -> Bool {
     machine := Machine{steps: limit, soft_stop: false}
-    first :: step(&machine) ?? return finish(^machine, false)
+    first: step(&machine) ?? return finish(^machine, false)
     _ := step(&machine)
     finish(^machine, first > 0)
 }
 
-fn fallback_reaches_join(limit: Int) -> Bool {
+fallback_reaches_join: fn(limit: Int) -> Bool {
     machine := Machine{steps: limit, soft_stop: false}
-    first :: step(&machine) ?? {
+    first: step(&machine) ?? {
         _ := finish(^machine, false)
         0
     }
     finish(^machine, first > 0)
 }
 
-fn loop_rebinds(machines: [Machine]) -> Bool {
+loop_rebinds: fn(machines: [Machine]) -> Bool {
     done := false
     loop machine in machines {
         // `machine` reads an element of the read parameter `machines`: the
@@ -58,7 +58,7 @@ fn loop_rebinds(machines: [Machine]) -> Bool {
     done
 }
 
-fn run() {
+run: fn() {
     print(fallback_block(0))
     print(fallback_return(0))
     print(fallback_reaches_join(0))

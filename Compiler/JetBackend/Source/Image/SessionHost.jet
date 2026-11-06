@@ -7,10 +7,10 @@
 
 // The child's descriptors are kept above every descriptor the child is given
 // (0..4), so moving them into place never collides.
-X64_COMPTIME_FD_FLOOR :: 100
-X64_COMPTIME_BUFFER :: 65536
+X64_COMPTIME_FD_FLOOR: 100
+X64_COMPTIME_BUFFER: 65536
 
-struct X64ComptimeChild {
+X64ComptimeChild: struct {
     pid: Int{0}
     command: Int{-1}
     reply: Int{-1}
@@ -33,9 +33,9 @@ struct X64ComptimeChild {
 // Starts the static executable `image` (Image/Loader.jet) in a child and
 // receives its entries; `stdout` admits the child's own standard output. A
 // failure leaves `failure` set.
-fn x64_comptime_spawn(image: [U8], stdout: Bool, budget: Int) -> X64ComptimeChild {
+x64_comptime_spawn: fn(image: [U8], stdout: Bool, budget: Int) -> X64ComptimeChild {
     child := X64ComptimeChild{budget: budget}
-    scratch :: os_map(4096 + X64_COMPTIME_BUFFER, OS_PROT_READ + OS_PROT_WRITE)
+    scratch: os_map(4096 + X64_COMPTIME_BUFFER, OS_PROT_READ + OS_PROT_WRITE)
     if os_failed(scratch) {
         child.failure = "can't map the comptime child's buffers ({-scratch})"
         return child
@@ -44,7 +44,7 @@ fn x64_comptime_spawn(image: [U8], stdout: Bool, budget: Int) -> X64ComptimeChil
     // command, reply, output, errors: [read end, write end] each.
     pipes := [Int]{}
     loop _ in 0..<4 {
-        ends :: x64_comptime_pipe(scratch)
+        ends: x64_comptime_pipe(scratch)
         if ends.len() != 2 {
             loop fd in pipes -> x64_comptime_close_fd(fd)
             x64_comptime_close(&child)
@@ -54,11 +54,11 @@ fn x64_comptime_spawn(image: [U8], stdout: Bool, budget: Int) -> X64ComptimeChil
         &pipes.push(ends[0])
         &pipes.push(ends[1])
     }
-    loaded :: x64_image_load(image)
+    loaded: x64_image_load(image)
     spawned := X64Spawned{pid: -1, failure: loaded.failure}
     if loaded.failure == "" {
         // No parent_death: the compile's child may outlive the worker thread that spawned it; it ends when its command pipe closes.
-        launch :: X64Launch{argv: [String]{"jet-comptime"}, env: Val([String]{}), executable: "", name: "jet-comptime", relaunch: [String]{}, parent_death: false}
+        launch: X64Launch{argv: [String]{"jet-comptime"}, env: Val([String]{}), executable: "", name: "jet-comptime", relaunch: [String]{}, parent_death: false}
         // The child's standard input stays the compiler's; its filter refuses reading it.
         spawned = x64_image_spawn(loaded, launch, [Int]{-1, pipes[5], pipes[7], pipes[0], pipes[3]})
         x64_image_unload(loaded)
@@ -77,13 +77,13 @@ fn x64_comptime_spawn(image: [U8], stdout: Bool, budget: Int) -> X64ComptimeChil
         return child
     }
     child.pid = spawned.pid
-    hello :: x64_comptime_receive(&child) ?? {
+    hello: x64_comptime_receive(&child) ?? {
         child.failure = x64_comptime_end_text(child, "before it started")
         x64_comptime_close(&child)
         return child
     }
-    count :: x64_comptime_word(hello, 8)
-    table :: x64_comptime_receive_bytes(&child, 8 * count) ?? {
+    count: x64_comptime_word(hello, 8)
+    table: x64_comptime_receive_bytes(&child, 8 * count) ?? {
         child.failure = x64_comptime_end_text(child, "before it started")
         x64_comptime_close(&child)
         return child
@@ -98,13 +98,13 @@ fn x64_comptime_spawn(image: [U8], stdout: Bool, budget: Int) -> X64ComptimeChil
 
 // The entry table's first word is the refusal handler. Installs the child's
 // seccomp program; `stdout` admits its standard output.
-fn x64_comptime_filter_child(child: &X64ComptimeChild, stdout: Bool) -> Bool {
-    program :: x64_comptime_filter(stdout)
-    handler :: child.entries[0]
+x64_comptime_filter_child: fn(child: &X64ComptimeChild, stdout: Bool) -> Bool {
+    program: x64_comptime_filter(stdout)
+    handler: child.entries[0]
     if !x64_comptime_send(&child, x64_comptime_frame(X64_COMPTIME_FILTER, [Int]{handler, program.len()}), program) -> return false
-    done :: x64_comptime_receive(&child) ?? return false
+    done: x64_comptime_receive(&child) ?? return false
     loop index in 1..<4 {
-        result :: x64_comptime_word(done, 8 * index)
+        result: x64_comptime_word(done, 8 * index)
         if result != 0 {
             child.failure = "the comptime child couldn't refuse its effects (step {index}: {-result})"
             return false
@@ -114,14 +114,14 @@ fn x64_comptime_filter_child(child: &X64ComptimeChild, stdout: Bool) -> Bool {
 }
 
 // What the child left behind when it ended `when`.
-fn x64_comptime_end_text(child: X64ComptimeChild, when: String) -> String Never! {
+x64_comptime_end_text: fn(child: X64ComptimeChild, when: String) -> String Never! {
     if child.failure != "" -> return child.failure
-    report :: (String.from_bytes(child.stderr) ?? "").trim()
+    report: (String.from_bytes(child.stderr) ?? "").trim()
     if report != "" -> return report
     "the comptime child ended {when} (wait status {child.status})"
 }
 
-fn x64_comptime_pipe(scratch: Int) -> [Int] {
+x64_comptime_pipe: fn(scratch: Int) -> [Int] {
     result := 0
     #Unsafe("pipe2 writes two descriptors into our scratch page") {
         result = os_syscall(293, scratch, 524288, 0, 0, 0, 0)
@@ -130,7 +130,7 @@ fn x64_comptime_pipe(scratch: Int) -> [Int] {
     packed := 0
     #Unsafe("pipe2 wrote the scratch page's first word") { packed = os_load_word(scratch) }
     ends := [Int]{}
-    lows :: [Int]{packed.bit_and(4294967295), (packed >> 32).bit_and(4294967295)}
+    lows: [Int]{packed.bit_and(4294967295), (packed >> 32).bit_and(4294967295)}
     loop low in lows {
         // F_DUPFD_CLOEXEC above every descriptor the child is given.
         high := 0
@@ -144,21 +144,21 @@ fn x64_comptime_pipe(scratch: Int) -> [Int] {
     ends
 }
 
-fn x64_comptime_close_fd(fd: Int) {
+x64_comptime_close_fd: fn(fd: Int) {
     if fd < 0 -> return
     #Unsafe("closes our own descriptor") { _ := os_syscall(3, fd, 0, 0, 0, 0, 0) }
 }
 
 // Writes all of `bytes` to `fd` through the `size`-byte buffer at `buffer`;
 // 0 or a failed call's result.
-fn x64_comptime_write_all(fd: Int, bytes: [U8], buffer: Int, size: Int) -> Int {
+x64_comptime_write_all: fn(fd: Int, bytes: [U8], buffer: Int, size: Int) -> Int {
     at := 0
     loop at < bytes.len() {
-        count :: if bytes.len() - at < size -> bytes.len() - at else -> size
+        count: if bytes.len() - at < size -> bytes.len() - at else -> size
         os_copy_in_range(buffer, bytes, at, count)
         done := 0
         loop done < count {
-            moved :: os_write(fd, buffer + done, count - done)
+            moved: os_write(fd, buffer + done, count - done)
             if moved == -4 -> next
             if os_failed(moved) -> return moved
             done += moved
@@ -169,7 +169,7 @@ fn x64_comptime_write_all(fd: Int, bytes: [U8], buffer: Int, size: Int) -> Int {
 }
 
 // Sends one frame and its payload.
-fn x64_comptime_send(child: &X64ComptimeChild, frame: [U8], payload: [U8]) -> Bool {
+x64_comptime_send: fn(child: &X64ComptimeChild, frame: [U8], payload: [U8]) -> Bool {
     if child.pid <= 0 -> return false
     error := x64_comptime_write_all(child.command, frame, child.scratch + 4096, X64_COMPTIME_BUFFER)
     if error == 0 && payload.len() > 0 {
@@ -182,15 +182,15 @@ fn x64_comptime_send(child: &X64ComptimeChild, frame: [U8], payload: [U8]) -> Bo
 }
 
 // One reply frame, or None once the child ended or ran out of time.
-fn x64_comptime_receive(child: &X64ComptimeChild) -> [U8]? {
+x64_comptime_receive: fn(child: &X64ComptimeChild) -> [U8]? {
     x64_comptime_receive_bytes(&child, X64_COMPTIME_FRAME_BYTES)
 }
 
 // Exactly `count` reply bytes, draining the child's output meanwhile.
-fn x64_comptime_receive_bytes(child: &X64ComptimeChild, count: Int) -> [U8]? {
+x64_comptime_receive_bytes: fn(child: &X64ComptimeChild, count: Int) -> [U8]? {
     bytes := [U8]{}
     if child.pid <= 0 -> return None
-    poll :: child.scratch
+    poll: child.scratch
     loop bytes.len() < count {
         // pollfd {fd: i32, events: POLLIN, revents}; a closed (-1) output is skipped.
         #Unsafe("the poll set is our scratch page's first three entries") {
@@ -198,13 +198,13 @@ fn x64_comptime_receive_bytes(child: &X64ComptimeChild, count: Int) -> [U8]? {
             os_store_word(poll + 8, child.output.bit_and(4294967295).bit_or(1 << 32))
             os_store_word(poll + 16, child.errors.bit_and(4294967295).bit_or(1 << 32))
         }
-        started :: x64_comptime_clock(child.scratch)
+        started: x64_comptime_clock(child.scratch)
         ready := 0
         #Unsafe("poll reads and writes the three entries of our scratch page") {
             ready = os_syscall(7, poll, 3, child.budget, 0, 0, 0)
         }
         if child.budget >= 0 {
-            spent :: x64_comptime_clock(child.scratch) - started
+            spent: x64_comptime_clock(child.scratch) - started
             child.budget = if child.budget > spent -> child.budget - spent else -> 0
         }
         if ready == -4 -> next
@@ -229,8 +229,8 @@ fn x64_comptime_receive_bytes(child: &X64ComptimeChild, count: Int) -> [U8]? {
             _ := x64_comptime_drain(&child, true)
         }
         if events[0] != 0 {
-            want :: if count - bytes.len() < X64_COMPTIME_BUFFER -> count - bytes.len() else -> X64_COMPTIME_BUFFER
-            moved :: os_read(child.reply, child.scratch + 4096, want)
+            want: if count - bytes.len() < X64_COMPTIME_BUFFER -> count - bytes.len() else -> X64_COMPTIME_BUFFER
+            moved: os_read(child.reply, child.scratch + 4096, want)
             if moved == -4 -> next
             if moved <= 0 {
                 x64_comptime_reap(&child, false)
@@ -244,9 +244,9 @@ fn x64_comptime_receive_bytes(child: &X64ComptimeChild, count: Int) -> [U8]? {
 
 // Takes the output the child wrote before its last reply: drains its
 // standard output and error until neither holds more.
-fn x64_comptime_settle(child: &X64ComptimeChild) {
+x64_comptime_settle: fn(child: &X64ComptimeChild) {
     if child.pid <= 0 -> return
-    poll :: child.scratch
+    poll: child.scratch
     loop {
         #Unsafe("the poll set is our scratch page's first two entries") {
             os_store_word(poll, child.output.bit_and(4294967295).bit_or(1 << 32))
@@ -269,10 +269,10 @@ fn x64_comptime_settle(child: &X64ComptimeChild) {
 
 // Reads what the child's stdout (or, `errors`, stderr) holds now; false,
 // and the pipe closed, at its end.
-fn x64_comptime_drain(child: &X64ComptimeChild, errors: Bool) -> Bool {
-    fd :: if errors -> child.errors else -> child.output
+x64_comptime_drain: fn(child: &X64ComptimeChild, errors: Bool) -> Bool {
+    fd: if errors -> child.errors else -> child.output
     if fd < 0 -> return false
-    moved :: os_read(fd, child.scratch + 4096, X64_COMPTIME_BUFFER)
+    moved: os_read(fd, child.scratch + 4096, X64_COMPTIME_BUFFER)
     if moved == -4 -> return true
     if moved <= 0 {
         x64_comptime_close_fd(fd)
@@ -292,7 +292,7 @@ fn x64_comptime_drain(child: &X64ComptimeChild, errors: Bool) -> Bool {
 }
 
 // Appends the `count` bytes at `address` (in our mapping) to `bytes`.
-fn x64_comptime_take(address: Int, count: Int, bytes: &[U8]) {
+x64_comptime_take: fn(address: Int, count: Int, bytes: &[U8]) {
     at := 0
     loop at < count {
         word := 0
@@ -307,7 +307,7 @@ fn x64_comptime_take(address: Int, count: Int, bytes: &[U8]) {
 }
 
 // Monotonic milliseconds.
-fn x64_comptime_clock(scratch: Int) -> Int {
+x64_comptime_clock: fn(scratch: Int) -> Int {
     time := 0
     #Unsafe("clock_gettime writes two words at scratch + 64, past the poll set") {
         _ := os_syscall(228, 1, scratch + 64, 0, 0, 0, 0)
@@ -318,7 +318,7 @@ fn x64_comptime_clock(scratch: Int) -> Int {
 
 // Waits for the child (killing it first when `kill`), collecting what it
 // wrote on its way out; then its descriptors close.
-fn x64_comptime_reap(child: &X64ComptimeChild, kill: Bool) {
+x64_comptime_reap: fn(child: &X64ComptimeChild, kill: Bool) {
     if child.pid <= 0 -> return
     if kill {
         #Unsafe("kills our own child") { _ := os_syscall(62, child.pid, 9, 0, 0, 0, 0) }
@@ -348,13 +348,13 @@ fn x64_comptime_reap(child: &X64ComptimeChild, kill: Bool) {
 }
 
 // The child's end: an exit status, or 128 + the signal that ended it.
-fn x64_comptime_exit_code(child: X64ComptimeChild) -> Int Never! {
-    signal :: child.status.bit_and(127)
+x64_comptime_exit_code: fn(child: X64ComptimeChild) -> Int Never! {
+    signal: child.status.bit_and(127)
     if signal == 0 -> (child.status >> 8).bit_and(255) else -> 128 + signal
 }
 
 // Ends a live child and releases its buffers.
-fn x64_comptime_close(child: &X64ComptimeChild) {
+x64_comptime_close: fn(child: &X64ComptimeChild) {
     if child.pid > 0 {
         _ := x64_comptime_send(&child, x64_comptime_frame(X64_COMPTIME_EXIT, [Int]{}), [U8]{})
         x64_comptime_reap(&child, false)
@@ -376,15 +376,15 @@ fn x64_comptime_close(child: &X64ComptimeChild) {
 // The part of a bound executable (MemoryLink.jet) from address `from` up:
 // its segments, whose offsets index `bytes`, and the page its last one
 // ends before; or why the executable has none.
-struct X64ComptimeCode {
+X64ComptimeCode: struct {
     segments: [X64Segment]
     bytes: [U8]
     high: Int
     failure: String
 }
 
-fn x64_comptime_code(image: [U8], from: Int) -> X64ComptimeCode Never! {
-    parsed :: x64_image_segments(image)
+x64_comptime_code: fn(image: [U8], from: Int) -> X64ComptimeCode Never! {
+    parsed: x64_image_segments(image)
     code := X64ComptimeCode{segments: [X64Segment]{}, bytes: [U8]{}, high: from, failure: parsed.failure}
     if parsed.failure != "" -> return code
     first := -1
@@ -399,7 +399,7 @@ fn x64_comptime_code(image: [U8], from: Int) -> X64ComptimeCode Never! {
     loop segment in parsed.segments {
         if segment.vaddr < from -> next
         &code.segments.push(X64Segment{vaddr: segment.vaddr, file_size: segment.file_size, memory_size: segment.memory_size, flags: segment.flags, offset: segment.offset - first})
-        end :: os_page_round(segment.vaddr + segment.memory_size)
+        end: os_page_round(segment.vaddr + segment.memory_size)
         if end > code.high -> code.high = end
     }
     code
@@ -407,11 +407,11 @@ fn x64_comptime_code(image: [U8], from: Int) -> X64ComptimeCode Never! {
 
 // Loads `code` into the child: each segment gets fresh pages at its
 // address, its bytes, then its protection. "" or why it didn't load.
-fn x64_comptime_load(child: &X64ComptimeChild, code: X64ComptimeCode) -> String {
+x64_comptime_load: fn(child: &X64ComptimeChild, code: X64ComptimeCode) -> String {
     loop segment in code.segments {
-        low :: segment.vaddr - segment.vaddr % OS_PAGE_SIZE
-        end :: os_page_round(segment.vaddr + segment.memory_size)
-        mapped :: x64_comptime_ask(&child, X64_COMPTIME_MAP, [Int]{low, end - low}) ?? return x64_comptime_end_text(child, "while its code loaded")
+        low: segment.vaddr - segment.vaddr % OS_PAGE_SIZE
+        end: os_page_round(segment.vaddr + segment.memory_size)
+        mapped: x64_comptime_ask(&child, X64_COMPTIME_MAP, [Int]{low, end - low}) ?? return x64_comptime_end_text(child, "while its code loaded")
         if mapped != low -> return "the comptime child couldn't map {end - low} bytes at {low} ({mapped})"
         if segment.file_size > 0 {
             bytes := [U8]{}
@@ -423,7 +423,7 @@ fn x64_comptime_load(child: &X64ComptimeChild, code: X64ComptimeCode) -> String 
         if segment.flags.bit_and(1) != 0 -> protection += 4
         if segment.flags.bit_and(2) != 0 -> protection += 2
         if segment.flags.bit_and(4) != 0 -> protection += 1
-        protected :: x64_comptime_ask(&child, X64_COMPTIME_PROTECT, [Int]{low, end - low, protection}) ?? return x64_comptime_end_text(child, "while its code loaded")
+        protected: x64_comptime_ask(&child, X64_COMPTIME_PROTECT, [Int]{low, end - low, protection}) ?? return x64_comptime_end_text(child, "while its code loaded")
         if protected != 0 -> return "the comptime child couldn't protect its code at {low} ({protected})"
     }
     ""
@@ -431,9 +431,9 @@ fn x64_comptime_load(child: &X64ComptimeChild, code: X64ComptimeCode) -> String 
 
 // Sends command `kind` and returns its DONE word; None when the child
 // ended or answered anything else.
-fn x64_comptime_ask(child: &X64ComptimeChild, kind: Int, operands: [Int]) -> Int? {
+x64_comptime_ask: fn(child: &X64ComptimeChild, kind: Int, operands: [Int]) -> Int? {
     if !x64_comptime_send(&child, x64_comptime_frame(kind, operands), [U8]{}) -> return None
-    reply :: x64_comptime_receive(&child) ?? return None
+    reply: x64_comptime_receive(&child) ?? return None
     if x64_comptime_word(reply, 0) != X64_COMPTIME_DONE {
         child.failure = "the comptime child answered command {kind} with frame {x64_comptime_word(reply, 0)}"
         x64_comptime_reap(&child, true)
@@ -445,26 +445,26 @@ fn x64_comptime_ask(child: &X64ComptimeChild, kind: Int, operands: [Int]) -> Int
 // The defined symbols of the executable `image` (its `.symtab`) whose names
 // start with `prefix`, by name: their addresses. `globals` keeps only the
 // global and weak ones, which are what a bound program's imports resolve to.
-fn x64_comptime_symbols(image: [U8], prefix: String, globals: Bool) -> [String:Int] Never! {
+x64_comptime_symbols: fn(image: [U8], prefix: String, globals: Bool) -> [String:Int] Never! {
     found := [String:Int]{}
     if image.len() < 64 -> return found
-    start :: prefix.bytes()
-    sections :: x64_comptime_unsigned(image, 40, 8)
-    header_size :: x64_comptime_unsigned(image, 58, 2)
-    count :: x64_comptime_unsigned(image, 60, 2)
+    start: prefix.bytes()
+    sections: x64_comptime_unsigned(image, 40, 8)
+    header_size: x64_comptime_unsigned(image, 58, 2)
+    count: x64_comptime_unsigned(image, 60, 2)
     loop section in 0..<count {
-        header :: sections + section * header_size
+        header: sections + section * header_size
         if header + 64 > image.len() -> break
         // SHT_SYMTAB
         if x64_comptime_unsigned(image, header + 4, 4) != 2 -> next
-        offset :: x64_comptime_unsigned(image, header + 24, 8)
-        size :: x64_comptime_unsigned(image, header + 32, 8)
-        strings_header :: sections + x64_comptime_unsigned(image, header + 40, 4) * header_size
-        entry_size :: x64_comptime_unsigned(image, header + 56, 8)
+        offset: x64_comptime_unsigned(image, header + 24, 8)
+        size: x64_comptime_unsigned(image, header + 32, 8)
+        strings_header: sections + x64_comptime_unsigned(image, header + 40, 4) * header_size
+        entry_size: x64_comptime_unsigned(image, header + 56, 8)
         if entry_size < 24 || strings_header + 64 > image.len() -> next
-        strings :: x64_comptime_unsigned(image, strings_header + 24, 8)
+        strings: x64_comptime_unsigned(image, strings_header + 24, 8)
         loop symbol in 0..<(size /% entry_size) {
-            entry :: offset + symbol * entry_size
+            entry: offset + symbol * entry_size
             if entry + 24 > image.len() -> break
             // SHN_UNDEF: an import, not a definition.
             if x64_comptime_unsigned(image, entry + 6, 2) == 0 -> next
@@ -482,7 +482,7 @@ fn x64_comptime_symbols(image: [U8], prefix: String, globals: Bool) -> [String:I
                 &name.push(image[at])
                 at += 1
             }
-            text :: String.from_bytes(name) ?? { next }
+            text: String.from_bytes(name) ?? { next }
             found[text] = x64_comptime_unsigned(image, entry + 8, 8)
         }
     }

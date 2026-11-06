@@ -16,7 +16,7 @@ function item(path, head) {
   return lines.slice(start, end + 1).join("\n");
 }
 const expressionPath = "Compiler/JetSema/Source/Sema/Expressions.jet";
-const builders = ["fn sema_tree_node(", "fn sema_tree_expr(", "fn sema_expression_todo("].map((head) => item(expressionPath, head));
+const builders = ["sema_tree_node: fn(", "sema_tree_expr: fn(", "sema_expression_todo: fn("].map((head) => item(expressionPath, head));
 const foundation = compilerFixtureUnit(repo, ["Compiler/JetFoundation"]);
 const fixtures = readFileSync(join(repo, "Compiler/JetSema/Tests/TypedGoalFixtures.fixture/TypedGoalFixtures.jet"), "utf8");
 mkdirSync(join(out, "project/src"), { recursive: true });

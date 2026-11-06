@@ -3,7 +3,7 @@
 // parser re-encodes what it read and rejects bytes that are not already
 // canonical, because the canonical bytes are what the producer signed.
 use {
-    json :: core.encoding.json
+    json: core.encoding.json
     jet_foundation.[foundation_json_integer]
     jet_pkg_model.[
         pkg_json_array, pkg_json_bool, pkg_json_object, pkg_json_render, pkg_json_text, pkg_json_texts,
@@ -12,28 +12,28 @@ use {
     jetpack_nix_eval.[nixeval_is_ascii_alphanumeric, nixeval_key_ordered, nixeval_sorted]
 }
 
-NIX_INDEX_MAX_COMPRESSED_BYTES :: 33554432
-NIX_INDEX_MAX_DECODED_BYTES :: 268435456
-NIX_INDEX_MAX_RECORDS :: 400000
-NIX_INDEX_MAX_NATIVE_RECIPE_BYTES :: 4194304
-NIX_INDEX_MAX_SIGNATURE_BYTES :: 16384
-NIX_INDEX_MAX_MANIFEST_BYTES :: 16777216
-NIX_INDEX_MAX_MANIFEST_FUTURE_SKEW_SECONDS :: 300
-NIX_INDEX_SCHEMA :: 1
-NIX_INDEX_U64_MAX :: 18446744073709551615
-NIX_INDEX_JSON_MAX_DEPTH :: 16
-NIX_INDEX_CHANNELS :: [String]{"nixpkgs-unstable", "nixos-unstable"}
-NIX_INDEX_SYSTEMS :: [String]{"x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"}
-NIX_INDEX_COVERAGE_REASONS :: [String]{"evaluation-failed", "unsupported-value", "unsupported-system", "no-channel-build", "missing-narinfo", "missing-version", "missing-primary-output", "policy-excluded"}
+NIX_INDEX_MAX_COMPRESSED_BYTES: 33554432
+NIX_INDEX_MAX_DECODED_BYTES: 268435456
+NIX_INDEX_MAX_RECORDS: 400000
+NIX_INDEX_MAX_NATIVE_RECIPE_BYTES: 4194304
+NIX_INDEX_MAX_SIGNATURE_BYTES: 16384
+NIX_INDEX_MAX_MANIFEST_BYTES: 16777216
+NIX_INDEX_MAX_MANIFEST_FUTURE_SKEW_SECONDS: 300
+NIX_INDEX_SCHEMA: 1
+NIX_INDEX_U64_MAX: 18446744073709551615
+NIX_INDEX_JSON_MAX_DEPTH: 16
+NIX_INDEX_CHANNELS: [String]{"nixpkgs-unstable", "nixos-unstable"}
+NIX_INDEX_SYSTEMS: [String]{"x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"}
+NIX_INDEX_COVERAGE_REASONS: [String]{"evaluation-failed", "unsupported-value", "unsupported-system", "no-channel-build", "missing-narinfo", "missing-version", "missing-primary-output", "policy-excluded"}
 
 #Error
-enum NixIndexError {
+NixIndexError: enum {
     Invalid(String)
     NotIndexed(attrpath: [String], channel: String, revision: String, system: String, reason: String)
     Offline(String)
     Transport(String)
 
-    fn code(self) -> Int Never! {
+    code: fn(self) -> Int Never! {
         if self == {
             .NotIndexed(_, _, _, _, _) -> 1349
             .Offline(_) -> 1276
@@ -41,7 +41,7 @@ enum NixIndexError {
         }
     }
 
-    fn message(self) -> String Never! {
+    message: fn(self) -> String Never! {
         if self == {
             .Invalid(detail) -> "E1348: {detail}"
             .NotIndexed(attrpath, channel, revision, system, reason) -> "E1349: `{attrpath.join(".")}` is not covered by {channel}@{revision} for {system}: {reason}"
@@ -51,7 +51,7 @@ enum NixIndexError {
     }
 }
 
-struct NixIndexKey {
+NixIndexKey: struct {
     channel: String
     revision: String
     system: String
@@ -60,20 +60,20 @@ struct NixIndexKey {
 
 // One indexed package: its attribute path, version, derivation and named
 // output store paths (key-ordered).
-struct NixIndexRecord {
+NixIndexRecord: struct {
     attrpath: [String]
     version: String
     drv_path: String
     outputs: [String: String]
 
-    fn canonical_json(self) -> String Never! {
+    canonical_json: fn(self) -> String Never! {
         pkg_json_render(NixIndexRecordWire.from_record(self).tree())
     }
 }
 
 // A local, unsigned Jetpack-native recipe. It is a document separate from the
 // nixpkgs mapping, so a native artifact never looks Nix-backed.
-struct NixNativeRecipe {
+NixNativeRecipe: struct {
     name: String
     version: String
     kind: String
@@ -81,7 +81,7 @@ struct NixNativeRecipe {
     sha256: String
     bin: String
 
-    fn tree(self) -> Dyn Never! {
+    tree: fn(self) -> Dyn Never! {
         Dyn.Object([
             "name": Dyn.Text(self.name.copy()),
             "version": Dyn.Text(self.version.copy()),
@@ -92,13 +92,13 @@ struct NixNativeRecipe {
         ])
     }
 
-    fn canonical_json(self) -> String Never! {
+    canonical_json: fn(self) -> String Never! {
         pkg_json_render(self.tree())
     }
 }
 
 // What a resolved record was verified against.
-struct NixIndexProof {
+NixIndexProof: struct {
     schema: Int
     channel: String
     revision: String
@@ -111,7 +111,7 @@ struct NixIndexProof {
     jet_key_id: String
     jet_signature: String
 
-    fn canonical_json(self) -> String Never! {
+    canonical_json: fn(self) -> String Never! {
         pkg_json_render(Dyn.Object([
             "schema": Dyn.Int(self.schema),
             "channel": Dyn.Text(self.channel.copy()),
@@ -128,25 +128,25 @@ struct NixIndexProof {
     }
 }
 
-enum NixIndexTrustTier {
+NixIndexTrustTier: enum {
     OfficialSigned
     LocalUnofficial
 
-    fn label(self) -> String Never! {
+    label: fn(self) -> String Never! {
         if self == {
             .OfficialSigned -> "official-signed"
             .LocalUnofficial -> "local-unofficial"
         }
     }
 
-    fn trust(self) -> String Never! {
+    trust: fn(self) -> String Never! {
         if self == {
             .OfficialSigned -> "verified"
             .LocalUnofficial -> "unverified"
         }
     }
 
-    fn signature_chain(self) -> String Never! {
+    signature_chain: fn(self) -> String Never! {
         if self == {
             .OfficialSigned -> "present"
             .LocalUnofficial -> "none"
@@ -154,41 +154,41 @@ enum NixIndexTrustTier {
     }
 }
 
-struct NixVerifiedIndexRecord {
+NixVerifiedIndexRecord: struct {
     record: NixIndexRecord
     proof: NixIndexProof
     trust: NixIndexTrustTier
 }
 
-struct NixIndexOutputWire {
+NixIndexOutputWire: struct {
     name: String
     store_path: String
 
-    fn tree(self) -> Dyn Never! {
+    tree: fn(self) -> Dyn Never! {
         Dyn.Object(["name": Dyn.Text(self.name.copy()), "storePath": Dyn.Text(self.store_path.copy())])
     }
 }
 
-struct NixIndexRecordWire {
+NixIndexRecordWire: struct {
     attrpath: [String]
     version: String
     drv_path: String
     outputs: [NixIndexOutputWire]
 
-    fn from_record(record: NixIndexRecord) -> NixIndexRecordWire Never! {
+    from_record: fn(record: NixIndexRecord) -> NixIndexRecordWire Never! {
         outputs := [NixIndexOutputWire]{}
-        names :: nixeval_sorted(record.outputs.keys().to_list())
+        names: nixeval_sorted(record.outputs.keys().to_list())
         loop name in names -> &outputs.push(NixIndexOutputWire{name, store_path: record.outputs[name]})
         NixIndexRecordWire{attrpath: record.attrpath, version: record.version, drv_path: record.drv_path, outputs}
     }
 
-    fn record(self) -> NixIndexRecord Never! {
+    record: fn(self) -> NixIndexRecord Never! {
         outputs := [String: String]{}
         loop output in self.outputs -> outputs[output.name] = output.store_path
         NixIndexRecord{attrpath: self.attrpath, version: self.version, drv_path: self.drv_path, outputs: nixeval_key_ordered(outputs)}
     }
 
-    fn tree(self) -> Dyn Never! {
+    tree: fn(self) -> Dyn Never! {
         outputs := [Dyn]{}
         loop output in self.outputs -> &outputs.push(output.tree())
         Dyn.Object([
@@ -200,28 +200,28 @@ struct NixIndexRecordWire {
     }
 
     // This record with its outputs in name order.
-    fn sorted(self) -> NixIndexRecordWire Never! {
+    sorted: fn(self) -> NixIndexRecordWire Never! {
         outputs := self.outputs.copy()
         &outputs.sort_by((left: NixIndexOutputWire, right: NixIndexOutputWire) -> left.name <=> right.name)
         NixIndexRecordWire{attrpath: self.attrpath, version: self.version, drv_path: self.drv_path, outputs}
     }
 }
 
-struct NixIndexCoverageMiss {
+NixIndexCoverageMiss: struct {
     attrpath: [String]
     reason: String
 
-    fn tree(self) -> Dyn Never! {
+    tree: fn(self) -> Dyn Never! {
         Dyn.Object(["attrpath": pkg_json_texts(self.attrpath), "reason": Dyn.Text(self.reason.copy())])
     }
 }
 
-struct NixIndexCoverage {
+NixIndexCoverage: struct {
     indexed: [[String]]
     not_indexed: [NixIndexCoverageMiss]
 }
 
-struct NixIndexDocument {
+NixIndexDocument: struct {
     schema: Int
     channel: String
     revision: String
@@ -232,12 +232,12 @@ struct NixIndexDocument {
 
     // Strict parse: known fields only, then validation, then byte equality
     // with the canonical re-encoding.
-    fn parse(bytes: [U8]) -> NixIndexDocument NixIndexError! {
-        text :: String.from_bytes(bytes) ?? return Err(NixIndexError.Invalid("nix index is not UTF-8"))
-        value :: nix_index_parse_json(text, "parse nix index JSON")
-        map :: nix_index_object(value, "nix index")
+    parse: fn(bytes: [U8]) -> NixIndexDocument NixIndexError! {
+        text: String.from_bytes(bytes) ?? return Err(NixIndexError.Invalid("nix index is not UTF-8"))
+        value: nix_index_parse_json(text, "parse nix index JSON")
+        map: nix_index_object(value, "nix index")
         nix_index_reject_unknown(map, [String]{"schema", "channel", "revision", "system", "released_unix", "records", "coverage"})
-        document :: NixIndexDocument{
+        document: NixIndexDocument{
             schema: nix_index_u64_field(map, "schema"),
             channel: nix_index_string_field(map, "channel"),
             revision: nix_index_string_field(map, "revision"),
@@ -251,7 +251,7 @@ struct NixIndexDocument {
         Ok(document)
     }
 
-    fn validate(self) NixIndexError! {
+    validate: fn(self) NixIndexError! {
         if self.schema != NIX_INDEX_SCHEMA -> return Err(NixIndexError.Invalid("unsupported nix index schema"))
         nix_index_validate_channel(self.channel)
         nix_index_validate_revision(self.revision)
@@ -260,7 +260,7 @@ struct NixIndexDocument {
         records := [String: Bool]{}
         loop record in self.records {
             nix_index_validate_attrpath(record.attrpath)
-            key :: nix_index_attrpath_key(record.attrpath)
+            key: nix_index_attrpath_key(record.attrpath)
             if records.get(key) != None -> return Err(NixIndexError.Invalid("nix index has duplicate record keys"))
             records[key] = true
             if record.version == "" || pkg_text_has_control(record.version) -> return Err(NixIndexError.Invalid("nix index record has an empty or invalid version"))
@@ -284,17 +284,17 @@ struct NixIndexDocument {
         indexed := [String: Bool]{}
         loop attrpath in self.coverage.indexed {
             nix_index_validate_attrpath(attrpath)
-            key :: nix_index_attrpath_key(attrpath)
+            key: nix_index_attrpath_key(attrpath)
             if indexed.get(key) != None -> return Err(NixIndexError.Invalid("nix index coverage repeats an indexed attrpath"))
             indexed[key] = true
         }
         if !nix_index_same_keys(indexed, records) -> return Err(NixIndexError.Invalid("nix index coverage does not exactly match indexed records"))
         misses := [String: Bool]{}
-        reasons :: NIX_INDEX_COVERAGE_REASONS
+        reasons: NIX_INDEX_COVERAGE_REASONS
         loop miss in self.coverage.not_indexed {
             nix_index_validate_attrpath(miss.attrpath)
             if !reasons.contains(miss.reason) -> return Err(NixIndexError.Invalid("nix index has an unknown coverage reason"))
-            key :: nix_index_attrpath_key(miss.attrpath)
+            key: nix_index_attrpath_key(miss.attrpath)
             if misses.get(key) != None -> return Err(NixIndexError.Invalid("nix index coverage repeats a missing attrpath"))
             misses[key] = true
             if records.get(key) != None -> return Err(NixIndexError.Invalid("nix index lists one attrpath as indexed and not-indexed"))
@@ -302,7 +302,7 @@ struct NixIndexDocument {
     }
 
     // The canonical, signed encoding: records, outputs and coverage sorted.
-    fn canonical_bytes(self) -> [U8] NixIndexError! {
+    canonical_bytes: fn(self) -> [U8] NixIndexError! {
         self.validate()
         records := [NixIndexRecordWire]{}
         loop record in self.records -> &records.push(record.sorted())
@@ -328,7 +328,7 @@ struct NixIndexDocument {
         ])).bytes())
     }
 
-    fn record_for(self, attrpath: [String]) -> NixIndexRecord? Never! {
+    record_for: fn(self, attrpath: [String]) -> NixIndexRecord? Never! {
         loop record in self.records {
             if record.attrpath == attrpath -> return Val(record.record())
         }
@@ -336,7 +336,7 @@ struct NixIndexDocument {
     }
 
     // The miss for `key`: its recorded coverage reason, or `not-listed`.
-    fn not_indexed(self, key: NixIndexKey) -> NixIndexError Never! {
+    not_indexed: fn(self, key: NixIndexKey) -> NixIndexError Never! {
         reason := "not-listed"
         loop miss in self.coverage.not_indexed {
             if miss.attrpath == key.attrpath {
@@ -348,19 +348,19 @@ struct NixIndexDocument {
     }
 }
 
-struct NixIndexSignature {
+NixIndexSignature: struct {
     schema: Int
     key_id: String
     algorithm: String
     signature: String
 
-    fn parse(bytes: [U8]) -> NixIndexSignature NixIndexError! {
-        text :: String.from_bytes(bytes) ?? return Err(NixIndexError.Invalid("nix index signature is not UTF-8"))
-        value :: json.parse(text) ?? return Err(NixIndexError.Invalid("parse nix index signature: {err.reason}"))
+    parse: fn(bytes: [U8]) -> NixIndexSignature NixIndexError! {
+        text: String.from_bytes(bytes) ?? return Err(NixIndexError.Invalid("nix index signature is not UTF-8"))
+        value: json.parse(text) ?? return Err(NixIndexError.Invalid("parse nix index signature: {err.reason}"))
         if !nix_index_json_depth_within(value, 0) -> return Err(NixIndexError.Invalid("parse nix index signature: JSON exceeds maximum nesting depth"))
-        map :: nix_index_object(value, "nix index signature")
+        map: nix_index_object(value, "nix index signature")
         nix_index_reject_unknown(map, [String]{"schema", "key_id", "algorithm", "signature"})
-        signature :: NixIndexSignature{
+        signature: NixIndexSignature{
             schema: nix_index_u64_field(map, "schema"),
             key_id: nix_index_string_field(map, "key_id"),
             algorithm: nix_index_string_field(map, "algorithm"),
@@ -370,7 +370,7 @@ struct NixIndexSignature {
         Ok(signature)
     }
 
-    fn canonical_bytes(self) -> [U8] Never! {
+    canonical_bytes: fn(self) -> [U8] Never! {
         pkg_json_render(Dyn.Object([
             "schema": Dyn.Int(self.schema),
             "key_id": Dyn.Text(self.key_id.copy()),
@@ -382,7 +382,7 @@ struct NixIndexSignature {
 
 // One signed channel target: where the compressed index and its signature
 // sidecar live and what they must measure.
-struct NixIndexManifestTarget {
+NixIndexManifestTarget: struct {
     revision: String
     system: String
     url: String
@@ -395,7 +395,7 @@ struct NixIndexManifestTarget {
     signature_sha256: String
     discoverable: Bool
 
-    fn tree(self) -> Dyn Never! {
+    tree: fn(self) -> Dyn Never! {
         Dyn.Object([
             "revision": Dyn.Text(self.revision.copy()),
             "system": Dyn.Text(self.system.copy()),
@@ -411,7 +411,7 @@ struct NixIndexManifestTarget {
     }
 }
 
-struct NixIndexChannelManifest {
+NixIndexChannelManifest: struct {
     schema: Int
     channel: String
     generation: Int
@@ -419,15 +419,15 @@ struct NixIndexChannelManifest {
     expires_unix: Int
     targets: [NixIndexManifestTarget]
 
-    fn parse(bytes: [U8]) -> NixIndexChannelManifest NixIndexError! {
-        text :: String.from_bytes(bytes) ?? return Err(NixIndexError.Invalid("nix index manifest is not UTF-8"))
-        value :: nix_index_parse_json(text, "parse nix index manifest JSON")
-        map :: nix_index_object(value, "nix index manifest")
+    parse: fn(bytes: [U8]) -> NixIndexChannelManifest NixIndexError! {
+        text: String.from_bytes(bytes) ?? return Err(NixIndexError.Invalid("nix index manifest is not UTF-8"))
+        value: nix_index_parse_json(text, "parse nix index manifest JSON")
+        map: nix_index_object(value, "nix index manifest")
         nix_index_reject_unknown(map, [String]{"schema", "channel", "generation", "issued_unix", "expires_unix", "targets"})
         targets := [NixIndexManifestTarget]{}
-        target_values :: nix_index_array_field(map, "targets")
+        target_values: nix_index_array_field(map, "targets")
         loop target in target_values -> &targets.push(nix_index_parse_manifest_target(target))
-        manifest :: NixIndexChannelManifest{
+        manifest: NixIndexChannelManifest{
             schema: nix_index_u64_field(map, "schema"),
             channel: nix_index_string_field(map, "channel"),
             generation: nix_index_u64_field(map, "generation"),
@@ -440,7 +440,7 @@ struct NixIndexChannelManifest {
         Ok(manifest)
     }
 
-    fn validate(self) NixIndexError! {
+    validate: fn(self) NixIndexError! {
         if self.schema != NIX_INDEX_SCHEMA -> return Err(NixIndexError.Invalid("unsupported nix index manifest schema"))
         nix_index_validate_channel(self.channel)
         if self.expires_unix <= self.issued_unix -> return Err(NixIndexError.Invalid("nix index manifest expiry is not after issue time"))
@@ -448,7 +448,7 @@ struct NixIndexChannelManifest {
         loop target in self.targets {
             nix_index_validate_revision(target.revision)
             nix_index_validate_system(target.system)
-            key :: "{target.revision}\n{target.system}"
+            key: "{target.revision}\n{target.system}"
             if keys.contains(key) -> return Err(NixIndexError.Invalid("nix index manifest has duplicate targets"))
             &keys.push(key)
             if target.compressed_length == 0 || target.compressed_length > NIX_INDEX_MAX_COMPRESSED_BYTES -> return Err(NixIndexError.Invalid("nix index target exceeds compressed bound"))
@@ -461,7 +461,7 @@ struct NixIndexChannelManifest {
         }
     }
 
-    fn canonical_bytes(self) -> [U8] NixIndexError! {
+    canonical_bytes: fn(self) -> [U8] NixIndexError! {
         self.validate()
         targets := self.targets.copy()
         &targets.sort_by((left: NixIndexManifestTarget, right: NixIndexManifestTarget) -> (left.revision <=> right.revision).then(left.system <=> right.system))
@@ -477,7 +477,7 @@ struct NixIndexChannelManifest {
         ])).bytes())
     }
 
-    fn target_for(self, revision: String, system: String) -> NixIndexManifestTarget? Never! {
+    target_for: fn(self, revision: String, system: String) -> NixIndexManifestTarget? Never! {
         loop target in self.targets {
             if target.revision == revision && target.system == system -> return Val(target)
         }
@@ -486,26 +486,26 @@ struct NixIndexChannelManifest {
 }
 
 // The canonical bytes of a local native recipe catalog.
-fn nix_index_canonical_local_native_recipes(bytes: [U8]) -> [U8] NixIndexError! {
-    recipes :: nix_index_parse_local_native_recipes(bytes)
+nix_index_canonical_local_native_recipes: fn(bytes: [U8]) -> [U8] NixIndexError! {
+    recipes: nix_index_parse_local_native_recipes(bytes)
     Ok(nix_index_canonical_native_recipes_bytes(recipes))
 }
 
-fn nix_index_parse_local_native_recipes(bytes: [U8]) -> [NixNativeRecipe] NixIndexError! {
+nix_index_parse_local_native_recipes: fn(bytes: [U8]) -> [NixNativeRecipe] NixIndexError! {
     if bytes.len() > NIX_INDEX_MAX_NATIVE_RECIPE_BYTES -> return Err(NixIndexError.Invalid("local unofficial native catalog exceeds its size bound"))
-    text :: String.from_bytes(bytes) ?? return Err(NixIndexError.Invalid("local unofficial native catalog is not UTF-8"))
-    value :: nix_index_parse_json(text, "parse local unofficial native catalog JSON")
-    map :: nix_index_object(value, "local unofficial native catalog")
+    text: String.from_bytes(bytes) ?? return Err(NixIndexError.Invalid("local unofficial native catalog is not UTF-8"))
+    value: nix_index_parse_json(text, "parse local unofficial native catalog JSON")
+    map: nix_index_object(value, "local unofficial native catalog")
     nix_index_reject_unknown(map, [String]{"schema", "recipes"})
     if nix_index_u64_field(map, "schema") != 1 -> return Err(NixIndexError.Invalid("local unofficial native catalog schema is unsupported"))
-    values :: nix_index_array_field(map, "recipes")
+    values: nix_index_array_field(map, "recipes")
     if values.len() > NIX_INDEX_MAX_RECORDS -> return Err(NixIndexError.Invalid("local unofficial native catalog has too many recipes"))
     recipes := [NixNativeRecipe]{}
     loop item in values -> &recipes.push(nix_index_parse_native_recipe(item))
     &recipes.sort_by((left: NixNativeRecipe, right: NixNativeRecipe) -> (left.name <=> right.name).then(left.version <=> right.version))
     identities := [String]{}
     loop recipe in recipes {
-        identity :: "{recipe.name}\n{recipe.version}"
+        identity: "{recipe.name}\n{recipe.version}"
         if identities.contains(identity) -> return Err(NixIndexError.Invalid("local unofficial native catalog repeats `{recipe.name}` version `{recipe.version}`"))
         &identities.push(identity)
     }
@@ -513,10 +513,10 @@ fn nix_index_parse_local_native_recipes(bytes: [U8]) -> [NixNativeRecipe] NixInd
     Ok(recipes)
 }
 
-fn nix_index_parse_native_recipe(value: Dyn) -> NixNativeRecipe NixIndexError! {
-    map :: nix_index_object(value, "local unofficial native recipe")
+nix_index_parse_native_recipe: fn(value: Dyn) -> NixNativeRecipe NixIndexError! {
+    map: nix_index_object(value, "local unofficial native recipe")
     nix_index_reject_unknown(map, [String]{"name", "version", "kind", "url", "sha256", "bin"})
-    recipe :: NixNativeRecipe{
+    recipe: NixNativeRecipe{
         name: nix_index_string_field(map, "name"),
         version: nix_index_string_field(map, "version"),
         kind: nix_index_string_field(map, "kind"),
@@ -536,20 +536,20 @@ fn nix_index_parse_native_recipe(value: Dyn) -> NixNativeRecipe NixIndexError! {
 }
 
 // ASCII letters, digits, `.`, `_` and `-`; 1 to 128 bytes.
-fn nix_index_valid_native_token(text: String, label: String) NixIndexError! {
-    raw :: text.bytes()
+nix_index_valid_native_token: fn(text: String, label: String) NixIndexError! {
+    raw: text.bytes()
     if raw.len() == 0 || raw.len() > 128 -> return Err(NixIndexError.Invalid("{label} is malformed"))
     loop byte in raw {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if !nixeval_is_ascii_alphanumeric(code) && code != 46 && code != 95 && code != 45 -> return Err(NixIndexError.Invalid("{label} is malformed"))
     }
 }
 
-fn nix_index_validate_native_recipe_url(url: String) NixIndexError! {
+nix_index_validate_native_recipe_url: fn(url: String) NixIndexError! {
     if url.starts_with("file://") && url.removeprefix("file://") != "" && !pkg_text_has_control(url) -> return
     if (url.starts_with("https://") || url.starts_with("http://")) && !pkg_text_has_control(url) && !url.contains(" ") {
         if url.starts_with("http://") {
-            authority :: url.removeprefix("http://").split("/").to_list()[0]
+            authority: url.removeprefix("http://").split("/").to_list()[0]
             if !nix_index_is_loopback_host(authority) -> return Err(NixIndexError.Invalid("plain HTTP native recipe URLs must use loopback"))
         }
         return
@@ -557,7 +557,7 @@ fn nix_index_validate_native_recipe_url(url: String) NixIndexError! {
     Err(NixIndexError.Invalid("local unofficial native recipe URL must be HTTPS, loopback HTTP, or file"))
 }
 
-fn nix_index_canonical_native_recipes_bytes(recipes: [NixNativeRecipe]) -> [U8] Never! {
+nix_index_canonical_native_recipes_bytes: fn(recipes: [NixNativeRecipe]) -> [U8] Never! {
     sorted := recipes.copy()
     &sorted.sort_by((left: NixNativeRecipe, right: NixNativeRecipe) -> (left.name <=> right.name).then(left.version <=> right.version))
     trees := [Dyn]{}
@@ -565,19 +565,19 @@ fn nix_index_canonical_native_recipes_bytes(recipes: [NixNativeRecipe]) -> [U8] 
     pkg_json_render(Dyn.Object(["schema": Dyn.Int(1), "recipes": Dyn.Array(trees)])).bytes()
 }
 
-fn nix_index_parse_records(value: Dyn) -> [NixIndexRecordWire] NixIndexError! {
-    values :: nix_index_value_array(value, "records")
+nix_index_parse_records: fn(value: Dyn) -> [NixIndexRecordWire] NixIndexError! {
+    values: nix_index_value_array(value, "records")
     if values.len() > NIX_INDEX_MAX_RECORDS -> return Err(NixIndexError.Invalid("nix index has too many records"))
     records := [NixIndexRecordWire]{}
     loop item in values -> &records.push(nix_index_parse_record(item))
     Ok(records)
 }
 
-fn nix_index_parse_record(value: Dyn) -> NixIndexRecordWire NixIndexError! {
-    map :: nix_index_object(value, "nix index record")
+nix_index_parse_record: fn(value: Dyn) -> NixIndexRecordWire NixIndexError! {
+    map: nix_index_object(value, "nix index record")
     nix_index_reject_unknown(map, [String]{"attrpath", "version", "drvPath", "outputs"})
     outputs := [NixIndexOutputWire]{}
-    output_values :: nix_index_array_field(map, "outputs")
+    output_values: nix_index_array_field(map, "outputs")
     loop output in output_values -> &outputs.push(nix_index_parse_output(output))
     Ok(NixIndexRecordWire{
         attrpath: nix_index_parse_attrpath(nix_index_field(map, "attrpath")),
@@ -587,37 +587,37 @@ fn nix_index_parse_record(value: Dyn) -> NixIndexRecordWire NixIndexError! {
     })
 }
 
-fn nix_index_parse_output(value: Dyn) -> NixIndexOutputWire NixIndexError! {
-    map :: nix_index_object(value, "nix index output")
+nix_index_parse_output: fn(value: Dyn) -> NixIndexOutputWire NixIndexError! {
+    map: nix_index_object(value, "nix index output")
     nix_index_reject_unknown(map, [String]{"name", "storePath"})
     Ok(NixIndexOutputWire{name: nix_index_string_field(map, "name"), store_path: nix_index_string_field(map, "storePath")})
 }
 
-fn nix_index_parse_coverage(value: Dyn) -> NixIndexCoverage NixIndexError! {
-    map :: nix_index_object(value, "nix index coverage")
+nix_index_parse_coverage: fn(value: Dyn) -> NixIndexCoverage NixIndexError! {
+    map: nix_index_object(value, "nix index coverage")
     nix_index_reject_unknown(map, [String]{"indexed", "notIndexed"})
     indexed := [[String]]{}
-    indexed_values :: nix_index_array_field(map, "indexed")
+    indexed_values: nix_index_array_field(map, "indexed")
     loop item in indexed_values -> &indexed.push(nix_index_parse_attrpath(item))
     not_indexed := [NixIndexCoverageMiss]{}
-    miss_values :: nix_index_array_field(map, "notIndexed")
+    miss_values: nix_index_array_field(map, "notIndexed")
     loop item in miss_values {
-        miss :: nix_index_object(item, "nix index coverage miss")
+        miss: nix_index_object(item, "nix index coverage miss")
         nix_index_reject_unknown(miss, [String]{"attrpath", "reason"})
         &not_indexed.push(NixIndexCoverageMiss{attrpath: nix_index_parse_attrpath(nix_index_field(miss, "attrpath")), reason: nix_index_string_field(miss, "reason")})
     }
     Ok(NixIndexCoverage{indexed, not_indexed})
 }
 
-fn nix_index_parse_attrpath(value: Dyn) -> [String] NixIndexError! {
+nix_index_parse_attrpath: fn(value: Dyn) -> [String] NixIndexError! {
     attrpath := [String]{}
-    segments :: nix_index_value_array(value, "attrpath")
+    segments: nix_index_value_array(value, "attrpath")
     loop segment in segments -> &attrpath.push(nix_index_string_value(segment, "attrpath segment"))
     Ok(attrpath)
 }
 
-fn nix_index_parse_manifest_target(value: Dyn) -> NixIndexManifestTarget NixIndexError! {
-    map :: nix_index_object(value, "nix index manifest target")
+nix_index_parse_manifest_target: fn(value: Dyn) -> NixIndexManifestTarget NixIndexError! {
+    map: nix_index_object(value, "nix index manifest target")
     nix_index_reject_unknown(map, [String]{"revision", "system", "url", "signature_url", "sha256", "compressed_length", "decoded_length", "record_count", "index_signature_sha256", "discoverable"})
     Ok(NixIndexManifestTarget{
         revision: nix_index_string_field(map, "revision"),
@@ -633,28 +633,28 @@ fn nix_index_parse_manifest_target(value: Dyn) -> NixIndexManifestTarget NixInde
     })
 }
 
-fn nix_index_validate_channel(channel: String) NixIndexError! {
-    channels :: NIX_INDEX_CHANNELS
+nix_index_validate_channel: fn(channel: String) NixIndexError! {
+    channels: NIX_INDEX_CHANNELS
     if !channels.contains(channel) -> return Err(NixIndexError.Invalid("unsupported nixpkgs channel `{channel}`"))
 }
 
-fn nix_index_validate_system(system: String) NixIndexError! {
-    systems :: NIX_INDEX_SYSTEMS
+nix_index_validate_system: fn(system: String) NixIndexError! {
+    systems: NIX_INDEX_SYSTEMS
     if !systems.contains(system) -> return Err(NixIndexError.Invalid("unsupported nixpkgs system `{system}`"))
 }
 
-fn nix_index_validate_revision(revision: String) NixIndexError! {
+nix_index_validate_revision: fn(revision: String) NixIndexError! {
     if !nix_is_lower_hex(revision, 40) -> return Err(NixIndexError.Invalid("nixpkgs revision must be exactly 40 lowercase hexadecimal characters"))
 }
 
-fn nix_index_validate_key(key: NixIndexKey) NixIndexError! {
+nix_index_validate_key: fn(key: NixIndexKey) NixIndexError! {
     nix_index_validate_channel(key.channel)
     nix_index_validate_revision(key.revision)
     nix_index_validate_system(key.system)
     nix_index_validate_attrpath(key.attrpath)
 }
 
-fn nix_index_validate_attrpath(attrpath: [String]) NixIndexError! {
+nix_index_validate_attrpath: fn(attrpath: [String]) NixIndexError! {
     if attrpath.len() == 0 -> return Err(NixIndexError.Invalid("nix index attrpath cannot be empty"))
     loop segment in attrpath {
         // NUL is a control character.
@@ -662,11 +662,11 @@ fn nix_index_validate_attrpath(attrpath: [String]) NixIndexError! {
     }
 }
 
-fn nix_index_validate_store_path(path: String, derivation: Bool) NixIndexError! {
-    malformed :: NixIndexError.Invalid("malformed Nix store path `{path}`")
+nix_index_validate_store_path: fn(path: String, derivation: Bool) NixIndexError! {
+    malformed: NixIndexError.Invalid("malformed Nix store path `{path}`")
     if !path.starts_with("/nix/store/") -> return Err(malformed)
-    parts :: path.removeprefix("/nix/store/").split_once("-") ?? return Err(malformed)
-    hash :: parts.before.bytes()
+    parts: path.removeprefix("/nix/store/").split_once("-") ?? return Err(malformed)
+    hash: parts.before.bytes()
     if hash.len() != 32 || parts.after == "" || parts.after.contains("/") || pkg_text_has_control(parts.after) || (derivation && !parts.after.ends_with(".drv")) {
         return Err(malformed)
     }
@@ -675,13 +675,13 @@ fn nix_index_validate_store_path(path: String, derivation: Bool) NixIndexError! 
     }
 }
 
-fn nix_index_validate_url(url: String) NixIndexError! {
+nix_index_validate_url: fn(url: String) NixIndexError! {
     if (url.starts_with("https://") || url.starts_with("http://")) && !pkg_text_has_control(url) && !url.contains(" ") -> return
     Err(NixIndexError.Invalid("nix index manifest contains an invalid URL"))
 }
 
 // `127.0.0.1`, `localhost` or `::1`, with an optional port or brackets.
-fn nix_index_is_loopback_host(authority: String) -> Bool Never! {
+nix_index_is_loopback_host: fn(authority: String) -> Bool Never! {
     host := authority
     if authority.starts_with("[") {
         host = authority.removeprefix("[").split("]").to_list()[0]
@@ -693,12 +693,12 @@ fn nix_index_is_loopback_host(authority: String) -> Bool Never! {
 
 // Strict JSON under the index's own size and nesting bounds. Core's parser
 // takes no caller limits, so the bounds are checked around it.
-fn nix_index_parse_json(text: String, context: String) -> Dyn NixIndexError! {
+nix_index_parse_json: fn(text: String, context: String) -> Dyn NixIndexError! {
     if text.bytes().len() > NIX_INDEX_MAX_DECODED_BYTES -> return Err(NixIndexError.Invalid("{context}: JSON exceeds its size bound"))
-    value :: if json.parse(text) == {
+    value: if json.parse(text) == {
         .Ok(parsed) -> parsed
         .Err(error) -> {
-            line :: error.line ?? 0
+            line: error.line ?? 0
             return Err(NixIndexError.Invalid("{context} at line {line}: {error.reason}"))
         }
     }
@@ -707,7 +707,7 @@ fn nix_index_parse_json(text: String, context: String) -> Dyn NixIndexError! {
 }
 
 // Whether every container sits below NIX_INDEX_JSON_MAX_DEPTH.
-fn nix_index_json_depth_within(value: Dyn, depth: Int) -> Bool Never! {
+nix_index_json_depth_within: fn(value: Dyn, depth: Int) -> Bool Never! {
     if value == {
         .Array(values) -> {
             if depth >= NIX_INDEX_JSON_MAX_DEPTH -> return false
@@ -729,11 +729,11 @@ fn nix_index_json_depth_within(value: Dyn, depth: Int) -> Bool Never! {
 
 // Segments joined by a byte no valid segment contains (validation rejects
 // control characters first).
-fn nix_index_attrpath_key(attrpath: [String]) -> String Never! {
+nix_index_attrpath_key: fn(attrpath: [String]) -> String Never! {
     attrpath.join("\n")
 }
 
-fn nix_index_same_keys(left: [String: Bool], right: [String: Bool]) -> Bool Never! {
+nix_index_same_keys: fn(left: [String: Bool], right: [String: Bool]) -> Bool Never! {
     if left.len() != right.len() -> return false
     loop entry in left {
         if right.get(entry.key) == None -> return false
@@ -742,43 +742,43 @@ fn nix_index_same_keys(left: [String: Bool], right: [String: Bool]) -> Bool Neve
 }
 
 // Segment-wise byte order, then length (Rust `[String]` ordering).
-fn nix_index_attrpath_order(left: [String], right: [String]) -> Ordering Never! {
-    count :: if left.len() < right.len() -> left.len() else -> right.len()
+nix_index_attrpath_order: fn(left: [String], right: [String]) -> Ordering Never! {
+    count: if left.len() < right.len() -> left.len() else -> right.len()
     loop index in 0..<count {
-        order :: left[index] <=> right[index]
+        order: left[index] <=> right[index]
         if order != Ordering.Equal -> return order
     }
     left.len() <=> right.len()
 }
 
-fn nix_index_object(value: Dyn, label: String) -> [String: Dyn] NixIndexError! {
-    map :: pkg_json_object(value) ?? return Err(NixIndexError.Invalid("{label} must be an object"))
+nix_index_object: fn(value: Dyn, label: String) -> [String: Dyn] NixIndexError! {
+    map: pkg_json_object(value) ?? return Err(NixIndexError.Invalid("{label} must be an object"))
     Ok(map)
 }
 
-fn nix_index_field(map: [String: Dyn], name: String) -> Dyn NixIndexError! {
-    value :: map.get(name) ?? return Err(NixIndexError.Invalid("nix index is missing `{name}`"))
+nix_index_field: fn(map: [String: Dyn], name: String) -> Dyn NixIndexError! {
+    value: map.get(name) ?? return Err(NixIndexError.Invalid("nix index is missing `{name}`"))
     Ok(value)
 }
 
-fn nix_index_reject_unknown(map: [String: Dyn], known: [String]) NixIndexError! {
+nix_index_reject_unknown: fn(map: [String: Dyn], known: [String]) NixIndexError! {
     loop entry in map {
         if !known.contains(entry.key) -> return Err(NixIndexError.Invalid("nix index has unknown field `{entry.key}`"))
     }
 }
 
-fn nix_index_string_value(value: Dyn, label: String) -> String NixIndexError! {
-    text :: pkg_json_text(value) ?? return Err(NixIndexError.Invalid("{label} must be a string"))
+nix_index_string_value: fn(value: Dyn, label: String) -> String NixIndexError! {
+    text: pkg_json_text(value) ?? return Err(NixIndexError.Invalid("{label} must be a string"))
     Ok(text)
 }
 
-fn nix_index_string_field(map: [String: Dyn], name: String) -> String NixIndexError! {
+nix_index_string_field: fn(map: [String: Dyn], name: String) -> String NixIndexError! {
     nix_index_string_value(nix_index_field(map, name), name)
 }
 
 // A JSON integer in the unsigned 64-bit range.
-fn nix_index_u64_value(value: Dyn, label: String) -> Int NixIndexError! {
-    number :: foundation_json_integer(value) ?? {
+nix_index_u64_value: fn(value: Dyn, label: String) -> Int NixIndexError! {
+    number: foundation_json_integer(value) ?? {
         if value.decode<Float>() == .Ok(_) -> return Err(NixIndexError.Invalid("{label} must be an unsigned integer"))
         return Err(NixIndexError.Invalid("{label} must be an integer"))
     }
@@ -787,36 +787,36 @@ fn nix_index_u64_value(value: Dyn, label: String) -> Int NixIndexError! {
     Ok(number)
 }
 
-fn nix_index_u64_field(map: [String: Dyn], name: String) -> Int NixIndexError! {
+nix_index_u64_field: fn(map: [String: Dyn], name: String) -> Int NixIndexError! {
     nix_index_u64_value(nix_index_field(map, name), name)
 }
 
-fn nix_index_bool_field(map: [String: Dyn], name: String) -> Bool NixIndexError! {
-    flag :: pkg_json_bool(nix_index_field(map, name)) ?? return Err(NixIndexError.Invalid("{name} must be a boolean"))
+nix_index_bool_field: fn(map: [String: Dyn], name: String) -> Bool NixIndexError! {
+    flag: pkg_json_bool(nix_index_field(map, name)) ?? return Err(NixIndexError.Invalid("{name} must be a boolean"))
     Ok(flag)
 }
 
-fn nix_index_value_array(value: Dyn, label: String) -> [Dyn] NixIndexError! {
-    items :: pkg_json_array(value) ?? return Err(NixIndexError.Invalid("{label} must be an array"))
+nix_index_value_array: fn(value: Dyn, label: String) -> [Dyn] NixIndexError! {
+    items: pkg_json_array(value) ?? return Err(NixIndexError.Invalid("{label} must be an array"))
     Ok(items)
 }
 
-fn nix_index_array_field(map: [String: Dyn], name: String) -> [Dyn] NixIndexError! {
+nix_index_array_field: fn(map: [String: Dyn], name: String) -> [Dyn] NixIndexError! {
     nix_index_value_array(nix_index_field(map, name), name)
 }
 
 // Non-empty text without control characters or `:`.
-fn nix_index_nonempty_text(text: String, label: String) -> String NixIndexError! {
+nix_index_nonempty_text: fn(text: String, label: String) -> String NixIndexError! {
     if text == "" || pkg_text_has_control(text) || text.contains(":") -> return Err(NixIndexError.Invalid("{label} is malformed"))
     Ok(text)
 }
 
 // A configured endpoint: an index URL, loopback when plain HTTP, without a
 // trailing `/`.
-fn nix_index_parse_endpoint(endpoint: String) -> String NixIndexError! {
+nix_index_parse_endpoint: fn(endpoint: String) -> String NixIndexError! {
     nix_index_validate_url(endpoint)
     if endpoint.starts_with("http://") {
-        authority :: endpoint.removeprefix("http://").split("/").to_list()[0]
+        authority: endpoint.removeprefix("http://").split("/").to_list()[0]
         if !nix_index_is_loopback_host(authority) -> return Err(NixIndexError.Invalid("plain HTTP nix index endpoints must use loopback"))
     }
     trimmed := endpoint

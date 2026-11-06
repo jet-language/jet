@@ -2,9 +2,9 @@
 // original advertised capability contract.
 use {
     core.encoding.[Dyn]
-    lsp_request_path :: core.files.runtime.kernel_path_components
+    lsp_request_path: core.files.runtime.kernel_path_components
     core.files.runtime.kernel_path_components.[OSPath]
-    lsp_request_term :: core.term
+    lsp_request_term: core.term
     jet_devserver.[
         EDITOR_WORKBENCH_METHOD, EDITOR_RECONNECT_METHOD, EDITOR_NAVIGATE_METHOD, EDITOR_SELECT_METHOD,
         EDITOR_COMMAND_METHOD, number, supported,
@@ -12,7 +12,7 @@ use {
 }
 
 // Rust353–414: known methods always reach their sole feature provider.
-fn lsp_handle_request(server: &LSPServer, method: String, params: Dyn?, id: Dyn) -[FS, Env, Exec, IO, Time.Wait]> String? Never! {
+lsp_handle_request: fn(server: &LSPServer, method: String, params: Dyn?, id: Dyn) -[FS, Env, Exec, IO, Time.Wait]> String? Never! {
     if method == {
         "initialize" -> {
             lsp_configure_workspace_roots(&server.workspace_roots, &server.workspace_folders, params, server.snapshot.cwd)
@@ -61,19 +61,19 @@ fn lsp_handle_request(server: &LSPServer, method: String, params: Dyn?, id: Dyn)
 }
 
 // Rust415–429: EditorHostAdapter owns parsing, typed host state and errors.
-fn lsp_editor_host_response(server: LSPServer, method: String, params: Dyn?, id: Dyn) -> String? Never! {
+lsp_editor_host_response: fn(server: LSPServer, method: String, params: Dyn?, id: Dyn) -> String? Never! {
     if (&server.editor_host.dispatch(method, params)) == {
         .Ok(result) -> Val(lsp_response(id, result))
         .Err(error) -> Val(lsp_error_response(id, Int{editor_host_error_code(error)}, "{error}"))
     }
 }
 
-fn lsp_build_graph_response(server: LSPServer, params: Dyn?, id: Dyn) -> String? Never! {
-    value :: params ?? return None
-    document :: value.field("textDocument") ?? return None
-    uri :: document.field("uri") ?? return None
+lsp_build_graph_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String? Never! {
+    value: params ?? return None
+    document: value.field("textDocument") ?? return None
+    uri: document.field("uri") ?? return None
     if uri == .Text(text) {
-        doc :: server.diagnostic_state.docs.get(text) ?? return None
+        doc: server.diagnostic_state.docs.get(text) ?? return None
         if lsp_build_graph_json(server.snapshot, doc.path, doc.text) == {
             .Val(graph) -> { return Val(lsp_response(id, graph)) }
             .None | .Err(_) -> { return Val(lsp_response(id, "null")) }
@@ -85,7 +85,7 @@ fn lsp_build_graph_response(server: LSPServer, params: Dyn?, id: Dyn) -> String?
 // Rust505–563: cancellation is recorded in the native reader BEFORE queueing.
 // The main loop removes late IDs after handling; this branch must not simulate
 // cancellation or duplicate the reader's shared set.
-fn lsp_handle_notification(server: &LSPServer, method: String, params: Dyn?, stdout: &lsp_request_term.Stdout) IOError! -[IO, Time.Wait, FS, Env]> {
+lsp_handle_notification: fn(server: &LSPServer, method: String, params: Dyn?, stdout: &lsp_request_term.Stdout) IOError! -[IO, Time.Wait, FS, Env]> {
     if method == {
         "initialized" | "notifications/initialized" | "$/cancelRequest" | "notifications/cancelled" -> {}
         "exit" -> server.shutdown = true
@@ -93,17 +93,17 @@ fn lsp_handle_notification(server: &LSPServer, method: String, params: Dyn?, std
         "textDocument/didChange" -> lsp_publish_after_change(&server.diagnostic_state, params, server.snapshot.cwd.platform)
         "workspace/didChangeWorkspaceFolders" -> lsp_update_workspace_roots(&server.workspace_roots, &server.workspace_folders, params, server.snapshot.cwd)
         "textDocument/didClose" -> {
-            value :: params ?? return
-            document :: value.field("textDocument") ?? return
-            uri :: document.field("uri") ?? return
+            value: params ?? return
+            document: value.field("textDocument") ?? return
+            uri: document.field("uri") ?? return
             if uri == .Text(text) -> lsp_close_document_diagnostics(&server.diagnostic_state, &server.queries, server.snapshot.cwd, text, &stdout) ?? return Err(err)
         }
         else -> {}
     }
 }
 
-fn lsp_initialize_response(id: Dyn) -> String Never! {
-    result :: """
+lsp_initialize_response: fn(id: Dyn) -> String Never! {
+    result: """
 {{
   "protocolVersion": "2025-11-25",
   "capabilities": {{
@@ -167,24 +167,24 @@ fn lsp_initialize_response(id: Dyn) -> String Never! {
 
 // Rust452–503. The host supplies its authorized cwd; roots retain native
 // identity. Driver owns absolute/relative path handling, not a local resolver.
-fn lsp_push_workspace_root(roots: &[OSPath], path: OSPath, cwd: OSPath) Never! {
+lsp_push_workspace_root: fn(roots: &[OSPath], path: OSPath, cwd: OSPath) Never! {
     if path.encoded.len() == 0 -> return
-    normalized :: jet_driver_query_path(cwd, path)
+    normalized: jet_driver_query_path(cwd, path)
     loop root in roots {
         if lsp_request_path.equals(root, normalized) -> return
     }
     &roots.push(normalized)
 }
 
-fn lsp_push_workspace_folder(roots: &[OSPath], folder: Dyn, cwd: OSPath) Never! {
-    uri :: folder.field("uri") ?? return
+lsp_push_workspace_folder: fn(roots: &[OSPath], folder: Dyn, cwd: OSPath) Never! {
+    uri: folder.field("uri") ?? return
     if uri == .Text(text) {
-        path :: lsp_request_path.from_text(lsp_uri_to_path(text, cwd.platform == lsp_request_path.PathPlatform.Windows), cwd.platform)
+        path: lsp_request_path.from_text(lsp_uri_to_path(text, cwd.platform == lsp_request_path.PathPlatform.Windows), cwd.platform)
         lsp_push_workspace_root(&roots, path, cwd)
     }
 }
 
-fn lsp_configure_workspace_roots(roots: &[OSPath], workspace_folders: &Bool, params: Dyn?, cwd: OSPath) Never! {
+lsp_configure_workspace_roots: fn(roots: &[OSPath], workspace_folders: &Bool, params: Dyn?, cwd: OSPath) Never! {
     configured := [OSPath]{}
     if params == .Val(value) {
         workspace_folders = value.field("workspaceFolders") != None
@@ -200,7 +200,7 @@ fn lsp_configure_workspace_roots(roots: &[OSPath], workspace_folders: &Bool, par
                 if value.field("rootUri") == {
                     .Val(uri) -> {
                         if uri == .Text(text) {
-                            path :: lsp_request_path.from_text(lsp_uri_to_path(text, cwd.platform == lsp_request_path.PathPlatform.Windows), cwd.platform)
+                            path: lsp_request_path.from_text(lsp_uri_to_path(text, cwd.platform == lsp_request_path.PathPlatform.Windows), cwd.platform)
                             lsp_push_workspace_root(&configured, path, cwd)
                         }
                     }
@@ -216,15 +216,15 @@ fn lsp_configure_workspace_roots(roots: &[OSPath], workspace_folders: &Bool, par
     roots = configured
 }
 
-fn lsp_update_workspace_roots(roots: &[OSPath], workspace_folders: &Bool, params: Dyn?, cwd: OSPath) Never! {
-    event :: (params ?? return).field("event") ?? return
+lsp_update_workspace_roots: fn(roots: &[OSPath], workspace_folders: &Bool, params: Dyn?, cwd: OSPath) Never! {
+    event: (params ?? return).field("event") ?? return
     workspace_folders = true
     if event.field("removed") == .Val(removed) {
         if removed == .Array(rows) {
             loop folder in rows {
-                uri :: folder.field("uri") ?? next
+                uri: folder.field("uri") ?? next
                 if uri == .Text(text) {
-                    path :: jet_driver_query_path(cwd, lsp_request_path.from_text(lsp_uri_to_path(text, cwd.platform == lsp_request_path.PathPlatform.Windows), cwd.platform))
+                    path: jet_driver_query_path(cwd, lsp_request_path.from_text(lsp_uri_to_path(text, cwd.platform == lsp_request_path.PathPlatform.Windows), cwd.platform))
                     // Remove in place; no whole-root-vector copy per removal.
                     index := 0
                     loop index < roots.len() {

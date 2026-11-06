@@ -1,9 +1,9 @@
 // FIPS 180-4 KAT transport supplies byte spans, not a second hash engine.
 // Every split hashes the same input without concatenation. Digest canaries and
 // scratch-zero checks witness exact boundaries, including the empty input.
-#Export(c) fn jet_rt_sha256_fixture(input: I64, length: I64, expected: I64) {
-    scratch :: jet_rt_alloc(I64{576}, I64{8})
-    output :: jet_rt_alloc(I64{34}, I64{1})
+#Export(c) jet_rt_sha256_fixture: fn(input: I64, length: I64, expected: I64) {
+    scratch: jet_rt_alloc(I64{576}, I64{8})
+    output: jet_rt_alloc(I64{34}, I64{1})
     split := I64{0}
     loop split <= length {
         rt_text_put(output, I64{165})

@@ -5,7 +5,7 @@
 // Jetpack/PackageModel/Source/Merge/FactLaw.jet, not repeated here.
 
 // Rust `PolicyKey::name`.
-fn policy_key_name(key: PolicyKey) -> String Never! {
+policy_key_name: fn(key: PolicyKey) -> String Never! {
     if key == {
         .Unsafe -> "unsafe"
         .Impure -> "impure"
@@ -31,7 +31,7 @@ fn policy_key_name(key: PolicyKey) -> String Never! {
 }
 
 // Rust `PolicyKey::parse`.
-fn policy_key_parse(name: String) -> PolicyKey? Never! {
+policy_key_parse: fn(name: String) -> PolicyKey? Never! {
     if name == {
         "unsafe" -> Val(PolicyKey.Unsafe)
         "impure" -> Val(PolicyKey.Impure)
@@ -58,7 +58,7 @@ fn policy_key_parse(name: String) -> PolicyKey? Never! {
 }
 
 // Rust `PolicyKey::is_audited_gate`.
-fn policy_key_is_audited_gate(key: PolicyKey) -> Bool Never! {
+policy_key_is_audited_gate: fn(key: PolicyKey) -> Bool Never! {
     if key == {
         .ScopedGC | .ExplicitUnits | .Copies | .Sentries -> false
         else -> true
@@ -66,7 +66,7 @@ fn policy_key_is_audited_gate(key: PolicyKey) -> Bool Never! {
 }
 
 // Rust `PolicyValue::display`.
-fn policy_value_display(value: PolicyValue) -> String Never! {
+policy_value_display: fn(value: PolicyValue) -> String Never! {
     if value == {
         .Enabled -> "true"
         .Limit(limit) -> "{limit}"
@@ -86,7 +86,7 @@ fn policy_value_display(value: PolicyValue) -> String Never! {
 }
 
 // Rust `Authority::Scope::name`.
-fn policy_scope_name(scope: PolicyScope) -> String Never! {
+policy_scope_name: fn(scope: PolicyScope) -> String Never! {
     if scope == {
         .Organization -> "organization"
         .Package -> "package"
@@ -97,7 +97,7 @@ fn policy_scope_name(scope: PolicyScope) -> String Never! {
 }
 
 // Rust `Authority::Scope::rank`: the lexical ladder, outer to inner.
-fn policy_scope_rank(scope: PolicyScope) -> Int Never! {
+policy_scope_rank: fn(scope: PolicyScope) -> Int Never! {
     if scope == {
         .Organization -> 0
         .Package -> 1
@@ -107,19 +107,19 @@ fn policy_scope_rank(scope: PolicyScope) -> Int Never! {
     }
 }
 
-enum PolicyCombine { Tighten Override Merge }
+PolicyCombine: enum { Tighten Override Merge }
 
-struct PolicyRule {
+PolicyRule: struct {
     key: PolicyKey
     scopes: [PolicyScope]
     combine: PolicyCombine
 }
 
-POLICY_PACKAGE_SCOPES :: comptime { [PolicyScope]{PolicyScope.Package, PolicyScope.Module, PolicyScope.Function, PolicyScope.Block} }
-POLICY_ALL_SCOPES :: comptime { [PolicyScope]{PolicyScope.Organization, PolicyScope.Package, PolicyScope.Module, PolicyScope.Function, PolicyScope.Block} }
+POLICY_PACKAGE_SCOPES: comptime { [PolicyScope]{PolicyScope.Package, PolicyScope.Module, PolicyScope.Function, PolicyScope.Block} }
+POLICY_ALL_SCOPES: comptime { [PolicyScope]{PolicyScope.Organization, PolicyScope.Package, PolicyScope.Module, PolicyScope.Function, PolicyScope.Block} }
 
 // Rust `POLICY_RULES`.
-POLICY_RULES :: comptime { [PolicyRule]{
+POLICY_RULES: comptime { [PolicyRule]{
     {key: PolicyKey.Unsafe, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
     {key: PolicyKey.Impure, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
     {key: PolicyKey.Nondeterministic, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
@@ -143,14 +143,14 @@ POLICY_RULES :: comptime { [PolicyRule]{
 } }
 
 // Rust `rule`.
-fn policy_rule(key: PolicyKey) -> PolicyRule Never! {
+policy_rule: fn(key: PolicyKey) -> PolicyRule Never! {
     loop row in POLICY_RULES {
         if row.key == key -> return row
     }
     panic("registered policy key")
 }
 
-struct EffectivePolicy {
+EffectivePolicy: struct {
     key: PolicyKey
     value: PolicyValue
     // Outer-to-inner declaration chain, including overridden declarations.
@@ -159,7 +159,7 @@ struct EffectivePolicy {
 
 // The source text of a file a policy chain names, so its declarations
 // render as `path:line:col`.
-struct PolicySourceText {
+PolicySourceText: struct {
     path: String
     text: DiagnosticSourceText
 }
@@ -167,7 +167,7 @@ struct PolicySourceText {
 // Where `declaration` was written: `path:line:col` when its source is among
 // `sources`, else the bare path (a package manifest's declarations carry no
 // span, and the invocation's `--gate` has no file).
-fn policy_declaration_site(declaration: PolicyDeclaration, sources: [PolicySourceText]) -> String Never! {
+policy_declaration_site: fn(declaration: PolicyDeclaration, sources: [PolicySourceText]) -> String Never! {
     if declaration.span.end <= declaration.span.start -> return declaration.source
     loop source in sources {
         if source.path == declaration.source -> return "{declaration.source}:{diagnostic_source_line(source.text, declaration.span.start)}:{diagnostic_source_column(source.text, declaration.span.start)}"
@@ -177,10 +177,10 @@ fn policy_declaration_site(declaration: PolicyDeclaration, sources: [PolicySourc
 
 // The resolution as `key = value` followed by every declaration of its chain,
 // the last one effective and the earlier ones shadowed.
-fn policy_explain(resolution: EffectivePolicy, sources: [PolicySourceText]) -> String Never! {
+policy_explain: fn(resolution: EffectivePolicy, sources: [PolicySourceText]) -> String Never! {
     out := "{policy_key_name(resolution.key)} = {policy_value_display(resolution.value)}"
     loop (index, declaration) in resolution.provenance {
-        status :: if index + 1 == resolution.provenance.len() -> "effective" else -> "shadowed"
+        status: if index + 1 == resolution.provenance.len() -> "effective" else -> "shadowed"
         out = "{out}\n  [{status}] {policy_scope_name(declaration.scope)} {policy_value_display(declaration.value)} at {policy_declaration_site(declaration, sources)}"
     }
     out
@@ -189,7 +189,7 @@ fn policy_explain(resolution: EffectivePolicy, sources: [PolicySourceText]) -> S
 // A refused ladder. `outer_site` is the outer rung's declaration the inner
 // one collides with, so the report names its site.
 #Error
-enum PolicyError {
+PolicyError: enum {
     ProhibitedScope(key: PolicyKey, scope: PolicyScope, span: Span)
     Conflict(key: PolicyKey, scope: PolicyScope, first: Span, second: Span, outer_site: PolicyDeclaration)
     Widening(key: PolicyKey, outer: PolicyValue, inner: PolicyValue, span: Span, outer_site: PolicyDeclaration)
@@ -198,7 +198,7 @@ enum PolicyError {
 // Rust's derived `Debug` spelling of PolicyError (package-policy conflicts
 // print it verbatim).
 impl PolicyError.Debug {
-    fn debug(self) -> String {
+    debug: fn(self) -> String {
         if self == {
             .ProhibitedScope(key, scope, span) -> "ProhibitedScope {{ key: {policy_key_debug_text(key)}, scope: {policy_scope_debug_text(scope)}, span: {policy_span_debug_text(span)} }}"
             .Conflict(key, scope, first, second, _) -> "Conflict {{ key: {policy_key_debug_text(key)}, scope: {policy_scope_debug_text(scope)}, first: {policy_span_debug_text(first)}, second: {policy_span_debug_text(second)} }}"
@@ -207,7 +207,7 @@ impl PolicyError.Debug {
     }
 }
 
-fn policy_key_debug_text(key: PolicyKey) -> String Never! {
+policy_key_debug_text: fn(key: PolicyKey) -> String Never! {
     if key == {
         .Unsafe -> "Unsafe"
         .Impure -> "Impure"
@@ -232,7 +232,7 @@ fn policy_key_debug_text(key: PolicyKey) -> String Never! {
     }
 }
 
-fn policy_value_debug_text(value: PolicyValue) -> String Never! {
+policy_value_debug_text: fn(value: PolicyValue) -> String Never! {
     if value == {
         .Enabled -> "Enabled"
         .Limit(limit) -> "Limit({limit})"
@@ -251,7 +251,7 @@ fn policy_value_debug_text(value: PolicyValue) -> String Never! {
     }
 }
 
-fn policy_scope_debug_text(scope: PolicyScope) -> String Never! {
+policy_scope_debug_text: fn(scope: PolicyScope) -> String Never! {
     if scope == {
         .Organization -> "Organization"
         .Package -> "Package"
@@ -261,14 +261,14 @@ fn policy_scope_debug_text(scope: PolicyScope) -> String Never! {
     }
 }
 
-fn policy_span_debug_text(span: Span) -> String Never! {
+policy_span_debug_text: fn(span: Span) -> String Never! {
     "Span {{ start: {span.start}, end: {span.end} }}"
 }
 
 // Rust `resolve_policy` (the `ResolutionKey for PolicyKey` arm of `resolve`):
 // declarations resolve outer-to-inner into one effective value, and every
 // shadowed or tightened declaration stays in the provenance chain.
-fn policy_resolve(key: PolicyKey, declarations: [PolicyDeclaration]) -> EffectivePolicy? PolicyError! {
+policy_resolve: fn(key: PolicyKey, declarations: [PolicyDeclaration]) -> EffectivePolicy? PolicyError! {
     // Rust sorts by scope rank with a stable sort: written order within a rung.
     ordered := [PolicyDeclaration]{}
     loop scope in POLICY_ALL_SCOPES {
@@ -276,7 +276,7 @@ fn policy_resolve(key: PolicyKey, declarations: [PolicyDeclaration]) -> Effectiv
             if declaration.key == key && declaration.scope == scope -> &ordered.push(declaration)
         }
     }
-    registry :: policy_rule(key)
+    registry: policy_rule(key)
     chain := [PolicyDeclaration]{}
     effective := PolicyValue?{None}
     loop declaration in ordered {
@@ -286,7 +286,7 @@ fn policy_resolve(key: PolicyKey, declarations: [PolicyDeclaration]) -> Effectiv
         }
         next := declaration.value
         if effective == .Val(outer) {
-            widens :: policy_widens(key, outer, declaration.value)
+            widens: policy_widens(key, outer, declaration.value)
             if registry.combine == PolicyCombine.Tighten && widens -> return Err(PolicyError.Widening{key: key, outer: outer, inner: declaration.value, span: declaration.span, outer_site: chain[chain.len() - 1]})
             if registry.combine == PolicyCombine.Merge {
                 next = policy_merge(outer, declaration.value) ?? return Err(PolicyError.Conflict{key: key, scope: declaration.scope, first: chain[chain.len() - 1].span, second: declaration.span, outer_site: chain[chain.len() - 1]})
@@ -295,12 +295,12 @@ fn policy_resolve(key: PolicyKey, declarations: [PolicyDeclaration]) -> Effectiv
         effective = Val(next)
         &chain.push(declaration)
     }
-    value :: effective ?? return Ok(None)
+    value: effective ?? return Ok(None)
     Ok(Val(EffectivePolicy{key: key, value: value, provenance: chain}))
 }
 
 // The widening arm of Rust `resolve_policy`.
-fn policy_widens(key: PolicyKey, outer: PolicyValue, inner: PolicyValue) -> Bool Never! {
+policy_widens: fn(key: PolicyKey, outer: PolicyValue, inner: PolicyValue) -> Bool Never! {
     if (key == PolicyKey.ScopedGC || key == PolicyKey.ExplicitUnits) && outer == PolicyValue.Enabled && inner == PolicyValue.Enabled -> return false
     if key == PolicyKey.Copies && outer == PolicyValue.Explicit && inner == PolicyValue.Explicit -> return false
     if key == PolicyKey.Sentries {
@@ -313,7 +313,7 @@ fn policy_widens(key: PolicyKey, outer: PolicyValue, inner: PolicyValue) -> Bool
 }
 
 // The `PolicyCombine::Merge` arm of Rust `resolve_policy`; None is a conflict.
-fn policy_merge(outer: PolicyValue, inner: PolicyValue) -> PolicyValue? Never! {
+policy_merge: fn(outer: PolicyValue, inner: PolicyValue) -> PolicyValue? Never! {
     if outer == .Limit(a) && inner == .Limit(b) -> return Val(PolicyValue.Limit{value: if a < b -> a else -> b})
     if outer == PolicyValue.Enabled && inner == PolicyValue.Enabled -> return Val(PolicyValue.Enabled)
     if outer == PolicyValue.Forbid && inner == PolicyValue.Forbid -> return Val(PolicyValue.Forbid)
@@ -321,7 +321,7 @@ fn policy_merge(outer: PolicyValue, inner: PolicyValue) -> PolicyValue? Never! {
 }
 
 // Rust `gate_widens`, arm for arm (including its non-reflexive cases).
-fn policy_gate_widens(outer: PolicyValue, inner: PolicyValue) -> Bool Never! {
+policy_gate_widens: fn(outer: PolicyValue, inner: PolicyValue) -> Bool Never! {
     if outer == PolicyValue.Forbid && inner == PolicyValue.Allow -> return true
     if inner == PolicyValue.Allow -> return false
     if outer == PolicyValue.Forbid -> return inner != PolicyValue.Forbid
@@ -342,15 +342,15 @@ fn policy_gate_widens(outer: PolicyValue, inner: PolicyValue) -> Bool Never! {
 
 // Rust `parse_value` returns the refusal as a `String`.
 #Error
-struct PolicyValueError {
+PolicyValueError: struct {
     detail: String
 
-    fn message(self) -> String Never! { self.detail }
+    message: fn(self) -> String Never! { self.detail }
 }
 
 // Rust `parse_value`: one package-policy value for `key`.
-fn policy_parse_value(key: PolicyKey, raw: String) -> PolicyValue PolicyValueError! {
-    value :: raw.trim()
+policy_parse_value: fn(key: PolicyKey, raw: String) -> PolicyValue PolicyValueError! {
+    value: raw.trim()
     if (key == PolicyKey.ScopedGC || key == PolicyKey.ExplicitUnits) && value == "true" -> return Ok(PolicyValue.Enabled)
     if key == PolicyKey.Copies {
         if value == ".Explicit" -> return Ok(PolicyValue.Explicit)

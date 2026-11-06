@@ -1,29 +1,29 @@
-struct Entry {
+Entry: struct {
     kind: String
     path: String
 }
 
-fn entry_order(left: Entry, right: Entry) -> Ordering Never! {
+entry_order: fn(left: Entry, right: Entry) -> Ordering Never! {
     (left.kind <=> right.kind).then(left.path <=> right.path)
 }
 
-fn text_order(left: String, right: String) -> Ordering Never! {
-    left_parts :: left.split("-").to_list()
-    right_parts :: right.split("-").to_list()
+text_order: fn(left: String, right: String) -> Ordering Never! {
+    left_parts: left.split("-").to_list()
+    right_parts: right.split("-").to_list()
     left_parts.join("-") <=> right_parts.join("-")
 }
 
-fn file_name(entry: Entry) -> String Never! {
-    parts :: entry.path.split("/").to_list()
+file_name: fn(entry: Entry) -> String Never! {
+    parts: entry.path.split("/").to_list()
     parts[parts.len() - 1]
 }
 
-fn is_evidence(entry: Entry) -> Bool Never! {
-    parts :: entry.path.split("/").to_list()
+is_evidence: fn(entry: Entry) -> Bool Never! {
+    parts: entry.path.split("/").to_list()
     parts.contains("evidence")
 }
 
-fn run() {
+run: fn() {
     entries := [Entry]{Entry{kind: "evidence", path: ".jet/evidence/b-{2}.json"}, Entry{kind: "evidence", path: ".jet/evidence/a-{1}.json"}, Entry{kind: "comparison", path: ".jet/receipts/c-{3}.json"}}
     names := [String]{"delta-{4}", "alpha-{1}", "charlie-{3}", "bravo-{2}"}
     parts := 0
@@ -34,11 +34,11 @@ fn run() {
         sorted := [String]{}
         loop name in names -> &sorted.push(name)
         &sorted.sort_by(text_order)
-        files :: ordered.map(file_name)
-        evidence :: ordered.filter(is_evidence)
+        files: ordered.map(file_name)
+        evidence: ordered.filter(is_evidence)
         parts = parts + files[round % 3].split(".").to_list().len() + sorted[round % 4].split("-").to_list().len() + evidence.len()
         if round == 63 {
-            paths :: loop entry in ordered -> entry.path
+            paths: loop entry in ordered -> entry.path
             print("{paths.join(",")}|{sorted.join(",")}|{files.join(",")}|{evidence.len()}|{parts}")
         }
     }

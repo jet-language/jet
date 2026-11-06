@@ -1,14 +1,14 @@
 // D-MODULE-VALUE1: a literal `@` table may hold enum payloads that are
 // themselves user enums, structs, lists or optionals. The compile-time
 // evaluator gives each payload the same nominal identity as its row type.
-enum Inner {
+Inner: enum {
     A
     B(float: Bool)
 }
 
-struct Size { n: Int }
+Size: struct { n: Int }
 
-enum Op {
+Op: enum {
     Wrap(op: Inner)
     Sized(size: Size)
     Many(items: [Inner])
@@ -16,16 +16,16 @@ enum Op {
     Plain
 }
 
-struct Row {
+Row: struct {
     name: String
     op: Op
 }
 
-fn row(name: String, op: Op) -> Row Never! {
+row: fn(name: String, op: Op) -> Row Never! {
     Row{name: name, op: op}
 }
 
-ROWS :: comptime { [Row]{
+ROWS: comptime { [Row]{
     row("wrap", Op.Wrap{op: Inner.B{float: true}}),
     row("sized", Op.Sized{size: Size{n: 3}}),
     row("many", Op.Many{items: [Inner]{Inner.A, Inner.A}}),
@@ -33,14 +33,14 @@ ROWS :: comptime { [Row]{
     row("plain", Op.Plain)
 } }
 
-fn inner_name(inner: Inner) -> String {
+inner_name: fn(inner: Inner) -> String {
     if inner == {
         .A -> "A"
         .B(_) -> "B"
     }
 }
 
-fn describe(op: Op) -> String {
+describe: fn(op: Op) -> String {
     if op == {
         .Wrap(inner) -> "wrap {inner_name(inner)}"
         .Sized(size) -> "sized {size.n}"
@@ -50,6 +50,6 @@ fn describe(op: Op) -> String {
     }
 }
 
-fn run() {
+run: fn() {
     loop value in ROWS -> print("{value.name}: {describe(value.op)}")
 }

@@ -1,4 +1,4 @@
-package {
+package: {
     name: "serde_json_duplicate_keys"
     version: "0.1.0"
     authority: { allow: [Exec, FS, FS.Read, IO, Mem.Alloc, Time.Wait] }
@@ -9,22 +9,22 @@ package {
 // `parse_allow_duplicates` is the named opt-in that keeps the later value, and
 // `reader_allow_duplicates` reports every occurrence as its own events.
 use {
-    encoding :: core.encoding
-    json :: core.encoding.json
-    files :: core.files
-    testing :: core.testing
+    encoding: core.encoding
+    json: core.encoding.json
+    files: core.files
+    testing: core.testing
 }
 
-struct CountRecord {
+CountRecord: struct {
     count: Int
 }
 
-fn kind_name(kind: encoding.EncodingErrorKind) -> String {
+kind_name: fn(kind: encoding.EncodingErrorKind) -> String {
     if kind == encoding.EncodingErrorKind.Syntax -> return "Syntax"
     "other"
 }
 
-fn event_name(event: DataEvent) -> String {
+event_name: fn(event: DataEvent) -> String {
     if event == {
         .ObjectStart -> return "object start"
         .ObjectEnd -> return "object end"
@@ -35,39 +35,39 @@ fn event_name(event: DataEvent) -> String {
     "other"
 }
 
-fn strict_parse(text: String) {
-    tree :: json.parse(text) ?? {
-        line :: err.line ?? 0
-        column :: err.column ?? 0
+strict_parse: fn(text: String) {
+    tree: json.parse(text) ?? {
+        line: err.line ?? 0
+        column: err.column ?? 0
         print("parse: {kind_name(err.kind)} at `{err.path}` line {line} column {column}: {err.reason}")
         return
     }
     print("parse: unexpectedly accepted {json.canonical(tree) ?? panic("canonical")}")
 }
 
-fn strict_decode(text: String) {
-    record :: json.decode<CountRecord>(text) ?? {
+strict_decode: fn(text: String) {
+    record: json.decode<CountRecord>(text) ?? {
         print("decode<CountRecord>: rejected")
         return
     }
     print("decode<CountRecord>: unexpectedly accepted {record.count}")
 }
 
-fn strict_reader(path: Path) (EncodingError | IOError)! {
-    input :: files.open(path) ?? return Err(err)
+strict_reader: fn(path: Path) (EncodingError | IOError)! {
+    input: files.open(path) ?? return Err(err)
     events := json.reader(^input) ?? return Err(err)
     loop {
         if &events.next() == {
             .Ok(next) -> {
-                event :: next ?? {
+                event: next ?? {
                     print("reader: unexpectedly reached the end")
                     return Ok(())
                 }
                 print("reader: {event_name(event)}")
             }
             .Err(err) -> {
-                line :: err.line ?? 0
-                column :: err.column ?? 0
+                line: err.line ?? 0
+                column: err.column ?? 0
                 print("reader: {kind_name(err.kind)} at `{err.path}` line {line} column {column}: {err.reason}")
                 return Ok(())
             }
@@ -75,25 +75,25 @@ fn strict_reader(path: Path) (EncodingError | IOError)! {
     }
 }
 
-fn allow_reader(path: Path) (EncodingError | IOError)! {
-    input :: files.open(path) ?? return Err(err)
+allow_reader: fn(path: Path) (EncodingError | IOError)! {
+    input: files.open(path) ?? return Err(err)
     events := json.reader_allow_duplicates(^input) ?? return Err(err)
     loop {
         // A failed read propagates; `??` handles the end of the stream.
-        event :: &events.next() ?? break
+        event: &events.next() ?? break
         print("allow reader: {event_name(event)}")
     }
 }
 
-fn run() (EncodingError | IOError)! {
-    text :: "{{\"count\":2,\"count\":3}}"
+run: fn() (EncodingError | IOError)! {
+    text: "{{\"count\":2,\"count\":3}}"
     strict_parse(text)
     strict_decode(text)
     // `testing.temp_dir` is the shared-Prelude scratch mechanism on every tier.
-    path :: Path.from(testing.temp_dir("json-duplicate-keys")).join("count.json")
+    path: Path.from(testing.temp_dir("json-duplicate-keys")).join("count.json")
     files.write(path.to_string(), text) ?? return
     strict_reader(path) ?? return
-    later :: json.parse_allow_duplicates(text) ?? panic("allowed parse")
+    later: json.parse_allow_duplicates(text) ?? panic("allowed parse")
     print("allow parse: {json.canonical(later) ?? panic("canonical")}")
     allow_reader(path) ?? return
     files.remove(path) ?? return

@@ -182,7 +182,7 @@ Top-level fields are:
 A compact graph payload contains the fields clients must preserve:
 
 ```json
-{"protocol":"jet.canvas.graph","schema_version":1,"source_id":"main.jet","revision":"sha256-...","fmt_fingerprint":"sha256-...","source_text":"fn square(n: Int) -> Int { n * n }\n","graphs":[],"diagnostics":[],"facts":{"semindex_schema_version":20,"blueprint":{},"handles":[]},"rails":[]}
+{"protocol":"jet.canvas.graph","schema_version":1,"source_id":"main.jet","revision":"sha256-...","fmt_fingerprint":"sha256-...","source_text":"square: fn(n: Int) -> Int { n * n }\n","graphs":[],"diagnostics":[],"facts":{"semindex_schema_version":20,"blueprint":{},"handles":[]},"rails":[]}
 ```
 
 Each graph carries a stable `graph_id`, title, `source_span`, nodes, pins,
@@ -342,7 +342,7 @@ The `jet.canvas.edit` operation set is:
 | `noop` | Reprojects without changing source. |
 | `rename_binding` | `from`, `to`; renames a binding through source edits. |
 | `rename_function` | Renames a function and project references where selected by the client. |
-| `create_function` | Creates a function through the checked source transaction. Use the current `fn name(params) -> Type { ... }` form. |
+| `create_function` | Creates a function through the checked source transaction. Use the current `name: fn(params) -> Type { ... }` form. |
 | `edit_function_signature` | Replaces a function signature after formatting and front-end checks. |
 | `edit_inline_expr` | `inline_expr_id`, `new_expr`; replaces an inline expression after validation. |
 | `promote_to_binding` | `inline_expr_id`, `name`; inserts an ordinary binding and replaces the inline expression. |
@@ -391,7 +391,7 @@ semantic edge in a graph asset. Control-wire endpoint dragging sends
 Successful and failure shapes are:
 
 ```json
-{"protocol":"jet.canvas.edit","schema_version":1,"changed":true,"revision":"sha256-...","source_text":"fn square(n: Int) -> Int { n * n }\n"}
+{"protocol":"jet.canvas.edit","schema_version":1,"changed":true,"revision":"sha256-...","source_text":"square: fn(n: Int) -> Int { n * n }\n"}
 ```
 
 ```json
@@ -444,7 +444,7 @@ wire runs the checked transaction; a `method_only` row carries its typed
 An action descriptor and preview look like:
 
 ```json
-{"protocol":"jet.canvas.query","schema_version":1,"ok":true,"op":"actions","revision":"sha256-...","results":[],"impact":null,"diff":null,"actions_schema_version":1,"project_functions":[{"name":"square","signature":"fn square(n: Int) -> Int","callee":"square","insert_callee":"square","module_path":"main.jet","pure":true,"ret":"Int","pins":[{"name":"n","direction":"input","type":"Int"}],"default_args":["1"],"available":true,"insert_op":"insert_call"}],"actions":[{"action_id":"canvas.action:main.jet:square","kind":"canvas.action","title":"square","callee":"square","insert_callee":"square","engine":"checked+jit","authority":["canvas.source_edit:package"],"package_id":"app","version":"0.1.0","touched_files":["main.jet"],"writes":"source_transaction_only"}]}
+{"protocol":"jet.canvas.query","schema_version":1,"ok":true,"op":"actions","revision":"sha256-...","results":[],"impact":null,"diff":null,"actions_schema_version":1,"project_functions":[{"name":"square","signature":"square: fn(n: Int) -> Int","callee":"square","insert_callee":"square","module_path":"main.jet","pure":true,"ret":"Int","pins":[{"name":"n","direction":"input","type":"Int"}],"default_args":["1"],"available":true,"insert_op":"insert_call"}],"actions":[{"action_id":"canvas.action:main.jet:square","kind":"canvas.action","title":"square","callee":"square","insert_callee":"square","engine":"checked+jit","authority":["canvas.source_edit:package"],"package_id":"app","version":"0.1.0","touched_files":["main.jet"],"writes":"source_transaction_only"}]}
 ```
 
 ```json
@@ -477,7 +477,7 @@ path. The endpoint does not accept arbitrary argv, and a long-running `dev`
 command is not advertised as a Canvas action.
 
 ```json
-{"schema_version":1,"action_id":"canvas.command:check","revision":"sha256-...","source_text":"fn run() -> Int {\n    missing\n}\n"}
+{"schema_version":1,"action_id":"canvas.command:check","revision":"sha256-...","source_text":"run: fn() -> Int {\n    missing\n}\n"}
 ```
 
 A receipt records the checked command and its result:
@@ -499,7 +499,7 @@ Every function graph carries source-backed metadata. The signature spelling in
 metadata follows current Jet syntax:
 
 ```json
-{"function":{"name":"on_start","signature":"fn on_start(limit: Int{<default@31-32>}) -> Int","visibility":"public","docs":"Starts the scene.","pure":false,"unsafe":false,"returns":"Int","params":[{"name":"limit","type":"Int","default":true,"default_source":"1"}],"meta":{"category":"Movement","tunable":true},"edit_affordances":["rename_function","edit_function_signature","create_function","source_jump"]}}
+{"function":{"name":"on_start","signature":"on_start: fn(limit: Int{<default@31-32>}) -> Int","visibility":"public","docs":"Starts the scene.","pure":false,"unsafe":false,"returns":"Int","params":[{"name":"limit","type":"Int","default":true,"default_source":"1"}],"meta":{"category":"Movement","tunable":true},"edit_affordances":["rename_function","edit_function_signature","create_function","source_jump"]}}
 ```
 
 `#Meta(category: "...", tunable)` projects source-backed `meta` facts on
@@ -517,7 +517,7 @@ Function edits are ordinary source transactions:
 
 ```json
 [
-  {"schema_version":1,"op":"edit_function_signature","revision":"sha256-...","graph_id":"fn:main.jet::on_start@25-33","signature":"fn on_start(limit: Int{1}) -> Int"},
+  {"schema_version":1,"op":"edit_function_signature","revision":"sha256-...","graph_id":"fn:main.jet::on_start@25-33","signature":"on_start: fn(limit: Int{1}) -> Int"},
   {"schema_version":1,"op":"rename_function","revision":"sha256-...","from":"on_start","to":"on_begin"},
   {"schema_version":1,"op":"create_function","revision":"sha256-...","name":"helper","params":"value: Int","ret_type":"Int"}
 ]

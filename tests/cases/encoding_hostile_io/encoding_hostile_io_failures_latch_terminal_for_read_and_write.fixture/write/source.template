@@ -1,11 +1,11 @@
 
 use {
-    encoding :: core.encoding
-    cbor :: core.encoding.cbor
-    files :: core.files
+    encoding: core.encoding
+    cbor: core.encoding.cbor
+    files: core.files
 }
 
-fn writer_io(writer: &cbor.CBORWriter) -[IO]> Bool {
+writer_io: fn(writer: &cbor.CBORWriter) -[IO]> Bool {
     if &writer.flush() == {
         .Err(error) -> return error.kind == encoding.EncodingErrorKind.IO
         .Ok(_) -> return false
@@ -13,8 +13,8 @@ fn writer_io(writer: &cbor.CBORWriter) -[IO]> Bool {
     return false
 }
 
-fn run() {
-    full_output :: files.create("/dev/full") ?? panic("full open")
+run: fn() {
+    full_output: files.create("/dev/full") ?? panic("full open")
     full_writer := cbor.writer(^full_output) ?? panic("full writer")
     if &full_writer.write(encoding.DataEvent.Null) == {
         .Err(first) -> {

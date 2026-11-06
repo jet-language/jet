@@ -2,7 +2,7 @@
 // small and unmarked. `inline: auto` inlines `bump` only, `always_marked`
 // `mix` only, and `off` neither; the output is the same under every value.
 #Inline(Always)
-fn mix(a: Int, b: Int) -> Int {
+mix: fn(a: Int, b: Int) -> Int {
     x := (a * 31 + b) % 1000003
     y := (x * 17 + a % 7) % 1000003
     z := (y * 13 + x % 11) % 1000003
@@ -12,11 +12,11 @@ fn mix(a: Int, b: Int) -> Int {
     (u * 5 + v % 19) % 1000003
 }
 
-fn bump(a: Int) -> Int {
+bump: fn(a: Int) -> Int {
     (a * 3 + 1) % 1000003
 }
 
-fn stage_one(t: Int) -> Int {
+stage_one: fn(t: Int) -> Int {
     s := mix(t, 1)
     s = bump(s)
     s = mix(s, 2)
@@ -25,7 +25,7 @@ fn stage_one(t: Int) -> Int {
     bump(s)
 }
 
-fn stage_two(t: Int) -> Int {
+stage_two: fn(t: Int) -> Int {
     s := mix(t, 4)
     s = bump(s)
     s = mix(s, 5)
@@ -34,7 +34,7 @@ fn stage_two(t: Int) -> Int {
     bump(s)
 }
 
-fn stage_three(t: Int) -> Int {
+stage_three: fn(t: Int) -> Int {
     s := mix(t, 7)
     s = bump(s)
     s = mix(s, 8)
@@ -43,7 +43,7 @@ fn stage_three(t: Int) -> Int {
     bump(s)
 }
 
-fn run() {
+run: fn() {
     t := 1
     loop round in 0..<3 -> t = stage_three(stage_two(stage_one(t + round)))
     print("mixed: {t}")

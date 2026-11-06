@@ -3,13 +3,13 @@
 use jet_pkg_model.[ProviderFacts, pkg_sha256_hex]
 
 // The fail-closed scale budget of the generation resolver.
-ENVMODEL_MAX_RESOLVER_NODES :: 100000
-ENVMODEL_RESOLVER_BUDGET_NAME :: "__jet_resolver_budget__:"
+ENVMODEL_MAX_RESOLVER_NODES: 100000
+ENVMODEL_RESOLVER_BUDGET_NAME: "__jet_resolver_budget__:"
 
 // One source-backed package-generation declaration. This is deliberately
 // separate from `PresetSpec`, which is the environment-shell preset surface
 // and may select host/user variables.
-struct PackageProfileSpec {
+PackageProfileSpec: struct {
     name: String{""}
     extends: [String]{[String]{}}
     // Canonical package refs as written by the shared package-sugar parser.
@@ -23,14 +23,14 @@ struct PackageProfileSpec {
 
 // One package ref after generation composition. `declared_by` keeps source
 // generation identity when equal package facts are de-duplicated.
-struct PackageProfilePackage {
+PackageProfilePackage: struct {
     raw: String{""}
     declared_by: [String]{[String]{}}
 }
 
 // One resolved generation view. It is still source-backed; generation
 // publication and activation consume this exact object later.
-struct ResolvedPackageProfile {
+ResolvedPackageProfile: struct {
     name: String{""}
     selected_profiles: [String]{[String]{}}
     applied: [String]{[String]{}}
@@ -42,7 +42,7 @@ struct ResolvedPackageProfile {
 // One resolved package fact with both the source spelling and the
 // realization identity that a lock, explain view, or generation writer must
 // preserve.
-struct PackageProfileFact {
+PackageProfileFact: struct {
     raw: String
     target: String
     source: String
@@ -59,7 +59,7 @@ struct PackageProfileFact {
 // The read-only, source-backed generation plan. Realization and activation
 // may consume this plan later; they must not reconstruct package identity
 // from the display string.
-struct PackageProfilePlan {
+PackageProfilePlan: struct {
     name: String{""}
     selected_profiles: [String]{[String]{}}
     applied: [String]{[String]{}}
@@ -71,7 +71,7 @@ struct PackageProfilePlan {
 
     // Seal the plan: its canonical length-prefixed identity and the per-ref
     // provider facts index.
-    fn finalize(^self) -> PackageProfilePlan Never! {
+    finalize: fn(^self) -> PackageProfilePlan Never! {
         updated := self
         lines := [String]{"jet-package-profile-plan-v1\n"}
         &lines.push(envmodel_fingerprint_line("name", updated.name))
@@ -100,17 +100,17 @@ struct PackageProfilePlan {
     }
 }
 
-fn envmodel_fingerprint_line(key: String, value: String) -> String Never! {
+envmodel_fingerprint_line: fn(key: String, value: String) -> String Never! {
     "{key}\t{value.bytes().len()}\t{value}\n"
 }
 
 #Error
-enum PackageProfileError {
+PackageProfileError: enum {
     Missing(String)
     Cycle([String])
     Conflict(String)
 
-    fn message(self) -> String Never! {
+    message: fn(self) -> String Never! {
         if self == {
             .Missing(name) -> "package generation '{name}' does not exist"
             .Cycle(names) -> "package generation inheritance cycle: {names.join(" -> ")}"
@@ -122,20 +122,20 @@ enum PackageProfileError {
     }
 }
 
-fn envmodel_resolver_budget_error() -> PackageProfileError Never! {
+envmodel_resolver_budget_error: fn() -> PackageProfileError Never! {
     PackageProfileError.Conflict("{ENVMODEL_RESOLVER_BUDGET_NAME}{ENVMODEL_MAX_RESOLVER_NODES}")
 }
 
 // Resolver visit state: absent, entered (on the stack), or finished.
-ENVMODEL_PROFILE_ENTERED :: 1
-ENVMODEL_PROFILE_FINISHED :: 2
+ENVMODEL_PROFILE_ENTERED: 1
+ENVMODEL_PROFILE_FINISHED: 2
 
-struct PackageProfileSet {
+PackageProfileSet: struct {
     profiles: [String: PackageProfileSpec]{[String: PackageProfileSpec]{}}
 
     // An equal re-declaration merges its source modules; different facts
     // under one name conflict.
-    fn insert_checked(&self, profile: PackageProfileSpec) PackageProfileError! {
+    insert_checked: fn(&self, profile: PackageProfileSpec) PackageProfileError! {
         if self.profiles.get(profile.name) == .Val(existing) {
             if existing.extends != profile.extends || existing.packages != profile.packages || existing.collisions != profile.collisions {
                 return Err(PackageProfileError.Conflict(profile.name))
@@ -151,13 +151,13 @@ struct PackageProfileSet {
         self.profiles[profile.name] = profile
     }
 
-    fn resolve(self, name: String) -> ResolvedPackageProfile PackageProfileError! {
+    resolve: fn(self, name: String) -> ResolvedPackageProfile PackageProfileError! {
         self.resolve_many([String]{name})
     }
 
     // Parent-first, iterative depth-first composition. Iteration keeps the
     // full resolver budget within a bounded native stack.
-    fn resolve_many(self, names: [String]) -> ResolvedPackageProfile PackageProfileError! {
+    resolve_many: fn(self, names: [String]) -> ResolvedPackageProfile PackageProfileError! {
         selected := [String]{}
         selected_seen := [String: Bool]{}
         loop name in names {
@@ -180,16 +180,16 @@ struct PackageProfileSet {
             &frame_names.push(name)
             &frame_next.push(0)
             loop frame_names.len() > 0 {
-                top :: frame_names.len() - 1
-                current :: frame_names[top].copy()
+                top: frame_names.len() - 1
+                current: frame_names[top].copy()
                 if state.get(current) == None {
                     if self.profiles.get(current) == None -> return Err(PackageProfileError.Missing(current))
                     if state.len() >= ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
                     state[current] = ENVMODEL_PROFILE_ENTERED
                     &stack.push(current)
                 }
-                profile :: self.profiles[current]
-                parent_index :: frame_next[top].copy()
+                profile: self.profiles[current]
+                parent_index: frame_next[top].copy()
                 frame_next[top] = parent_index + 1
                 if parent_index >= profile.extends.len() {
                     _ := &frame_names.pop()
@@ -205,25 +205,25 @@ struct PackageProfileSet {
                         }
                     }
                     loop raw in profile.packages {
-                        package_index :: if package_indices.get(raw) == {
+                        package_index: if package_indices.get(raw) == {
                             .Val(index) -> index
                             .None -> {
                                 if resolved.packages.len() >= ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
-                                index :: resolved.packages.len()
+                                index: resolved.packages.len()
                                 package_indices[raw] = index
                                 &resolved.packages.push(PackageProfilePackage{raw: raw})
                                 index
                             }
                         }
                         // Length-prefixed so distinct (raw, profile) pairs never share a key.
-                        owner_key :: "{raw.bytes().len()}:{raw}{current}"
+                        owner_key: "{raw.bytes().len()}:{raw}{current}"
                         if declared_by_seen.get(owner_key) == None {
                             declared_by_seen[owner_key] = true
                             &resolved.packages[package_index].declared_by.push(current)
                         }
                     }
                     loop path in envmodel_sorted_keys(profile.collisions) {
-                        provider :: profile.collisions[path]
+                        provider: profile.collisions[path]
                         if resolved.collisions.get(path) == {
                             .Val(existing) -> {
                                 if existing != provider -> return Err(PackageProfileError.Conflict("{current}.collisions.{path}"))
@@ -236,8 +236,8 @@ struct PackageProfileSet {
                     }
                     next
                 }
-                parent :: profile.extends[parent_index]
-                parent_state :: state.get(parent) ?? 0
+                parent: profile.extends[parent_index]
+                parent_state: state.get(parent) ?? 0
                 if parent_state == {
                     ENVMODEL_PROFILE_ENTERED -> {
                         cycle := [String]{}

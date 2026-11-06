@@ -2,37 +2,37 @@
 // deferred close runs on every exit edge: falling off the end of the body, an
 // early `return`, a `break` out of a loop body, an explicit failure return, and
 // a failure propagated from a plain fallible call.
-struct Resource {
+Resource: struct {
     name: String
 }
 
 impl Resource.Close {
-    fn close(^self) { print("close {self.name}") }
+    close: fn(^self) { print("close {self.name}") }
 }
 
 #Error
-enum Fail {
+Fail: enum {
     Bad
 }
 
-fn plain() {
-    resource :: Resource{name: "plain"}
+plain: fn() {
+    resource: Resource{name: "plain"}
     defer close(^resource)
     print("plain body")
 }
 
-fn early(stop: Bool) -> Int {
-    resource :: Resource{name: "early"}
+early: fn(stop: Bool) -> Int {
+    resource: Resource{name: "early"}
     defer close(^resource)
     if stop -> return 1
     print("early body")
     2
 }
 
-fn loop_break() {
+loop_break: fn() {
     i := 0
     loop i < 3 {
-        resource :: Resource{name: "iteration {i}"}
+        resource: Resource{name: "iteration {i}"}
         defer close(^resource)
         if i == 1 -> break
         print("loop body {i}")
@@ -41,29 +41,29 @@ fn loop_break() {
     print("after loop")
 }
 
-fn failing(fail: Bool) -> Int Fail! {
-    resource :: Resource{name: "failing"}
+failing: fn(fail: Bool) -> Int Fail! {
+    resource: Resource{name: "failing"}
     defer close(^resource)
     if fail -> return Err(Fail.Bad)
     Ok(3)
 }
 
-fn propagate() -> Int Fail! {
-    resource :: Resource{name: "propagate"}
+propagate: fn() -> Int Fail! {
+    resource: Resource{name: "propagate"}
     defer close(^resource)
-    value :: failing(true)
+    value: failing(true)
     Ok(value)
 }
 
-fn run() {
+run: fn() {
     plain()
     print("early {early(true)}")
     print("early {early(false)}")
     loop_break()
-    succeeded :: failing(false) ?? -1
+    succeeded: failing(false) ?? -1
     print("failing {succeeded}")
-    failed :: failing(true) ?? -1
+    failed: failing(true) ?? -1
     print("failing {failed}")
-    propagated :: propagate() ?? -1
+    propagated: propagate() ?? -1
     print("propagated {propagated}")
 }

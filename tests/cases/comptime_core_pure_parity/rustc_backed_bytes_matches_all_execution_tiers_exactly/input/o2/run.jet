@@ -1,6 +1,6 @@
-fn bytes_view() -> String {
+bytes_view: fn() -> String {
     buffer := Bytes.new()
-    empty_before :: buffer.is_empty()
+    empty_before: buffer.is_empty()
     // Writing calls mark the written place (D-CAP-RECEIVER1=D,
     // Docs/spec/syntax-decisions.md:2878-2890; E0224 without the mark).
     &buffer.write_u8(18)
@@ -11,16 +11,16 @@ fn bytes_view() -> String {
     &buffer.write_u64_le(72623859790382856)
     &buffer.write_u64_be(1230066625199609624)
     &buffer.write_bytes([9, 10])
-    length :: buffer.len()
-    bytes :: buffer.to_bytes()
+    length: buffer.len()
+    bytes: buffer.to_bytes()
     &buffer.clear()
     from := Bytes.from([255, 0])
     return "{empty_before}|{length}|{bytes}|{buffer.is_empty()}|{buffer.len()}|{from.to_bytes()}|{from.len()}"
 }
-EXPECTED :: comptime { bytes_view() }
+EXPECTED: comptime { bytes_view() }
 
-fn run() {
-    actual :: bytes_view()
+run: fn() {
+    actual: bytes_view()
     print("{EXPECTED}")
     print("{actual}")
 }

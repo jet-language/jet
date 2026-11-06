@@ -1,14 +1,14 @@
 
 use {
-    encoding :: core.encoding
-    fmt :: core.encoding.cbor
-    files :: core.files
+    encoding: core.encoding
+    fmt: core.encoding.cbor
+    files: core.files
 }
 
 
-fn run() {
+run: fn() {
     path := "{work}/packet.cbor"
-    output :: files.create(path) ?? panic("create")
+    output: files.create(path) ?? panic("create")
     writer := fmt.writer(^output) ?? panic("writer")
     &writer.write(encoding.DataEvent.ObjectStart) ?? panic("start")
     &writer.write(encoding.DataEvent.Key("aa")) ?? panic("key aa")
@@ -21,9 +21,9 @@ fn run() {
     &writer.write(encoding.DataEvent.Float(-0.0)) ?? panic("float z")
     &writer.write(encoding.DataEvent.ObjectEnd) ?? panic("end")
     &writer.finish() ?? panic("finish")
-    input :: files.open(path) ?? panic("open")
+    input: files.open(path) ?? panic("open")
     reader := fmt.reader(^input) ?? panic("reader")
-    first :: &reader.next()
+    first: &reader.next()
     if first == {
         .Val(_) -> print(true)
         .None -> print(false)

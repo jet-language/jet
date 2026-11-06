@@ -8,26 +8,26 @@
 // Empty collections return `None` (or an empty collection) without advancing
 // the stream.
 use {
-    math :: core.math
-    core :: core
+    math: core.math
+    core: core
 }
-fn nonfinite(value: Float) -> Bool Never! {
+nonfinite: fn(value: Float) -> Bool Never! {
     if math.is_finite(value) -> return false
     true
 }
 
 
-C_MASK32 :: 4294967295
-C_BASE32 :: 4294967296
-C_MASK63 :: 9223372036854775807
-C_BASE63 :: 9223372036854775808
-C_BASE53_FLOAT :: 9007199254740992.0
+C_MASK32: 4294967295
+C_BASE32: 4294967296
+C_MASK63: 9223372036854775807
+C_BASE63: 9223372036854775808
+C_BASE53_FLOAT: 9007199254740992.0
 
 
 // Caller-owned capabilities use SplitMix64, not the ambient xorshift stream.
 // Keep state transitions in explicitly wrapping sized words. Jet's exact Int
 // holds the bounded draw's full 64-by-64 product without a new scalar carrier.
-fn seeded_next(state: &U64) -> U64 Never! {
+seeded_next: fn(state: &U64) -> U64 Never! {
     state = state.wrapping_add(U64{11400714819323198485})
     word := U64{state}
     word = (word.bit_xor((word >> 30))).wrapping_mul(U64{13787848793156543929})
@@ -38,93 +38,93 @@ fn seeded_next(state: &U64) -> U64 Never! {
 // A zero bound denotes the full 2^64 domain. Lemire rejection retains the
 // exact native stream: a modulo-only draw would bias the result and consume
 // a different number of words for large bounds.
-fn seeded_bounded(state: &U64, bound: U64) -> U64 Never! {
+seeded_bounded: fn(state: &U64, bound: U64) -> U64 Never! {
     if bound == (U64{0}) -> return seeded_next(&state)
-    threshold :: U64{0}.wrapping_sub(bound) %% bound
+    threshold: U64{0}.wrapping_sub(bound) %% bound
     loop {
-        product :: Int{seeded_next(&state)} * Int{bound}
-        low :: U64{product.bit_and(18446744073709551615)}
+        product: Int{seeded_next(&state)} * Int{bound}
+        low: U64{product.bit_and(18446744073709551615)}
         if low >= threshold -> return U64{product >> 64}
     }
 }
 
 // The public capability checks its endpoints at the signed-64 boundary.
 // This kernel preserves that domain, including its wrapped inclusive width.
-fn __seeded_int(state: &U64, low: Int, high: Int) -> Int? Never! {
+__seeded_int: fn(state: &U64, low: Int, high: Int) -> Int? Never! {
     if high < low -> return None
     if high == low -> return Val(low)
-    width :: U64{(high - low + 1).bit_and(18446744073709551615)}
-    offset :: Int{seeded_bounded(&state, width)}
+    width: U64{(high - low + 1).bit_and(18446744073709551615)}
+    offset: Int{seeded_bounded(&state, width)}
     value := (low + offset).bit_and(18446744073709551615)
     if value > C_MASK63 -> value = value - 18446744073709551616
     Val(value)
 }
 
-fn seeded_unit(state: &U64) -> Float Never! {
+seeded_unit: fn(state: &U64) -> Float Never! {
     Float{seeded_next(&state) >> 11} / C_BASE53_FLOAT
 }
 
 /// Deterministic caller-owned capability. Drawing edits this owner's one word;
 /// an explicit clone duplicates its state, never a process-global stream.
-struct RNG {
+RNG: struct {
     state: U64
 
-    fn int(&self, low: Int, high: Int) -> Int Never! {
-        lower :: Int{I64{low}}
-        upper :: Int{I64{high}}
+    int: fn(&self, low: Int, high: Int) -> Int Never! {
+        lower: Int{I64{low}}
+        upper: Int{I64{high}}
         if upper < lower -> core.math.__numeric_stop("RNG.int requires low <= high")
         __seeded_int(&self.state, lower, upper) ?? core.math.__numeric_stop("RNG.int requires low <= high")
     }
 
-    fn float(&self) -> Float Never! { seeded_unit(&self.state) }
+    float: fn(&self) -> Float Never! { seeded_unit(&self.state) }
 
-    fn float_range(&self, low: Float, high: Float) -> Float Never! {
+    float_range: fn(&self, low: Float, high: Float) -> Float Never! {
         if !(high > low) -> return low
         low + (high - low) * &self.float()
     }
 
-    fn bool(&self) -> Bool Never! { (seeded_next(&self.state).bit_and(U64{1})) == U64{1} }
+    bool: fn(&self) -> Bool Never! { (seeded_next(&self.state).bit_and(U64{1})) == U64{1} }
 
     // Public bool(p)'s existing arity-1 row targets this reserved
     // method; the zero-argument coin draw uses bool(), not a default p=0.5.
-    fn __bool_p(&self, probability: Float) -> Bool Never! {
+    __bool_p: fn(&self, probability: Float) -> Bool Never! {
         if probability <= 0.0 || math.is_nan(probability) -> return false
         if probability >= 1.0 -> return true
         &self.float() < probability
     }
 
-    fn float_open(&self) -> Float Never! {
+    float_open: fn(&self) -> Float Never! {
         math.max_float(&self.float(), 2.2250738585072014e-308)
     }
 
-    fn normal(&self, mean: Float, stddev: Float) -> Float Never! {
-        first :: &self.float_open()
-        second :: &self.float()
-        sample :: math.sqrt((Float{-2.0}) * math.ln(first)) * math.cos(math.TAU * second)
+    normal: fn(&self, mean: Float, stddev: Float) -> Float Never! {
+        first: &self.float_open()
+        second: &self.float()
+        sample: math.sqrt((Float{-2.0}) * math.ln(first)) * math.cos(math.TAU * second)
         mean + sample * math.max_float(stddev, 0.0)
     }
 
-    fn exponential(&self, lambda: Float) -> Float Never! {
+    exponential: fn(&self, lambda: Float) -> Float Never! {
         if lambda <= 0.0 || math.is_nan(lambda) -> return 0.0
-        sample :: &self.float_open()
+        sample: &self.float_open()
         return -math.ln(sample) / lambda
     }
 
-    fn bytes(&self, count: Int) -> [U8] Never! {
-        length :: Int{I64{count}}
+    bytes: fn(&self, count: Int) -> [U8] Never! {
+        length: Int{I64{count}}
         out := [U8]{}
         loop _ in 0..<length -> &out.push(U8{seeded_next(&self.state).bit_and(U64{255})})
         out
     }
 
-    fn split(&self) -> RNG Never! { RNG{state: seeded_next(&self.state)} }
+    split: fn(&self) -> RNG Never! { RNG{state: seeded_next(&self.state)} }
 
-    fn pick<T>(&self, items: [T]) -> T? Never! {
+    pick: fn<T>(&self, items: [T]) -> T? Never! {
         if items.len() == 0 -> return None
         Val(items[&self.int(0, items.len() - 1)].copy())
     }
 
-    fn weighted_pick<T>(&self, items: [T], weights: [Float]) -> T? Never! {
+    weighted_pick: fn<T>(&self, items: [T], weights: [Float]) -> T? Never! {
         if items.len() == 0 || items.len() != weights.len() -> return None
         total := Float{0.0}
         loop weight in weights {
@@ -141,14 +141,14 @@ struct RNG {
         Val(items[items.len() - 1].copy())
     }
 
-    fn sample<T>(&self, items: [T], count: Int) -> [T] Never! {
+    sample: fn<T>(&self, items: [T], count: Int) -> [T] Never! {
         want := Int{I64{count}}
         if want < 0 -> want = 0
         if want > items.len() -> want = items.len()
         if want == 0 -> return [T]{}
         pool := items.copy()
         loop index in 0..<want {
-            picked :: &self.int(index, pool.len() - 1)
+            picked: &self.int(index, pool.len() - 1)
             &pool.__swap(index, picked)
         }
         // Clone excludes Close owners; discard excess values without a second
@@ -157,24 +157,24 @@ struct RNG {
         pool
     }
 
-    fn shuffle<T>(&self, items: &[T]) Never! {
+    shuffle: fn<T>(&self, items: &[T]) Never! {
         index := items.len() - 1
         loop index > 0 {
-            picked :: &self.int(0, index)
+            picked: &self.int(0, index)
             &items.__swap(index, picked)
             index -= 1
         }
     }
 
     impl Display {
-        fn display(self) -> String { "RNG {{ .. }}" }
+        display: fn(self) -> String { "RNG {{ .. }}" }
     }
 }
 // The world owns synchronization and journaling. Jet owns the transition;
 // compare/exchange keeps concurrent draws on that same serialized stream.
-fn __word() -[Rand]> Int Never! {
+__word: fn() -[Rand]> Int Never! {
     loop {
-        previous :: core.math.random.__rng_state()
+        previous: core.math.random.__rng_state()
         word := Int{previous}
         word = (word.bit_xor((word << 7))).bit_and(18446744073709551615)
         word = word.bit_xor((word >> 9))
@@ -183,40 +183,40 @@ fn __word() -[Rand]> Int Never! {
     }
 }
 
-fn next_bits63() -[Rand]> Int Never! { __word() >> 1 }
+next_bits63: fn() -[Rand]> Int Never! { __word() >> 1 }
 
 // A 53-bit draw is exactly representable, so the unit float needs no lossy
 // Int-to-Float crossing.
-fn unit() -[Rand]> Float Never! {
+unit: fn() -[Rand]> Float Never! {
     Float{__word() >> 11} / C_BASE53_FLOAT
 }
 
-fn unit_open() -[Rand]> Float {
-    u :: unit()
+unit_open: fn() -[Rand]> Float {
+    u: unit()
     if u <= (Float{0.0}) -> return (Float{1.0}) / C_BASE53_FLOAT
     u
 }
 
-fn full_word64() -[Rand]> Int Never! {
-    hi :: (next_bits63()).bit_and(C_MASK32)
-    lo :: (next_bits63()).bit_and(C_MASK32)
+full_word64: fn() -[Rand]> Int Never! {
+    hi: (next_bits63()).bit_and(C_MASK32)
+    lo: (next_bits63()).bit_and(C_MASK32)
     (hi * C_BASE32) + lo
 }
 
 // Unbiased offset in 0..<span. Rejection over base-2^63 digits covers every
 // representable range without modulo bias.
-fn bounded(span: Int) -[Rand]> Int Never! {
+bounded: fn(span: Int) -[Rand]> Int Never! {
     if span <= 1 -> return 0
     if span <= C_BASE63 {
-        limit :: C_BASE63 - (C_BASE63 %% span)
+        limit: C_BASE63 - (C_BASE63 %% span)
         loop {
-            draw :: next_bits63()
+            draw: next_bits63()
             if draw < limit -> return draw %% span
         }
     }
     space := C_BASE63
     loop space < span -> space = space * C_BASE63
-    limit :: space - (space %% span)
+    limit: space - (space %% span)
     loop {
         draw := 0
         factor := 1
@@ -227,8 +227,8 @@ fn bounded(span: Int) -[Rand]> Int Never! {
         if draw < limit -> return draw %% span
     }
 }
-fn normalize_angle(angle: Float) -> Float Never! {
-    tau :: math.TAU
+normalize_angle: fn(angle: Float) -> Float Never! {
+    tau: math.TAU
     reduced := math.fmod(angle, tau)
     if reduced < (Float{0.0}) -> return reduced + tau
     reduced
@@ -236,21 +236,21 @@ fn normalize_angle(angle: Float) -> Float Never! {
 
 
 /// Install `value` as the deterministic stream seed.
-fn seed(value: Int) Never! -[Rand]> {
+seed: fn(value: Int) Never! -[Rand]> {
     core.math.random.seed(value)
 }
 
 /// Construct a deterministic, caller-owned RNG capability.
-fn rng(seed_value: Int) -> RNG Never! {
+rng: fn(seed_value: Int) -> RNG Never! {
     RNG{state: U64{Int{I64{seed_value}}.bit_and(18446744073709551615)}}
 }
 
 /// Construct a deterministic child capability from `seed_value` while mixing
 /// one word from the ambient stream. The explicit effect documents that mix.
-fn split(seed_value: Int) -[Rand]> RNG Never! {
-    word :: __word()
-    rotated :: ((word << 17).bit_or((word >> 47))).bit_and(18446744073709551615)
-    mixed :: (seed_value.bit_and(18446744073709551615)).bit_xor(rotated)
+split: fn(seed_value: Int) -[Rand]> RNG Never! {
+    word: __word()
+    rotated: ((word << 17).bit_or((word >> 47))).bit_and(18446744073709551615)
+    mixed: (seed_value.bit_and(18446744073709551615)).bit_xor(rotated)
     signed := mixed
     if signed > C_MASK63 -> signed = signed - 18446744073709551616
     rng(signed)
@@ -258,9 +258,9 @@ fn split(seed_value: Int) -[Rand]> RNG Never! {
 
 /// Inclusive integer range. An empty range (`lo > hi`) returns `lo` and does
 /// not consume the stream.
-fn int(lo: Int, hi: Int) -[Rand]> Int Never! {
+int: fn(lo: Int, hi: Int) -[Rand]> Int Never! {
     if lo >= hi -> return lo
-    span :: hi - lo + 1
+    span: hi - lo + 1
     if span <= 0 {
         // The only overflowing inclusive width is the complete signed domain.
         return lo + full_word64()
@@ -269,35 +269,35 @@ fn int(lo: Int, hi: Int) -[Rand]> Int Never! {
 }
 
 /// Uniform in `[0, 1)`, using the full precision available from 63 source bits.
-fn float() -[Rand]> Float Never! { unit() }
+float: fn() -[Rand]> Float Never! { unit() }
 
 /// Uniform in `[lo, hi)`. Invalid or reversed bounds return `lo` without a draw.
-fn float_range(lo: Float, hi: Float) -[Rand]> Float Never! {
+float_range: fn(lo: Float, hi: Float) -[Rand]> Float Never! {
     if nonfinite(lo) || nonfinite(hi) || hi <= lo -> return lo
-    u :: unit()
+    u: unit()
     if lo >= (Float{0.0}) || hi <= (Float{0.0}) -> return lo + (hi - lo) * u
     negative := -lo
     positive := hi
     if positive >= negative {
-        probability :: (Float{1.0}) / ((Float{1.0}) + negative / positive)
+        probability: (Float{1.0}) / ((Float{1.0}) + negative / positive)
         if u < probability -> return positive * (u / probability)
         return lo * ((u - probability) / ((Float{1.0}) - probability))
     }
-    ratio :: positive / negative
-    probability :: ratio / ((Float{1.0}) + ratio)
+    ratio: positive / negative
+    probability: ratio / ((Float{1.0}) + ratio)
     if u < probability -> return positive * (u / probability)
     lo * ((u - probability) / ((Float{1.0}) - probability))
 }
 
-fn bool() -[Rand]> Bool Never! { (next_bits63() % 2) == 1 }
+bool: fn() -[Rand]> Bool Never! { (next_bits63() % 2) == 1 }
 
 /// Seeded pseudo-random bytes. Negative lengths are an empty request.
-fn bytes(n: Int) -[Rand]> [U8] Never! {
+bytes: fn(n: Int) -[Rand]> [U8] Never! {
     out := [U8]{}
     if n <= 0 -> return out
     loop {
         if out.len() >= n -> return out
-        word :: full_word64()
+        word: full_word64()
         loop k in 0..<8 {
             if out.len() >= n -> return out
             &out.push(to_u8(word >> (k * 8)))
@@ -305,14 +305,14 @@ fn bytes(n: Int) -[Rand]> [U8] Never! {
     }
 }
 
-fn pick<T>(items: [T]) -[Rand]> T? Never! {
+pick: fn<T>(items: [T]) -[Rand]> T? Never! {
     if items.len() == 0 -> return None
     Val(items[int(0, items.len() - 1)].copy())
 }
 
 /// Weighted selection. Length mismatches, negative/non-finite weights, and a
 /// zero total are absent. Zero weights remain valid and are never selected.
-fn weighted_pick<T>(items: [T], weights: [Float]) -[Rand]> T? Never! {
+weighted_pick: fn<T>(items: [T], weights: [Float]) -[Rand]> T? Never! {
     if items.len() == 0 || items.len() != weights.len() -> return None
     maximum := Float{0.0}
     loop w in weights {
@@ -323,13 +323,13 @@ fn weighted_pick<T>(items: [T], weights: [Float]) -[Rand]> T? Never! {
     total := Float{0.0}
     loop w in weights -> total = total + w / maximum
     if nonfinite(total) || total <= (Float{0.0}) -> return None
-    draw :: unit() * total
+    draw: unit() * total
     acc := Float{0.0}
     last := -1
     loop i in 0..<items.len() {
-        w :: weights[i]
+        w: weights[i]
         if w <= (Float{0.0}) -> next
-        scaled :: w / maximum
+        scaled: w / maximum
         acc = acc + scaled
         last = i
         if draw < acc -> return Val(items[i].copy())
@@ -339,13 +339,13 @@ fn weighted_pick<T>(items: [T], weights: [Float]) -[Rand]> T? Never! {
 }
 
 /// Fisher–Yates. Mutates `items` in place.
-fn shuffle(items: &[Int]) Never! -[Rand]> {
-    n :: items.len()
+shuffle: fn(items: &[Int]) Never! -[Rand]> {
+    n: items.len()
     if n < 2 -> return
     i := n - 1
     loop i > 0 {
-        j :: int(0, i)
-        tmp :: Int{items[i]}
+        j: int(0, i)
+        tmp: Int{items[i]}
         items[i] = items[j]
         items[j] = tmp
         i = i - 1
@@ -355,7 +355,7 @@ fn shuffle(items: &[Int]) Never! -[Rand]> {
 /// Uniform sample without replacement. The source is copied once and only the
 /// requested prefix is shuffled, so asking for a small sample is O(n) memory
 /// and O(k) draws.
-fn sample(items: [Int], n: Int) -[Rand]> [Int] Never! {
+sample: fn(items: [Int], n: Int) -[Rand]> [Int] Never! {
     out := [Int]{}
     if n <= 0 || items.len() == 0 -> return out
     pool := [Int]{}
@@ -364,8 +364,8 @@ fn sample(items: [Int], n: Int) -[Rand]> [Int] Never! {
     if want > pool.len() -> want = pool.len()
     i := 0
     loop i < want {
-        j :: int(i, pool.len() - 1)
-        tmp :: Int{pool[i]}
+        j: int(i, pool.len() - 1)
+        tmp: Int{pool[i]}
         pool[i] = pool[j]
         pool[j] = tmp
         &out.push(pool[i])
@@ -375,30 +375,30 @@ fn sample(items: [Int], n: Int) -[Rand]> [Int] Never! {
 }
 
 /// Box–Muller normal draw. Invalid parameters return a finite degenerate value.
-fn normal(mean: Float, stddev: Float) -[Rand]> Float Never! {
+normal: fn(mean: Float, stddev: Float) -[Rand]> Float Never! {
     if nonfinite(mean) -> return (Float{0.0})
     if nonfinite(stddev) || stddev <= (Float{0.0}) -> return mean
-    u1 :: unit_open()
-    u2 :: unit()
+    u1: unit_open()
+    u2: unit()
     mean + stddev * math.sqrt((Float{-2.0}) * math.ln(u1)) * math.cos(math.TAU * u2)
 }
 
-fn exponential(lambda: Float) -[Rand]> Float Never! {
+exponential: fn(lambda: Float) -[Rand]> Float Never! {
     if nonfinite(lambda) || lambda <= (Float{0.0}) -> return (Float{0.0})
     return -math.ln(unit_open()) / lambda
 }
 
 /// Python `random` spellings over the same deterministic stream.
-fn random() -[Rand]> Float Never! { float() }
-fn randint(lo: Int, hi: Int) -[Rand]> Int Never! { int(lo, hi) }
-fn uniform(lo: Float, hi: Float) -[Rand]> Float Never! { float_range(lo, hi) }
-fn normalvariate(mean: Float, stddev: Float) -[Rand]> Float Never! { normal(mean, stddev) }
-fn gauss(mean: Float, stddev: Float) -[Rand]> Float Never! { normal(mean, stddev) }
-fn expovariate(lambda: Float) -[Rand]> Float Never! { exponential(lambda) }
-fn randbytes(n: Int) -[Rand]> [U8] Never! { bytes(n) }
+random: fn() -[Rand]> Float Never! { float() }
+randint: fn(lo: Int, hi: Int) -[Rand]> Int Never! { int(lo, hi) }
+uniform: fn(lo: Float, hi: Float) -[Rand]> Float Never! { float_range(lo, hi) }
+normalvariate: fn(mean: Float, stddev: Float) -[Rand]> Float Never! { normal(mean, stddev) }
+gauss: fn(mean: Float, stddev: Float) -[Rand]> Float Never! { normal(mean, stddev) }
+expovariate: fn(lambda: Float) -[Rand]> Float Never! { exponential(lambda) }
+randbytes: fn(n: Int) -[Rand]> [U8] Never! { bytes(n) }
 
 /// Draw `k` low-order random bits. Non-positive widths return zero.
-fn getrandbits(k: Int) -[Rand]> Int Never! {
+getrandbits: fn(k: Int) -[Rand]> Int Never! {
     if k <= 0 -> return 0
     out := 0
     remaining := k
@@ -411,27 +411,27 @@ fn getrandbits(k: Int) -[Rand]> Int Never! {
     out
 }
 
-fn randrange(start: Int, stop: Int) -[Rand]> Int Never! {
+randrange: fn(start: Int, stop: Int) -[Rand]> Int Never! {
     if stop <= start -> return start
     int(start, stop - 1)
 }
 
-fn choice(items: [Int]) -[Rand]> Int? Never! {
+choice: fn(items: [Int]) -[Rand]> Int? Never! {
     if items.len() == 0 -> return None
     Val(items[int(0, items.len() - 1)])
 }
 
-fn choices(items: [Int], n: Int) -[Rand]> [Int] Never! {
+choices: fn(items: [Int], n: Int) -[Rand]> [Int] Never! {
     out := [Int]{}
     if items.len() == 0 || n <= 0 -> return out
     loop _ in 0..<n {
-        value :: choice(items) ?? return out
+        value: choice(items) ?? return out
         &out.push(value)
     }
     out
 }
 
-fn triangular(low: Float, high: Float, mode: Float) -[Rand]> Float Never! {
+triangular: fn(low: Float, high: Float, mode: Float) -[Rand]> Float Never! {
     if nonfinite(low) || nonfinite(high) -> return (Float{0.0})
     if high <= low -> return low
     peak := mode
@@ -441,34 +441,34 @@ fn triangular(low: Float, high: Float, mode: Float) -[Rand]> Float Never! {
     scale := math.fabs(low)
     if math.fabs(high) > scale -> scale = math.fabs(high)
     if scale <= (Float{0.0}) -> return low
-    lower :: low / scale
-    upper :: high / scale
-    apex :: peak / scale
-    u :: unit()
-    cut :: (apex - lower) / (upper - lower)
+    lower: low / scale
+    upper: high / scale
+    apex: peak / scale
+    u: unit()
+    cut: (apex - lower) / (upper - lower)
     if u <= cut -> return (lower + math.sqrt(u * (upper - lower) * (apex - lower))) * scale
     (upper - math.sqrt(((Float{1.0}) - u) * (upper - lower) * (upper - apex))) * scale
 }
 
-fn gammavariate(alpha: Float, beta: Float) -[Rand]> Float Never! {
-    one :: Float{1.0}
-    three :: Float{3.0}
-    zero :: Float{0.0}
-    nine :: Float{9.0}
-    half :: Float{0.5}
-    epsilon :: Float{0.0331}
+gammavariate: fn(alpha: Float, beta: Float) -[Rand]> Float Never! {
+    one: Float{1.0}
+    three: Float{3.0}
+    zero: Float{0.0}
+    nine: Float{9.0}
+    half: Float{0.5}
+    epsilon: Float{0.0331}
     if nonfinite(alpha) || nonfinite(beta) || alpha <= zero || beta <= zero -> return zero
     if alpha < one {
         return gammavariate(alpha + one, beta) * math.exp(math.ln(unit_open()) / alpha)
     }
-    d :: alpha - one / three
-    c :: one / math.sqrt(nine * d)
+    d: alpha - one / three
+    c: one / math.sqrt(nine * d)
     loop {
-        x :: normal(zero, one)
-        v0 :: one + c * x
+        x: normal(zero, one)
+        v0: one + c * x
         if v0 <= zero -> next
-        sample_scale :: v0 * v0 * v0
-        u :: unit_open()
+        sample_scale: v0 * v0 * v0
+        u: unit_open()
         if u < one - epsilon * x * x * x * x -> return beta * d * sample_scale
         if math.ln(u) < half * x * x + d * (one - sample_scale + math.ln(sample_scale)) {
             return beta * d * sample_scale
@@ -476,52 +476,52 @@ fn gammavariate(alpha: Float, beta: Float) -[Rand]> Float Never! {
     }
 }
 
-fn betavariate(alpha: Float, beta: Float) -[Rand]> Float Never! {
+betavariate: fn(alpha: Float, beta: Float) -[Rand]> Float Never! {
     if nonfinite(alpha) || nonfinite(beta) || alpha <= (Float{0.0}) || beta <= (Float{0.0}) {
         return (Float{0.0})
     }
-    a :: gammavariate(alpha, (Float{1.0}))
-    b :: gammavariate(beta, (Float{1.0}))
+    a: gammavariate(alpha, (Float{1.0}))
+    b: gammavariate(beta, (Float{1.0}))
     scale := a
     if b > scale -> scale = b
     if scale <= (Float{0.0}) || nonfinite(scale) -> return (Float{0.0})
-    an :: a / scale
-    bn :: b / scale
+    an: a / scale
+    bn: b / scale
     if an + bn <= (Float{0.0}) -> return (Float{0.0})
     an / (an + bn)
 }
 
-fn lognormvariate(mean: Float, sigma: Float) -[Rand]> Float Never! {
+lognormvariate: fn(mean: Float, sigma: Float) -[Rand]> Float Never! {
     if nonfinite(mean) || nonfinite(sigma) -> return (Float{0.0})
     math.exp(normal(mean, sigma))
 }
 
-fn paretovariate(alpha: Float) -[Rand]> Float Never! {
+paretovariate: fn(alpha: Float) -[Rand]> Float Never! {
     if nonfinite(alpha) || alpha <= (Float{0.0}) -> return (Float{0.0})
     math.exp(-math.ln(unit_open()) / alpha)
 }
 
-fn weibullvariate(alpha: Float, beta: Float) -[Rand]> Float Never! {
+weibullvariate: fn(alpha: Float, beta: Float) -[Rand]> Float Never! {
     if nonfinite(alpha) || nonfinite(beta) || alpha <= (Float{0.0}) || beta <= (Float{0.0}) {
         return (Float{0.0})
     }
     alpha * math.exp(math.ln(-math.ln(unit_open())) / beta)
 }
 
-fn vonmisesvariate(mu: Float, kappa: Float) -[Rand]> Float Never! {
+vonmisesvariate: fn(mu: Float, kappa: Float) -[Rand]> Float Never! {
     if mu != mu || nonfinite(mu) -> return (Float{0.0})
     if kappa != kappa || nonfinite(kappa) || kappa < (Float{0.0}) -> return normalize_angle(mu)
     if kappa <= (Float{0.00000001}) {
         return normalize_angle(mu + math.TAU * ((Float{2.0}) * unit() - (Float{1.0})))
     }
-    s :: (Float{0.5}) / kappa
-    r :: s + math.sqrt((Float{1.0}) + s * s)
+    s: (Float{0.5}) / kappa
+    r: s + math.sqrt((Float{1.0}) + s * s)
     loop {
-        u1 :: unit()
-        z :: math.cos(math.PI * u1)
-        f :: ((Float{1.0}) + r * z) / (r + z)
-        c :: kappa * (r - f)
-        u2 :: unit()
+        u1: unit()
+        z: math.cos(math.PI * u1)
+        f: ((Float{1.0}) + r * z) / (r + z)
+        c: kappa * (r - f)
+        u2: unit()
         if u2 >= c * ((Float{2.0}) - c) && u2 > c * math.exp((Float{1.0}) - c) -> next
         angle := mu
         if unit() > (Float{0.5}) -> angle = angle + math.acos(f) else -> angle = angle - math.acos(f)
@@ -529,7 +529,7 @@ fn vonmisesvariate(mu: Float, kappa: Float) -[Rand]> Float Never! {
     }
 }
 
-fn binomialvariate(n: Int, p: Float) -[Rand]> Int Never! {
+binomialvariate: fn(n: Int, p: Float) -[Rand]> Int Never! {
     if n <= 0 || nonfinite(p) || p <= (Float{0.0}) -> return 0
     if p >= (Float{1.0}) -> return n
     successes := 0
@@ -541,15 +541,15 @@ fn binomialvariate(n: Int, p: Float) -[Rand]> Int Never! {
 
 /// Low byte of `n`. The mask runs in `Int`, so a wide value never reaches the
 /// checked `U8{}` conversion.
-fn to_u8(n: Int) -> U8 Never! {
-    v :: (n).bit_and(255)
+to_u8: fn(n: Int) -> U8 Never! {
+    v: (n).bit_and(255)
     (U8{v})
 }
 
 // Captured from the retained Rust kernel before cutover (SHA256
 // 1c1e8f6498d33c3a42392bc38e59cc0c9712522c6c0520233013a23344c48d8c).
 // The high-rejection range and final states detect modulo-only or extra draws.
-struct RNGAnswer {
+RNGAnswer: struct {
     seed: Int
     small: Int
     unit: Float
@@ -560,7 +560,7 @@ struct RNGAnswer {
 }
 
 #Test("caller-owned SplitMix64 fixed known answers including rejection and full width") {
-    answers :: [RNGAnswer]{
+    answers: [RNGAnswer]{
         {seed: 0, small: 89, unit: 0.43152799704850997, wide: -2762096055666619646, rejection: 8954805688390271221, full: -7261621834428681061, state: U64{1663341875487337577}},
         {seed: 0, small: 33, unit: 0.17386786595968284, wide: 3943919006984103319, rejection: 2266080580496311648, full: 8338494477124284582, state: U64{3326683750974675154}},
         {seed: 99, small: 27, unit: 0.0316577610861849, wide: 4512837520904499006, rejection: 943729858380535402, full: -6086338216632190732, state: U64{1663341875487337676}},
@@ -580,7 +580,7 @@ struct RNGAnswer {
     }
     stream := rng(0)
     loop index in 0..<answers.len() {
-        answer :: answers[index]
+        answer: answers[index]
         if index %% 2 == 0 -> stream = rng(answer.seed)
         assert_eq(&stream.int(1, 100), answer.small)
         assert_eq(&stream.float(), answer.unit)
@@ -678,10 +678,10 @@ struct RNGAnswer {
 // Eight consecutive draws captured by executing from seed 42. Final states also
 // cover rejection's extra word consumption.
 #Test("caller-owned exact bounded products retain eight native draws per range") {
-    small :: [Int]{75, 16, 28, 35, 4, 87, 22, 81}
-    wide :: [Int]{3674083908946410616, -1560806464107718934, -492589827703751123, 97716448712738216, -2657728483137783600, 4814052688918791390, -1034353256590340050, 4205686890421530943}
-    rejection :: [Int]{1474913046063446144, 8007990562831494530, 2014432356388812461, 7384525663493887953, 3135310438806241001, 5704490196125334486, 1889885825713147102, 4735243383115555698}
-    full :: [Int]{4456085495900499605, -6273545944727883517, -4084088288392011950, -2874173976596520044, -8521839250712812558, 6792609088808213254, -5194507324077150883, 5545679290133000100}
+    small: [Int]{75, 16, 28, 35, 4, 87, 22, 81}
+    wide: [Int]{3674083908946410616, -1560806464107718934, -492589827703751123, 97716448712738216, -2657728483137783600, 4814052688918791390, -1034353256590340050, 4205686890421530943}
+    rejection: [Int]{1474913046063446144, 8007990562831494530, 2014432356388812461, 7384525663493887953, 3135310438806241001, 5704490196125334486, 1889885825713147102, 4735243383115555698}
+    full: [Int]{4456085495900499605, -6273545944727883517, -4084088288392011950, -2874173976596520044, -8521839250712812558, 6792609088808213254, -5194507324077150883, 5545679290133000100}
     stream := rng(42)
     loop expected in small -> assert_eq(&stream.int(1, 100), expected)
     assert_eq(stream.state, U64{17418742259747381458})
@@ -697,13 +697,13 @@ struct RNGAnswer {
 }
 
 #Test("caller-owned bounded collection draws retain eight native results each") {
-    items :: [Int]{0, 1, 2, 3, 4}
-    picks :: [Int]{3, 0, 1, 1, 0, 4, 1, 4}
-    samples :: [[Int]]{
+    items: [Int]{0, 1, 2, 3, 4}
+    picks: [Int]{3, 0, 1, 1, 0, 4, 1, 4}
+    samples: [[Int]]{
         [Int]{3, 1, 2}, [Int]{1, 0, 4}, [Int]{1, 4, 3}, [Int]{3, 1, 0},
         [Int]{2, 3, 1}, [Int]{1, 0, 3}, [Int]{0, 3, 4}, [Int]{0, 3, 1},
     }
-    shuffles :: [[Int]]{
+    shuffles: [[Int]]{
         [Int]{1, 2, 4, 0, 3}, [Int]{2, 1, 4, 3, 0}, [Int]{4, 3, 0, 2, 1}, [Int]{3, 0, 1, 4, 2},
         [Int]{2, 3, 4, 1, 0}, [Int]{3, 2, 1, 0, 4}, [Int]{4, 3, 2, 1, 0}, [Int]{0, 1, 3, 2, 4},
     }

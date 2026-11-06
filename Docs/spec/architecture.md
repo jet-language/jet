@@ -87,7 +87,7 @@ diagnostic summary; syntax-only receipts do not establish borrow correctness.
 A held stage0-only job being READY means it is prepared for scheduling, not
 that its semantic check passed. In Codegen poll and comptime-budget emission,
 `span := builder.current_span` snapshots the source span before write-access to
-`&builder`; `span ::` would retain a builder view across those mutations.
+`&builder`; `span:` would retain a builder view across those mutations.
 
 Runtime process-edge fixtures decode the committed Trap/Scheduler report words
 as signed little-endian I64 values through one
@@ -780,7 +780,7 @@ packages live under `Jetpack/`.
 | `JetCli` | the `jet` executable: canonical command/flag registry, completions, man page, diagnostic reference, and help UI | renders existing diagnostics only |
 | `JetCanvas` | Canvas browser HTML/JS projection assets | no |
 | `JetDevserver` | watch/HTTP/static policy, Canvas routes and semantic/edit service, browser-client leases, terminal/browser status parity, live reload, and atomic last-good artifact swapping | renders existing diagnostics only |
-| `Jetpack/PackageModel` | **L1**, shared read-only package/config data model: `package.jet` manifests and the inline `package { … }` carrier, lock, store listing, ref classification, FFI bridge construction, structural `Merge`, the `BuildRecipe` data shape, plus pure effect-budget/lint-policy computation (no network/provider/shell) | package/FFI diagnostics |
+| `Jetpack/PackageModel` | **L1**, shared read-only package/config data model: `package.jet` manifests and the inline `package: { … }` carrier, lock, store listing, ref classification, FFI bridge construction, structural `Merge`, the `BuildRecipe` data shape, plus pure effect-budget/lint-policy computation (no network/provider/shell) | package/FFI diagnostics |
 | `Jetpack/EnvModel` | **L2**, shared pure environment plan model: `ModuleEval` and its typed plan outputs; no provider/store/network/shell | plan-evaluation diagnostics |
 | Jetpack engine (`Jetpack/CLI`, `Store`, `Environment`, …) | **L3**, package manager engine: provider/network/shell realization, JetOS, CLI; reads L1 data and realizes L2 plans | package/JetOS diagnostics |
 
@@ -1595,7 +1595,7 @@ three load/unload cycles, and a forked panic call whose parent continues.
 The package is the unit of incremental checking. This follows the owner
 ruling of 2026-09-30, which amends layer 2 of D-INCR-UNIT1 from the module to
 the package. A package is a directory with `package.jet` (recursive, minus
-nested packages) or a single file with a leading `package { … }` header. Its
+nested packages) or a single file with a leading `package: { … }` header. Its
 files share one namespace (D-MOD-CYCLE1=A), and packages form an acyclic
 graph. Design and prior art:
 [incremental-checking-design-2026-09-30](../research/incremental-checking-design-2026-09-30.md).

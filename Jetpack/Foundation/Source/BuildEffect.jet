@@ -1,7 +1,7 @@
 // Build-effect view of the canonical Prelude effect table, ported from
 // jet_foundation::BuildEffects. The build projection excludes runtime-only
 // FFI, Browser, and Secret roots while keeping the public effect identities.
-enum BuildEffect {
+BuildEffect: enum {
     Net
     FS
     IO
@@ -13,7 +13,7 @@ enum BuildEffect {
     Log
     GPU
 
-    fn name(self) -> String Never! {
+    name: fn(self) -> String Never! {
         if self == {
             .Net -> "Net"
             .FS -> "FS"
@@ -28,7 +28,7 @@ enum BuildEffect {
         }
     }
 
-    fn flag(self) -> String Never! {
+    flag: fn(self) -> String Never! {
         if self == {
             .Net -> "net"
             .FS -> "fs"
@@ -45,7 +45,7 @@ enum BuildEffect {
 
     // A root effect name matched ASCII case-insensitively against the
     // canonical table; dotted leaves are not build effects.
-    fn parse(value: String) -> BuildEffect? Never! {
+    parse: fn(value: String) -> BuildEffect? Never! {
         if value.contains(".") -> return None
         if value.to_ascii_lower() == {
             "net" -> Val(BuildEffect.Net)
@@ -63,7 +63,7 @@ enum BuildEffect {
     }
 
     // Position in the canonical table, the order Rust's derived `Ord` uses.
-    fn rank(self) -> Int Never! {
+    rank: fn(self) -> Int Never! {
         if self == {
             .Net -> 0
             .FS -> 1
@@ -79,7 +79,7 @@ enum BuildEffect {
     }
 
     // The effects in canonical table order, keeping repeats.
-    fn sorted(effects: [BuildEffect]) -> [BuildEffect] Never! {
+    sorted: fn(effects: [BuildEffect]) -> [BuildEffect] Never! {
         out := effects
         out = loop fresh_item in out -> fresh_item
         &out.sort_by(written -> written.rank())

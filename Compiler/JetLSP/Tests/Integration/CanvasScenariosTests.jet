@@ -7,17 +7,17 @@ use {
 // GATE #4483: Unix permissions tests dispatch on the selected target family.
 
 #Test("cdp_driver_owns_parallel_browsers_under_long_tmpdir") {
-    tools :: canvas_tools()
+    tools: canvas_tools()
     if tools == none {
         eprintln("ignored: CDP lifecycle regression needs dev-shell Chromium and Node")
         return
     }
-    _permits :: (0..MAX_CANVAS_BROWSERS).map(_ -> CanvasBrowserPermit.acquire()).collect()
-    repo :: OSPath.from(env.manifest_dir())
-    repeated :: "x".repeat(120)
-    long_tmp :: env.temp_dir().join("canvas-driver-lifecycle-{repeated}-{process.id()}")
+    _permits: (0..MAX_CANVAS_BROWSERS).map(_ -> CanvasBrowserPermit.acquire()).collect()
+    repo: OSPath.from(env.manifest_dir())
+    repeated: "x".repeat(120)
+    long_tmp: env.temp_dir().join("canvas-driver-lifecycle-{repeated}-{process.id()}")
     fs.create_dir_all(long_tmp).expect("create long Canvas driver temp root")
-    output :: Command.new(tools.unwrap().node).current_dir(repo).env("CHROMIUM", tools.unwrap().chromium).env("TMPDIR", long_tmp)
+    output: Command.new(tools.unwrap().node).current_dir(repo).env("CHROMIUM", tools.unwrap().chromium).env("TMPDIR", long_tmp)
         .arg("Tools/canvas-test/driver-lifecycle.mjs").arg(MAX_CANVAS_BROWSERS.to_string()).output().expect("run Canvas CDP lifecycle regression")
     fs.remove_dir_all(long_tmp).expect("remove long Canvas driver temp root")
     assert(output.status.success(), "parallel CDP lifecycle failed\n--- stdout ---\n{String.from_utf8_lossy(output.stdout)}\n--- stderr ---\n{String.from_utf8_lossy(output.stderr)}")
@@ -133,7 +133,7 @@ use {
 #Test("random_ops_source_sync") { run_canvas_scenario("random-ops-source-sync") }
 #Test("harness_click_noop_selftest") { run_canvas_scenario("harness-click-noop-selftest") }
 #Test("big_project_perf_budget") {
-    tools :: canvas_tools().unwrap_or_else(() -> panic("big-project-perf needs dev-shell Chromium and Node; no skipped sample path"))
+    tools: canvas_tools().unwrap_or_else(() -> panic("big-project-perf needs dev-shell Chromium and Node; no skipped sample path"))
     loop clean_run in 1..2 {
         eprintln("BIG_PROJECT_PERF clean_run={clean_run}/2")
         run_browser_scenario(BIG_PROJECT_SCENARIO, "chromium", tools.node, [("CHROMIUM", tools.chromium)])
@@ -144,15 +144,15 @@ use {
         eprintln("ignored: Gecko smoke lane not selected")
         return
     }
-    tools :: gecko_tools().unwrap_or_else(error -> panic("{error}"))
+    tools: gecko_tools().unwrap_or_else(error -> panic("{error}"))
     run_gecko_cleanup_probe(tools)
     loop name in ["open-and-render", "pan-zoom-fit", "click-select-details", "palette-insert-core-fn", "wire-data-and-exec", "undo-restores-source", "check-button-populates-panel", "random-ops-source-sync"] {
         run_browser_scenario(name, "firefox", tools.node, [(_0: "FIREFOX", _1: tools.firefox), (_0: "GECKODRIVER", _1: tools.geckodriver)])
     }
 }
 #Test("canvas_cases_same_name_get_distinct_directories") {
-    repo :: OSPath.from(env.manifest_dir())
-    first :: CanvasCase.new(repo, "undo-restores-source")
-    second :: CanvasCase.new(repo, "undo-restores-source")
+    repo: OSPath.from(env.manifest_dir())
+    first: CanvasCase.new(repo, "undo-restores-source")
+    second: CanvasCase.new(repo, "undo-restores-source")
     assert_ne(first.dir, second.dir)
 }

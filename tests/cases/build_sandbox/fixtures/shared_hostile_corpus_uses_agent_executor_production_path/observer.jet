@@ -1,16 +1,16 @@
 // Original observer: build_sandbox.rs:1366-1385,1446-1449.
 use {
-    net :: core.net
-    time :: core.time
-    files :: core.files
-    process :: core.process
+    net: core.net
+    time: core.time
+    files: core.files
+    process: core.process
 }
-fn run() {
-    args :: process.args()
+run: fn() {
+    args: process.args()
     listener := net.tcp_listen("127.0.0.1:0") ?? panic("bind observer")
-    port :: net.socket_port(net.listener_local_socket_addr(listener) ?? panic("address"))
+    port: net.socket_port(net.listener_local_socket_addr(listener) ?? panic("address"))
     files.write(args[0], "{port}") ?? panic("publish port")
-    deadline :: time.instant() + time.duration_ms(750)
+    deadline: time.instant() + time.duration_ms(750)
     reached := false
     loop {
         if &listener.accept(deadline: 0s) == {

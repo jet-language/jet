@@ -1,15 +1,15 @@
 
 use {
-    files :: core.files
-    env :: core.sys
-    process :: core.process
+    files: core.files
+    env: core.sys
+    process: core.process
 }
 
-fn build(b: Build) {
+build: fn(b: Build) {
     #Impure("hostile inspection probe") {
-        write_result :: files.write("{work}/must-not-exist", "owned")
+        write_result: files.write("{work}/must-not-exist", "owned")
         env.set("JET_QUERY_MUST_NOT_SET", "owned")
-        process_result :: process.run(["sh", "-c", "exit 97"])
+        process_result: process.run(["sh", "-c", "exit 97"])
     }
 }
-fn run() {}
+run: fn() {}

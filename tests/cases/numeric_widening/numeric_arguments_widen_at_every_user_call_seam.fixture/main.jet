@@ -1,48 +1,48 @@
 
-trait NumericSink {
-    fn accept(self, value: Float) -> Float
+NumericSink: trait {
+    accept: fn(self, value: Float) -> Float
 }
 
-struct Holder {
+Holder: struct {
     seed: Int
 }
 
 impl Holder.NumericSink {
-    fn accept(self, value: Float) -[]> Float {
+    accept: fn(self, value: Float) -[]> Float {
         return value
     }
 }
 
 impl Holder {
-    fn instance(self, value: Float) -[]> Float {
+    instance: fn(self, value: Float) -[]> Float {
         return value
     }
 
-    fn static(value: Float) -[]> Float {
-        return value
-    }
-}
-
-module numeric_helpers {
-    fn accept(value: Float) -[]> Float {
+    static: fn(value: Float) -[]> Float {
         return value
     }
 }
 
-fn accept_float(value: Float) -[]> Float {
+numeric_helpers: module {
+    accept: fn(value: Float) -[]> Float {
+        return value
+    }
+}
+
+accept_float: fn(value: Float) -[]> Float {
     return value
 }
 
-fn run() {
-    narrow :: I32{7}
-    holder :: Holder{seed: 0}
-    callback :: accept_float
+run: fn() {
+    narrow: I32{7}
+    holder: Holder{seed: 0}
+    callback: accept_float
 
     print(holder.instance(narrow) == 7.0)
     print(Holder.static(narrow) == 7.0)
     print(callback(narrow) == 7.0)
     print(&numeric_helpers.accept(narrow) == 7.0)
     print(&holder.accept(narrow) == 7.0)
-    widened :: [accept_float(narrow)]
+    widened: [accept_float(narrow)]
     print(widened[0] == 7.0)
 }

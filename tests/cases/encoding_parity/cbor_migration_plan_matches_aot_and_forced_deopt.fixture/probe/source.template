@@ -1,16 +1,16 @@
 
 use {
-    cbor :: core.encoding.cbor
-    text :: core.text
+    cbor: core.encoding.cbor
+    text: core.text
 }
 
 #Codable
-struct ScoreRank { value: Int }
+ScoreRank: struct { value: Int }
 
 // v1 wire shape: legacyId, name, score: Int
 // v2 removes legacyId; v3 renames name and converts score; v4 adds hostName.
 #[PublishedSchema, Codable, RenameAll(camel)]
-struct Profile {
+Profile: struct {
     display_name: String
     score: ScoreRank
     host_name: String
@@ -29,8 +29,8 @@ migration Profile {
     add host_name: String = "localhost"
 }
 
-fn decode_old() -[]> String {
-    bytes :: [U8]{
+decode_old: fn() -[]> String {
+    bytes: [U8]{
         0xa3,
         0x64, 0x6e, 0x61, 0x6d, 0x65,
         0x63, 0x41, 0x64, 0x61,
@@ -39,13 +39,13 @@ fn decode_old() -[]> String {
         0x68, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x49, 0x64,
         0x09
     }
-    profile :: cbor.decode<Profile>(bytes.copy()) ?? panic("decode")
+    profile: cbor.decode<Profile>(bytes.copy()) ?? panic("decode")
     return "{profile.display_name}|{profile.score.value}|{profile.host_name}"
 }
 
-fn forced_deopt() -[]> String {
+forced_deopt: fn() -[]> String {
     if text.casefold("Straße") != "strasse" { panic("casefold") }
-    bytes :: [U8]{
+    bytes: [U8]{
         0xa3,
         0x64, 0x6e, 0x61, 0x6d, 0x65,
         0x63, 0x41, 0x64, 0x61,
@@ -54,12 +54,12 @@ fn forced_deopt() -[]> String {
         0x68, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x49, 0x64,
         0x09
     }
-    profile :: cbor.decode<Profile>(bytes.copy()) ?? panic("decode")
+    profile: cbor.decode<Profile>(bytes.copy()) ?? panic("decode")
     return "{profile.display_name}|{profile.score.value}|{profile.host_name}"
 }
 
-fn failed_change() -[]> String {
-    bytes :: [U8]{
+failed_change: fn() -[]> String {
+    bytes: [U8]{
         0xa3,
         0x64, 0x6e, 0x61, 0x6d, 0x65,
         0x63, 0x41, 0x64, 0x61,
@@ -71,7 +71,7 @@ fn failed_change() -[]> String {
     cbor.decode<Profile>(bytes.copy()) ? _value -> return "accepted" ! error -> return "{error[0].path}:{error[0].reason}"
 }
 
-fn run() {
+run: fn() {
     print(forced_deopt())
     print(failed_change())
 }

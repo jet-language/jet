@@ -7,26 +7,26 @@
 // 16MiB/depth256/path/column semantics are substituted. E4 is valid UTF-8 as
 // Rust &str was; walk scalars without a chars Vec copy. State words: borrowed
 // data/length, byte cursor, consumed-LF line, owned error.
-fn compiler_json_peek(state: I64) -> I64 {
-    at :: rt_text_word(wrapping(state + I64{16}))
+compiler_json_peek: fn(state: I64) -> I64 {
+    at: rt_text_word(wrapping(state + I64{16}))
     if (at == rt_text_word(wrapping(state + I64{8}))) -> return I64{-1}
     rt_text_decode(wrapping(rt_text_word(state) + at))
 }
-fn compiler_json_bump(state: I64) {
-    at :: rt_text_word(wrapping(state + I64{16}))
-    data :: rt_text_word(state)
+compiler_json_bump: fn(state: I64) {
+    at: rt_text_word(wrapping(state + I64{16}))
+    data: rt_text_word(state)
     if (rt_text_byte(wrapping(data + at)) == I64{10}) -> rt_text_store(wrapping(state + I64{24}), rt_text_word(wrapping(state + I64{24})) + I64{1})
     rt_text_store(wrapping(state + I64{16}), at + rt_text_width(wrapping(data + at)))
 }
-fn compiler_json_ws(state: I64) {
+compiler_json_ws: fn(state: I64) {
     loop {
-        ch :: compiler_json_peek(state)
+        ch: compiler_json_peek(state)
         if (ch != I64{32} && ch != I64{9} && ch != I64{13} && ch != I64{10}) -> return
         compiler_json_bump(state)
     }
 }
-fn compiler_json_error_owned(state: I64, reason: I64) -> I64 {
-    error :: jet_rt_alloc(ENCODING_ERROR_BYTES, I64{8})
+compiler_json_error_owned: fn(state: I64, reason: I64) -> I64 {
+    error: jet_rt_alloc(ENCODING_ERROR_BYTES, I64{8})
     encoding_store(wrapping(error + ENCODING_ERROR_FORMAT), I64{0})
     encoding_store(wrapping(error + ENCODING_ERROR_KIND), I64{0})
     encoding_store(wrapping(error + ENCODING_ERROR_OFFSET), I64{0})
@@ -40,19 +40,19 @@ fn compiler_json_error_owned(state: I64, reason: I64) -> I64 {
     rt_text_store(wrapping(state + I64{32}), error)
     I64{0}
 }
-fn compiler_json_error(state: I64, reason: I64) -> I64 {
+compiler_json_error: fn(state: I64, reason: I64) -> I64 {
     compiler_json_error_owned(state, jet_rt_string_clone(reason))
 }
-fn compiler_json_hex4(state: I64) -> I64 {
+compiler_json_hex4: fn(state: I64) -> I64 {
     value := I64{0}
     count := I64{0}
     loop count < (I64{4}) {
-        ch :: compiler_json_peek(state)
+        ch: compiler_json_peek(state)
         if (ch == I64{-1}) {
             _ := compiler_json_error(state, rt_static_text("truncated unicode escape"))
             return I64{-1}
         }
-        digit :: if (ch >= I64{48} && ch <= I64{57}) -> ch - I64{48} else if (ch >= I64{65} && ch <= I64{70}) -> ch - I64{55} else if (ch >= I64{97} && ch <= I64{102}) -> ch - I64{87} else -> I64{-1}
+        digit: if (ch >= I64{48} && ch <= I64{57}) -> ch - I64{48} else if (ch >= I64{65} && ch <= I64{70}) -> ch - I64{55} else if (ch >= I64{97} && ch <= I64{102}) -> ch - I64{87} else -> I64{-1}
         if (digit == I64{-1}) {
             _ := compiler_json_error(state, rt_static_text("invalid unicode escape"))
             return I64{-1}
@@ -63,8 +63,8 @@ fn compiler_json_hex4(state: I64) -> I64 {
     }
     value
 }
-fn compiler_json_unicode(state: I64, target: I64) -> Bool {
-    high :: compiler_json_hex4(state)
+compiler_json_unicode: fn(state: I64, target: I64) -> Bool {
+    high: compiler_json_hex4(state)
     if (high == I64{-1}) -> return false
     scalar := high
     if (high >= I64{55296} && high <= I64{56319}) {
@@ -78,7 +78,7 @@ fn compiler_json_unicode(state: I64, target: I64) -> Bool {
             return false
         }
         compiler_json_bump(state)
-        low :: compiler_json_hex4(state)
+        low: compiler_json_hex4(state)
         if (low == I64{-1}) -> return false
         if (low < I64{56320} || low > I64{57343}) {
             _ := compiler_json_error(state, rt_static_text("unpaired surrogate in string"))
@@ -92,12 +92,12 @@ fn compiler_json_unicode(state: I64, target: I64) -> Bool {
     rt_text_push_scalar(target, scalar)
     true
 }
-fn compiler_json_string(state: I64) -> I64 {
+compiler_json_string: fn(state: I64) -> I64 {
     if (compiler_json_peek(state) != I64{34}) -> return compiler_json_error(state, rt_static_text("expected quoted text"))
     compiler_json_bump(state)
-    target :: jet_rt_string_builder_new()
+    target: jet_rt_string_builder_new()
     loop {
-        ch :: compiler_json_peek(state)
+        ch: compiler_json_peek(state)
         if (ch == I64{-1}) {
             _ := compiler_json_error(state, rt_static_text("missing closing quote"))
             break
@@ -105,7 +105,7 @@ fn compiler_json_string(state: I64) -> I64 {
         compiler_json_bump(state)
         if (ch == I64{34}) -> return jet_rt_string_builder_finish(target)
         if (ch == I64{92}) {
-            escape :: compiler_json_peek(state)
+            escape: compiler_json_peek(state)
             if (escape == I64{-1}) {
                 _ := compiler_json_error(state, rt_static_text("unfinished escape"))
                 break
@@ -114,7 +114,7 @@ fn compiler_json_string(state: I64) -> I64 {
             if (escape == I64{117}) {
                 if !compiler_json_unicode(state, target) -> break
             } else {
-                scalar :: if (escape == I64{34} || escape == I64{92} || escape == I64{47}) -> escape else if (escape == I64{98}) -> I64{8} else if (escape == I64{102}) -> I64{12} else if (escape == I64{110}) -> I64{10} else if (escape == I64{114}) -> I64{13} else if (escape == I64{116}) -> I64{9} else -> I64{-1}
+                scalar: if (escape == I64{34} || escape == I64{92} || escape == I64{47}) -> escape else if (escape == I64{98}) -> I64{8} else if (escape == I64{102}) -> I64{12} else if (escape == I64{110}) -> I64{10} else if (escape == I64{114}) -> I64{13} else if (escape == I64{116}) -> I64{9} else -> I64{-1}
                 if (scalar == I64{-1}) {
                     _ := compiler_json_error(state, rt_static_text("invalid escape in string"))
                     break
@@ -129,12 +129,12 @@ fn compiler_json_string(state: I64) -> I64 {
     jet_rt_string_drop(target)
     I64{0}
 }
-fn compiler_json_digit(state: I64) -> Bool {
-    ch :: compiler_json_peek(state)
+compiler_json_digit: fn(state: I64) -> Bool {
+    ch: compiler_json_peek(state)
     ch >= I64{48} && ch <= I64{57}
 }
-fn compiler_json_number(state: I64) -> I64 {
-    start :: rt_text_word(wrapping(state + I64{16}))
+compiler_json_number: fn(state: I64) -> I64 {
+    start: rt_text_word(wrapping(state + I64{16}))
     if (compiler_json_peek(state) == I64{45}) -> compiler_json_bump(state)
     if (compiler_json_peek(state) == I64{48}) { compiler_json_bump(state) } else if (compiler_json_peek(state) >= I64{49} && compiler_json_peek(state) <= I64{57}) {
         loop compiler_json_digit(state) -> compiler_json_bump(state)
@@ -154,12 +154,12 @@ fn compiler_json_number(state: I64) -> I64 {
         if !compiler_json_digit(state) -> return compiler_json_error(state, rt_static_text("bad number"))
         loop compiler_json_digit(state) -> compiler_json_bump(state)
     }
-    end :: rt_text_word(wrapping(state + I64{16}))
-    data :: rt_text_word(state)
+    end: rt_text_word(wrapping(state + I64{16}))
+    data: rt_text_word(state)
     digits := I64{0}
     at := start
     loop at < end {
-        byte :: rt_text_byte(wrapping(data + at))
+        byte: rt_text_byte(wrapping(data + at))
         if (byte >= I64{48} && byte <= I64{57}) -> digits += I64{1}
         at += I64{1}
     }
@@ -167,11 +167,11 @@ fn compiler_json_number(state: I64) -> I64 {
     // abs(exponent)<=1e6. Finite-f64 restrictions do not apply to Number.
     if (digits > I64{1000000}) -> return compiler_json_error(state, rt_static_text("JSON number exceeds the 1000000-digit limit"))
     if (exponent_start != I64{-1}) {
-        limit :: if exponent_negative -> I64{-9223372036854775808} else -> I64{-9223372036854775807}
+        limit: if exponent_negative -> I64{-9223372036854775808} else -> I64{-9223372036854775807}
         exponent := I64{0}
         at = exponent_start
         loop at < end {
-            digit :: rt_text_byte(wrapping(data + at)) - I64{48}
+            digit: rt_text_byte(wrapping(data + at)) - I64{48}
             // The smallest exponent whose *10 stays >= limit: ceil(limit / 10), i.e. the
             // truncated quotient. `/%` floors, so divide the negated sign pair.
             if (exponent < -(limit /% I64{-10})) -> return compiler_json_error(state, rt_static_text("JSON number exponent is out of range"))
@@ -184,7 +184,7 @@ fn compiler_json_number(state: I64) -> I64 {
     }
     data_tree_new(DATA_TREE_NUMBER, rt_text_copy(wrapping(data + start), end - start))
 }
-fn compiler_json_word(state: I64, word: I64, kind: I64, payload: I64) -> I64 {
+compiler_json_word: fn(state: I64, word: I64, kind: I64, payload: I64) -> I64 {
     at := I64{0}
     loop at < rt_text_len(word) {
         if compiler_json_peek(state) != rt_text_byte(wrapping(rt_text_data(word) + at)) -> return compiler_json_error(state, rt_static_text("expected a JSON word"))
@@ -193,14 +193,14 @@ fn compiler_json_word(state: I64, word: I64, kind: I64, payload: I64) -> I64 {
     }
     data_tree_new(kind, payload)
 }
-fn compiler_json_container(state: I64, depth: I64, object: Bool) -> I64 {
+compiler_json_container: fn(state: I64, depth: I64, object: Bool) -> I64 {
     if (depth >= I64{64}) -> return compiler_json_error(state, rt_static_text("JSON value is nested too deeply"))
     compiler_json_bump(state)
-    kind :: if object -> DATA_TREE_OBJECT else -> DATA_TREE_ARRAY
-    stride :: if object -> DATA_TREE_ENTRY_BYTES else -> DATA_TREE_ELEMENT_BYTES
-    close :: if object -> I64{125} else -> I64{93}
-    separator :: if object -> rt_static_text("expected `,` or `}}`") else -> rt_static_text("expected `,` or `]`")
-    sequence :: data_sequence_new(I64{0}, stride)
+    kind: if object -> DATA_TREE_OBJECT else -> DATA_TREE_ARRAY
+    stride: if object -> DATA_TREE_ENTRY_BYTES else -> DATA_TREE_ELEMENT_BYTES
+    close: if object -> I64{125} else -> I64{93}
+    separator: if object -> rt_static_text("expected `,` or `}}`") else -> rt_static_text("expected `,` or `]`")
+    sequence: data_sequence_new(I64{0}, stride)
     loop {
         compiler_json_ws(state)
         if compiler_json_peek(state) == close {
@@ -218,8 +218,8 @@ fn compiler_json_container(state: I64, depth: I64, object: Bool) -> I64 {
                 break
             }
             compiler_json_bump(state)
-            length :: data_tree_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
-            data :: data_tree_word(wrapping(sequence + DATA_SEQUENCE_DATA))
+            length: data_tree_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
+            data: data_tree_word(wrapping(sequence + DATA_SEQUENCE_DATA))
             duplicate := false
             at := I64{0}
             loop at < length {
@@ -230,7 +230,7 @@ fn compiler_json_container(state: I64, depth: I64, object: Bool) -> I64 {
                 at += I64{1}
             }
             if duplicate {
-                reason :: jet_rt_string_builder_new()
+                reason: jet_rt_string_builder_new()
                 jet_rt_string_builder_push(reason, rt_static_text("duplicate object key `"))
                 jet_rt_string_builder_push(reason, key)
                 rt_text_push_scalar(reason, I64{96})
@@ -239,19 +239,19 @@ fn compiler_json_container(state: I64, depth: I64, object: Bool) -> I64 {
                 break
             }
         }
-        child :: compiler_json_value(state, depth + I64{1})
+        child: compiler_json_value(state, depth + I64{1})
         if (child == I64{0}) {
             if object -> jet_rt_string_drop(key)
             break
         }
-        slot :: data_sequence_reserve(sequence, stride)
+        slot: data_sequence_reserve(sequence, stride)
         if object {
             data_tree_store(wrapping(slot + DATA_TREE_ENTRY_KEY), key)
             data_tree_store(wrapping(slot + DATA_TREE_ENTRY_VALUE), child)
         } else { data_tree_store(slot, child) }
         data_tree_store(wrapping(sequence + DATA_SEQUENCE_LENGTH), data_tree_word(wrapping(sequence + DATA_SEQUENCE_LENGTH)) + I64{1})
         compiler_json_ws(state)
-        ch :: compiler_json_peek(state)
+        ch: compiler_json_peek(state)
         if (ch == I64{44}) {
             compiler_json_bump(state)
             compiler_json_ws(state)
@@ -267,14 +267,14 @@ fn compiler_json_container(state: I64, depth: I64, object: Bool) -> I64 {
     data_sequence_drop(sequence, kind)
     I64{0}
 }
-fn compiler_json_value(state: I64, depth: I64) -> I64 {
+compiler_json_value: fn(state: I64, depth: I64) -> I64 {
     compiler_json_ws(state)
-    ch :: compiler_json_peek(state)
+    ch: compiler_json_peek(state)
     if (ch == I64{110}) -> return compiler_json_word(state, rt_static_text("null"), DATA_TREE_NULL, I64{0})
     if (ch == I64{116}) -> return compiler_json_word(state, rt_static_text("true"), DATA_TREE_BOOL, I64{1})
     if (ch == I64{102}) -> return compiler_json_word(state, rt_static_text("false"), DATA_TREE_BOOL, I64{0})
     if (ch == I64{34}) {
-        text :: compiler_json_string(state)
+        text: compiler_json_string(state)
         if (text == I64{0}) -> return I64{0}
         return data_tree_new(DATA_TREE_TEXT, text)
     }
@@ -283,8 +283,8 @@ fn compiler_json_value(state: I64, depth: I64) -> I64 {
     if (ch == I64{45} || (ch >= I64{48} && ch <= I64{57})) -> return compiler_json_number(state)
     compiler_json_error(state, rt_static_text("expected a JSON value"))
 }
-#Export(c) fn jet_std_json_parse(a0: I64, ok: I64, err: I64) -> I64 {
-    state :: jet_rt_alloc(I64{40}, I64{8})
+#Export(c) jet_std_json_parse: fn(a0: I64, ok: I64, err: I64) -> I64 {
+    state: jet_rt_alloc(I64{40}, I64{8})
     rt_text_store(state, rt_text_data(a0))
     rt_text_store(wrapping(state + I64{8}), rt_text_len(a0))
     rt_text_store(wrapping(state + I64{16}), I64{0})

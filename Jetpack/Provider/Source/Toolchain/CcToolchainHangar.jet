@@ -4,10 +4,10 @@
 // reads Hangar and re-proves every digest, including the toolchain pack a
 // pack-layout target entry mounts.
 
-fn provider_cc_toolchain_resolve_for_target(verification: &StoreVerification, hangar_root: String, target: String, allow_fixture: Bool) -[FS, Env, Time]> CcToolchainDescriptor CcToolchainError! {
-    normalized :: provider_cc_normalize_target(target)
-    roots :: provider_cc_roots_for_hangar(hangar_root)
-    entries :: store_list_checked(&verification, roots) ?? {
+provider_cc_toolchain_resolve_for_target: fn(verification: &StoreVerification, hangar_root: String, target: String, allow_fixture: Bool) -[FS, Env, Time]> CcToolchainDescriptor CcToolchainError! {
+    normalized: provider_cc_normalize_target(target)
+    roots: provider_cc_roots_for_hangar(hangar_root)
+    entries: store_list_checked(&verification, roots) ?? {
         return Err(CcToolchainError.Invalid("could not inspect Hangar C toolchain records: {err.message()}"))
     }
     // The last corrupt candidate wins over "missing" so a damaged record is
@@ -15,7 +15,7 @@ fn provider_cc_toolchain_resolve_for_target(verification: &StoreVerification, ha
     corrupt := ""
     loop entry in entries {
         if entry.name != CC_TOOLCHAIN_PACKAGE -> next
-        producer :: ProducerRecord.decode(entry.producer_record) ?? {
+        producer: ProducerRecord.decode(entry.producer_record) ?? {
             corrupt = "Hangar C toolchain `{entry.id}` has an invalid producer record: {err.message()}"
             next
         }
@@ -23,7 +23,7 @@ fn provider_cc_toolchain_resolve_for_target(verification: &StoreVerification, ha
             corrupt = "Hangar entry `{entry.id}` is named `{CC_TOOLCHAIN_PACKAGE}` but was not produced by the C/C++ provider"
             next
         }
-        layout :: producer.facts.get("cc.layout") ?? ""
+        layout: producer.facts.get("cc.layout") ?? ""
         if !allow_fixture && layout == CC_TOOLCHAIN_FIXTURE_LAYOUT -> next
         if producer.facts.get("cc.target") != Val(normalized) -> next
         // An entry built from another jet's pack is not this jet's toolchain.
@@ -38,26 +38,26 @@ fn provider_cc_toolchain_resolve_for_target(verification: &StoreVerification, ha
 }
 
 // The Hangar roots whose `hangar_dir()` is exactly `hangar`.
-fn provider_cc_roots_for_hangar(hangar: String) -> HangarRoots CcToolchainError! {
+provider_cc_roots_for_hangar: fn(hangar: String) -> HangarRoots CcToolchainError! {
     if hangar == "" || hangar == "/" -> return Err(CcToolchainError.Invalid("Hangar root has no parent"))
-    roots :: HangarRoots{root: files.dirname(hangar), dev_mode: files.basename(hangar) == "Hangar"}
+    roots: HangarRoots{root: files.dirname(hangar), dev_mode: files.basename(hangar) == "Hangar"}
     if roots.hangar_dir() != hangar -> return Err(CcToolchainError.Invalid("unsupported Hangar layout `{hangar}`"))
     Ok(roots)
 }
 
 // One required producer fact of a Hangar entry.
-fn provider_cc_fact(producer: ProducerRecord, entry_id: String, key: String) -> String CcToolchainError! {
+provider_cc_fact: fn(producer: ProducerRecord, entry_id: String, key: String) -> String CcToolchainError! {
     producer.facts.get(key) ?? return Err(CcToolchainError.Invalid("Hangar C toolchain `{entry_id}` is missing fact `{key}`"))
 }
 
-fn provider_cc_descriptor_from_entry(roots: HangarRoots, entry: StoreEntry, producer: ProducerRecord) -[FS, Env]> CcToolchainDescriptor CcToolchainError! {
-    schema :: provider_cc_fact(producer, entry.id, "cc.schema")
+provider_cc_descriptor_from_entry: fn(roots: HangarRoots, entry: StoreEntry, producer: ProducerRecord) -[FS, Env]> CcToolchainDescriptor CcToolchainError! {
+    schema: provider_cc_fact(producer, entry.id, "cc.schema")
     if schema != CC_TOOLCHAIN_SCHEMA -> return Err(CcToolchainError.Invalid("Hangar C toolchain `{entry.id}` has an unsupported descriptor schema"))
-    hangar :: roots.hangar_dir()
-    root :: provider_cc_checked_entry_root(hangar, entry)
-    layout_text :: provider_cc_fact(producer, entry.id, "cc.layout")
-    bundle_sha256 :: provider_cc_fact(producer, entry.id, "cc.bundle.sha256")
-    layout :: CcToolchainLayout.parse(layout_text) ?? return Err(CcToolchainError.Invalid("Hangar C toolchain `{entry.id}` has unsupported layout `{layout_text}`"))
+    hangar: roots.hangar_dir()
+    root: provider_cc_checked_entry_root(hangar, entry)
+    layout_text: provider_cc_fact(producer, entry.id, "cc.layout")
+    bundle_sha256: provider_cc_fact(producer, entry.id, "cc.bundle.sha256")
+    layout: CcToolchainLayout.parse(layout_text) ?? return Err(CcToolchainError.Invalid("Hangar C toolchain `{entry.id}` has unsupported layout `{layout_text}`"))
     descriptor := CcToolchainDescriptor{
         entry_id: entry.id,
         root: root,
@@ -85,7 +85,7 @@ fn provider_cc_descriptor_from_entry(roots: HangarRoots, entry: StoreEntry, prod
         producer: producer
     }
     if layout == CcToolchainLayout.Pack {
-        pack_root :: provider_cc_checked_object_digest_path(hangar, provider_cc_fact(producer, entry.id, "cc.compiler.root.sha256"), "C toolchain pack")
+        pack_root: provider_cc_checked_object_digest_path(hangar, provider_cc_fact(producer, entry.id, "cc.compiler.root.sha256"), "C toolchain pack")
         descriptor = provider_cc_pack_descriptor(entry.id, root, pack_root, entry.references, entry.envelope, producer)
     }
     provider_cc_validate_descriptor(descriptor, entry, hangar)
@@ -106,20 +106,20 @@ fn provider_cc_descriptor_from_entry(roots: HangarRoots, entry: StoreEntry, prod
 
 // `<hangar>/objects/<digest>`: a real file or directory that canonicalizes
 // inside the object pool under its own digest name.
-fn provider_cc_checked_object_digest_path(hangar_root: String, digest: String, label: String) -[FS, Env]> String CcToolchainError! {
+provider_cc_checked_object_digest_path: fn(hangar_root: String, digest: String, label: String) -[FS, Env]> String CcToolchainError! {
     provider_cc_validate_tree_digest(digest, "{label} digest")
-    hangar :: files.canonicalize(hangar_root) ?? {
+    hangar: files.canonicalize(hangar_root) ?? {
         return Err(CcToolchainError.Invalid("canonicalize Hangar root: {err}"))
     }
-    objects :: files.join(hangar, "objects")
-    path :: files.join(objects, digest)
-    metadata :: files.stat(path) ?? {
+    objects: files.join(hangar, "objects")
+    path: files.join(objects, digest)
+    metadata: files.stat(path) ?? {
         return Err(CcToolchainError.Invalid("Hangar C toolchain {label} is unavailable: {err}"))
     }
     if metadata.is_symlink || (!metadata.is_file && !metadata.is_dir) {
         return Err(CcToolchainError.Invalid("Hangar C toolchain {label} is not a regular object"))
     }
-    canonical :: files.canonicalize(path) ?? {
+    canonical: files.canonicalize(path) ?? {
         return Err(CcToolchainError.Invalid("canonicalize Hangar C toolchain {label}: {err}"))
     }
     if !provider_cc_path_within(canonical, objects) || files.basename(canonical) != digest {
@@ -129,16 +129,16 @@ fn provider_cc_checked_object_digest_path(hangar_root: String, digest: String, l
 }
 
 // `Path::starts_with`: `path` is `base` or lies below it.
-fn provider_cc_path_within(path: String, base: String) -> Bool Never! {
+provider_cc_path_within: fn(path: String, base: String) -> Bool Never! {
     if path == base -> return true
-    prefix :: if base.ends_with("/") -> base else -> "{base}/"
+    prefix: if base.ends_with("/") -> base else -> "{base}/"
     path.starts_with(prefix)
 }
 
 // Every descriptor field, digest, envelope, and payload byte is re-proved
 // before a Hangar descriptor is used.
-fn provider_cc_validate_descriptor(descriptor: CcToolchainDescriptor, entry: StoreEntry, hangar_root: String) CcToolchainError! -[FS, Env]> {
-    host :: provider_cc_toolchain_host_target_triple()
+provider_cc_validate_descriptor: fn(descriptor: CcToolchainDescriptor, entry: StoreEntry, hangar_root: String) CcToolchainError! -[FS, Env]> {
+    host: provider_cc_toolchain_host_target_triple()
     if descriptor.host != host {
         return Err(CcToolchainError.Invalid("Hangar C toolchain `{entry.id}` targets host `{descriptor.host}`, but this machine is `{host}`"))
     }
@@ -149,7 +149,7 @@ fn provider_cc_validate_descriptor(descriptor: CcToolchainDescriptor, entry: Sto
     provider_cc_validate_text_field(descriptor.abi, "ABI") ?? {
         return Err(CcToolchainError.Invalid("Hangar C toolchain `{entry.id}` has an invalid {err.message()}"))
     }
-    paths :: [(name: String, path: String)]{
+    paths: [(name: String, path: String)]{
         (name: "compiler", path: descriptor.compiler),
         (name: "c++ compiler", path: descriptor.cxx),
         (name: "linker", path: descriptor.linker),
@@ -165,11 +165,11 @@ fn provider_cc_validate_descriptor(descriptor: CcToolchainDescriptor, entry: Sto
     provider_cc_validate_sha256(descriptor.linker_sha256, "linker digest")
     provider_cc_validate_tree_digest(descriptor.sysroot_sha256, "sysroot digest")
     provider_cc_validate_tree_digest(descriptor.bundle_sha256, "bundle digest")
-    platform :: pkg_host_platform()
+    platform: pkg_host_platform()
     if entry.envelope.output_hash != descriptor.bundle_sha256 || entry.envelope.platform != platform || entry.cache_identity.platform != platform {
         return Err(CcToolchainError.Invalid("Hangar C toolchain `{entry.id}` has an envelope/platform identity mismatch"))
     }
-    actual_bundle :: pkg_try_output_hash_of_in_hangar(entry.out, hangar_root, false) ?? {
+    actual_bundle: pkg_try_output_hash_of_in_hangar(entry.out, hangar_root, false) ?? {
         return Err(CcToolchainError.Invalid(err.message()))
     }
     if actual_bundle != descriptor.bundle_sha256 {
@@ -183,8 +183,8 @@ fn provider_cc_validate_descriptor(descriptor: CcToolchainDescriptor, entry: Sto
 
 // A fixture bundle is one directory: every role root is the descriptor root
 // and its single mount carries the bundle digest.
-fn provider_cc_validate_fixture_roots(descriptor: CcToolchainDescriptor, entry_id: String) CcToolchainError! -[FS, Env]> {
-    root :: descriptor.root
+provider_cc_validate_fixture_roots: fn(descriptor: CcToolchainDescriptor, entry_id: String) CcToolchainError! -[FS, Env]> {
+    root: descriptor.root
     if descriptor.compiler_root != root || descriptor.cxx_root != root || descriptor.linker_root != root || descriptor.sysroot_root != root {
         return Err(CcToolchainError.Invalid("Hangar C toolchain `{entry_id}` has inconsistent fixture roots"))
     }
@@ -200,13 +200,13 @@ fn provider_cc_validate_fixture_roots(descriptor: CcToolchainDescriptor, entry_i
 // A pack-layout toolchain mounts its pack object (compiler, C++ driver,
 // linker and their resources) as the compiler role and its own sysroot as the
 // sysroot role; the entry must reference the pack so it stays alive.
-fn provider_cc_validate_pack_roots(descriptor: CcToolchainDescriptor, entry_id: String, hangar_root: String) CcToolchainError! -[FS, Env]> {
+provider_cc_validate_pack_roots: fn(descriptor: CcToolchainDescriptor, entry_id: String, hangar_root: String) CcToolchainError! -[FS, Env]> {
     if descriptor.mounts.len() != 2 || descriptor.cxx_root != descriptor.compiler_root || descriptor.linker_root != descriptor.compiler_root {
         return Err(CcToolchainError.Invalid("Hangar C toolchain `{entry_id}` has inconsistent pack roots"))
     }
-    pack :: descriptor.mounts[0]
-    sysroot :: descriptor.mounts[1]
-    expected_pack :: provider_cc_checked_object_digest_path(hangar_root, pack.digest, "C toolchain pack")
+    pack: descriptor.mounts[0]
+    sysroot: descriptor.mounts[1]
+    expected_pack: provider_cc_checked_object_digest_path(hangar_root, pack.digest, "C toolchain pack")
     if expected_pack != descriptor.compiler_root || pack.source != expected_pack || pack.destination != descriptor.role_virtual_root(CcToolchainRole.Compiler) {
         return Err(CcToolchainError.Invalid("Hangar C toolchain `{entry_id}` has an invalid pack mount"))
     }
@@ -221,13 +221,13 @@ fn provider_cc_validate_pack_roots(descriptor: CcToolchainDescriptor, entry_id: 
         provider_cc_verify_file(descriptor.cxx_root, descriptor.cxx, descriptor.cxx_sha256, "C++ compiler")
     }
     provider_cc_verify_file(descriptor.linker_root, descriptor.linker, descriptor.linker_sha256, "linker")
-    sysroot_metadata :: files.stat(descriptor.sysroot_root) ?? {
+    sysroot_metadata: files.stat(descriptor.sysroot_root) ?? {
         return Err(CcToolchainError.Invalid("C toolchain sysroot is unavailable: {err}"))
     }
     if sysroot_metadata.is_symlink || !sysroot_metadata.is_dir {
         return Err(CcToolchainError.Invalid("C toolchain sysroot is not a real directory"))
     }
-    actual_sysroot :: pkg_try_output_hash_of_in_hangar(descriptor.sysroot_root, hangar_root, false) ?? {
+    actual_sysroot: pkg_try_output_hash_of_in_hangar(descriptor.sysroot_root, hangar_root, false) ?? {
         return Err(CcToolchainError.Invalid(err.message()))
     }
     if actual_sysroot != descriptor.sysroot_sha256 {
@@ -237,17 +237,17 @@ fn provider_cc_validate_pack_roots(descriptor: CcToolchainDescriptor, entry_id: 
 
 // The entry output: a real directory that canonicalizes strictly inside the
 // Hangar root.
-fn provider_cc_checked_entry_root(hangar_root: String, entry: StoreEntry) -[FS, Env]> String CcToolchainError! {
-    metadata :: files.stat(entry.out) ?? {
+provider_cc_checked_entry_root: fn(hangar_root: String, entry: StoreEntry) -[FS, Env]> String CcToolchainError! {
+    metadata: files.stat(entry.out) ?? {
         return Err(CcToolchainError.Invalid("Hangar C toolchain `{entry.id}` output is unavailable: {err}"))
     }
     if metadata.is_symlink || !metadata.is_dir {
         return Err(CcToolchainError.Invalid("Hangar C toolchain `{entry.id}` output is not a real directory"))
     }
-    hangar :: files.canonicalize(hangar_root) ?? {
+    hangar: files.canonicalize(hangar_root) ?? {
         return Err(CcToolchainError.Invalid("could not canonicalize Hangar root: {err}"))
     }
-    root :: files.canonicalize(entry.out) ?? {
+    root: files.canonicalize(entry.out) ?? {
         return Err(CcToolchainError.Invalid("could not canonicalize C toolchain output: {err}"))
     }
     if !provider_cc_path_within(root, hangar) || root == hangar {
@@ -258,15 +258,15 @@ fn provider_cc_checked_entry_root(hangar_root: String, entry: StoreEntry) -[FS, 
 
 // A non-empty regular file under `root` (no symlink on the way) whose
 // SHA-256 is `expected`.
-fn provider_cc_verify_file(root: String, relative: String, expected: String, label: String) CcToolchainError! -[FS]> {
-    path :: provider_cc_checked_relative_path(root, relative, label)
-    metadata :: files.stat(path) ?? {
+provider_cc_verify_file: fn(root: String, relative: String, expected: String, label: String) CcToolchainError! -[FS]> {
+    path: provider_cc_checked_relative_path(root, relative, label)
+    metadata: files.stat(path) ?? {
         return Err(CcToolchainError.Invalid("C toolchain {label} is unavailable: {err}"))
     }
     if metadata.is_symlink || !metadata.is_file || metadata.size == 0 {
         return Err(CcToolchainError.Invalid("C toolchain {label} is not a non-empty regular file"))
     }
-    actual :: foundation_sha256_file_hex(path) ?? {
+    actual: foundation_sha256_file_hex(path) ?? {
         return Err(CcToolchainError.Invalid("could not hash C toolchain {label}: {err}"))
     }
     if actual != expected {
@@ -275,15 +275,15 @@ fn provider_cc_verify_file(root: String, relative: String, expected: String, lab
 }
 
 // A real directory under `root` whose Hangar tree digest is `expected`.
-fn provider_cc_verify_tree(root: String, relative: String, expected: String, label: String) CcToolchainError! -[FS, Env]> {
-    path :: provider_cc_checked_relative_path(root, relative, label)
-    metadata :: files.stat(path) ?? {
+provider_cc_verify_tree: fn(root: String, relative: String, expected: String, label: String) CcToolchainError! -[FS, Env]> {
+    path: provider_cc_checked_relative_path(root, relative, label)
+    metadata: files.stat(path) ?? {
         return Err(CcToolchainError.Invalid("C toolchain {label} is unavailable: {err}"))
     }
     if metadata.is_symlink || !metadata.is_dir {
         return Err(CcToolchainError.Invalid("C toolchain {label} is not a real directory"))
     }
-    actual :: pkg_try_output_hash_of(path) ?? {
+    actual: pkg_try_output_hash_of(path) ?? {
         return Err(CcToolchainError.Invalid("could not hash C toolchain {label}: {err.message()}"))
     }
     if actual != expected {
@@ -293,15 +293,15 @@ fn provider_cc_verify_tree(root: String, relative: String, expected: String, lab
 
 // `root` joined with a normalized relative path, refusing any symlink on the
 // way down.
-fn provider_cc_checked_relative_path(root: String, relative: String, label: String) -[FS]> String CcToolchainError! {
+provider_cc_checked_relative_path: fn(root: String, relative: String, label: String) -[FS]> String CcToolchainError! {
     provider_cc_validate_relative_path(relative) ?? {
         return Err(CcToolchainError.Invalid("C toolchain {label} path: {err.message()}"))
     }
     current := root
-    parts :: provider_cc_path_parts(relative)
+    parts: provider_cc_path_parts(relative)
     loop part in parts {
         current = files.join(current, part)
-        metadata :: files.stat(current) ?? {
+        metadata: files.stat(current) ?? {
             return Err(CcToolchainError.Invalid("C toolchain {label} path is unavailable: {err}"))
         }
         if metadata.is_symlink -> return Err(CcToolchainError.Invalid("C toolchain {label} path traverses a symlink"))
@@ -311,18 +311,18 @@ fn provider_cc_checked_relative_path(root: String, relative: String, label: Stri
 
 // A regular (non-symlink) file of at most `limit` bytes, read through a
 // bounded reader so a growing file cannot exceed the limit in memory.
-fn provider_cc_read_bounded_file(path: String, limit: Int, label: String) -[FS]> [U8] CcToolchainError! {
-    metadata :: files.stat(path) ?? {
+provider_cc_read_bounded_file: fn(path: String, limit: Int, label: String) -[FS]> [U8] CcToolchainError! {
+    metadata: files.stat(path) ?? {
         return Err(CcToolchainError.Invalid("read {label}: {err}"))
     }
     if metadata.is_symlink || !metadata.is_file -> return Err(CcToolchainError.Invalid("{label} is not a regular file"))
     if metadata.size > limit -> return Err(CcToolchainError.Invalid("{label} exceeds its size limit"))
-    reader :: files.open(path, links: .Refuse) ?? {
+    reader: files.open(path, links: .Refuse) ?? {
         return Err(CcToolchainError.Invalid("read {label}: {err}"))
     }
     bytes := [U8]{}
     loop {
-        chunk :: reader.read(limit + 1 - bytes.len()) ?? {
+        chunk: reader.read(limit + 1 - bytes.len()) ?? {
             return Err(CcToolchainError.Invalid("read {label}: {err}"))
         }
         if chunk.len() == 0 -> break

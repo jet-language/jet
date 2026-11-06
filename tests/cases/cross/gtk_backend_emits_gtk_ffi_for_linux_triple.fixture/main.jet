@@ -1,4 +1,4 @@
-package {
+package: {
     name: "ui_ui_native_linux"
     version: "0.1.0"
     authority: { allow: [Browser, Exec, FFI, IO, Mem.Alloc] }
@@ -26,20 +26,20 @@ package {
 // golden test sets, so it terminates); `tests/cross.rs` proves the window/
 // widget/click/style code compiles and links against gtk4.
 use {
-    ui :: core.ui
-    reactive :: core.reactive
-    gtk4 :: c.gtk4
+    ui: core.ui
+    reactive: core.reactive
+    gtk4: c.gtk4
 }
 
-fn run() {
+run: fn() {
     comptime if $build.os == {
         .Linux -> {
-            clicks :: reactive.signal(0)
-            app :: ui.gtk_backend()
-            render_app :: app.copy()
+            clicks: reactive.signal(0)
+            app: ui.gtk_backend()
+            render_app: app.copy()
             ui.reactive_render(
             () -> {
-                tree :: ui.box(
+                tree: ui.box(
                 [
                     ui.text("Jet — native GTK4 counter"),
                     ui.node_color(

@@ -1,15 +1,15 @@
-package {
+package: {
     name: "note_app"
     authority: { allow: [Browser, FS.Read, FS.Write, IO, Mem.Alloc] }
 }
 
 use {
-    ui :: core.ui
-    reactive :: core.reactive
-    fs :: core.files
+    ui: core.ui
+    reactive: core.reactive
+    fs: core.files
 }
 
-fn shortcut_label(code: String) -> String {
+shortcut_label: fn(code: String) -> String {
     if code == {
         "Ctrl+S" -> "save"
         "Ctrl+Z" -> "undo"
@@ -19,20 +19,20 @@ fn shortcut_label(code: String) -> String {
     }
 }
 
-fn run() {
-    path :: "$JET_STATE_ROOT/dx3/area-gui/pkg/sample-note.txt"
+run: fn() {
+    path: "$JET_STATE_ROOT/dx3/area-gui/pkg/sample-note.txt"
     fs.write(path, "Meeting notes — café\nBring résumé and naïve examples.\n") ?? panic("seed note")
-    loaded :: fs.read(path) ?? panic("open note")
-    loaded_len :: loaded.len()
+    loaded: fs.read(path) ?? panic("open note")
+    loaded_len: loaded.len()
 
-    meeting_title :: "Meeting"
-    ideas_title :: "Ideas"
+    meeting_title: "Meeting"
+    ideas_title: "Ideas"
     selected := reactive.signal(0)
     draft := reactive.signal(loaded.copy())
     mode := reactive.signal("dark")
     settings := reactive.signal("closed")
     backend := ui.tui_backend()
-    render_backend :: backend.copy()
+    render_backend: backend.copy()
 
     ui.reactive_render(() -> {
         rows := [UINode]{
@@ -60,11 +60,11 @@ fn run() {
         ui.node_role("Toggle theme", 16.0, 1.0, ui.aria_role_button())
     ])
     print("focus initial: {backend.focused_label()}")
-    _tab_result :: backend.on_event(ui.key_event("Tab"))
+    _tab_result: backend.on_event(ui.key_event("Tab"))
     print("tab result: handled")
     print("focus after Tab: {backend.focused_label()}")
-    save_shortcut :: shortcut_label("Ctrl+S")
-    undo_shortcut :: shortcut_label("Ctrl+Z")
+    save_shortcut: shortcut_label("Ctrl+S")
+    undo_shortcut: shortcut_label("Ctrl+Z")
     print("shortcut Ctrl+S: {save_shortcut}")
     print("shortcut Ctrl+Z: {undo_shortcut}")
     print("initial renders: {backend.render_count()}")
@@ -72,7 +72,7 @@ fn run() {
 
     undo := [String]{}
     redo := [String]{}
-    previous :: draft.get()
+    previous: draft.get()
     &undo.push(previous)
     &draft.set("Edited — café, résumé, 中文")
     &selected.set(1)
@@ -80,7 +80,7 @@ fn run() {
     &settings.set("open")
     print("edited renders: {backend.render_count()}")
     print("theme/settings: light / open")
-    restored :: &undo.pop() ?? ""
+    restored: &undo.pop() ?? ""
     &redo.push(draft.get())
     &draft.set(restored)
     print("undo restored: {draft.get() == loaded}")

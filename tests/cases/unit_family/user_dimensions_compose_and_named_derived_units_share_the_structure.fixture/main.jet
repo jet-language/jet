@@ -3,13 +3,13 @@
 #UnitFamily(Length, dimension, base: meter) { meter }
 #UnitFamily(Force, dimension: Mass * Length / Time / Time, base: newton) { newton }
 
-fn accept(force: Newton) { print(force) }
-fn keep<Q: Quantity<Force, .Linear>>(value: ^Q) -> Q { return value }
-fn run() {
-    momentum :: 4kilogram * 3meter
-    acceleration_step :: momentum / 2s
-    force :: acceleration_step / 2s
-    named :: 1newton
+accept: fn(force: Newton) { print(force) }
+keep: fn<Q: Quantity<Force, .Linear>>(value: ^Q) -> Q { return value }
+run: fn() {
+    momentum: 4kilogram * 3meter
+    acceleration_step: momentum / 2s
+    force: acceleration_step / 2s
+    named: 1newton
     keep(^named).drop("the call only proves the Quantity<Force, .Linear> bound")
     keep(^force).drop("the call only proves the Quantity<Force, .Linear> bound")
     accept(force)

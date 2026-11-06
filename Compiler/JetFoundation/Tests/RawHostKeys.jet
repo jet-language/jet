@@ -5,8 +5,8 @@ use jet_foundation.[
     core_module_export, type_identity_equal, type_tuple_fields_canonical,
 ]
 
-fn raw_host_key_fixture(module_name: String, key: String, retired: String, parameters: [Type], result: Type, borrowed: [Bool], effect_kind: Effect, effect_leaf: String?) {
-    row :: core_call(module_name, key) ?? panic("raw host route is registered")
+raw_host_key_fixture: fn(module_name: String, key: String, retired: String, parameters: [Type], result: Type, borrowed: [Bool], effect_kind: Effect, effect_leaf: String?) {
+    row: core_call(module_name, key) ?? panic("raw host route is registered")
     assert(row.module_name == module_name && row.member == key)
     assert(row.signature.arity == parameters.len() && row.signature.max_arity == parameters.len())
     assert(row.signature.borrow_mask == borrowed)
@@ -15,21 +15,21 @@ fn raw_host_key_fixture(module_name: String, key: String, retired: String, param
         .Prelude(symbol) -> assert(symbol == key)
         else -> panic("raw host route retains its Prelude symbol")
     }
-    actual_effect :: row.effect_kind ?? panic("raw host authority is registered")
+    actual_effect: row.effect_kind ?? panic("raw host authority is registered")
     assert(actual_effect == effect_kind)
     if effect_leaf == {
         .Val(expected) -> {
-            actual_leaf :: row.effect_leaf ?? panic("raw host authority leaf is registered")
+            actual_leaf: row.effect_leaf ?? panic("raw host authority leaf is registered")
             assert(actual_leaf == expected)
         }
         None -> assert(row.effect_leaf == None)
     }
-    signature :: core_host_fixed_signature(module_name, key) ?? panic("raw host typed signature is registered")
+    signature: core_host_fixed_signature(module_name, key) ?? panic("raw host typed signature is registered")
     assert(signature.min_arity == parameters.len() && signature.max_arity == parameters.len() && signature.parameters.len() == parameters.len())
     loop (index, parameter) in parameters {
         assert(type_identity_equal(signature.parameters[index].ty, parameter))
     }
-    returned :: signature.return_type ?? panic("raw host typed result")
+    returned: signature.return_type ?? panic("raw host typed result")
     assert(type_identity_equal(returned, result))
     assert(core_call(module_name, retired) == None)
     assert(core_host_fixed_signature(module_name, retired) == None)
@@ -39,34 +39,34 @@ fn raw_host_key_fixture(module_name: String, key: String, retired: String, param
     raw_host_key_fixture("core.term", "jet_term_is_terminal_raw", "__is_terminal", [Type]{Type.Int}, Type.Bool, [Bool]{false}, Effect.IO, None)
     raw_host_key_fixture("core.process", "jet_process_exit_status_raw", "__exit_status", [Type]{Type.Int}, Type.Option{inner: Type.String}, [Bool]{false}, Effect.Exec, None)
     raw_host_key_fixture("core.files", "jet_std_files_open_reader_nonblocking", "__open_nonblocking", [Type]{Type.String}, Type.Result{ok: Type.Named{name: "FileReader"}, err: Type.Named{name: "IOError"}}, [Bool]{true}, Effect.FS, Val("FS.Read"))
-    wire :: Type.List{element: Type.List{element: Type.IntN{signed: false, bits: 8}}}
-    result :: Type.Result{ok: wire, err: Type.String}
+    wire: Type.List{element: Type.List{element: Type.IntN{signed: false, bits: 8}}}
+    result: Type.Result{ok: wire, err: Type.String}
     raw_host_key_fixture("core.http.client", "jet_http_build_resolve", "__build_resolve", [Type]{Type.String, Type.Int}, result, [Bool]{true, false}, Effect.Net, Val("Time.Wait"))
     // Named tuple fields are canonical by name (S73), as the signature row reads them.
-    link_facts :: Type.Tuple{fields: type_tuple_fields_canonical([TypeTupleField]{
+    link_facts: Type.Tuple{fields: type_tuple_fields_canonical([TypeTupleField]{
         {name: "available", ty: Type.Bool},
         {name: "held", ty: Type.Bool},
         {name: "value", ty: Type.Int},
         {name: "errno", ty: Type.Int}
     })}
     raw_host_key_fixture("core.files", "jet_files_link_reader_at_raw", "__link_reader_at", [Type]{Type.Named{name: "FileReader"}, Type.Int, Type.String}, link_facts, [Bool]{true, false, true}, Effect.FS, Val("FS.Write"))
-    files :: core_module_export("core.files") ?? panic("files exports are registered")
+    files: core_module_export("core.files") ?? panic("files exports are registered")
     assert(files.members.contains("compiler_link_held"))
     assert(!files.members.contains("__link_held"))
     assert(core_call("core.files", "compiler_link_held") == None)
-    read_members :: [String]{"__read_bytes_os", "__read_at_os", "__read_link_os", "__scope_read_at", "__reader_line_bytes"}
+    read_members: [String]{"__read_bytes_os", "__read_at_os", "__read_link_os", "__scope_read_at", "__reader_line_bytes"}
     loop member in read_members {
-        row :: core_call("core.files", member) ?? panic("file read leaf is registered")
+        row: core_call("core.files", member) ?? panic("file read leaf is registered")
         assert(row.effect_kind == Val(Effect.FS) && row.effect_leaf == Val("FS.Read"))
     }
-    write_members :: [String]{"__write_bytes_os", "__append_bytes_os", "__create_dirs_os", "__write_at_os", "__writer_refusal", "__atomic_reserve", "__atomic_finish", "__atomic_remove", "__atomic_rename", "__atomic_sync_parent", "__atomic_close"}
+    write_members: [String]{"__write_bytes_os", "__append_bytes_os", "__create_dirs_os", "__write_at_os", "__writer_refusal", "__atomic_reserve", "__atomic_finish", "__atomic_remove", "__atomic_rename", "__atomic_sync_parent", "__atomic_close"}
     loop member in write_members {
-        row :: core_call("core.files", member) ?? panic("file write leaf is registered")
+        row: core_call("core.files", member) ?? panic("file write leaf is registered")
         assert(row.effect_kind == Val(Effect.FS) && row.effect_leaf == Val("FS.Write"))
     }
-    inspect_members :: [String]{"__path_windows", "__atomic_pid", "__scope_roots", "__reader_path"}
+    inspect_members: [String]{"__path_windows", "__atomic_pid", "__scope_roots", "__reader_path"}
     loop member in inspect_members {
-        row :: core_call("core.files", member) ?? panic("file inspection leaf is registered")
+        row: core_call("core.files", member) ?? panic("file inspection leaf is registered")
         assert(row.effect_kind == None && row.effect_leaf == None)
     }
 }

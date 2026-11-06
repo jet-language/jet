@@ -1,5 +1,5 @@
 
-package {
+package: {
     name: "core.process"
     version: "0.0.1"
     edition: "2026"
@@ -10,14 +10,14 @@ package {
     }
 }
 use {
-    core :: core
-    files :: core.files
-    unicode :: core.text
+    core: core
+    files: core.files
+    unicode: core.text
 }
 
 // Exact ProcessSignal shape. Signal arming shares the one native interrupt
 // dispatcher; source owns mask and failure policy.
-enum ProcessSignal {
+ProcessSignal: enum {
     Term
     Hup
     Int
@@ -26,29 +26,29 @@ enum ProcessSignal {
 // An argv-safe shell command. `Sh{"cmd {value}"}` splits its literal text on
 // whitespace and keeps every hole as exactly one argv item; `Sh.raw(text)` is
 // the audited whole-text split.
-struct Sh {
+Sh: struct {
     argv: [String]
     impl Display {
-        fn display(self) -> String { self.argv.join(" ") }
+        display: fn(self) -> String { self.argv.join(" ") }
     }
     impl Debug {
-        fn debug(^self) -> String { self.argv.join(" ") }
+        debug: fn(^self) -> String { self.argv.join(" ") }
     }
     impl Equatable {
-        fn equal(self, rhs: Sh) -> Bool { self.argv == rhs.argv }
+        equal: fn(self, rhs: Sh) -> Bool { self.argv == rhs.argv }
     }
 }
 
 impl Sh {
-    fn args(self) -> [String] Never! { self.argv.copy() }
-    fn raw(text: String) -> Sh Never! {
+    args: fn(self) -> [String] Never! { self.argv.copy() }
+    raw: fn(text: String) -> Sh Never! {
         argv := [String]{}
         sh_split_into(text, &argv)
         Sh{argv: argv}
     }
 }
 
-fn sh_split_into(text: String, argv: &[String]) Never! {
+sh_split_into: fn(text: String, argv: &[String]) Never! {
     word := ""
     loop scalar in unicode.scalars(text) {
         if scalar.is_whitespace() {
@@ -63,7 +63,7 @@ fn sh_split_into(text: String, argv: &[String]) Never! {
 
 // The checked `Sh{…}` literal: literal text splits on whitespace, each hole's
 // display text is one argv item.
-fn __sh_literal(literals: [String], holes: [String]) -> Sh Never! {
+__sh_literal: fn(literals: [String], holes: [String]) -> Sh Never! {
     if literals.len() != holes.len() + 1 -> panic("typed Sh literal and hole counts do not match")
     argv := [String]{}
     sh_split_into(literals[0], &argv)
@@ -75,11 +75,11 @@ fn __sh_literal(literals: [String], holes: [String]) -> Sh Never! {
 }
 
 
-fn args() -[Exec.Args]> [String] Never! { args_from_argv(core.process.argv()) }
+args: fn() -[Exec.Args]> [String] Never! { args_from_argv(core.process.argv()) }
 
-fn check(receipt: ProcessReceipt) IOError! {
+check: fn(receipt: ProcessReceipt) IOError! {
     if receipt.success -> return Ok()
-    limit_hit :: receipt.limit_hit
+    limit_hit: receipt.limit_hit
     if limit_hit == {
         .None -> { _ := 0 }
         .Val(limit) -> return Err(IOError.ResourceLimit(limit))
@@ -94,7 +94,7 @@ fn check(receipt: ProcessReceipt) IOError! {
         }))
     }
     cause := "process exited unsuccessfully: code={receipt.code}"
-    signal :: receipt.signal.copy()
+    signal: receipt.signal.copy()
     if signal == {
         .None -> { _ := 0 }
         .Val(number) -> cause = "{cause}; signal={number}"
@@ -108,43 +108,43 @@ fn check(receipt: ProcessReceipt) IOError! {
 }
 
 
-fn stdin_text(spec: ProcessSpec, text: String) IOError! -[Exec, Time.Wait]> {
-    child :: spec.stdin(.Stream).spawn()
+stdin_text: fn(spec: ProcessSpec, text: String) IOError! -[Exec, Time.Wait]> {
+    child: spec.stdin(.Stream).spawn()
     child.stdin.write_all(text.bytes())
     child.stdin.close()
-    receipt :: child.wait()
+    receipt: child.wait()
     check(receipt)
 }
 
-fn getoutput(spec: ProcessSpec) -[Exec, Time.Wait]> String IOError! {
-    receipt :: spec.run()
+getoutput: fn(spec: ProcessSpec) -[Exec, Time.Wait]> String IOError! {
+    receipt: spec.run()
     receipt.output
 }
 
-fn getstatusoutput(spec: ProcessSpec) -[Exec, Time.Wait]> (status: Int, output: String) IOError! {
-    receipt :: spec.run()
+getstatusoutput: fn(spec: ProcessSpec) -[Exec, Time.Wait]> (status: Int, output: String) IOError! {
+    receipt: spec.run()
     (status: receipt.code, output: combined_output(receipt))
 }
 
-fn shell(line: String) -[Exec, Env]> ProcessSpec Never! {
+shell: fn(line: String) -[Exec, Env]> ProcessSpec Never! {
     if core.sys.family() == "windows" -> return cmd([String]{"cmd", "/C", line})
     cmd([String]{"sh", "-c", line})
 }
 
-fn arg(spec: ProcessSpec, extra: String) -> ProcessSpec Never! {
+arg: fn(spec: ProcessSpec, extra: String) -> ProcessSpec Never! {
     spec.arg(extra)
 }
 
-fn args_extend(spec: ProcessSpec, extra: [String]) -> ProcessSpec Never! {
+args_extend: fn(spec: ProcessSpec, extra: [String]) -> ProcessSpec Never! {
     spec.args_extend(extra)
 }
 
 
-fn cmd(argv: [String]) -[Exec]> ProcessSpec Never! {
-    fields :: default_fields(argv)
-    terminal :: fields.terminal ?? TerminalPolicy{size: TerminalSize{cols: 0, rows: 0}, mode: .Cooked}
-    has_stdin :: if fields.stdin == .Val(_) -> true else -> false
-    has_terminal :: if fields.terminal == .Val(_) -> true else -> false
+cmd: fn(argv: [String]) -[Exec]> ProcessSpec Never! {
+    fields: default_fields(argv)
+    terminal: fields.terminal ?? TerminalPolicy{size: TerminalSize{cols: 0, rows: 0}, mode: .Cooked}
+    has_stdin: if fields.stdin == .Val(_) -> true else -> false
+    has_terminal: if fields.terminal == .Val(_) -> true else -> false
     #Unsafe("transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length") {
         return core.process.__spec_fields(fields.argv, fields.cwd != None, fields.cwd ?? "", fields.env_clear,
             fields.env_names, fields.env_values, fields.env_remove,
@@ -159,23 +159,23 @@ fn cmd(argv: [String]) -[Exec]> ProcessSpec Never! {
     }
 }
 
-fn current_pid() -[Env]> Int Never! { core.sys.getpid() }
+current_pid: fn() -[Env]> Int Never! { core.sys.getpid() }
 
-fn cwd(spec: ProcessSpec, path: String) -> ProcessSpec Never! { spec.cwd(path) }
+cwd: fn(spec: ProcessSpec, path: String) -> ProcessSpec Never! { spec.cwd(path) }
 
-fn env(spec: ProcessSpec, key: String, value: String) -> ProcessSpec Never! {
+env: fn(spec: ProcessSpec, key: String, value: String) -> ProcessSpec Never! {
     spec.env(key, value)
 }
 
-fn env_get(name: String) -[Env]> String? Never! { core.sys.get(name) }
+env_get: fn(name: String) -[Env]> String? Never! { core.sys.get(name) }
 
-fn exit(code: Int) -[Exec]> Never Never! {
+exit: fn(code: Int) -[Exec]> Never Never! {
     core.process.exit(code)
     loop {}
 }
 
-fn on_signal(signal: ProcessSignal) Never! -[Exec]> {
-    mask :: if signal == {
+on_signal: fn(signal: ProcessSignal) Never! -[Exec]> {
+    mask: if signal == {
         .Int -> 1
         .Hup -> 2
         .Term -> 4
@@ -186,7 +186,7 @@ fn on_signal(signal: ProcessSignal) Never! -[Exec]> {
     }
 }
 
-fn pipeline(steps: [ProcessSpec]) -[Exec, Time.Wait]> ProcessReceipt IOError! {
+pipeline: fn(steps: [ProcessSpec]) -[Exec, Time.Wait]> ProcessReceipt IOError! {
     if steps.len() == 0 {
         return Err(IOError.InvalidInput(IOContext{
             operation: .Resolve, resource: Val("process.pipeline([])"), os_code: None,
@@ -196,7 +196,7 @@ fn pipeline(steps: [ProcessSpec]) -[Exec, Time.Wait]> ProcessReceipt IOError! {
     core.process.__pipeline_run(steps)
 }
 
-fn run_spec(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt IOError! {
+run_spec: fn(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt IOError! {
     spec.run()
 }
 
@@ -205,7 +205,7 @@ fn run_spec(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt IOError! {
 // receipt (the caller checks `.success`); a spec that cannot start is an Err in
 // its own slot, so one bad spec never hides the others. Every child but a
 // detached one is marked to die with this process (Linux PR_SET_PDEATHSIG).
-fn run_all(specs: [ProcessSpec], jobs: Int) -[Exec, Time.Wait]> [Result<ProcessReceipt, IOError>] IOError! {
+run_all: fn(specs: [ProcessSpec], jobs: Int) -[Exec, Time.Wait]> [Result<ProcessReceipt, IOError>] IOError! {
     if jobs < 1 {
         return Err(IOError.InvalidInput(IOContext{
             operation: .Resolve, resource: Val("process.run_all"), os_code: None,
@@ -214,9 +214,9 @@ fn run_all(specs: [ProcessSpec], jobs: Int) -[Exec, Time.Wait]> [Result<ProcessR
     }
     results := [Result<ProcessReceipt, IOError>]{}
     task.group pool(limit: jobs) {
-        handles :: loop spec in specs -> task run_all_job(core.process.__spec_parent_death(spec))
+        handles: loop spec in specs -> task run_all_job(core.process.__spec_parent_death(spec))
         loop handle in handles {
-            outcome :: ^handle.join() ?? (receipt: None, error: Val(run_all_cancelled()))
+            outcome: ^handle.join() ?? (receipt: None, error: Val(run_all_cancelled()))
             if outcome.receipt == {
                 .Val(receipt) -> &results.push(Ok(receipt))
                 .None -> &results.push(Err(outcome.error ?? run_all_cancelled()))
@@ -226,14 +226,14 @@ fn run_all(specs: [ProcessSpec], jobs: Int) -[Exec, Time.Wait]> [Result<ProcessR
     Ok(results)
 }
 
-fn run_all_job(spec: ProcessSpec) -[Exec, Time.Wait]> (receipt: ProcessReceipt?, error: IOError?) Never! {
+run_all_job: fn(spec: ProcessSpec) -[Exec, Time.Wait]> (receipt: ProcessReceipt?, error: IOError?) Never! {
     if spec.run() == {
         .Ok(receipt) -> (receipt: Val(receipt), error: None)
         .Err(error) -> (receipt: None, error: Val(error))
     }
 }
 
-fn run_all_cancelled() -> IOError Never! {
+run_all_cancelled: fn() -> IOError Never! {
     IOError.Cancelled(IOContext{
         operation: .Resolve, resource: Val("process.run_all"), os_code: None,
         cause: Val("the job was cancelled before it finished"),
@@ -245,32 +245,32 @@ fn run_all_cancelled() -> IOError Never! {
 // TerminalFact names; a preview fact is any other string key. Every host the
 // runtime launches on opens a PTY (HostSpawn spawn_pty), so the report holds
 // the three stable facts whatever the spec asks for.
-fn __spec_abilities(_spec: ProcessSpec) -> Set<String> Never! {
+__spec_abilities: fn(_spec: ProcessSpec) -> Set<String> Never! {
     Set.from([String]{"terminal", "resize", "raw"})
 }
 
-fn status_ok(receipt: ProcessReceipt) -> Bool Never! {
+status_ok: fn(receipt: ProcessReceipt) -> Bool Never! {
     receipt.success
 }
 
 
-fn which(name: String) -[FS, Env]> String? Never! {
+which: fn(name: String) -[FS, Env]> String? Never! {
     if name.len() == 0 -> return None
     if contains_path_separator(name) || path_is_absolute(name) {
         if resolves_to_file(name) -> return Val(name)
         return None
     }
-    path :: core.sys.get("PATH") ?? return None
-    family :: core.sys.family() ?? return None
-    separator :: path_separator_for_platform(family)
+    path: core.sys.get("PATH") ?? return None
+    family: core.sys.family() ?? return None
+    separator: path_separator_for_platform(family)
     loop directory in path_parts(path, separator) {
-        candidate :: path_join(directory, name)
+        candidate: path_join(directory, name)
         if resolves_to_file(candidate) -> return Val(candidate)
     }
     None
 }
-fn path_is_absolute(path: String) -> Bool Never! {
-    raw :: path.bytes()
+path_is_absolute: fn(path: String) -> Bool Never! {
+    raw: path.bytes()
     if raw.len() == 0 -> return false
     if raw[0] == (U8{47}) || raw[0] == (U8{92}) -> return true
     raw.len() >= 3 &&
@@ -281,20 +281,20 @@ fn path_is_absolute(path: String) -> Bool Never! {
 }
 
 // A PATH search follows a final link, as a shell does: package managers install tools as links.
-fn resolves_to_file(path: String) -[FS]> Bool Never! {
-    row :: core.files.__stat_at(-1, path, true) ?? return false
+resolves_to_file: fn(path: String) -[FS]> Bool Never! {
+    row: core.files.__stat_at(-1, path, true) ?? return false
     row[0] == 0
 }
 
-fn path_join(base: String, name: String) -> String Never! {
+path_join: fn(base: String, name: String) -> String Never! {
     if name.len() == 0 -> return base.copy()
     if path_is_absolute(name) || base.len() == 0 -> return name.copy()
-    last :: base.bytes()[base.bytes().len() - 1]
+    last: base.bytes()[base.bytes().len() - 1]
     if last == (U8{47}) || last == (U8{92}) -> return "{base}{name}"
     "{base}/{name}"
 }
 
-fn path_separator_for_platform(family: String) -> U8 Never! {
+path_separator_for_platform: fn(family: String) -> U8 Never! {
     if family == "windows" -> return U8{59}
     U8{58}
 }
@@ -302,51 +302,51 @@ fn path_separator_for_platform(family: String) -> U8 Never! {
 
 
 
-fn call(spec: ProcessSpec) -[Exec, Time.Wait]> Int IOError! {
-    receipt :: spec.run()
+call: fn(spec: ProcessSpec) -[Exec, Time.Wait]> Int IOError! {
+    receipt: spec.run()
     receipt.code
 }
 
-fn capture(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt IOError! {
+capture: fn(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt IOError! {
     spec.run()
 }
 
-fn check_call(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt IOError! {
+check_call: fn(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt IOError! {
     spec.run_checked()
 }
 
-fn check_output(spec: ProcessSpec) -[Exec, Time.Wait]> String IOError! {
-    receipt :: check_call(spec)
+check_output: fn(spec: ProcessSpec) -[Exec, Time.Wait]> String IOError! {
+    receipt: check_call(spec)
     receipt.output
 }
 
 
-fn combined_output(receipt: ProcessReceipt) -> String Never! {
+combined_output: fn(receipt: ProcessReceipt) -> String Never! {
     if receipt.output.len() == 0 -> return receipt.errors
     if receipt.errors.len() == 0 -> return receipt.output
     "{receipt.output}\n{receipt.errors}"
 }
 
-fn env_get_or(name: String, fallback: String) -[Env]> String Never! {
+env_get_or: fn(name: String, fallback: String) -[Env]> String Never! {
     core.sys.get(name) ?? return fallback
 }
 
-fn env_keys() -[Env]> [String] EnvError! { core.sys.vars() }
+env_keys: fn() -[Env]> [String] EnvError! { core.sys.vars() }
 
-fn env_set(spec: ProcessSpec, key: String, value: String) -> ProcessSpec Never! {
+env_set: fn(spec: ProcessSpec, key: String, value: String) -> ProcessSpec Never! {
     spec.env(key, value)
 }
 
-fn env_truthy(name: String) -[Env]> Bool Never! {
-    value :: core.sys.get(name) ?? return false
-    lowered :: core.text.lower(value)
+env_truthy: fn(name: String) -[Env]> Bool Never! {
+    value: core.sys.get(name) ?? return false
+    lowered: core.text.lower(value)
     lowered == "1" || lowered == "true" || lowered == "yes" || lowered == "on"
 }
 
-fn failed(receipt: ProcessReceipt) -> Bool Never! { !receipt.success }
+failed: fn(receipt: ProcessReceipt) -> Bool Never! { !receipt.success }
 
 
-fn list2cmdline(argv: [String]) -> String Never! {
+list2cmdline: fn(argv: [String]) -> String Never! {
     out := ""
     first := true
     loop item in argv {
@@ -357,7 +357,7 @@ fn list2cmdline(argv: [String]) -> String Never! {
     out
 }
 
-fn signal_number(signal: ProcessSignal) -> Int Never! {
+signal_number: fn(signal: ProcessSignal) -> Int Never! {
     if signal == {
         .Int -> 2
         .Term -> 15
@@ -365,32 +365,32 @@ fn signal_number(signal: ProcessSignal) -> Int Never! {
     }
 }
 
-fn stderr_lines(receipt: ProcessReceipt) -> [String] Never! {
+stderr_lines: fn(receipt: ProcessReceipt) -> [String] Never! {
     split_lines(receipt.errors)
 }
 
-fn stdout_lines(receipt: ProcessReceipt) -> [String] Never! {
+stdout_lines: fn(receipt: ProcessReceipt) -> [String] Never! {
     split_lines(receipt.output)
 }
 
-fn exited(receipt: ProcessReceipt) -> Bool Never! {
+exited: fn(receipt: ProcessReceipt) -> Bool Never! {
     receipt.signal == None && !receipt.timed_out
 }
-fn contains_path_separator(value: String) -> Bool Never! {
+contains_path_separator: fn(value: String) -> Bool Never! {
     loop byte in value.bytes() {
         if byte == (U8{47}) || byte == (U8{92}) -> return true
     }
     false
 }
 
-fn path_separator(value: String) -> U8 {
-    raw :: value.bytes()
+path_separator: fn(value: String) -> U8 {
+    raw: value.bytes()
     if raw.len() > 0 -> return raw[0]
     U8{58}
 }
 
-fn path_parts(value: String, separator: U8) -> [String] Never! {
-    raw :: value.bytes()
+path_parts: fn(value: String, separator: U8) -> [String] Never! {
+    raw: value.bytes()
     out := [String]{}
     start := 0
     i := 0
@@ -406,8 +406,8 @@ fn path_parts(value: String, separator: U8) -> [String] Never! {
     out
 }
 
-fn split_lines(value: String) -> [String] {
-    raw :: value.bytes()
+split_lines: fn(value: String) -> [String] {
+    raw: value.bytes()
     out := [String]{}
     start := 0
     i := 0
@@ -428,8 +428,8 @@ fn split_lines(value: String) -> [String] {
     out
 }
 
-fn quote_arg(value: String) -> String {
-    raw :: value.bytes()
+quote_arg: fn(value: String) -> String {
+    raw: value.bytes()
     needs_quote := raw.len() == 0
     loop byte in raw {
         if byte == (U8{9}) || byte == (U8{10}) || byte == (U8{13}) || byte == (U8{32}) {
@@ -476,7 +476,7 @@ fn quote_arg(value: String) -> String {
     String.from_bytes(out) ?? value.copy()
 }
 
-fn slice_u8(raw: [U8], start: Int, end: Int) -> [U8] Never! {
+slice_u8: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     out := [U8]{}
     i := start
     loop i < end {
@@ -487,7 +487,7 @@ fn slice_u8(raw: [U8], start: Int, end: Int) -> [U8] Never! {
 }
 
 
-fn args_from_argv(values: [String]) -> [String] Never! {
+args_from_argv: fn(values: [String]) -> [String] Never! {
     if values.len() < 2 -> return [String]{}
     values[1..<values.len()]
 }
@@ -500,7 +500,7 @@ fn args_from_argv(values: [String]) -> [String] Never! {
 
 // Temporary native-carrier layout. This is not a second public builder API:
 // the canonical ProcessSpec stays opaque and its existing methods stay intact.
-struct ProcessFields {
+ProcessFields: struct {
     argv: [String]
     cwd: String?
     env_clear: Bool
@@ -520,7 +520,7 @@ struct ProcessFields {
     policy_wire: String?
 }
 
-fn default_fields(argv: [String]) -> ProcessFields Never! {
+default_fields: fn(argv: [String]) -> ProcessFields Never! {
     ProcessFields{
         argv: argv, cwd: None, env_clear: false,
         env_names: [String]{}, env_values: [String]{}, env_remove: [String]{},
@@ -532,7 +532,7 @@ fn default_fields(argv: [String]) -> ProcessFields Never! {
 }
 
 #Test("command defaults are Jet-owned and keep empty argv deferred to spawn") {
-    fields :: default_fields([String]{})
+    fields: default_fields([String]{})
     assert(fields.argv.len() == 0)
     assert(fields.cwd == None && !fields.env_clear)
     assert(fields.env_names.len() == 0 && fields.env_values.len() == 0 && fields.env_remove.len() == 0)
@@ -544,24 +544,24 @@ fn default_fields(argv: [String]) -> ProcessFields Never! {
 }
 
 // Process stdout/stderr readers wait on the child execution boundary, not FS.
-fn __stdout_next_line(stream: ProcessStdoutStream) -[Exec, Time.Wait]> String? IOError! {
+__stdout_next_line: fn(stream: ProcessStdoutStream) -[Exec, Time.Wait]> String? IOError! {
     pipe_line(core.process.__stdout_line_bytes(stream))
 }
 
-fn __stderr_next_line(stream: ProcessStderrStream) -[Exec, Time.Wait]> String? IOError! {
+__stderr_next_line: fn(stream: ProcessStderrStream) -[Exec, Time.Wait]> String? IOError! {
     pipe_line(core.process.__stderr_line_bytes(stream))
 }
 
 /// A child's output pipe read in pieces: `loop chunk in child.stdout.chunks(size)`
 /// yields each non-empty piece of at most `size` bytes. The loop ends at end of
 /// input or at the first failed read; a size below one fails before any read.
-struct ProcessChunks {
+ProcessChunks: struct {
     __stdout: ProcessStdoutStream?{None}
     __stderr: ProcessStderrStream?{None}
     __size: Int
 }
 
-struct __ProcessChunkCursor {
+__ProcessChunkCursor: struct {
     stdout: ProcessStdoutStream?
     stderr: ProcessStderrStream?
     size: Int
@@ -569,9 +569,9 @@ struct __ProcessChunkCursor {
 }
 
 impl __ProcessChunkCursor.Iterator {
-    type Item = [U8]
+    Item: [U8]
 
-    fn next(&self) -[Exec, Time.Wait]> [U8]? {
+    next: fn(&self) -[Exec, Time.Wait]> [U8]? {
         if self.done -> return None
         piece := [U8]{}
         if self.stdout == .Val(stream) {
@@ -588,38 +588,38 @@ impl __ProcessChunkCursor.Iterator {
 }
 
 impl ProcessChunks.Iterable {
-    type Iter = __ProcessChunkCursor
+    Iter: __ProcessChunkCursor
 
-    fn iter(^self) -> __ProcessChunkCursor {
+    iter: fn(^self) -> __ProcessChunkCursor {
         __ProcessChunkCursor{stdout: self.__stdout, stderr: self.__stderr, size: self.__size, done: false}
     }
 }
 
 // The loop sources `child.stdout.chunks(size)` and `child.stderr.chunks(size)`
 // check to (Sema ProcessHandles).
-fn __stdout_chunks(stream: ProcessStdoutStream, size: Int) -> ProcessChunks Never! {
+__stdout_chunks: fn(stream: ProcessStdoutStream, size: Int) -> ProcessChunks Never! {
     ProcessChunks{__stdout: Val(stream), __size: size}
 }
 
-fn __stderr_chunks(stream: ProcessStderrStream, size: Int) -> ProcessChunks Never! {
+__stderr_chunks: fn(stream: ProcessStderrStream, size: Int) -> ProcessChunks Never! {
     ProcessChunks{__stderr: Val(stream), __size: size}
 }
 
-fn pipe_line(^input: [U8]) -> String? IOError! {
+pipe_line: fn(^input: [U8]) -> String? IOError! {
     bytes := ^input
     if bytes.len() == 0 -> return Ok(None)
     trim_pipe_line(&bytes)
-    text :: String.from_bytes(^bytes) ?? return Err(IOError.Other(IOContext{
+    text: String.from_bytes(^bytes) ?? return Err(IOError.Other(IOContext{
         operation: .Read, resource: Val("process output"), os_code: None,
         cause: Val("stream did not contain valid UTF-8"),
     }))
     Ok(Val(text))
 }
 
-fn trim_pipe_line(bytes: &[U8]) Never! {
+trim_pipe_line: fn(bytes: &[U8]) Never! {
     if bytes.len() > 0 && bytes[bytes.len() - 1] == (U8{10}) {
-        _ :: &bytes.pop()
-        if bytes.len() > 0 && bytes[bytes.len() - 1] == (U8{13}) -> _ :: &bytes.pop()
+        _: &bytes.pop()
+        if bytes.len() > 0 && bytes[bytes.len() - 1] == (U8{13}) -> _: &bytes.pop()
     }
 }
 

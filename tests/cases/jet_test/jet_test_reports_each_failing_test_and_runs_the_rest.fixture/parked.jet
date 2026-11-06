@@ -2,7 +2,7 @@
 // a full channel, so the test process dies at exit (E3013) after every outcome
 // has streamed. The run still reports each test, and the tests after either
 // culprit run and pass.
-use tasks :: core.tasks
+use tasks: core.tasks
 
 #Test("before the failures") { assert(true) }
 
@@ -11,9 +11,9 @@ use tasks :: core.tasks
 #Test("between the failures") { assert(true) }
 
 #Test("leaves a parked task") {
-    (sender, receiver) :: channel<Int>(1)
+    (sender, receiver): channel<Int>(1)
     sender.send(1)
-    blocked :: task ^sender {
+    blocked: task ^sender {
         sender.send(2)
         receiver.close()
     }

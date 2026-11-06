@@ -1,7 +1,7 @@
 
-use tls :: core.net.tls
+use tls: core.net.tls
 
-fn run() -[IO, Net]> {
+run: fn() -[IO, Net]> {
     print(tls.RootCertificates.from_pem("not PEM".bytes()) == .Err(_))
     print(tls.ClientIdentity.from_pem(cert_chain: "not PEM".bytes(), private_key: "not PEM".bytes()) == .Err(_))
     print(tls.ClientConfig.default().with_alpn([""]) == .Err(_))

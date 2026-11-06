@@ -1,16 +1,16 @@
 use {
-    comptime_diff_hex :: core.encoding.hex
-    loadable :: core.reactive.loadable
+    comptime_diff_hex: core.encoding.hex
+    loadable: core.reactive.loadable
 }
-COMPTIME_VALUE :: comptime { loadable.idle() }
+COMPTIME_VALUE: comptime { loadable.idle() }
 
-fn run() {
-    r :: loadable.idle()
+run: fn() {
+    r: loadable.idle()
     comptime_diff_frame("{COMPTIME_VALUE.is_idle()}", "{r.is_idle()}")
 
 }
 
-fn comptime_diff_frame(expected_text: String, actual_text: String) {
+comptime_diff_frame: fn(expected_text: String, actual_text: String) {
     print("{comptime_diff_hex.encode(expected_text.bytes())}")
     print("{comptime_diff_hex.encode(actual_text.bytes())}")
 }

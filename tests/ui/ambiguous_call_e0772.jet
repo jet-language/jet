@@ -1,19 +1,19 @@
 // Two traits each give `Store` a default `put` of the same shape, so a
 // positional call cannot choose one body.
-trait Named {
-    fn put(self, name: String, text: String) -> String { "{name}: {text}" }
+Named: trait {
+    put: fn(self, name: String, text: String) -> String { "{name}: {text}" }
 }
 
-trait Keyed {
-    fn put(self, key: String, id: String) -> String { "{key} = {id}" }
+Keyed: trait {
+    put: fn(self, key: String, id: String) -> String { "{key} = {id}" }
 }
 
-struct Store {
+Store: struct {
     impl Named {}
     impl Keyed {}
 }
 
-fn run() {
-    store :: Store{}
+run: fn() {
+    store: Store{}
     print(store.put("name", "text"))
 }

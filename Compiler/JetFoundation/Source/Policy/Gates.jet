@@ -1,12 +1,12 @@
 // Invocation gates are transport, not a second policy resolver.
 
-struct GateSet {
+GateSet: struct {
     allowed: [PolicyKey]{[PolicyKey]{}}
     build_flag: Bool{false}
     session_flag: Bool{false}
 }
 
-fn policy_gate_allows(gates: GateSet, key: PolicyKey) -> Bool Never! {
+policy_gate_allows: fn(gates: GateSet, key: PolicyKey) -> Bool Never! {
     if !gates.allowed.contains(key) -> return false
     if policy_resolve(key, [policy_invocation_declaration(key)]) == {
         .Ok(_) -> true
@@ -14,16 +14,16 @@ fn policy_gate_allows(gates: GateSet, key: PolicyKey) -> Bool Never! {
     }
 }
 
-fn policy_gate_set_is_empty(gates: GateSet) -> Bool Never! {
+policy_gate_set_is_empty: fn(gates: GateSet) -> Bool Never! {
     gates.allowed.is_empty()
 }
 
 #Error
-struct PolicyGateParseError { message: String }
+PolicyGateParseError: struct { message: String }
 
 // One `--gate name=allow` argument: the audited gate it opens.
-fn policy_gate_parse(spec: String) -> PolicyKey PolicyGateParseError! {
-    raw :: spec.bytes()
+policy_gate_parse: fn(spec: String) -> PolicyKey PolicyGateParseError! {
+    raw: spec.bytes()
     split := -1
     loop (index, byte) in raw {
         if Int.from_u8(byte) == 61 {
@@ -32,9 +32,9 @@ fn policy_gate_parse(spec: String) -> PolicyKey PolicyGateParseError! {
         }
     }
     if split < 0 -> return Err(PolicyGateParseError{message: "use `--gate name=allow`"})
-    name :: (String.from_bytes(raw[0..<split]) ?? "").trim()
-    value :: (String.from_bytes(raw[split + 1..<raw.len()]) ?? "").trim()
-    key :: policy_key_parse(name) ?? return Err(PolicyGateParseError{message: "`{name}` is not an audited gate"})
+    name: (String.from_bytes(raw[0..<split]) ?? "").trim()
+    value: (String.from_bytes(raw[split + 1..<raw.len()]) ?? "").trim()
+    key: policy_key_parse(name) ?? return Err(PolicyGateParseError{message: "`{name}` is not an audited gate"})
     if !policy_key_is_audited_gate(key) || value != "allow" -> return Err(PolicyGateParseError{message: "`--gate {spec}` must name an audited gate with `=allow`"})
     if policy_resolve(key, [PolicyDeclaration]{policy_invocation_declaration(key)}) == {
         .Ok(_) -> {}
@@ -43,14 +43,14 @@ fn policy_gate_parse(spec: String) -> PolicyKey PolicyGateParseError! {
     Ok(key)
 }
 
-fn policy_invocation_declaration(key: PolicyKey) -> PolicyDeclaration Never! {
+policy_invocation_declaration: fn(key: PolicyKey) -> PolicyDeclaration Never! {
     PolicyDeclaration{key: key, value: PolicyValue.Allow, scope: PolicyScope.Block, span: Span{start: 0, end: 0}, target: None, source: "<invocation>"}
 }
 
 // Rust `gate_refusal` (D-GATE-LAW1=A): the `.Forbid` of `key` on the outermost
 // rung (the first written there) refuses its gate, whatever an inner rung or an
 // invocation allowance says; None when no declaration forbids it.
-fn policy_gate_forbidding(key: PolicyKey, declarations: [PolicyDeclaration]) -> PolicyDeclaration? Never! {
+policy_gate_forbidding: fn(key: PolicyKey, declarations: [PolicyDeclaration]) -> PolicyDeclaration? Never! {
     selected := PolicyDeclaration?{None}
     loop declaration in declarations {
         if declaration.key != key || declaration.value != PolicyValue.Forbid -> next
@@ -62,17 +62,17 @@ fn policy_gate_forbidding(key: PolicyKey, declarations: [PolicyDeclaration]) -> 
     selected
 }
 
-fn policy_resolve_with_gates(key: PolicyKey, declarations: [PolicyDeclaration], gates: GateSet) -> EffectivePolicy? PolicyError! {
-    effective :: policy_resolve(key, declarations)
+policy_resolve_with_gates: fn(key: PolicyKey, declarations: [PolicyDeclaration], gates: GateSet) -> EffectivePolicy? PolicyError! {
+    effective: policy_resolve(key, declarations)
     if gates.allowed.contains(key) {
         chain := declarations
         &chain.push(policy_invocation_declaration(key))
-        _ :: policy_resolve(key, chain)
+        _: policy_resolve(key, chain)
     }
     Ok(effective)
 }
 
-fn policy_default_gate_value(key: PolicyKey) -> PolicyValue Never! {
+policy_default_gate_value: fn(key: PolicyKey) -> PolicyValue Never! {
     if key == PolicyKey.Unsafe -> return PolicyValue.Default
     if policy_key_is_audited_gate(key) -> return PolicyValue.GateOnly
     if key == PolicyKey.Sentries -> return PolicyValue.On

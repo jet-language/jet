@@ -1,7 +1,7 @@
 // HTTPClient.rs409-411/419 precise raw error mappings; original three raw-client instances and request/read phases.
-use http :: core.http.client
-fn run() {
-    client0 :: http.Client.new().protocols(true, false, true)
+use http: core.http.client
+run: fn() {
+    client0: http.Client.new().protocols(true, false, true)
     if client0.send(http.request("GET", "http://{cap:addr}/h2")) == {
         .Err(error) -> {
             if error == {
@@ -11,7 +11,7 @@ fn run() {
         }
         else -> panic("expected send error")
     }
-    client1 :: http.Client.new().protocols(true, false, true)
+    client1: http.Client.new().protocols(true, false, true)
     if client1.send(http.request("GET", "http://{cap:addr}/h2")) == {
         .Err(error) -> {
             if error == {
@@ -21,8 +21,8 @@ fn run() {
         }
         else -> panic("expected send error")
     }
-    client2 :: http.Client.new().protocols(true, false, true)
-    response :: client2.send(http.request("GET", "http://{cap:addr}/h2")) ?? panic("third send")
+    client2: http.Client.new().protocols(true, false, true)
+    response: client2.send(http.request("GET", "http://{cap:addr}/h2")) ?? panic("third send")
     saw_error := false
     loop chunk in response.body().chunks(64) {
         if chunk == {

@@ -2,37 +2,37 @@
 // instead of EncodingLimits.safe() (16 MiB, depth 256). A larger budget
 // accepts what `json.parse` refuses; a smaller one refuses what it accepts.
 use {
-    encoding :: core.encoding
-    json :: core.encoding.json
+    encoding: core.encoding
+    json: core.encoding.json
 }
 
-fn kind_name(kind: encoding.EncodingErrorKind) -> String {
+kind_name: fn(kind: encoding.EncodingErrorKind) -> String {
     if kind == encoding.EncodingErrorKind.Syntax -> return "Syntax"
     if kind == encoding.EncodingErrorKind.Limit -> return "Limit"
     "other"
 }
 
-fn nested(depth: Int) -> String {
+nested: fn(depth: Int) -> String {
     out := ""
     loop _ in 0..<depth -> out = "{out}["
     loop _ in 0..<depth -> out = "{out}]"
     out
 }
 
-fn limits(depth: Int, bytes: Int) -> encoding.EncodingLimits {
+limits: fn(depth: Int, bytes: Int) -> encoding.EncodingLimits {
     encoding.EncodingLimits{buffer_bytes: 65536, max_depth: depth, max_item_bytes: bytes, max_total_bytes: None, max_expansion_depth: 32, max_expansion_bytes: 8388608}
 }
 
-fn show(label: String, text: String, chosen: encoding.EncodingLimits) {
-    value :: json.parse_with_limits(text, chosen) ?? {
+show: fn(label: String, text: String, chosen: encoding.EncodingLimits) {
+    value: json.parse_with_limits(text, chosen) ?? {
         print("{label}: {kind_name(err.kind)}: {err.reason}")
         return
     }
     print("{label}: accepted {text.len()} bytes, canonical {json.canonical(value) ?? panic("canonical")}")
 }
 
-fn run() {
-    deep :: nested(300)
+run: fn() {
+    deep: nested(300)
     if json.parse(deep) == {
         .Ok(_) -> print("parse depth 300: accepted")
         .Err(err) -> print("parse depth 300: {kind_name(err.kind)}: {err.reason}")

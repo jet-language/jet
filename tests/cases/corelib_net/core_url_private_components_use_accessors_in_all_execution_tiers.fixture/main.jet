@@ -1,10 +1,10 @@
 
-use url :: core.net.url
+use url: core.net.url
 
-fn run() -[IO, Mem.Alloc]> {
-    parsed :: url.parse("https://alice:secret@example.test:8443/a?x=1#frag") ?? panic("URL parse")
-    typed :: URL{"https://alice:secret@example.test:8443/a?x=1#frag"}
-    values :: [URL]{parsed, typed}
+run: fn() -[IO, Mem.Alloc]> {
+    parsed: url.parse("https://alice:secret@example.test:8443/a?x=1#frag") ?? panic("URL parse")
+    typed: URL{"https://alice:secret@example.test:8443/a?x=1#frag"}
+    values: [URL]{parsed, typed}
     loop value in values {
         print(value.scheme())
         print(value.host() ?? "missing")

@@ -112,7 +112,7 @@ export function parseRuntimeExports(source, path) {
   const exports = new Map();
   // Read the complete declaration so a generic, write parameter, or failure
   // suffix cannot be silently erased before validation.
-  for (const match of source.matchAll(/^(?:\/\/ runtime-(init|fini): (\d+)(?: when ([A-Za-z_]\w*(?:,[A-Za-z_]\w*)*))?\n)?#Export\(c\)\s+(?:pub\s+)?fn\s+([A-Za-z_]\w*)\s*([^{}]*?)\{/gm)) {
+  for (const match of source.matchAll(/^(?:\/\/ runtime-(init|fini): (\d+)(?: when ([A-Za-z_]\w*(?:,[A-Za-z_]\w*)*))?\n)?#Export\(c\)\s+(?:pub\s+)?([A-Za-z_]\w*):\s*fn\s*([^{}]*?)\{/gm)) {
     const [, lifecycleKind, lifecyclePriority, lifecycleGuard, name, signature] = match;
     if (lifecycleKind && Number(lifecyclePriority) > 65535) throw new Error(`${path}: lifecycle priority exceeds 65535`);
     const parsed = /^\(([\s\S]*)\)\s*([\s\S]*)$/.exec(signature.trim());

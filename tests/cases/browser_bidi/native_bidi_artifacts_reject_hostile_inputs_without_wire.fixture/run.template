@@ -1,12 +1,12 @@
 
-use browser :: core.web.browser
+use browser: core.web.browser
 
-fn run() {
-    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
-    timeout :: browser.timeout(200) ?? panic("timeout")
-    session :: browser.connect_profile("ws://127.0.0.1:{free-port:artifacts_hostile}/session?token=HOSTILE_ARTIFACT_SECRET", profile, timeout) ?? panic("connect")
-    context :: session.context() ?? panic("context")
-    page :: context.page() ?? panic("page")
+run: fn() {
+    profile: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout: browser.timeout(200) ?? panic("timeout")
+    session: browser.connect_profile("ws://127.0.0.1:{free-port:artifacts_hostile}/session?token=HOSTILE_ARTIFACT_SECRET", profile, timeout) ?? panic("connect")
+    context: session.context() ?? panic("context")
+    page: context.page() ?? panic("page")
 
     loop attempt in [1] {
         session.allow_downloads("") ?? next
@@ -17,11 +17,11 @@ fn run() {
         print("unexpected empty cookie")
     }
     loop attempt in [1] {
-        value :: page.cookie("") ?? next
+        value: page.cookie("") ?? next
         print("unexpected empty cookie name {value}")
     }
     loop attempt in [1] {
-        value :: page.storage_get("memory", "k") ?? next
+        value: page.storage_get("memory", "k") ?? next
         print("unexpected storage kind {value}")
     }
     loop attempt in [1] {

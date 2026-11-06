@@ -6,13 +6,13 @@
 // state (Channel.jet State160).
 
 // Checked FunctionAddress intrinsics in the canonical RuntimeLibrary table.
-fn rt_interval_worker_address() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
-fn rt_after_worker_address() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
-fn rt_timer_int_drop_address() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+rt_interval_worker_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+rt_after_worker_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+rt_timer_int_drop_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
 
 // Drops one queued Int when the channel is released with values unreceived
 // (an address target returns a word; the drop has none to give).
-#Export(c) fn jet_rt_timer_int_drop(slot: I64) -> I64 {
+#Export(c) jet_rt_timer_int_drop: fn(slot: I64) -> I64 {
     jet_rt_int_drop(sync_load(slot))
     I64{0}
 }
@@ -20,8 +20,8 @@ fn rt_timer_int_drop_address() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}
 // The element descriptor of an exact-Int channel (Collections.jet meta72:
 // stride 8, drop 16, kind 1). Queued values are moved out on receive and
 // never cloned.
-fn timer_meta() -> I64 {
-    meta :: jet_rt_alloc(I64{72}, I64{8})
+timer_meta: fn() -> I64 {
+    meta: jet_rt_alloc(I64{72}, I64{8})
     thread_zero(meta, I64{72})
     sync_store(meta, I64{8})
     sync_store(wrapping(meta + I64{16}), rt_timer_int_drop_address())
@@ -32,7 +32,7 @@ fn timer_meta() -> I64 {
 // reserve_send + commit of an owned Int on the unbounded channel: refused,
 // leaving the value with the caller, once the channel is closed or has no
 // receiver left.
-fn timer_send(channel: I64, value: I64) -> Bool {
+timer_send: fn(channel: I64, value: I64) -> Bool {
     sync_mutex_lock(channel)
     if (sync_load(wrapping(channel + I64{88})) != I64{0} || sync_load(wrapping(channel + I64{128})) == I64{0}) {
         channel_update(channel)
@@ -40,9 +40,9 @@ fn timer_send(channel: I64, value: I64) -> Bool {
         return false
     }
     if (sync_load(wrapping(channel + I64{56})) == I64{0}) -> sync_store(wrapping(channel + I64{56}), timer_meta())
-    length :: sync_load(wrapping(channel + I64{16}))
+    length: sync_load(wrapping(channel + I64{16}))
     channel_grow(channel, length + sync_load(wrapping(channel + I64{80})) + I64{1})
-    target :: wrapping(sync_load(wrapping(channel + I64{32})) + ((sync_load(wrapping(channel + I64{40})) + length) % sync_load(wrapping(channel + I64{24}))) * I64{8})
+    target: wrapping(sync_load(wrapping(channel + I64{32})) + ((sync_load(wrapping(channel + I64{40})) + length) % sync_load(wrapping(channel + I64{24}))) * I64{8})
     sync_store(target, value)
     sync_store(wrapping(channel + I64{16}), length + I64{1})
     channel_wake_one(channel, false)
@@ -54,18 +54,18 @@ fn timer_send(channel: I64, value: I64) -> Bool {
 // A new unbounded timer channel of `kind` whose producer job (Job32:
 // channel (the producer's sender endpoint) 0, delay ms 8, owned World lease
 // or 0 at 16, owned value at 24) runs `worker` on a detached host thread.
-fn timer_start(kind: I64, delay: I64, value: I64, worker: I64) -> I64 {
-    channel :: channel_new(I64{-1}, kind, delay)
+timer_start: fn(kind: I64, delay: I64, value: I64, worker: I64) -> I64 {
+    channel: channel_new(I64{-1}, kind, delay)
     sync_store(wrapping(channel + I64{120}), I64{1})
     channel_retain(channel)
-    job :: jet_rt_alloc(I64{32}, I64{8})
+    job: jet_rt_alloc(I64{32}, I64{8})
     sync_store(job, channel)
     sync_store(wrapping(job + I64{8}), delay)
-    world :: world_current()
+    world: world_current()
     sync_store(wrapping(job + I64{16}), if (world == I64{0}) -> I64{0} else -> jet_rt_world_clone(world))
     sync_store(wrapping(job + I64{24}), value)
     if (world != I64{0}) -> world_task_spawned(world)
-    handle :: thread_spawn(worker, job)
+    handle: thread_spawn(worker, job)
     if (handle < I64{0}) {
         scheduler_start_failed()
         return channel
@@ -74,14 +74,14 @@ fn timer_start(kind: I64, delay: I64, value: I64, worker: I64) -> I64 {
     channel
 }
 
-fn timer_worker_enter(job: I64, save: I64) {
-    world :: sync_load(wrapping(job + I64{16}))
+timer_worker_enter: fn(job: I64, save: I64) {
+    world: sync_load(wrapping(job + I64{16}))
     if (world != I64{0}) -> world_scope_enter(world, save, true)
 }
 
-fn timer_worker_leave(job: I64, save: I64) {
-    channel :: sync_load(job)
-    world :: sync_load(wrapping(job + I64{16}))
+timer_worker_leave: fn(job: I64, save: I64) {
+    channel: sync_load(job)
+    world: sync_load(wrapping(job + I64{16}))
     jet_rt_free(job, I64{32}, I64{8})
     if (world != I64{0}) {
         world_task_finished(world)
@@ -92,11 +92,11 @@ fn timer_worker_leave(job: I64, save: I64) {
     jet_rt_native_sender_drop(channel)
 }
 
-#Export(c) fn jet_rt_interval_worker(job: I64) -> I64 {
-    save :: jet_rt_alloc(I64{32}, I64{8})
+#Export(c) jet_rt_interval_worker: fn(job: I64) -> I64 {
+    save: jet_rt_alloc(I64{32}, I64{8})
     timer_worker_enter(job, save)
-    channel :: sync_load(job)
-    delay :: sync_load(wrapping(job + I64{8}))
+    channel: sync_load(job)
+    delay: sync_load(wrapping(job + I64{8}))
     tick := I64{1}
     loop {
         jet_scheduler_sleep_ms(delay)
@@ -107,34 +107,34 @@ fn timer_worker_leave(job: I64, save: I64) {
     I64{0}
 }
 
-#Export(c) fn jet_rt_after_worker(job: I64) -> I64 {
-    save :: jet_rt_alloc(I64{32}, I64{8})
+#Export(c) jet_rt_after_worker: fn(job: I64) -> I64 {
+    save: jet_rt_alloc(I64{32}, I64{8})
     timer_worker_enter(job, save)
     jet_scheduler_sleep_ms(sync_load(wrapping(job + I64{8})))
-    value :: sync_load(wrapping(job + I64{24}))
+    value: sync_load(wrapping(job + I64{24}))
     if !timer_send(sync_load(job), value) -> jet_rt_int_drop(value)
     timer_worker_leave(job, save)
     I64{0}
 }
 
-#Export(c) fn interval(ms: I64) -> I64 {
-    native :: jet_int_owned_to_i64(ms)
+#Export(c) interval: fn(ms: I64) -> I64 {
+    native: jet_int_owned_to_i64(ms)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
-    delay :: if (native < I64{1}) -> I64{1} else -> native
+    delay: if (native < I64{1}) -> I64{1} else -> native
     timer_start(I64{2}, delay, I64{0}, rt_interval_worker_address())
 }
 
 // The Duration carrier's ns word, truncated to whole milliseconds.
-#Export(c) fn after_value(delay: I64, value: I64) -> I64 {
-    native :: jet_int_owned_to_i64(delay)
+#Export(c) after_value: fn(delay: I64, value: I64) -> I64 {
+    native: jet_int_owned_to_i64(delay)
     if (jet_scheduler_native_propagate() != I64{0}) {
         jet_rt_int_drop(value)
         return I64{0}
     }
-    ms :: native / I64{1000000}
+    ms: native / I64{1000000}
     timer_start(I64{1}, if (ms < I64{0}) -> I64{0} else -> ms, value, rt_after_worker_address())
 }
 
-#Export(c) fn jet_rt_handle_drop_jet_receiver_63726174653a3a6a65745f666f756e646174696f6e3a3a4e756d657269633a3a4a6574496e74(channel: I64) {
+#Export(c) jet_rt_handle_drop_jet_receiver_63726174653a3a6a65745f666f756e646174696f6e3a3a4e756d657269633a3a4a6574496e74: fn(channel: I64) {
     jet_rt_native_receiver_drop(channel)
 }

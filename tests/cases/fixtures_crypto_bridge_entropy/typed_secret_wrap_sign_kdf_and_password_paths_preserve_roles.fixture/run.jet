@@ -1,90 +1,90 @@
 // tests/fixtures/crypto_bridge_entropy.rs:418-467. PORT+PENDING-SEAM(runtime-crypto-internals). Runtime UNRUN.
 // CryptoError payloads retire under D-CRYPTO-ERRFAM1=A; public tag mappings cite Core at assertion sites.
 use {
-    crypto :: core.crypto
-    expert :: core.crypto.expert
-    files :: core.files
+    crypto: core.crypto
+    expert: core.crypto.expert
+    files: core.files
 }
-fn filled(value: Int, count: Int) -> [U8] {
+filled: fn(value: Int, count: Int) -> [U8] {
     out := [U8]{}
     loop _ in 0..<count -> &out.push((U8{value}))
     out
 }
-fn cut(bytes: [U8], start: Int, end: Int) -> [U8] {
+cut: fn(bytes: [U8], start: Int, end: Int) -> [U8] {
     out := [U8]{}
     loop i in start..<end -> &out.push(bytes[i])
     out
 }
-fn hex(text: String) -> [U8] {
-    raw :: text.bytes()
+hex: fn(text: String) -> [U8] {
+    raw: text.bytes()
     out := [U8]{}
     loop i in 0..<(raw.len() /% 2) {
-        a :: Int.from_u8(raw[2 * i])
-        b :: Int.from_u8(raw[2 * i + 1])
-        high :: if a <= 57 -> a - 48 else -> a - 87
-        low :: if b <= 57 -> b - 48 else -> b - 87
+        a: Int.from_u8(raw[2 * i])
+        b: Int.from_u8(raw[2 * i + 1])
+        high: if a <= 57 -> a - 48 else -> a - 87
+        low: if b <= 57 -> b - 48 else -> b - 87
         &out.push((U8{high * 16 + low}))
     }
     out
 }
-fn little(bytes: [U8], at: Int, width: Int) -> Int {
+little: fn(bytes: [U8], at: Int, width: Int) -> Int {
     out := 0
     loop i in 0..<width -> out = out.bit_or(Int.from_u8(bytes[at + i]) << (8 * i))
     out
 }
-fn store_little(bytes: &[U8], at: Int, width: Int, value: Int) {
+store_little: fn(bytes: &[U8], at: Int, width: Int, value: Int) {
     loop i in 0..<width -> bytes[at + i] = (U8{(value >> (8 * i)).bit_and(255)})
 }
 // An out-of-range length written as a literal is E2702 at compile time; the
 // runtime bound check below receives its length through here.
-fn runtime(value: Int) -> Int {
+runtime: fn(value: Int) -> Int {
     value
 }
 #Test("typed_secret_wrap_sign_kdf_and_password_paths_preserve_roles") {
-    recipient :: crypto.X25519SecretKey.new_random() ?? panic("recipient")
-    secret :: crypto.Secret.from_text("do not print")
-    wrapped :: crypto.wrap(secret, recipient.public_key()) ?? panic("wrap")
+    recipient: crypto.X25519SecretKey.new_random() ?? panic("recipient")
+    secret: crypto.Secret.from_text("do not print")
+    wrapped: crypto.wrap(secret, recipient.public_key()) ?? panic("wrap")
     assert_eq(cut(wrapped.bytes, 0, 4), "JETW".bytes())
-    unwrapped :: crypto.unwrap(recipient, crypto.WrappedKey{bytes: wrapped.bytes.copy()}) ?? panic("unwrap")
+    unwrapped: crypto.unwrap(recipient, crypto.WrappedKey{bytes: wrapped.bytes.copy()}) ?? panic("unwrap")
     assert(crypto.constant_time_equal(secret, unwrapped))
     material := [U8]{}
     #Unsafe("crypto expert: the test derives from the secret's raw bytes") {
         material = expert.secret_bytes(secret)
     }
-    derived :: crypto.hkdf_sha256(material, [U8]{}, "domain".bytes(), 32) ?? panic("derive")
+    derived: crypto.hkdf_sha256(material, [U8]{}, "domain".bytes(), 32) ?? panic("derive")
     assert(!crypto.constant_time_equal(secret, derived))
     // Core/Crypto/crypto.jet282: Length; payload/Display RETIRE.
     if crypto.hkdf_sha256(material, [U8]{}, [U8]{}, runtime(-1)) == {
         .Ok(_) -> panic("HKDF length -1 accepted")
         .Err(error) -> assert_eq(error, crypto.CryptoError.Length)
     }
-    signing :: crypto.SigningKey.new_random() ?? panic("signing")
-    message :: "release".bytes()
-    signature :: crypto.sign(signing, message) ?? panic("sign")
+    signing: crypto.SigningKey.new_random() ?? panic("signing")
+    message: "release".bytes()
+    signature: crypto.sign(signing, message) ?? panic("sign")
     assert(crypto.verify(signing.public_key(), message, signature) ?? panic("verify"))
-    stored :: crypto.password_hash(secret) ?? panic("hash")
+    stored: crypto.password_hash(secret) ?? panic("hash")
     assert(crypto.password_verify(secret, stored) ?? panic("password verify"))
     // Core/Crypto/crypto.jet795-799: KeyRejected for unsupported PHC algorithm/version/extra parameters.
-    extra :: crypto.PasswordHash{text: stored.text.replace(",p=1$", ",p=1,x=1$")}
+    extra: crypto.PasswordHash{text: stored.text.replace(",p=1$", ",p=1,x=1$")}
     if crypto.password_verify(secret, extra) == {
         .Ok(_) -> panic("extra PHC parameter accepted")
         .Err(error) -> assert_eq(error, crypto.CryptoError.KeyRejected)
     }
     loop algorithm in ["argon2i", "argon2d", "argon2x"] {
-        hostile :: crypto.PasswordHash{text: stored.text.replace("$argon2id$", "${algorithm}$")}
+        hostile: crypto.PasswordHash{text: stored.text.replace("$argon2id$", "${algorithm}$")}
         if crypto.password_verify(secret, hostile) == {
             .Ok(_) -> panic("unsupported PHC algorithm accepted")
             .Err(error) -> assert_eq(error, crypto.CryptoError.KeyRejected)
         }
     }
     loop version in ["16", "300"] {
-        hostile :: crypto.PasswordHash{text: stored.text.replace("$v=19$", "$v={version}$")}
+        hostile: crypto.PasswordHash{text: stored.text.replace("$v=19$", "$v={version}$")}
         if crypto.password_verify(secret, hostile) == {
             .Ok(_) -> panic("unsupported PHC version accepted")
             .Err(error) -> assert_eq(error, crypto.CryptoError.KeyRejected)
         }
     }
-    wrong :: crypto.Secret.from_text("wrong")
-    stored_again :: crypto.password_hash(secret) ?? panic("hash again")
+    wrong: crypto.Secret.from_text("wrong")
+    stored_again: crypto.password_hash(secret) ?? panic("hash again")
     assert(!(crypto.password_verify(wrong, stored_again) ?? panic("wrong password")))
 }

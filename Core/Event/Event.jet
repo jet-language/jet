@@ -1,4 +1,4 @@
-package {
+package: {
     name: "core.event"
     version: "0.0.1"
     edition: "2026"
@@ -10,7 +10,7 @@ package {
 }
 
 use {
-    core :: core
+    core: core
     core.event.[Event, EventConfigError]
 }
 
@@ -18,39 +18,39 @@ use {
 // Source owns constructor composition and rejects invalid async capacities
 // before allocating provider state. Private leaves reuse existing host calls.
 
-fn scope() -> EventScope Never! {
+scope: fn() -> EventScope Never! {
     core.event.__scope_new()
 }
 
-fn new<T>() -> Event<T> Never! {
+new: fn<T>() -> Event<T> Never! {
     with_policy<T>(policy_sync())
 }
 
-fn with_policy<T>(policy: EventPolicy) -> Event<T> Never! {
+with_policy: fn<T>(policy: EventPolicy) -> Event<T> Never! {
     core.event.__event_with_policy<T>(policy)
 }
 
-fn hook<T, R>(fallback: R) -> Hook<T, R> Never! {
+hook: fn<T, R>(fallback: R) -> Hook<T, R> Never! {
     core.event.__hook_new<T, R>(fallback)
 }
 
-fn decision_hook<T, E>(policy: HookPolicy) -> DecisionHook<T, E> Never! {
+decision_hook: fn<T, E>(policy: HookPolicy) -> DecisionHook<T, E> Never! {
     core.event.__decision_hook_new<T, E>(policy)
 }
 
-fn policy_sync() -> EventPolicy Never! {
+policy_sync: fn() -> EventPolicy Never! {
     core.event.__policy_sync()
 }
 
-fn async_result<T, E>(policy: AsyncPolicy, failures: FailurePolicy) -> AsyncEvent<T, E> EventConfigError! {
+async_result: fn<T, E>(policy: AsyncPolicy, failures: FailurePolicy) -> AsyncEvent<T, E> EventConfigError! {
     if policy.capacity <= 0 -> return Err(EventConfigError.InvalidCapacity)
     core.event.__async_new<T, E>(policy, failures)
 }
 
 #Test("async constructors reject zero and negative capacities before allocation") {
-    capacities :: [Int]{0, -1, -9223372036854775808}
+    capacities: [Int]{0, -1, -9223372036854775808}
     loop capacity in capacities {
-        policy :: AsyncPolicy{capacity: capacity, overflow: Overflow.Block}
+        policy: AsyncPolicy{capacity: capacity, overflow: Overflow.Block}
         if async_result<Int, String>(policy, FailurePolicy.Collect) == {
             .Err(reason) -> assert_eq(reason, EventConfigError.InvalidCapacity)
             .Ok(_) -> assert(false)

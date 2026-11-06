@@ -1,29 +1,29 @@
-package {
+package: {
     name: "defs_probe"
     authority: { allow: [FS.Read, FS.Write, IO, Mem.Alloc] }
 }
 
 use {
-    data :: core.data
-    files :: core.files
+    data: core.data
+    files: core.files
 }
 
 #Codable
-struct Observation { team: String segment: String x: Float y: Float value: Float }
+Observation: struct { team: String segment: String x: Float y: Float value: Float }
 #Codable
-struct Owner { team: String owner: String }
+Owner: struct { team: String owner: String }
 #Codable
-struct Summary { team: String mean: Float }
+Summary: struct { team: String mean: Float }
 #Codable
-struct Joined { team: String owner: String mean: Float }
+Joined: struct { team: String owner: String mean: Float }
 #Codable
-struct Regression { slope: Float intercept: Float r_squared: Float }
+Regression: struct { slope: Float intercept: Float r_squared: Float }
 #Codable
-struct AnalysisReceipt { rows: Int columns: Int filtered: Int groups: Int joined: Int pivot_cells: Int window_width: Int svg_bytes: Int tensor_shape: [Int] regression: Regression }
-fn mark(stage: String) { files.write("$JET_STATE_ROOT/dx3/area-data/stage.txt", stage) ?? panic("mark") }
-fn run() {
-    raw :: files.read("$JET_STATE_ROOT/dx3/area-data/fixture-100k.csv") ?? panic("read")
-    rows :: data.csv<Observation>(raw) ?? panic("csv")
+AnalysisReceipt: struct { rows: Int columns: Int filtered: Int groups: Int joined: Int pivot_cells: Int window_width: Int svg_bytes: Int tensor_shape: [Int] regression: Regression }
+mark: fn(stage: String) { files.write("$JET_STATE_ROOT/dx3/area-data/stage.txt", stage) ?? panic("mark") }
+run: fn() {
+    raw: files.read("$JET_STATE_ROOT/dx3/area-data/fixture-100k.csv") ?? panic("read")
+    rows: data.csv<Observation>(raw) ?? panic("csv")
     mark("loaded")
     print("rows={rows.len()}")
 }

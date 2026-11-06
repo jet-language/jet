@@ -1,20 +1,20 @@
 // E2404: `?` propagates a typed error into a function that returns a different
 // typed error, but no `impl Source -> Target` conversion has been declared.
-enum FileErr {
+FileErr: enum {
     NotFound
 }
 
-enum AppErr {
+AppErr: enum {
     File(FileErr)
 }
 
-fn inner() -> String FileErr! { Ok("hi") }
+inner: fn() -> String FileErr! { Ok("hi") }
 
-fn outer() -> String AppErr! {
+outer: fn() -> String AppErr! {
     inner()
     return Ok("done")
 }
 
-fn run() {
+run: fn() {
 
 }

@@ -2,19 +2,19 @@
 // under AOT and default dev (JIT) — R12 parity. `fast` wins the race, so the
 // losing `slow` task is cancelled and unwinds at `time.sleep`; the commit after
 // the wait never runs, so only the winner "7" is printed on both tiers.
-use time :: core.time
+use time: core.time
 
-fn slow_commit() -> Int {
+slow_commit: fn() -> Int {
     time.sleep(200ms)
     print("committed")
     return 1
 }
 
-fn fast_seven() -> Int { 7 }
+fast_seven: fn() -> Int { 7 }
 
-fn run() {
+run: fn() {
     task.group g {
-        winner :: task.race {slow_commit(), fast_seven()} ?? panic("race failed")
+        winner: task.race {slow_commit(), fast_seven()} ?? panic("race failed")
         print(winner)
     }
 }

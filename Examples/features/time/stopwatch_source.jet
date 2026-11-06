@@ -3,20 +3,20 @@
 // `elapsed_millis` subtract it from a fresh sample, so a later stopwatch never
 // starts before an earlier one. Duration exposes its checked `ns` count as a
 // field on every tier.
-package {
+package: {
     name: "stopwatch_source"
     authority: { allow: [IO, Time] }
 }
 
-use time :: core.time
+use time: core.time
 
-fn run() {
-    watch :: time.start()
-    later :: time.start()
+run: fn() {
+    watch: time.start()
+    later: time.start()
     print(later.start_ns >= watch.start_ns)
     print(watch.elapsed_millis() >= 0)
     print(time.elapsed(watch).ns >= 0)
     print(time.duration_ms(3).ns)
-    span :: time.duration_ns(1500)
+    span: time.duration_ns(1500)
     print(span.ns)
 }

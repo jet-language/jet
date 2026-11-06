@@ -1,18 +1,18 @@
 // #1414 systems workload: walk the supplied directory without following
 // symlinks, then hash every readable regular file.
 use {
-    crypto :: core.crypto
-    fs :: core.files
+    crypto: core.crypto
+    fs: core.files
 }
 
 #CLI
-struct WorkloadArgs {
+WorkloadArgs: struct {
     input: String
 }
 
-fn run(args: WorkloadArgs) {
-    root :: args.input
-    entries :: fs.walk(root) ?? panic("cannot walk input root")
+run: fn(args: WorkloadArgs) {
+    root: args.input
+    entries: fs.walk(root) ?? panic("cannot walk input root")
     rows := [String]{}
     links := 0
     rejects := 0
@@ -20,7 +20,7 @@ fn run(args: WorkloadArgs) {
     loop entry in entries {
         if entry.is_dir -> next
         if entry.relative == ".fixture-modes.tsv" -> next
-        stat :: fs.stat(entry.path) ?? {
+        stat: fs.stat(entry.path) ?? {
             rejects += 1
             next
         }
@@ -32,19 +32,19 @@ fn run(args: WorkloadArgs) {
             rejects += 1
             next
         }
-        content :: fs.read_bytes(entry.path) ?? {
+        content: fs.read_bytes(entry.path) ?? {
             rejects += 1
             next
         }
-        relative :: &entry.relative.replace("\\", "/")
-        digest :: crypto.sha256(content).hex()
+        relative: &entry.relative.replace("\\", "/")
+        digest: crypto.sha256(content).hex()
         &rows.push("file|{relative}|{content.len()}|{digest}")
         bytes += content.len()
     }
     &rows.sort()
     canonical := ""
     loop row in rows -> canonical = "{canonical}{row}\n"
-    index_hash :: crypto.sha256(canonical.bytes()).hex()
+    index_hash: crypto.sha256(canonical.bytes()).hex()
     print("files={rows.len()}")
     print("bytes={bytes}")
     print("links={links}")

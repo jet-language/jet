@@ -7,13 +7,13 @@ use jet_foundation.[
     core_call_source_member, core_call_typed_signature,
 ]
 
-fn core_source_owned_require(ok: Bool, message: String) Never! {
+core_source_owned_require: fn(ok: Bool, message: String) Never! {
     if !ok -> panic("Core SourceOwned: {message}")
 }
 #Test("core_source_owned") {
     // CORE_CALLS rows are literal data; check-core-surface-ledger.mjs
     // --hostile-fixtures proves a source-owned row keeps its declaration facts.
-    row :: CoreCallRecord{module_name: "core.ui.host", member: "shortcut", receiver_types: [String]{}, signature: CoreCallSignature{arity: 2, max_arity: 2, borrow_mask: [Bool]{true, false}}, frame_accesses: [CoreCallResourceAccess]{}, frame_completion: None, fallibility: CoreCallFallibility.Sema, effect_kind: None, capability: CoreCapabilityContract{kind: CoreCapabilityKind.Pure, provider: None, fallback: None, failure: None}, effect_leaf: None, sink_class: None, pure_route: CoreCallPureRoute.NoPureRoute, symbol: CoreCallSymbol.SourceOwned, source_target: None, coverage: CoreCallCoverage{bits: CORE_CALL_COVERAGE_SEMA}, aot_direct: false, native_int_result: false, ui_capabilities: [String]{"UI.Shortcuts"}, marker: None, authority: None}
+    row: CoreCallRecord{module_name: "core.ui.host", member: "shortcut", receiver_types: [String]{}, signature: CoreCallSignature{arity: 2, max_arity: 2, borrow_mask: [Bool]{true, false}}, frame_accesses: [CoreCallResourceAccess]{}, frame_completion: None, fallibility: CoreCallFallibility.Sema, effect_kind: None, capability: CoreCapabilityContract{kind: CoreCapabilityKind.Pure, provider: None, fallback: None, failure: None}, effect_leaf: None, sink_class: None, pure_route: CoreCallPureRoute.NoPureRoute, symbol: CoreCallSymbol.SourceOwned, source_target: None, coverage: CoreCallCoverage{bits: CORE_CALL_COVERAGE_SEMA}, aot_direct: false, native_int_result: false, ui_capabilities: [String]{"UI.Shortcuts"}, marker: None, authority: None}
     original := row.copy()
     original.symbol = CoreCallSymbol.Prelude{name: "jet_ui_host_shortcut"}
     original.coverage = CoreCallCoverage{bits: CORE_CALL_COVERAGE_KNOWN}
@@ -26,32 +26,32 @@ fn core_source_owned_require(ok: Bool, message: String) Never! {
     host_selected := original.copy()
     host_selected.source_target = Val("__not_a_host_route")
     core_source_owned_require(core_call_source_member(host_selected) == None, "non-source-owned row unchanged")
-    rows :: [CoreCallRecord]{row}
-    sema :: core_call_projection_in(rows, "core.ui.host", "shortcut", 1, 2)
+    rows: [CoreCallRecord]{row}
+    sema: core_call_projection_in(rows, "core.ui.host", "shortcut", 1, 2)
     core_source_owned_require(if sema == {.Row(_) -> true else -> false}, "sema projection retained")
-    projections :: [Int]{2, 4, 8, 32}
+    projections: [Int]{2, 4, 8, 32}
     loop projection in projections {
-        projected :: core_call_projection_in(rows, "core.ui.host", "shortcut", projection, 2)
-        rejected :: if projected == {
+        projected: core_call_projection_in(rows, "core.ui.host", "shortcut", projection, 2)
+        rejected: if projected == {
             .Error(error) -> if error == {.Uncovered(_) -> true else -> false}
             else -> false
         }
         core_source_owned_require(rejected, "executable projection rejected")
     }
-    members :: [String]{"__stdio_write", "__stdio_bytes", "__stdio_flush", "__stdio_fault", "__stdout_terminal", "__stderr_terminal", "__stdin_line"}
-    string :: Type.String
-    boolean :: Type.Bool
-    bytes :: Type.List{element: Type.IntN{signed: false, bits: 8}}
-    optional_text :: Type.Option{inner: string}
-    parameters :: [[Type]]{
+    members: [String]{"__stdio_write", "__stdio_bytes", "__stdio_flush", "__stdio_fault", "__stdout_terminal", "__stderr_terminal", "__stdin_line"}
+    string: Type.String
+    boolean: Type.Bool
+    bytes: Type.List{element: Type.IntN{signed: false, bits: 8}}
+    optional_text: Type.Option{inner: string}
+    parameters: [[Type]]{
         [Type]{string, boolean, boolean, boolean}, [Type]{bytes, boolean, boolean},
         [Type]{boolean}, [Type]{string}, [Type]{}, [Type]{}, [Type]{},
     }
-    returns :: [Type]{optional_text, optional_text, optional_text, boolean, boolean, boolean,
+    returns: [Type]{optional_text, optional_text, optional_text, boolean, boolean, boolean,
         Type.Result{ok: optional_text, err: Type.Named{name: "IOError"}}}
     loop index in 0..<members.len() {
-        member :: members[index]
-        signature :: core_call_typed_signature("core.term", member, parameters[index].len()) ?? panic("missing stdio signature: {member}")
+        member: members[index]
+        signature: core_call_typed_signature("core.term", member, parameters[index].len()) ?? panic("missing stdio signature: {member}")
         core_source_owned_require((signature.return_type ?? panic("missing stdio return type")) == returns[index], "stdio return contract")
         core_source_owned_require(signature.parameters.len() == parameters[index].len(), "stdio arity")
         loop parameter in 0..<signature.parameters.len() {

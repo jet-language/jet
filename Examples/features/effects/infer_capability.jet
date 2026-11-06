@@ -2,18 +2,18 @@
 // decided at parse time, never inferred from the body. A function that
 // mutates its parameter must say so explicitly with `&`; the call site
 // mirrors it (`&c`), so mutation stays visible at both ends.
-struct Counter {
+Counter: struct {
     value: Int
 }
 
 // `c` is `&Counter` because the body mutates it — the signature states the
 // access it needs, rather than the compiler guessing it from usage.
-fn bump(c: &Counter, by: Int) { c.value += by }
+bump: fn(c: &Counter, by: Int) { c.value += by }
 
 // `c` is unmarked — a plain read, which is all this function needs.
-fn value_of(c: Counter) -> Int { c.value }
+value_of: fn(c: Counter) -> Int { c.value }
 
-fn run() {
+run: fn() {
     c := Counter{value: 0}
     bump(&c, 5)
     bump(&c, 3)

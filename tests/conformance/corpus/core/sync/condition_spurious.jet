@@ -2,45 +2,45 @@
 // coverage: Condition.new, guard.wait, notify_one, false notification predicate recheck
 // web: not-applicable (the web target has no browser scheduler)
 
-struct State {
+State: struct {
     ready: Bool
 }
 
-fn check_ready(value: State, checks: Sender<Int>) -> Bool {
+check_ready: fn(value: State, checks: Sender<Int>) -> Bool {
     checks.send(1)
     return value.ready
 }
 
-fn wait_for_ready(
+wait_for_ready: fn(
     state: Shared<State>,
     changed: Condition,
     armed: Sender<Int>,
     checks: Sender<Int>,
     woke: Sender<Bool>,
 ) {
-    guard :: state.guard_edit()
+    guard: state.guard_edit()
     armed.send(1)
     guard.wait(changed, value -> check_ready(value, checks)) ?? panic("wait failed")
     woke.send(guard.value.ready)
 }
 
-fn run() {
-    state :: shared State{ready: false}
-    changed :: Condition.new()
-    (armed_sender, armed) :: channel<Int>(capacity: 1)
-    (checks_sender, checks) :: channel<Int>(capacity: 4)
-    (woke_sender, woke) :: channel<Bool>(capacity: 1)
+run: fn() {
+    state: shared State{ready: false}
+    changed: Condition.new()
+    (armed_sender, armed): channel<Int>(capacity: 1)
+    (checks_sender, checks): channel<Int>(capacity: 4)
+    (woke_sender, woke): channel<Bool>(capacity: 1)
 
-    waiter :: task wait_for_ready(state, changed, armed_sender, checks_sender, woke_sender)
+    waiter: task wait_for_ready(state, changed, armed_sender, checks_sender, woke_sender)
     armed.receive() ?? panic("waiter was not armed")
     checks.receive() ?? panic("predicate was not checked")
     {
-        guard :: state.guard_edit()
+        guard: state.guard_edit()
         changed.notify_one()
     }
     checks.receive() ?? panic("false notification was not rechecked")
     {
-        guard :: state.guard_edit()
+        guard: state.guard_edit()
         guard.value.ready = true
         changed.notify_one()
     }

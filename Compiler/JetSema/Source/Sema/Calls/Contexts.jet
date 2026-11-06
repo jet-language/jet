@@ -6,11 +6,11 @@ use jet_foundation.[
     Type,
 ]
 
-struct SemaCallKnowledgeScope {
+SemaCallKnowledgeScope: struct {
     previous: SemaKnowledgeGate?
 }
 
-fn sema_call_gate_for_name(name: String) -> SemaKnowledgeGate? {
+sema_call_gate_for_name: fn(name: String) -> SemaKnowledgeGate? {
     if name == {
         "wrapping" | "saturating" | "checked" -> Val(SemaKnowledgeGate.BoundedArithmetic)
         "approx" -> Val(SemaKnowledgeGate.Approximation)
@@ -18,34 +18,34 @@ fn sema_call_gate_for_name(name: String) -> SemaKnowledgeGate? {
     }
 }
 
-fn sema_call_method_gate(method: String) -> SemaKnowledgeGate? {
+sema_call_method_gate: fn(method: String) -> SemaKnowledgeGate? {
     if method.starts_with("from_") && method.ends_with("_rounded") -> Val(SemaKnowledgeGate.RoundedConversion) else -> None
 }
 
-fn sema_call_gate_is_unshadowed(name: String, scopes: SemaScopeTable) -> Bool Never! {
+sema_call_gate_is_unshadowed: fn(name: String, scopes: SemaScopeTable) -> Bool Never! {
     sema_scope_resolve_index(scopes, name) == None
 }
 
-fn sema_call_enter_gate(scopes: &SemaScopeTable, gate: SemaKnowledgeGate) -> SemaCallKnowledgeScope Never! {
+sema_call_enter_gate: fn(scopes: &SemaScopeTable, gate: SemaKnowledgeGate) -> SemaCallKnowledgeScope Never! {
     SemaCallKnowledgeScope{previous: sema_scope_push_knowledge_gate(&scopes, gate)}
 }
 
-fn sema_call_leave_gate(scopes: &SemaScopeTable, scope: SemaCallKnowledgeScope) Never! {
+sema_call_leave_gate: fn(scopes: &SemaScopeTable, scope: SemaCallKnowledgeScope) Never! {
     sema_scope_pop_knowledge_gate(&scopes, scope.previous)
 }
 
-fn sema_call_direct_gate(name: String, scopes: SemaScopeTable) -> SemaKnowledgeGate? {
+sema_call_direct_gate: fn(name: String, scopes: SemaScopeTable) -> SemaKnowledgeGate? {
     if sema_call_gate_is_unshadowed(name, scopes) -> sema_call_gate_for_name(name) else -> None
 }
 
-fn sema_call_is_overflow_operation(op: BinOp) -> Bool Never! {
+sema_call_is_overflow_operation: fn(op: BinOp) -> Bool Never! {
     if op == {
         .Add | .Sub | .Mul | .Div -> true
         else -> false
     }
 }
 
-fn sema_call_overflow_operation_name(op: BinOp) -> String Never! {
+sema_call_overflow_operation_name: fn(op: BinOp) -> String Never! {
     if op == {
         .Add -> "add"
         .Sub -> "sub"
@@ -55,6 +55,6 @@ fn sema_call_overflow_operation_name(op: BinOp) -> String Never! {
     }
 }
 
-fn sema_call_host_callback_type(inner: Type, result: Type?, shared: Bool) -> Type Never! {
+sema_call_host_callback_type: fn(inner: Type, result: Type?, shared: Bool) -> Type Never! {
     sema_shared_access_host_callback_type(inner, result, shared)
 }

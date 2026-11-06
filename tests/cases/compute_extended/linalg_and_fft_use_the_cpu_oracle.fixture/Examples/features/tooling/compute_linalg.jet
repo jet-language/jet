@@ -1,4 +1,4 @@
-package {
+package: {
     name: "tooling_compute_linalg"
     version: "0.1.0"
     authority: { allow: [GPU, IO, Mem.Alloc] }
@@ -6,11 +6,11 @@ package {
 
 // D-COMPUTE1 / #1137: dense linalg + DFT on the Tensor CPU oracle.
 use {
-    compute :: core.compute
-    solve :: core.compute.solve
+    compute: core.compute
+    solve: core.compute.solve
 }
 
-fn run() {
+run: fn() {
     a := compute.matrix(2, 2, 0.0) ?? panic("matrix")
     compute.set(&a, [0, 0], 4.0) ?? panic("set")
     compute.set(&a, [0, 1], 7.0) ?? panic("set")
@@ -18,7 +18,7 @@ fn run() {
     compute.set(&a, [1, 1], 6.0) ?? panic("set")
     print("det:{compute.det(a) ?? panic("det")}")
 
-    inv :: compute.inv(a) ?? panic("inv")
+    inv: compute.inv(a) ?? panic("inv")
     print("inv:{compute.to_list(inv)}")
 
     pivot := compute.matrix(2, 2, 0.0) ?? panic("pivot")
@@ -29,10 +29,10 @@ fn run() {
     b := compute.matrix(2, 1, 0.0) ?? panic("b")
     compute.set(&b, [0, 0], 4.0) ?? panic("set")
     compute.set(&b, [1, 0], 5.0) ?? panic("set")
-    x :: solve.dense(pivot, b) ?? panic("dense")
+    x: solve.dense(pivot, b) ?? panic("dense")
     print("solve:{compute.to_list(x)}")
 
-    factors :: solve.lu(pivot) ?? panic("lu")
+    factors: solve.lu(pivot) ?? panic("lu")
     print("lu_pivots:{factors.pivots}")
 
     singular := compute.matrix(2, 2, 0.0) ?? panic("singular")
@@ -45,7 +45,7 @@ fn run() {
         .Err(_) -> print("singular:checked")
     }
 
-    signal :: compute.from_list([1.0, 0.0, -1.0, 0.0]) ?? panic("signal")
-    spectrum :: compute.fft(signal) ?? panic("fft")
+    signal: compute.from_list([1.0, 0.0, -1.0, 0.0]) ?? panic("signal")
+    spectrum: compute.fft(signal) ?? panic("fft")
     print("fft_len:{compute.numel(spectrum)}")
 }

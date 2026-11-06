@@ -3,7 +3,7 @@
 // it never needs `^` and never trips E0209 (unlike passing `x` itself to a
 // move param when `x` is used again). `.clone()` is not user-typable Jet syntax — `x.copy()` is the only
 // spelling.
-struct Ticket {
+Ticket: struct {
     id: Int
     label: String
 }
@@ -11,32 +11,32 @@ struct Ticket {
 // D-MEM-COPYSEM1=A: a read-only view entering an owned return slot is copied
 // automatically through the same semantic path as `.copy()`. `.copy()` remains the one
 // explicit spelling when the boundary is intentional in source.
-fn implicit_domain() -> String {
+implicit_domain: fn() -> String {
     email := "user@jet-lang.dev"
-    domain :: email.after("@")
+    domain: email.after("@")
     return domain
 }
 
-fn implicit_window() -> [Int] {
+implicit_window: fn() -> [Int] {
     values := [1, 2, 3]
-    window :: values[0..1]
+    window: values[0..1]
     return window
 }
 
-fn archive(t: ^Ticket) -> String { t.label }
+archive: fn(t: ^Ticket) -> String { t.label }
 
-fn run() {
-    name :: "vault"
-    saved :: name.copy()
+run: fn() {
+    name: "vault"
+    saved: name.copy()
     print(name)
     print(saved)
-    n :: 5
-    m :: n.copy()
+    n: 5
+    m: n.copy()
     print(n)
     print(m)
     print(implicit_domain())
     print(implicit_window()[1])
-    t :: Ticket{id: 1, label: "root"}
+    t: Ticket{id: 1, label: "root"}
     print(archive(t.copy()))
     print(t.label)
 }

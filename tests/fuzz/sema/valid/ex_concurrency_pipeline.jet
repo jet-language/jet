@@ -1,16 +1,16 @@
-use tasks :: core.tasks
+use tasks: core.tasks
 
-fn run() {
-    { sender: s1, receiver: ch } :: channel<Int>()
-    s2 :: s1.copy()
-    s3 :: s1.copy()
-    t1 :: task {
+run: fn() {
+    { sender: s1, receiver: ch }: channel<Int>()
+    s2: s1.copy()
+    s3: s1.copy()
+    t1: task {
         s1.send(30)
     }
-    t2 :: task {
+    t2: task {
         s2.send(10)
     }
-    t3 :: task {
+    t3: task {
         s3.send(20)
     }
     t1.join() ?? panic("task 1 failed")

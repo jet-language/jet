@@ -1,29 +1,29 @@
-use files :: core.files
+use files: core.files
 
 #Test("output file wiring applies to spawned and persistent children only at their join boundary") {
-    root :: cases_test_root("wiring-joins")
-    source :: "spawn batch: jet -c 'printf out; printf err >&2'\nstdout: file batch.out\nstderr: file batch.err\nwait: batch\nfile: batch.out = \"out\"\nfile: batch.err = \"err\"\nsession peer raw: cat\nstdout: file peer.out\nsend peer: \"payload\"\nclose peer\nfile: peer.out = \"payload\"\n"
+    root: cases_test_root("wiring-joins")
+    source: "spawn batch: jet -c 'printf out; printf err >&2'\nstdout: file batch.out\nstderr: file batch.err\nwait: batch\nfile: batch.out = \"out\"\nfile: batch.err = \"err\"\nsession peer raw: cat\nstdout: file peer.out\nsend peer: \"payload\"\nclose peer\nfile: peer.out = \"payload\"\n"
     assert_eq(cases_test_advanced(root, "joins", source).verdict.status, "PASS")
-    wrong :: "step: printf actual\nstdout: file result\nfile: result = \"wrong\"\n"
+    wrong: "step: printf actual\nstdout: file result\nfile: result = \"wrong\"\n"
     assert_eq(cases_test_advanced(root, "wrong-file", wrong).verdict.status, "FAIL")
-    live :: "session peer raw: cat\nstdout: file live.out\nawait: file live.out timeout 1s every 1ms\nclose peer\n"
-    refused :: cases_test_advanced(root, "live-file", live)
+    live: "session peer raw: cat\nstdout: file live.out\nawait: file live.out timeout 1s every 1ms\nclose peer\n"
+    refused: cases_test_advanced(root, "live-file", live)
     assert_eq(refused.verdict.status, "REFUSED")
     assert_eq(refused.verdict.detail, "process-file-fd")
     files.remove_all(root) ?? panic("remove wiring join scratch")
 }
 
 #Test("null streams discard completed output but forbid recv captures JSON and joined stream assertions") {
-    root :: cases_test_root("wiring-nulls")
-    source :: "step: jet -c 'cat; printf out; printf err >&2'\nstdin: null\nstdout: null\nstderr: null\nstep: printf observed\nstdout: = \"observed\"\n"
+    root: cases_test_root("wiring-nulls")
+    source: "step: jet -c 'cat; printf out; printf err >&2'\nstdin: null\nstdout: null\nstderr: null\nstep: printf observed\nstdout: = \"observed\"\n"
     assert_eq(cases_test_advanced(root, "discard", source).verdict.status, "PASS")
     loop unobservable in ["step: printf x\nstdout: null\ncapture: value = text stdout\n", "step: printf '{{}}'\nstdout: null\njson: stdout doc $ valid # original predicate\n", "session peer raw: cat\nstdout: null\nrecv peer timeout 1s\nclose peer\n", "spawn peer: printf x\nstdout: null\nwait: peer\nstdout: empty\n", "session peer raw: cat\nstderr: null\nclose peer\nstderr: empty\n", "step: printf x\nstdout: null\nfor line stdout as row\nstep: true\nend for\n"] {
-        refused :: cases_test_advanced(root, "unobservable", unobservable)
+        refused: cases_test_advanced(root, "unobservable", unobservable)
         assert_eq(refused.verdict.status, "REFUSED")
         assert(refused.verdict.detail.contains("nulled stream"))
     }
     loop seam in ["process-null-fd", "process-file-fd"] {
-        refused :: cases_test_advanced(root, "fd-observation", "refused: {seam}\nstep: false\n")
+        refused: cases_test_advanced(root, "fd-observation", "refused: {seam}\nstep: false\n")
         assert_eq(refused.verdict.status, "REFUSED")
         assert_eq(refused.verdict.detail, seam)
     }
@@ -31,28 +31,28 @@ use files :: core.files
 }
 
 #Test("terminal steps and sessions run on a sized terminal with timed input and partial wiring refuses") {
-    root :: cases_test_root("wiring-pty")
-    sized :: "requires: os:unix\nstep: jet -c 'stty size'\npty: true size 24x80\nstdout: = \"24 80\\r\\n\"\n"
+    root: cases_test_root("wiring-pty")
+    sized: "requires: os:unix\nstep: jet -c 'stty size'\npty: true size 24x80\nstdout: = \"24 80\\r\\n\"\n"
     assert_eq(cases_test_advanced(root, "sized", sized).verdict.status, "PASS")
-    typed :: "requires: os:unix\nstep: jet -c 'read line; printf \"got:%s\\\\n\" \"$line\"'\npty: true\npty-send: \"hi\\n\" after 50ms\nexit: 0\nstdout: ~ \"got:hi\" # the transcript also echoes the typed line\n"
+    typed: "requires: os:unix\nstep: jet -c 'read line; printf \"got:%s\\\\n\" \"$line\"'\npty: true\npty-send: \"hi\\n\" after 50ms\nexit: 0\nstdout: ~ \"got:hi\" # the transcript also echoes the typed line\n"
     assert_eq(cases_test_advanced(root, "typed", typed).verdict.status, "PASS")
-    closed :: "requires: os:unix\nstep: cat\npty: true\npty-send: \"abc\\n\" after 10ms\npty-close: after 50ms\nexit: 0\nstdout: ~ \"abc\" # echo and copy of the typed line\n"
+    closed: "requires: os:unix\nstep: cat\npty: true\npty-send: \"abc\\n\" after 10ms\npty-close: after 50ms\nexit: 0\nstdout: ~ \"abc\" # echo and copy of the typed line\n"
     assert_eq(cases_test_advanced(root, "closed", closed).verdict.status, "PASS")
-    resized :: "requires: os:unix\nstep: jet -c 'sleep 0.5; stty size'\npty: true size 24x80\npty-resize: 30x100 at 50ms\nstdout: = \"30 100\\r\\n\"\n"
+    resized: "requires: os:unix\nstep: jet -c 'sleep 0.5; stty size'\npty: true size 24x80\npty-resize: 30x100 at 50ms\nstdout: = \"30 100\\r\\n\"\n"
     assert_eq(cases_test_advanced(root, "resized", resized).verdict.status, "PASS")
-    session :: "requires: os:unix\nsession peer raw: cat\npty: true\npty-send: \"ping\\n\" after 0ms\nrecv peer until ~ \"ping\" timeout 5s # the terminal echoes typed input\npty-send: \"two\\n\" after 10ms\nclose peer\nexit: 0\nstdout: ~ \"two\" # echo and copy of the second line\n"
+    session: "requires: os:unix\nsession peer raw: cat\npty: true\npty-send: \"ping\\n\" after 0ms\nrecv peer until ~ \"ping\" timeout 5s # the terminal echoes typed input\npty-send: \"two\\n\" after 10ms\nclose peer\nexit: 0\nstdout: ~ \"two\" # echo and copy of the second line\n"
     assert_eq(cases_test_advanced(root, "session", session).verdict.status, "PASS")
-    wrong :: "requires: os:unix\nstep: jet -c 'stty size'\npty: true size 24x80\nstdout: = \"25 80\\r\\n\"\n"
+    wrong: "requires: os:unix\nstep: jet -c 'stty size'\npty: true size 24x80\nstdout: = \"25 80\\r\\n\"\n"
     assert_eq(cases_test_advanced(root, "wrong-size", wrong).verdict.status, "FAIL")
-    partial :: cases_test_advanced(root, "partial", "step: false\npty: stdin,stdout,stderr\n")
+    partial: cases_test_advanced(root, "partial", "step: false\npty: stdin,stdout,stderr\n")
     assert_eq(partial.verdict.status, "REFUSED")
     assert_eq(partial.verdict.detail, "pty-stdio")
     loop orphan in ["step: false\npty-send: \"x\\n\" after 1ms\n", "step: false\npty-close: after 1ms\n", "step: false\npty-resize: 30x100 at 1ms\n", "session peer raw: cat\npty-send: \"x\" after 1ms\nclose peer\n", "step: false\npty: true\npty: true\n"] {
-        refused :: cases_test_advanced(root, "orphan", orphan)
+        refused: cases_test_advanced(root, "orphan", orphan)
         assert_eq(refused.verdict.status, "REFUSED")
     }
     loop modifier in ["pty: false", "pty: output", "pty: true size -1x80", "pty: true size nox0", "pty: true size 0x", "pty-resize: 24x80 after 1ms", "stderr-to-stdout: false", "stdout: file ../escape"] {
-        refused :: cases_test_advanced(root, "noncanonical", "step: false\n{modifier}\n")
+        refused: cases_test_advanced(root, "noncanonical", "step: false\n{modifier}\n")
         assert_eq(refused.verdict.status, "REFUSED")
         assert(refused.verdict.detail != "pty-stdio")
     }
@@ -60,17 +60,17 @@ use files :: core.files
 }
 
 #Test("quoted RHS means literal while spaced snapshots and write templates require explicit path") {
-    root :: cases_test_root("wiring-rhs")
-    directory :: files.join(root, "tests/cases/group")
+    root: cases_test_root("wiring-rhs")
+    directory: files.join(root, "tests/cases/group")
     kit_exec_write(files.join(directory, "snapshot"), "expected")
     kit_exec_write(files.join(directory, "two words.out"), "expected")
     kit_exec_write(files.join(directory, "two words.template"), "{{cap:message}}\\n")
-    source :: "step: printf expected\nstdout: = snapshot\nstdout: = path \"two words.out\"\ncapture: message = text stdout\nwrite: copy = \"{{cap:message}}\"\nfile: copy = \"expected\"\nwrite: templated path \"two words.template\"\nfile: templated = \"expected\\\\n\"\n"
+    source: "step: printf expected\nstdout: = snapshot\nstdout: = path \"two words.out\"\ncapture: message = text stdout\nwrite: copy = \"{{cap:message}}\"\nfile: copy = \"expected\"\nwrite: templated path \"two words.template\"\nfile: templated = \"expected\\\\n\"\n"
     assert_eq(cases_test_advanced(root, "path", source).verdict.status, "PASS")
     assert_eq(cases_test_advanced(root, "quoted-name", "step: printf snapshot\nstdout: = \"snapshot\"\n").verdict.status, "PASS")
     assert_eq(cases_test_advanced(root, "literal-not-file", "step: printf expected\nstdout: = \"snapshot\"\n").verdict.status, "FAIL")
     loop assertion in ["stdout: = \"snapshot\"", "stdout: = path \"two words.out\"", "stdout: = snapshot"] {
-        failed :: cases_test_advanced(root, "not-snapshot-literal", "step: printf wrong\n{assertion}\n")
+        failed: cases_test_advanced(root, "not-snapshot-literal", "step: printf wrong\n{assertion}\n")
         assert_eq(failed.verdict.status, "FAIL")
     }
     loop invalid in ["write: value \"not a template\"\n", "write: value = unquoted\n", "step: printf expected\nstdout: == \"expected\"\n"] -> assert_eq(cases_test_advanced(root, "invalid-rhs", invalid).verdict.status, "REFUSED")

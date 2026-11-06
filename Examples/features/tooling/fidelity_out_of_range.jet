@@ -1,21 +1,21 @@
 // D-PERF-ERR1=A: setting fidelity outside 0.0 to 1.0 fails with
 // `PerfError.OutOfRange`, which carries the rejected number. The setting is
 // left unchanged, and `reset_fidelity` cannot fail.
-package {
+package: {
     name: "fidelity_out_of_range"
     authority: { allow: [Env, IO] }
 }
 
-use perf :: core.perf
+use perf: core.perf
 
-fn set(value: Float) {
+set: fn(value: Float) {
     if perf.override_fidelity(value) == {
         .Ok(_) -> print("set {value}: fidelity is now {perf.fidelity()}")
         .Err(.OutOfRange(rejected)) -> print("{rejected} is outside 0.0 to 1.0; fidelity stays {perf.fidelity()}")
     }
 }
 
-fn run() {
+run: fn() {
     set(0.5)
     set(1.5)
     set(-0.25)

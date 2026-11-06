@@ -1,6 +1,6 @@
 // Canonical typed test boundary.
 #Error
-enum TestEvidenceError {
+TestEvidenceError: enum {
     SchemaConflict(expected: U16, found: U16)
     ProducerConflict(expected: EvidenceProducerKind, found: EvidenceProducerKind)
     EmptyReportID
@@ -19,7 +19,7 @@ enum TestEvidenceError {
     Foundation(EvidenceMergeError)
 }
 
-fn test_evidence_error_text(error: TestEvidenceError) -> String Never! {
+test_evidence_error_text: fn(error: TestEvidenceError) -> String Never! {
     if error == {
         .SchemaConflict(expected, found) -> "test evidence requires jet.evidence/v{expected}, found v{found}"
         .ProducerConflict(expected, found) -> "test evidence producer must be {evidence_producer_name(expected)}, found {evidence_producer_name(found)}"
@@ -40,13 +40,13 @@ fn test_evidence_error_text(error: TestEvidenceError) -> String Never! {
     }
 }
 
-fn test_evidence_report_parts(error: TestEvidenceError) -> (detail: String, message: String) Never! {
-    text :: test_evidence_error_text(error)
+test_evidence_report_parts: fn(error: TestEvidenceError) -> (detail: String, message: String) Never! {
+    text: test_evidence_error_text(error)
     if !text.contains("\n") -> return (detail: "", message: text)
     (detail: text.after("\n"), message: text.before("\n"))
 }
 
-fn validate_test_report(report: EvidenceReport) TestEvidenceError! {
+validate_test_report: fn(report: EvidenceReport) TestEvidenceError! {
     if report.schema_version != EVIDENCE_REPORT_VERSION {
         return Err(TestEvidenceError.SchemaConflict{expected: EVIDENCE_REPORT_VERSION, found: report.schema_version})
     }
@@ -57,14 +57,14 @@ fn validate_test_report(report: EvidenceReport) TestEvidenceError! {
     return
 }
 
-fn is_terminal_test_outcome(outcome: EvidenceOutcome) -> Bool Never! {
+is_terminal_test_outcome: fn(outcome: EvidenceOutcome) -> Bool Never! {
     if outcome == {
         .Generated | .Passed | .Failed | .Skipped | .Unavailable | .Error -> true
         else -> false
     }
 }
 
-fn validate_test_record(report: EvidenceReport, record: EvidenceRecord) TestEvidenceError! {
+validate_test_record: fn(report: EvidenceReport, record: EvidenceRecord) TestEvidenceError! {
     if record.producer != EvidenceProducerKind.Test {
         return Err(TestEvidenceError.ProducerConflict{expected: EvidenceProducerKind.Test, found: record.producer})
     }
@@ -91,11 +91,11 @@ fn validate_test_record(report: EvidenceReport, record: EvidenceRecord) TestEvid
     return
 }
 
-fn validate_test_records(report: EvidenceReport) TestEvidenceError! {
+validate_test_records: fn(report: EvidenceReport) TestEvidenceError! {
     outcomes := [String:EvidenceOutcome]{}
     evidence := [String:Int]{}
     loop index in 0..<report.records.len() {
-        record :: report.records[index]
+        record: report.records[index]
         validate_test_record(report, record)
         if outcomes.get(record.identity.claim_id) == {
             .Val(existing) -> {
@@ -117,7 +117,7 @@ fn validate_test_records(report: EvidenceReport) TestEvidenceError! {
     return
 }
 
-fn record_test_case(report: &EvidenceReport, record: ^EvidenceRecord) TestEvidenceError! {
+record_test_case: fn(report: &EvidenceReport, record: ^EvidenceRecord) TestEvidenceError! {
     validate_test_report(report)
     validate_test_record(report, record)
     loop existing in report.records {
@@ -136,7 +136,7 @@ fn record_test_case(report: &EvidenceReport, record: ^EvidenceRecord) TestEviden
             .Err(error) -> return Err(TestEvidenceError.Foundation(error))
         }
     } else {
-        derivation :: evidence_record_checked_derivation(record)
+        derivation: evidence_record_checked_derivation(record)
         if evidence_report_add_record_with_derivation(&report, ^record, ^derivation) == {
             .Ok(_) -> {
                 return
@@ -146,7 +146,7 @@ fn record_test_case(report: &EvidenceReport, record: ^EvidenceRecord) TestEviden
     }
 }
 
-fn finalize_test_report(report: ^EvidenceReport) -> EvidenceReport TestEvidenceError! {
+finalize_test_report: fn(report: ^EvidenceReport) -> EvidenceReport TestEvidenceError! {
     validate_test_report(report)
     validate_test_records(report)
     value := report
@@ -157,13 +157,13 @@ fn finalize_test_report(report: ^EvidenceReport) -> EvidenceReport TestEvidenceE
 }
 
 // Validation without materializing the unused query rows at the report adapter.
-fn test_evidence_validate(report: EvidenceReport) TestEvidenceError! {
+test_evidence_validate: fn(report: EvidenceReport) TestEvidenceError! {
     validate_test_report(report)
     validate_test_records(report)
     return
 }
 
-fn query_test_evidence(report: EvidenceReport, claim_id: String?) -> [EvidenceProjection] TestEvidenceError! {
+query_test_evidence: fn(report: EvidenceReport, claim_id: String?) -> [EvidenceProjection] TestEvidenceError! {
     validate_test_report(report)
     validate_test_records(report)
     Ok(evidence_report_query(report, claim_id))

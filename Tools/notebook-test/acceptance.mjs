@@ -88,7 +88,7 @@ async function runClient(client) {
 
 const source = `#FX(authority: IO, FS) {
     eprint("ambient-eprint")
-    name :: input("name: ") ?? "fallback"
+    name: input("name: ") ?? "fallback"
     assert(name == "Ada")
     write_file("browser-notebook.txt", name) ?? panic("write failed")
     assert(file_exists("browser-notebook.txt"))

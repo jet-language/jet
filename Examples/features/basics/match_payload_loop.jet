@@ -1,23 +1,23 @@
 // A match over a plain local inside a loop reads the payload on every
 // iteration: a payload binding never takes the payload out of a carrier the
 // back edge tests again (the local stays whole after each arm).
-enum Slot {
+Slot: enum {
     Full(text: String)
     Empty
 }
 
-fn lookup(seed: Int) -> String? Never! {
+lookup: fn(seed: Int) -> String? Never! {
     if seed > 0 -> return Val("name-{seed}")
     None
 }
 
-fn slot_of(seed: Int) -> Slot Never! {
+slot_of: fn(seed: Int) -> Slot Never! {
     if seed > 0 -> return Slot.Full{text: "slot-{seed}"}
     Slot.Empty
 }
 
-fn run() {
-    name :: lookup(7)
+run: fn() {
+    name: lookup(7)
     out := [String]{}
     loop i in 0..<3 {
         if name == {
@@ -26,7 +26,7 @@ fn run() {
         }
     }
     print(out.join(","))
-    slot :: slot_of(4)
+    slot: slot_of(4)
     slots := [String]{}
     loop i in 0..<3 {
         if slot == {

@@ -1,9 +1,9 @@
 // Canonical C marshalling, not a second launch policy. Inputs borrow
 // E4/List24/Spec136, except a ProcessSpec a builder route consumes and returns
 // changed (ProcessSpec.jet); every returned carrier owns its children.
-fn process_route_text_list(data: I64, length: I64) -> I64 {
-    count :: if data == (I64{0}) || length <= (I64{0}) -> I64{0} else -> length
-    result :: data_sequence_new(count, DATA_TREE_ELEMENT_BYTES)
+process_route_text_list: fn(data: I64, length: I64) -> I64 {
+    count: if data == (I64{0}) || length <= (I64{0}) -> I64{0} else -> length
+    result: data_sequence_new(count, DATA_TREE_ELEMENT_BYTES)
     index := I64{0}
     loop index < count {
         process_text_list_push(result, encoding_word(wrapping(data + index * DATA_TREE_ELEMENT_BYTES)))
@@ -11,30 +11,30 @@ fn process_route_text_list(data: I64, length: I64) -> I64 {
     }
     result
 }
-fn process_route_optional_word(present: Bool, value: I64) -> I64 {
+process_route_optional_word: fn(present: Bool, value: I64) -> I64 {
     if present -> process_raw_box(value) else -> I64{0}
 }
-fn process_route_stream_mode(mode: I64) {
+process_route_stream_mode: fn(mode: I64) {
     if mode < PROCESS_STREAM_STREAM || mode > PROCESS_STREAM_CAPTURE -> trap_native_index_range_stop()
 }
-#Export(c) fn jet_process_spec_fields_raw(cmd: I64, cmd_length: I64, has_cwd: Bool, cwd: I64, env_clear: Bool, names: I64, names_length: I64, values: I64, values_length: I64, removals: I64, removals_length: I64, has_stdin: Bool, stdin: I64, stdout: I64, stderr: I64, has_timeout: Bool, timeout: I64, has_output: Bool, output: I64, has_cpu: Bool, cpu: I64, has_memory: Bool, memory: I64, has_files: Bool, files: I64, detached: Bool, has_terminal: Bool, terminal: I64, has_policy: Bool, policy: I64) -> I64 {
+#Export(c) jet_process_spec_fields_raw: fn(cmd: I64, cmd_length: I64, has_cwd: Bool, cwd: I64, env_clear: Bool, names: I64, names_length: I64, values: I64, values_length: I64, removals: I64, removals_length: I64, has_stdin: Bool, stdin: I64, stdout: I64, stderr: I64, has_timeout: Bool, timeout: I64, has_output: Bool, output: I64, has_cpu: Bool, cpu: I64, has_memory: Bool, memory: I64, has_files: Bool, files: I64, detached: Bool, has_terminal: Bool, terminal: I64, has_policy: Bool, policy: I64) -> I64 {
     process_route_stream_mode(stdin)
     process_route_stream_mode(stdout)
     process_route_stream_mode(stderr)
     if jet_scheduler_native_propagate() != (I64{0}) -> return I64{0}
-    result :: jet_rt_alloc(PROCESS_SPEC_BYTES, I64{8})
+    result: jet_rt_alloc(PROCESS_SPEC_BYTES, I64{8})
     coll_zero(result, PROCESS_SPEC_BYTES)
     encoding_store(wrapping(result + PROCESS_SPEC_CMD), process_route_text_list(cmd, cmd_length))
     encoding_store(wrapping(result + PROCESS_SPEC_CWD), if has_cwd -> jet_rt_string_clone(cwd) else -> I64{0})
     encoding_store(wrapping(result + PROCESS_SPEC_ENV_CLEAR), if env_clear -> I64{1} else -> I64{0})
     // Rust Vec::zip stops at the shorter column; absent pointer means empty.
-    name_count :: if names == (I64{0}) || names_length <= (I64{0}) -> I64{0} else -> names_length
-    value_count :: if values == (I64{0}) || values_length <= (I64{0}) -> I64{0} else -> values_length
-    count :: if name_count < value_count -> name_count else -> value_count
-    pairs :: data_sequence_new(count, DATA_TREE_ENTRY_BYTES)
+    name_count: if names == (I64{0}) || names_length <= (I64{0}) -> I64{0} else -> names_length
+    value_count: if values == (I64{0}) || values_length <= (I64{0}) -> I64{0} else -> values_length
+    count: if name_count < value_count -> name_count else -> value_count
+    pairs: data_sequence_new(count, DATA_TREE_ENTRY_BYTES)
     index := I64{0}
     loop index < count {
-        slot :: data_sequence_reserve(pairs, DATA_TREE_ENTRY_BYTES)
+        slot: data_sequence_reserve(pairs, DATA_TREE_ENTRY_BYTES)
         encoding_store(wrapping(slot + DATA_TREE_ENTRY_KEY), jet_rt_string_clone(encoding_word(wrapping(names + index * DATA_TREE_ELEMENT_BYTES))))
         encoding_store(wrapping(slot + DATA_TREE_ENTRY_VALUE), jet_rt_string_clone(encoding_word(wrapping(values + index * DATA_TREE_ELEMENT_BYTES))))
         encoding_store(wrapping(pairs + DATA_SEQUENCE_LENGTH), index + I64{1})
@@ -56,37 +56,37 @@ fn process_route_stream_mode(mode: I64) {
     // The zeroed private directory tail is the original empty inherited Vec.
     result
 }
-#Export(c) fn jet_std_process_spec_under(value: I64, authority: I64) -> I64 {
-    result :: value
+#Export(c) jet_std_process_spec_under: fn(value: I64, authority: I64) -> I64 {
+    result: value
     jet_rt_string_drop(encoding_word(wrapping(result + PROCESS_SPEC_POLICY_WIRE)))
     encoding_store(wrapping(result + PROCESS_SPEC_POLICY_WIRE), jet_authority_to_wire(authority))
     encoding_store(wrapping(result + PROCESS_SPEC_ENV_CLEAR), I64{1})
     result
 }
-fn process_route_i32(value: I64) -> I64 {
-    bits :: value.bit_and(I64{4294967295})
+process_route_i32: fn(value: I64) -> I64 {
+    bits: value.bit_and(I64{4294967295})
     if bits >= (I64{2147483648}) -> bits - I64{4294967296} else -> bits
 }
-#Export(c) fn jet_process_spec_with_directory_raw(value: I64, source_fd: I64, child_fd: I64, as_cwd: Bool, spec_out: I64, supported_out: I64, assigned_out: I64, errno_out: I64) {
+#Export(c) jet_process_spec_with_directory_raw: fn(value: I64, source_fd: I64, child_fd: I64, as_cwd: Bool, spec_out: I64, supported_out: I64, assigned_out: I64, errno_out: I64) {
     // Duplicate its lent fd, never reopen a pathname. The spec is consumed:
     // its earlier rows move into the returned one, so each passed descriptor
     // has one owner and closes once.
-    result :: value
-    target :: process_route_i32(child_fd)
-    duplicated :: host_call(I64{72}, process_route_i32(source_fd), I64{1030}, target)
+    result: value
+    target: process_route_i32(child_fd)
+    duplicated: host_call(I64{72}, process_route_i32(source_fd), I64{1030}, target)
     assigned := I64{-1}
     error := I64{0}
     if duplicated < (I64{0}) {
         error = -duplicated
     } else {
         assigned = duplicated
-        directory :: jet_fd_adopt_unbuffered_raw(duplicated, I64{0})
+        directory: jet_fd_adopt_unbuffered_raw(duplicated, I64{0})
         directories := encoding_word(wrapping(result + PROCESS_SPEC_DIRECTORIES))
         if directories == (I64{0}) {
             directories = data_sequence_new(I64{1}, I64{24})
             encoding_store(wrapping(result + PROCESS_SPEC_DIRECTORIES), directories)
         }
-        slot :: data_sequence_reserve(directories, I64{24})
+        slot: data_sequence_reserve(directories, I64{24})
         encoding_store(slot, directory)
         encoding_store(wrapping(slot + I64{8}), target)
         encoding_store(wrapping(slot + I64{16}), if as_cwd -> I64{1} else -> I64{0})

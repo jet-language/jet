@@ -1,14 +1,14 @@
-use process :: core.process
+use process: core.process
 
 #CLI
-struct WorkloadArgs {
+WorkloadArgs: struct {
     root: String
 }
 
-fn run(args: WorkloadArgs) {
-    root :: args.root
-    timeout :: Duration.seconds(5) ?? panic("bad timeout")
-    result :: process.cmd([
+run: fn(args: WorkloadArgs) {
+    root: args.root
+    timeout: Duration.seconds(5) ?? panic("bad timeout")
+    result: process.cmd([
         "git",
         "-C",
         root.copy(),
@@ -28,7 +28,7 @@ fn run(args: WorkloadArgs) {
     if result.timed_out -> panic("git diff timed out")
     if result.code != 0 && result.code != 1 -> panic("git diff exit {result.code}: {result.errors.trim()}")
 
-    output :: result.output.copy()
+    output: result.output.copy()
     added := 0
     deleted := 0
     modified := 0
@@ -36,10 +36,10 @@ fn run(args: WorkloadArgs) {
     // Raw git --name-status protocol: it is not RFC-4180 CSV.
     loop line in output.split("\n") {
         if line != "" {
-            fields :: line.split("\t").to_list()
+            fields: line.split("\t").to_list()
             if fields.len() != 2 -> panic("bad git name-status row: {line}")
-            status :: fields[0]
-            raw_path :: fields[1]
+            status: fields[0]
+            raw_path: fields[1]
             pieces := [String]{}
             root_name := ""
             index := 0
@@ -50,7 +50,7 @@ fn run(args: WorkloadArgs) {
             if root_name != "before" && root_name != "after" {
                 panic("git path escaped roots: {raw_path}")
             }
-            path :: pieces.join("/")
+            path: pieces.join("/")
             kind := ""
             if status == {
                 "A" -> {

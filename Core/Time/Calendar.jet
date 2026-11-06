@@ -1,29 +1,29 @@
-use time :: core.time
+use time: core.time
 // core.time.calendar — Python `calendar` without locale tables.
 //
 // Weeks start on Monday (`MONDAY = 0`) unless a function takes `firstweekday`.
 // Day `0` in a month matrix is a slot outside the month. Names are English
 // and fixed; there is no locale override.
-MONDAY :: 0
+MONDAY: 0
 
-TUESDAY :: 1
+TUESDAY: 1
 
-WEDNESDAY :: 2
+WEDNESDAY: 2
 
-THURSDAY :: 3
+THURSDAY: 3
 
-FRIDAY :: 4
+FRIDAY: 4
 
-SATURDAY :: 5
+SATURDAY: 5
 
-SUNDAY :: 6
+SUNDAY: 6
 // `/%` already rounds toward negative infinity.
-fn floor_div(a: Int, b: Int) -> Int { a /% b }
+floor_div: fn(a: Int, b: Int) -> Int { a /% b }
 
 
-fn isleap(year: Int) -> Bool Never! { time.is_leap_year(year) }
+isleap: fn(year: Int) -> Bool Never! { time.is_leap_year(year) }
 
-fn leapdays(y1: Int, y2: Int) -> Int Never! {
+leapdays: fn(y1: Int, y2: Int) -> Int Never! {
     a := y1
     b := y2
     if b < a {
@@ -31,48 +31,48 @@ fn leapdays(y1: Int, y2: Int) -> Int Never! {
         a = b
         b = t
     }
-    by4 :: leap_multiple_count(a, b, 4)
-    by100 :: leap_multiple_count(a, b, 100)
-    by400 :: leap_multiple_count(a, b, 400)
+    by4: leap_multiple_count(a, b, 4)
+    by100: leap_multiple_count(a, b, 100)
+    by400: leap_multiple_count(a, b, 400)
     by4 - by100 + by400
 }
 
-fn leap_multiple_count(start: Int, end: Int, divisor: Int) -> Int {
+leap_multiple_count: fn(start: Int, end: Int, divisor: Int) -> Int {
     floor_before(end, divisor) - floor_before(start, divisor)
 }
 
-fn floor_before(value: Int, divisor: Int) -> Int {
+floor_before: fn(value: Int, divisor: Int) -> Int {
     // `value - 1` is not representable at Int's lower bound.  floor_div
     // already accounts for the negative remainder; only an exact multiple
     // needs one additional step for the exclusive upper bound.
     if value == -9223372036854775808 {
-        q :: floor_div(value, divisor)
+        q: floor_div(value, divisor)
         if value %% divisor == 0 -> return q - 1
         return q
     }
     floor_div(value - 1, divisor)
 }
-fn weekday(year: Int, month: Int, day: Int) -> Int Never! {
+weekday: fn(year: Int, month: Int, day: Int) -> Int Never! {
     // Sakamoto: 0 = Sunday. Convert to Monday = 0.
     y := year
     m := month
     if m < 1 -> m = 1
     if m > 12 -> m = 12
-    t :: [Int]{0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4}
+    t: [Int]{0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4}
     if month < 3 -> y = y - 1
     sun0 := (y + floor_div(y, 4) - floor_div(y, 100) + floor_div(y, 400) + t[m - 1] + day) %% 7
     if sun0 < 0 -> sun0 = sun0 + 7
     (sun0 + 6) %% 7
 
 }
-fn monthrange(year: Int, month: Int) -> (days: Int, weekday: Int) Never! {
-    days :: time.days_in_month(year, month)
+monthrange: fn(year: Int, month: Int) -> (days: Int, weekday: Int) Never! {
+    days: time.days_in_month(year, month)
     (days: days, weekday: weekday(year, month, 1))
 }
 
-fn monthcalendar(year: Int, month: Int) -> [[Int]] Never! { monthcalendar_start(year, month, 0) }
-fn monthcalendar_start(year: Int, month: Int, firstweekday: Int) -> [[Int]] Never! {
-    range :: monthrange(year, month)
+monthcalendar: fn(year: Int, month: Int) -> [[Int]] Never! { monthcalendar_start(year, month, 0) }
+monthcalendar_start: fn(year: Int, month: Int, firstweekday: Int) -> [[Int]] Never! {
+    range: monthrange(year, month)
     first := firstweekday %% 7
     if first < 0 -> first = first + 7
     start := (range.weekday - first) %% 7
@@ -97,7 +97,7 @@ fn monthcalendar_start(year: Int, month: Int, firstweekday: Int) -> [[Int]] Neve
 }
 
 
-fn yearcalendar(year: Int) -> [[[Int]]] Never! {
+yearcalendar: fn(year: Int) -> [[[Int]]] Never! {
     months := [[[Int]]]{}
     m := 1
     loop m <= 12 {
@@ -107,7 +107,7 @@ fn yearcalendar(year: Int) -> [[[Int]]] Never! {
     months
 }
 
-fn day_name(weekday: Int) -> String Never! {
+day_name: fn(weekday: Int) -> String Never! {
     i := weekday
     if i < 0 -> i = 0
     if i > 6 -> i = 6
@@ -122,7 +122,7 @@ fn day_name(weekday: Int) -> String Never! {
     }
 }
 
-fn day_abbr(weekday: Int) -> String Never! {
+day_abbr: fn(weekday: Int) -> String Never! {
     i := weekday
     if i < 0 -> i = 0
     if i > 6 -> i = 6
@@ -137,7 +137,7 @@ fn day_abbr(weekday: Int) -> String Never! {
     }
 }
 
-fn month_name(month: Int) -> String Never! {
+month_name: fn(month: Int) -> String Never! {
     i := month
     if i < 1 -> i = 1
     if i > 12 -> i = 12
@@ -157,7 +157,7 @@ fn month_name(month: Int) -> String Never! {
     }
 }
 
-fn month_abbr(month: Int) -> String Never! {
+month_abbr: fn(month: Int) -> String Never! {
     i := month
     if i < 1 -> i = 1
     if i > 12 -> i = 12
@@ -177,7 +177,7 @@ fn month_abbr(month: Int) -> String Never! {
     }
 }
 
-fn weekheader(width: Int, firstweekday: Int) -> [String] Never! {
+weekheader: fn(width: Int, firstweekday: Int) -> [String] Never! {
     w := width
     if w < 1 -> w = 1
     first := firstweekday %% 7
@@ -185,17 +185,17 @@ fn weekheader(width: Int, firstweekday: Int) -> [String] Never! {
     out := [String]{}
     i := 0
     loop i < 7 {
-        name :: day_abbr((i + first) %% 7)
+        name: day_abbr((i + first) %% 7)
         &out.push(clip(name, w))
         i = i + 1
     }
     out
 }
 
-fn formatmonth(year: Int, month: Int, width: Int) -> String Never! {
+formatmonth: fn(year: Int, month: Int, width: Int) -> String Never! {
     w := width
     if w < 2 -> w = 2
-    title :: "{month_name(month)} {year}"
+    title: "{month_name(month)} {year}"
     out := "{center(title, w * 7 + 6)}\n{join_row(weekheader(w, 0), w)}\n"
     loop week in monthcalendar(year, month) {
         row := [String]{}
@@ -207,7 +207,7 @@ fn formatmonth(year: Int, month: Int, width: Int) -> String Never! {
     out
 }
 
-fn formatyear(year: Int) -> String Never! {
+formatyear: fn(year: Int) -> String Never! {
     out := ""
     m := 1
     loop m <= 12 {
@@ -217,25 +217,25 @@ fn formatyear(year: Int) -> String Never! {
     out
 }
 
-fn timegm(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> Int Never! {
-    m :: constrain(month, 1, 12)
-    d :: constrain(day, 1, time.days_in_month(year, m))
-    y :: year - 1
-    offsets :: [Int]{0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334}
+timegm: fn(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> Int Never! {
+    m: constrain(month, 1, 12)
+    d: constrain(day, 1, time.days_in_month(year, m))
+    y: year - 1
+    offsets: [Int]{0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334}
     days := 365 * y + floor_div(y, 4) - floor_div(y, 100) + floor_div(y, 400) + offsets[m - 1] + d - 1
     if m > 2 && isleap(year) -> days = days + 1
     // 719162 is the civil day number of 1970-01-01. The epoch carrier
     // saturates the day product before adding the constrained time of day.
-    base :: constrain((days - 719162) * 86400, -9223372036854775808, 9223372036854775807)
-    seconds :: constrain(hour, 0, 23) * 3600 + constrain(minute, 0, 59) * 60 + constrain(second, 0, 59)
+    base: constrain((days - 719162) * 86400, -9223372036854775808, 9223372036854775807)
+    seconds: constrain(hour, 0, 23) * 3600 + constrain(minute, 0, 59) * 60 + constrain(second, 0, 59)
     timestamp := constrain(base + seconds, -9223372036854775808, 9223372036854775807)
     if hour == 23 && minute == 59 && second == 60 -> timestamp = constrain(timestamp + 1, -9223372036854775808, 9223372036854775807)
     timestamp
 }
 
 
-fn clip(text: String, width: Int) -> String {
-    raw :: text.bytes()
+clip: fn(text: String, width: Int) -> String {
+    raw: text.bytes()
     if raw.len() <= width -> return pad_end(text, width)
     out := [U8]{}
     i := 0
@@ -246,8 +246,8 @@ fn clip(text: String, width: Int) -> String {
     String.from_bytes(out) ?? text.copy()
 }
 
-fn pad(text: String, width: Int) -> String {
-    raw :: text.bytes()
+pad: fn(text: String, width: Int) -> String {
+    raw: text.bytes()
     if raw.len() >= width -> return text.copy()
     out := text
     n := width - raw.len()
@@ -258,8 +258,8 @@ fn pad(text: String, width: Int) -> String {
     out
 }
 
-fn center(text: String, width: Int) -> String {
-    raw :: text.bytes()
+center: fn(text: String, width: Int) -> String {
+    raw: text.bytes()
     if raw.len() >= width -> return clip(text, width)
     left := (width - raw.len()) /% 2
     right := width - raw.len() - left
@@ -276,8 +276,8 @@ fn center(text: String, width: Int) -> String {
     out
 }
 
-fn join_row(cells: [String], width: Int) -> String {
-    _ :: width
+join_row: fn(cells: [String], width: Int) -> String {
+    _: width
     out := ""
     i := 0
     loop i < cells.len() {
@@ -289,13 +289,13 @@ fn join_row(cells: [String], width: Int) -> String {
 }
 
 
-fn constrain(value: Int, low: Int, high: Int) -> Int Never! {
+constrain: fn(value: Int, low: Int, high: Int) -> Int Never! {
     if value < low -> return low
     if value > high -> return high
     value
 }
 
-fn pad_end(text: String, width: Int) -> String Never! {
+pad_end: fn(text: String, width: Int) -> String Never! {
     out := text
     n := width - text.bytes().len()
     loop n > 0 {

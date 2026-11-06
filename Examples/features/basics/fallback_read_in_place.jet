@@ -1,19 +1,19 @@
 // `opt ?? fallback` handed to a read parameter, with both sides places,
 // reads whichever side applies in place: neither the payload nor the
 // fallback is copied, and both stay whole afterwards (#5041).
-struct Blob {
+Blob: struct {
     data: [Int]
     text: String
 }
 
-fn weight(blob: Blob) -> Int { blob.data.len() * 10 + blob.text.len() }
+weight: fn(blob: Blob) -> Int { blob.data.len() * 10 + blob.text.len() }
 
-fn choose(primary: Blob?, backup: Blob) -> Int { weight(primary ?? backup) }
+choose: fn(primary: Blob?, backup: Blob) -> Int { weight(primary ?? backup) }
 
-fn run() {
-    backup :: Blob{data: [Int]{1}, text: "b"}
-    some :: Val(Blob{data: [Int]{1, 2}, text: "abc"})
-    none :: Blob?{None}
+run: fn() {
+    backup: Blob{data: [Int]{1}, text: "b"}
+    some: Val(Blob{data: [Int]{1, 2}, text: "abc"})
+    none: Blob?{None}
     total := 0
     loop _ in 0..<2 -> total += weight(some ?? backup) + weight(none ?? backup)
     print("total {total}")

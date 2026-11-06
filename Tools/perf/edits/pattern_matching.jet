@@ -1,12 +1,12 @@
 // Representative edit: change the payload observed by the first match.
-enum Conn {
+Conn: enum {
     Active(Int)
     Reconnecting(Int)
     Idle(Int)
     Closed
 }
 
-fn describe_conn(c: Conn) -> String {
+describe_conn: fn(c: Conn) -> String {
     if c == {
         .Active(id) | .Reconnecting(id) -> {
             return "live:{id}"
@@ -17,12 +17,12 @@ fn describe_conn(c: Conn) -> String {
     }
 }
 
-enum HTTP {
+HTTP: enum {
     Good(Int)
     Fail(Int)
 }
 
-fn classify(r: HTTP) -> String {
+classify: fn(r: HTTP) -> String {
     if r == {
         .Good(200..299) -> return "success"
         .Good(300..399) -> return "redirect"
@@ -34,7 +34,7 @@ fn classify(r: HTTP) -> String {
     }
 }
 
-fn score_grade(score: Int) -> String {
+score_grade: fn(score: Int) -> String {
     if score == {
         0..59 -> "F"
         60..69 -> "D"
@@ -45,7 +45,7 @@ fn score_grade(score: Int) -> String {
     }
 }
 
-fn run() {
+run: fn() {
     print(describe_conn(Conn.Active(43)))
     print(describe_conn(Conn.Reconnecting(7)))
     print(describe_conn(Conn.Idle(99)))

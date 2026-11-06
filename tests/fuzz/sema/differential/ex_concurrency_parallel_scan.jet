@@ -9,22 +9,22 @@
 // Interactive prompts:
 //   INTERACTIVE=1 nix develop -c jet run Examples/features/concurrency/parallel_scan.jet
 use {
-    tasks :: core.tasks
-    fs :: core.files
-    io :: core.term
-    process :: core.process
-    env :: core.sys
+    tasks: core.tasks
+    fs: core.files
+    io: core.term
+    process: core.process
+    env: core.sys
 }
 
-fn count_lines(text: String) -> Int { text.lines().len() }
+count_lines: fn(text: String) -> Int { text.lines().len() }
 
-fn scan_one(path: String) -> String {
-    text :: fs.read(path.copy()) ?? return "{path}: unreadable"
-    lines :: count_lines(text)
+scan_one: fn(path: String) -> String {
+    text: fs.read(path.copy()) ?? return "{path}: unreadable"
+    lines: count_lines(text)
     return "{path}: {lines} lines, {text.len()} chars"
 }
 
-fn default_paths() -> [String] {
+default_paths: fn() -> [String] {
     return [
         "Examples/features/concurrency/tasks.jet",
         "Examples/features/concurrency/pipeline.jet",
@@ -33,40 +33,40 @@ fn default_paths() -> [String] {
     ]
 }
 
-fn paths_from_args() -> [String] {
+paths_from_args: fn() -> [String] {
     return process.args()
 }
 
-fn paths_from_prompt() -> [String] {
+paths_from_prompt: fn() -> [String] {
     print("Enter file paths (blank line when done):")
     out := [String]{}
     loop true {
-        raw :: io.input("> ") ?? return out.copy()
+        raw: io.input("> ") ?? return out.copy()
         if raw == "" { break }
         &out.push(raw)
     }
     return out
 }
 
-fn gather_paths() -> [String] {
-    from_args :: paths_from_args()
+gather_paths: fn() -> [String] {
+    from_args: paths_from_args()
     if from_args.len() > 0 -> return from_args
     if (env.get("INTERACTIVE") ?? "") == "1" -> return paths_from_prompt()
     return default_paths()
 }
 
-fn scan_parallel(paths: [String]) -> [String] {
-    { sender, receiver: ch } :: channel<String>()
+scan_parallel: fn(paths: [String]) -> [String] {
+    { sender, receiver: ch }: channel<String>()
     workers := [Task<()>]{}
     loop path in paths {
-        tx :: sender.copy()
-        file :: path.copy()
+        tx: sender.copy()
+        file: path.copy()
         &workers.push(task {
             tx.send(scan_one(file))
         })
     }
     loop workers.len() > 0 {
-        worker :: &workers.pop() ?? panic("missing worker")
+        worker: &workers.pop() ?? panic("missing worker")
         worker.join() ?? panic("worker failed")
     }
     sender.close()
@@ -76,18 +76,18 @@ fn scan_parallel(paths: [String]) -> [String] {
     return results
 }
 
-fn copy_paths(paths: [String]) -> [String] { paths.map(path -> path.copy()) }
+copy_paths: fn(paths: [String]) -> [String] { paths.map(path -> path.copy()) }
 
-fn run() {
-    paths :: gather_paths()
+run: fn() {
+    paths: gather_paths()
     if paths.len() == 0 {
         print("no files to scan")
         return
     }
     print("scanning {paths.len()} files...")
     print("")
-    parallel_paths :: copy_paths(paths)
-    parallel :: scan_parallel(parallel_paths)
+    parallel_paths: copy_paths(paths)
+    parallel: scan_parallel(parallel_paths)
     loop line in parallel -> print(line)
     print("")
     print("done — {paths.len()} files scanned in parallel")

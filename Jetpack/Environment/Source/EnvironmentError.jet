@@ -10,7 +10,7 @@ use {
 }
 
 #Error
-enum EnvironmentError {
+EnvironmentError: enum {
     IO(IOError)
     InvalidData(String)
     InvalidInput(String)
@@ -24,7 +24,7 @@ enum EnvironmentError {
     Activation(String)
     Gate(PackageGateError)
 
-    fn message(self) -> String Never! {
+    message: fn(self) -> String Never! {
         if self == {
             .IO(error) -> "{error}"
             .InvalidData(text) -> text
@@ -42,7 +42,7 @@ enum EnvironmentError {
     }
 
     // Rust `error.kind() == ErrorKind::NotFound` across both carriers.
-    fn is_not_found(self) -> Bool Never! {
+    is_not_found: fn(self) -> Bool Never! {
         if self == {
             .IO(error) -> {
                 if error == {

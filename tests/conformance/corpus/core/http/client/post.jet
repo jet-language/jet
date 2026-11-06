@@ -1,21 +1,21 @@
 // core-conformance: core.http.client.post
 use {
-    client :: core.http.client
-    net :: core.net
-    tasks :: core.tasks
+    client: core.http.client
+    net: core.net
+    tasks: core.tasks
 }
 
-fn run() {
-    { sender, receiver: ch } :: channel<String>()
-    t :: task {
-        listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+run: fn() {
+    { sender, receiver: ch }: channel<String>()
+    t: task {
+        listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
         sender.send(listener.local_addr() ?? panic("address"))
-        stream :: &listener.accept() ?? panic("accept")
+        stream: &listener.accept() ?? panic("accept")
         stream.read_text(8192) ?? panic("request")
         net.tcp_reply(^stream, "200 OK", "witness") ?? panic("reply")
     }
-    addr :: ch.receive() ?? panic("address")
-    response :: client.post("http://{addr}/", "payload") ?? panic("post")
+    addr: ch.receive() ?? panic("address")
+    response: client.post("http://{addr}/", "payload") ?? panic("post")
     print(response.body().text(1024) ?? panic("body"))
     t.join() ?? panic("server")
 }

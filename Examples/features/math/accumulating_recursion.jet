@@ -3,69 +3,69 @@
 // far (Compiler/JetIR/Source/OptAccumulate.jet); every tier prints the same.
 
 // Two calls of itself: this one stays recursive.
-fn fib(n: Int) -> Int {
+fib: fn(n: Int) -> Int {
     if n < 2 -> return n
     fib(n - 1) + fib(n - 2)
 }
 
-fn triangle(n: Int) -> Int {
+triangle: fn(n: Int) -> Int {
     if n < 1 -> return 0
     n + triangle(n - 1)
 }
 
 // 30! leaves the inline Int range: the loop carries the big product.
-fn factorial(n: Int) -> Int {
+factorial: fn(n: Int) -> Int {
     if n < 2 -> return 1
     factorial(n - 1) * n
 }
 
 // The value combined is computed after the call.
-fn scramble(n: Int) -> Int {
+scramble: fn(n: Int) -> Int {
     if n < 1 -> return 7
     scramble(n - 1).bit_xor(n * 3)
 }
 
-fn spread(n: Int) -> Int {
+spread: fn(n: Int) -> Int {
     if n < 1 -> return 0
     spread(n - 1).bit_or(n * n)
 }
 
-fn common(n: Int) -> Int {
+common: fn(n: Int) -> Int {
     if n < 1 -> return -1
     common(n - 1).bit_and(n.bit_or(1024))
 }
 
 // I64 products and sums that wrap.
-fn spin(n: I64) -> I64 {
+spin: fn(n: I64) -> I64 {
     if n < 1 -> return 1
     wrapping(spin(n - 1) * 31)
 }
 
-fn wide_sum(n: I64) -> I64 {
+wide_sum: fn(n: I64) -> I64 {
     if n < 1 -> return 0
-    step :: n * 400000000000000000
+    step: n * 400000000000000000
     wrapping(step + wide_sum(n - 1))
 }
 
 // `base` passes through unchanged; the loop clones it for each pass.
-fn steps(base: Int, n: Int) -> Int {
+steps: fn(base: Int, n: Int) -> Int {
     if n < 1 -> return base
     base + steps(base, n - 1)
 }
 
 // Raising n toward the test that ends it makes a loop too.
-fn climb(n: Int) -> Int {
+climb: fn(n: Int) -> Int {
     if n > 100 -> return 0
     n + climb(n + 1)
 }
 
 // A difference is not associative: this stays a call.
-fn alternate(n: Int) -> Int {
+alternate: fn(n: Int) -> Int {
     if n < 1 -> return 0
     n - alternate(n - 1)
 }
 
-fn run() {
+run: fn() {
     print(fib(25))
     print(triangle(5000))
     print(factorial(30))

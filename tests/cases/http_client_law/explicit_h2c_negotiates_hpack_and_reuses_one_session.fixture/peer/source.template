@@ -1,68 +1,68 @@
 use {
-    net :: core.net
-    files :: core.files
-    time :: core.time
+    net: core.net
+    files: core.files
+    time: core.time
 }
-PEER_CRLF :: comptime { String.from_bytes([U8]{13, 10}) ?? panic("fixture CRLF") }
-fn publish(listener: TCPListener, path: String) {
-    address :: listener.local_addr() ?? panic("address")
+PEER_CRLF: comptime { String.from_bytes([U8]{13, 10}) ?? panic("fixture CRLF") }
+publish: fn(listener: TCPListener, path: String) {
+    address: listener.local_addr() ?? panic("address")
     files.write_atomic(path, address.bytes()) ?? panic("publish address")
 }
 // Test-only raw HTTP/2 frame transport: literal port of http_client_law.rs25-45.
-struct Frame {
+Frame: struct {
     kind: Int
     flags: Int
     id: Int
     payload: [U8]
 }
-fn read_exact(stream: TCPStream, size: Int) -> [U8] {
+read_exact: fn(stream: TCPStream, size: Int) -> [U8] {
     out := [U8]{}
     loop out.len() < size {
-        chunk :: stream.read(size - out.len()) ?? panic("frame read_exact")
+        chunk: stream.read(size - out.len()) ?? panic("frame read_exact")
         assert(chunk.len() > 0)
         loop byte in chunk { &out.push(byte) }
     }
     return out
 }
-fn read_frame(stream: TCPStream) -> Frame {
-    head :: read_exact(stream, 9)
-    size :: (Int.from_u8(head[0]) << 16).bit_or(Int.from_u8(head[1]) << 8).bit_or(Int.from_u8(head[2]))
-    id :: (Int.from_u8(head[5]) << 24).bit_or(Int.from_u8(head[6]) << 16).bit_or(Int.from_u8(head[7]) << 8).bit_or(Int.from_u8(head[8])).bit_and(2147483647)
+read_frame: fn(stream: TCPStream) -> Frame {
+    head: read_exact(stream, 9)
+    size: (Int.from_u8(head[0]) << 16).bit_or(Int.from_u8(head[1]) << 8).bit_or(Int.from_u8(head[2]))
+    id: (Int.from_u8(head[5]) << 24).bit_or(Int.from_u8(head[6]) << 16).bit_or(Int.from_u8(head[7]) << 8).bit_or(Int.from_u8(head[8])).bit_and(2147483647)
     return Frame{kind: Int.from_u8(head[3]), flags: Int.from_u8(head[4]), id: id, payload: read_exact(stream, size)}
 }
-fn write_frame(stream: TCPStream, kind: Int, flags: Int, id: Int, payload: [U8]) {
-    size :: payload.len()
-    head :: [U8]{(U8{(size >> 16).bit_and(255)}), (U8{(size >> 8).bit_and(255)}), (U8{size.bit_and(255)}), (U8{kind}), (U8{flags}), (U8{(id >> 24).bit_and(255)}), (U8{(id >> 16).bit_and(255)}), (U8{(id >> 8).bit_and(255)}), (U8{id.bit_and(255)})}
+write_frame: fn(stream: TCPStream, kind: Int, flags: Int, id: Int, payload: [U8]) {
+    size: payload.len()
+    head: [U8]{(U8{(size >> 16).bit_and(255)}), (U8{(size >> 8).bit_and(255)}), (U8{size.bit_and(255)}), (U8{kind}), (U8{flags}), (U8{(id >> 24).bit_and(255)}), (U8{(id >> 16).bit_and(255)}), (U8{(id >> 8).bit_and(255)}), (U8{id.bit_and(255)})}
     stream.write_all(head) ?? panic("frame head write_all")
     stream.write_all(payload) ?? panic("frame payload write_all")
 }
-fn first_headers(stream: TCPStream) -> Frame {
+first_headers: fn(stream: TCPStream) -> Frame {
     loop {
-        frame :: read_frame(stream)
+        frame: read_frame(stream)
         if frame.kind == 1 -> return frame
     }
 }
-fn preface(stream: &TCPStream, timeout: Int) {
+preface: fn(stream: &TCPStream, timeout: Int) {
     net.set_read_timeout(&stream, timeout) ?? panic("read timeout")
     assert_eq(read_exact(stream, 24), "PRI * HTTP/2.0{PEER_CRLF}{PEER_CRLF}SM{PEER_CRLF}{PEER_CRLF}".bytes())
     assert(read_frame(stream).kind == 4)
     write_frame(stream, 4, 0, 0, [U8]{})
 }
 
-fn run() {
-    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+run: fn() {
+    listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     publish(listener, "{work}/addr.txt")
     stream := &listener.accept() ?? panic("accept")
     preface(&stream, 5000)
-    request :: first_headers(stream)
+    request: first_headers(stream)
     assert(request.id == 1)
     assert(request.flags.bit_and(4) != 0)
-    response :: [U8]{136, 15, 13, 129, 23}
+    response: [U8]{136, 15, 13, 129, 23}
     write_frame(stream, 1, 4, 1, response)
     write_frame(stream, 0, 1, 1, "w0".bytes())
     ids := [Int]{}
     loop ids.len() < 2 {
-        frame :: read_frame(stream)
+        frame: read_frame(stream)
         if frame.kind == 6 && frame.flags.bit_and(1) == 0 {
             write_frame(stream, 6, 1, 0, frame.payload)
             next
@@ -79,10 +79,10 @@ fn run() {
     // Original bounded5s nonblocking reconnect observer; every non-Timeout error fails.
     again := &listener.accept(deadline: 5s) ?? panic("client did not reconnect stale HTTP/2 session")
     preface(&again, 5000)
-    next_request :: first_headers(again)
+    next_request: first_headers(again)
     assert(next_request.id == 1)
     write_frame(again, 1, 4, 1, response)
     write_frame(again, 0, 1, 1, "c3".bytes())
-    ack :: read_frame(again)
+    ack: read_frame(again)
     assert(ack.kind == 4 && ack.flags == 1 && ack.id == 0)
 }

@@ -28,7 +28,7 @@ for (const [name, path] of fixtures) {
     const project = join(out, name);
     mkdirSync(join(project, "src"), { recursive: true });
     const fixture = unblockUses(readFileSync(join(repo, path), "utf8")).replace(packageImport, blank);
-    const entry = name === "named-tuple-identity" ? "\nfn run() { named_tuple_identity_fixture() }\n" : "";
+    const entry = name === "named-tuple-identity" ? "\nrun: fn() { named_tuple_identity_fixture() }\n" : "";
     const implementation = name === "named-tuple-identity" ? foundation : production;
     writeFileSync(join(project, "src/compiler.jet"), implementation + "\n" + fixture + entry);
     writeFileSync(join(project, "package.jet"), `name: "${name}"\nversion: "0.1.0"\nauthority: { allow: [IO, Mem.Alloc, Mem.Rc, Time.Wait] }\n`);

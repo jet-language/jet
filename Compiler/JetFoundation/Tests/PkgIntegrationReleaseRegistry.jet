@@ -11,11 +11,11 @@ use jet_foundation.[core_marker_application, diagnostic_explanation, diagnostic_
 }
 
 #Test("core_encoding_migrations_use_one_marker_payload") {
-    encode :: core_marker_application("core.encoding.cbor", "encode") ?? panic("cbor.encode deprecation")
+    encode: core_marker_application("core.encoding.cbor", "encode") ?? panic("cbor.encode deprecation")
     assert_eq(encode.since, "2027")
     assert_eq(encode.replacement, "cbor.to_bytes")
     assert_eq(encode.removed_in, Val("2028"))
-    decode :: core_marker_application("core.encoding.cbor", "decode") ?? panic("cbor.decode deprecation")
+    decode: core_marker_application("core.encoding.cbor", "decode") ?? panic("cbor.decode deprecation")
     assert_eq(decode.since, "2027")
     assert_eq(decode.replacement, "cbor.parse")
     assert_eq(decode.removed_in, Val("2028"))

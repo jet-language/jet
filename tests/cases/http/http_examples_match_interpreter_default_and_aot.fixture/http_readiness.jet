@@ -1,22 +1,22 @@
 // A raw HTTP exchange keeps the readiness proof on the shared core.net surface.
-package {
+package: {
     name: "http_readiness"
     authority: { allow: [IO, Mem.Alloc, Net, Time.Wait] }
 }
 
-use net :: core.net
+use net: core.net
 
-fn run() (Closed | NetError | RangeError | TaskFailure)! {
-    budget :: 1000ms
-    { sender, receiver: ch } :: channel<String>()
+run: fn() (Closed | NetError | RangeError | TaskFailure)! {
+    budget: 1000ms
+    { sender, receiver: ch }: channel<String>()
     // The listener lives inside the server task: `accept` writes it, and a
     // written value can't be shared across the task boundary.
-    server :: task {
-        listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    server: task {
+        listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
         sender.send(listener.local_addr() ?? panic("address"))
-        stream :: &listener.accept(deadline: budget) ?? panic("accept")
-        _request :: stream.read_text(8192, deadline: budget) ?? panic("request")
-        response :: [U8]{
+        stream: &listener.accept(deadline: budget) ?? panic("accept")
+        _request: stream.read_text(8192, deadline: budget) ?? panic("request")
+        response: [U8]{
             72,
             84,
             84,
@@ -79,11 +79,11 @@ fn run() (Closed | NetError | RangeError | TaskFailure)! {
         }
         stream.write_all(response, deadline: budget) ?? panic("response")
     }
-    address :: ch.receive() ?? panic("address")
-    client :: net.tcp_connect(address) ?? panic("connect")
-    write_ready :: client.ready(NetReadyInterest.Write, deadline: budget) ?? panic("ready")
+    address: ch.receive() ?? panic("address")
+    client: net.tcp_connect(address) ?? panic("connect")
+    write_ready: client.ready(NetReadyInterest.Write, deadline: budget) ?? panic("ready")
     print(net.ready_writable(write_ready))
-    request :: [U8]{
+    request: [U8]{
         71,
         69,
         84,
@@ -137,7 +137,7 @@ fn run() (Closed | NetError | RangeError | TaskFailure)! {
         10
     }
     client.write_all(request, deadline: budget) ?? panic("request")
-    response :: client.read_text(8192, deadline: budget) ?? panic("response")
+    response: client.read_text(8192, deadline: budget) ?? panic("response")
     print(response.starts_with("HTTP/1.1 200 OK"))
     print(response.ends_with("ok"))
     ^server.join() ?? panic("server")

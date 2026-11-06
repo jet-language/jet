@@ -4,18 +4,18 @@
 // directly, so a stop needs no source map. LLDB is the one external tool; the
 // Jet dev shell pins it, and its absence is E2203.
 use {
-    native_process :: core.process
-    native_files :: core.files
+    native_process: core.process
+    native_files: core.files
     jet_foundation.[Diagnostic, diagnostic_from_registry, diagnostic_registry_row]
 }
 
 // The line the session's marker command prints once LLDB has finished every
 // command before it.
-NATIVE_DEBUG_SENTINEL :: "__jet_debug_settled__"
+NATIVE_DEBUG_SENTINEL: "__jet_debug_settled__"
 
 // LLDB runs synchronously (each command returns after the stop it causes), the
 // program reads no terminal input, and its output goes to the session's file.
-NATIVE_DEBUG_SETUP :: [String]{
+NATIVE_DEBUG_SETUP: [String]{
     "script lldb.debugger.SetAsync(False)",
     "settings set auto-confirm true",
     "settings set stop-line-count-before 0",
@@ -24,32 +24,32 @@ NATIVE_DEBUG_SETUP :: [String]{
 }
 
 #Error
-struct NativeDebugError {
+NativeDebugError: struct {
     detail: String
 }
 
 impl NativeDebugError {
     // E2203, the registered failure of the native debugger.
-    fn diagnostic(self) -> Diagnostic Never! {
+    diagnostic: fn(self) -> Diagnostic Never! {
         native_debug_unavailable(self.detail)
     }
 }
 
 // E2203 with `detail` as the reason the native debugger could not run.
-fn native_debug_unavailable(detail: String) -> Diagnostic Never! {
-    row :: diagnostic_registry_row("E2203") ?? panic("E2203 is not registered")
+native_debug_unavailable: fn(detail: String) -> Diagnostic Never! {
+    row: diagnostic_registry_row("E2203") ?? panic("E2203 is not registered")
     diagnostic_from_registry("E2203", None, row.what.replace("{{detail}}", detail), row.why, row.fix)
 }
 
 // The LLDB on PATH: a session's one external tool.
-fn native_debug_lldb() -> String NativeDebugError! {
-    lldb :: native_process.which("lldb") ?? return Err(NativeDebugError{detail: "LLDB is not on PATH"})
+native_debug_lldb: fn() -> String NativeDebugError! {
+    lldb: native_process.which("lldb") ?? return Err(NativeDebugError{detail: "LLDB is not on PATH"})
     Ok(lldb)
 }
 
 // One frame of a stop: the Jet function and its source position, or a frame
 // without line information (the runtime's start code) with line 0.
-struct NativeFrame {
+NativeFrame: struct {
     function: String
     file: String
     line: Int
@@ -57,13 +57,13 @@ struct NativeFrame {
 
 // One local of the selected frame, in Jet terms. A value the image's debug
 // information cannot show is `<unavailable>`.
-struct NativeLocal {
+NativeLocal: struct {
     name: String
     type_name: String
     value: String
 }
 
-enum NativeStopKind {
+NativeStopKind: enum {
     Paused
     Exited
     Signaled
@@ -71,14 +71,14 @@ enum NativeStopKind {
 
 // Where a run-control command left the program: paused at `frame` for
 // `reason`, exited with `code`, or ended by the signal named in `reason`.
-struct NativeStop {
+NativeStop: struct {
     kind: NativeStopKind
     reason: String
     code: Int
     frame: NativeFrame?
 }
 
-struct NativeSession {
+NativeSession: struct {
     child: ProcessChild
     output_path: String
     output_read: Int
@@ -88,21 +88,21 @@ struct NativeSession {
 impl NativeSession {
     // Load `binary` (a native image with debug info) under LLDB. The program's
     // output is written to `output_path`; nothing runs until `launch`.
-    fn start(binary: String, output_path: String) -> NativeSession NativeDebugError! {
-        lldb :: native_debug_lldb() ?? return Err(err)
+    start: fn(binary: String, output_path: String) -> NativeSession NativeDebugError! {
+        lldb: native_debug_lldb() ?? return Err(err)
         if native_debug_control_free(binary) == false || native_debug_control_free(output_path) == false {
             return Err(NativeDebugError{detail: "the program path contains a control character"})
         }
         native_files.write(output_path, "") ?? return Err(NativeDebugError{detail: "couldn't create the program output file: {err}"})
         // LLDB's diagnostics share its output stream, so a refused command is
         // read in order with the command's echo.
-        argv :: [String]{"sh", "-c", "exec \"$0\" --no-lldbinit --no-use-colors \"$1\" 2>&1", lldb, binary}
+        argv: [String]{"sh", "-c", "exec \"$0\" --no-lldbinit --no-use-colors \"$1\" 2>&1", lldb, binary}
         child := native_process.cmd(argv).stdin(.Stream).stdout(.Stream).stderr(.Capture).spawn() ?? return Err(NativeDebugError{detail: "couldn't start LLDB: {err}"})
         session := NativeSession{child: child, output_path: output_path, output_read: 0, finished: false}
         setup := NATIVE_DEBUG_SETUP.copy()
         &setup.push("settings set target.output-path {native_debug_quote(output_path)}")
         &setup.push("settings set target.error-path {native_debug_quote(output_path)}")
-        loaded :: &session.run_commands(setup) ?? return Err(err)
+        loaded: &session.run_commands(setup) ?? return Err(err)
         if loaded.contains("error:") {
             &session.close()
             return Err(NativeDebugError{detail: "LLDB refused the program: {native_debug_first_error(loaded)}"})
@@ -111,7 +111,7 @@ impl NativeSession {
     }
 
     // Send `commands` and return LLDB's output up to the settle marker.
-    fn run_commands(&self, commands: [String]) -> String NativeDebugError! {
+    run_commands: fn(&self, commands: [String]) -> String NativeDebugError! {
         text := ""
         loop command in commands -> text = "{text}{command}\n"
         text = "{text}script print(\"{NATIVE_DEBUG_SENTINEL}\")\n"
@@ -127,70 +127,70 @@ impl NativeSession {
 
     // A breakpoint on `line` of the Jet source `file` (its base name, as the
     // line table names it): its number, or None when no code is on that line.
-    fn break_at(&self, file: String, line: Int) -> Int? NativeDebugError! {
+    break_at: fn(&self, file: String, line: Int) -> Int? NativeDebugError! {
         if !native_debug_control_free(file) -> return Err(NativeDebugError{detail: "the breakpoint path contains a control character"})
         &self.set_breakpoint("breakpoint set -f {native_debug_quote(file)} -l {line}")
     }
 
     // A breakpoint at the start of the Jet function `function`.
-    fn break_in(&self, function: String) -> Int? NativeDebugError! {
+    break_in: fn(&self, function: String) -> Int? NativeDebugError! {
         if !native_debug_control_free(function) -> return Err(NativeDebugError{detail: "the function name contains a control character"})
         &self.set_breakpoint("breakpoint set -n {native_debug_quote(function)}")
     }
 
     // A breakpoint that resolves to no code is removed, not left pending.
-    fn set_breakpoint(&self, command: String) -> Int? NativeDebugError! {
-        output :: &self.run_commands([String]{command}) ?? return Err(err)
-        number :: native_debug_breakpoint_number(output) ?? return Err(NativeDebugError{detail: "LLDB set no breakpoint: {native_debug_first_error(output)}"})
+    set_breakpoint: fn(&self, command: String) -> Int? NativeDebugError! {
+        output: &self.run_commands([String]{command}) ?? return Err(err)
+        number: native_debug_breakpoint_number(output) ?? return Err(NativeDebugError{detail: "LLDB set no breakpoint: {native_debug_first_error(output)}"})
         if native_debug_breakpoint_resolved(output) -> return Ok(Val(number))
         &self.delete_breakpoint(number) ?? return Err(err)
         Ok(None)
     }
 
-    fn delete_breakpoint(&self, number: Int) NativeDebugError! {
-        _ :: &self.run_commands([String]{"breakpoint delete {number}"}) ?? return Err(err)
+    delete_breakpoint: fn(&self, number: Int) NativeDebugError! {
+        _: &self.run_commands([String]{"breakpoint delete {number}"}) ?? return Err(err)
         Ok()
     }
 
     // Remove every breakpoint.
-    fn clear_breakpoints(&self) NativeDebugError! {
-        _ :: &self.run_commands([String]{"breakpoint delete"}) ?? return Err(err)
+    clear_breakpoints: fn(&self) NativeDebugError! {
+        _: &self.run_commands([String]{"breakpoint delete"}) ?? return Err(err)
         Ok()
     }
 
     // Run the program from its start, with `args`.
-    fn launch(&self, args: [String]) -> NativeStop NativeDebugError! {
+    launch: fn(&self, args: [String]) -> NativeStop NativeDebugError! {
         quoted := [String]{}
         loop arg in args {
             if !native_debug_control_free(arg) -> return Err(NativeDebugError{detail: "a program argument contains a control character"})
             &quoted.push(native_debug_quote(arg))
         }
-        command :: if quoted.len() == 0 -> "process launch" else -> "process launch -- {quoted.join(" ")}"
+        command: if quoted.len() == 0 -> "process launch" else -> "process launch -- {quoted.join(" ")}"
         &self.resume(command)
     }
 
-    fn continue_run(&self) -> NativeStop NativeDebugError! { &self.resume("process continue") }
+    continue_run: fn(&self) -> NativeStop NativeDebugError! { &self.resume("process continue") }
 
     // The next line, entering calls.
-    fn step_in(&self) -> NativeStop NativeDebugError! { &self.resume("thread step-in") }
+    step_in: fn(&self) -> NativeStop NativeDebugError! { &self.resume("thread step-in") }
 
     // The next line of this function, running calls to their end.
-    fn step_over(&self) -> NativeStop NativeDebugError! { &self.resume("thread step-over") }
+    step_over: fn(&self) -> NativeStop NativeDebugError! { &self.resume("thread step-over") }
 
     // Run to the end of this function, stopping in its caller.
-    fn step_out(&self) -> NativeStop NativeDebugError! { &self.resume("thread step-out") }
+    step_out: fn(&self) -> NativeStop NativeDebugError! { &self.resume("thread step-out") }
 
-    fn resume(&self, command: String) -> NativeStop NativeDebugError! {
+    resume: fn(&self, command: String) -> NativeStop NativeDebugError! {
         if self.finished -> return Err(NativeDebugError{detail: "the program has already finished"})
-        output :: &self.run_commands([String]{command}) ?? return Err(err)
-        stop :: native_debug_parse_stop(output) ?? return Err(NativeDebugError{detail: "LLDB reported no stop for `{command}`: {native_debug_first_error(output)}"})
+        output: &self.run_commands([String]{command}) ?? return Err(err)
+        stop: native_debug_parse_stop(output) ?? return Err(NativeDebugError{detail: "LLDB reported no stop for `{command}`: {native_debug_first_error(output)}"})
         if stop.kind != NativeStopKind.Paused -> self.finished = true
         Ok(stop)
     }
 
     // The selected thread's frames, innermost first.
-    fn backtrace(&self) -> [NativeFrame] NativeDebugError! {
-        output :: &self.run_commands([String]{"thread backtrace"}) ?? return Err(err)
+    backtrace: fn(&self) -> [NativeFrame] NativeDebugError! {
+        output: &self.run_commands([String]{"thread backtrace"}) ?? return Err(err)
         frames := [NativeFrame]{}
         loop line in output.lines() {
             if native_debug_parse_frame(line) == .Val(frame) -> &frames.push(frame)
@@ -199,29 +199,29 @@ impl NativeSession {
     }
 
     // The selected frame's parameters and locals.
-    fn locals(&self) -> [NativeLocal] NativeDebugError! {
-        output :: &self.run_commands([String]{"frame variable"}) ?? return Err(err)
+    locals: fn(&self) -> [NativeLocal] NativeDebugError! {
+        output: &self.run_commands([String]{"frame variable"}) ?? return Err(err)
         Ok(native_debug_parse_locals(output))
     }
 
     // Select frame `index` of the current thread (0 is innermost).
-    fn select_frame(&self, index: Int) -> Bool NativeDebugError! {
-        output :: &self.run_commands([String]{"frame select {index}"}) ?? return Err(err)
+    select_frame: fn(&self, index: Int) -> Bool NativeDebugError! {
+        output: &self.run_commands([String]{"frame select {index}"}) ?? return Err(err)
         Ok(!output.contains("error:"))
     }
 
     // The program's output written since the last call.
-    fn take_output(&self) -> String Never! {
-        text :: native_files.read(self.output_path) ?? return ""
-        bytes :: text.bytes()
+    take_output: fn(&self) -> String Never! {
+        text: native_files.read(self.output_path) ?? return ""
+        bytes: text.bytes()
         if bytes.len() <= self.output_read -> return ""
-        fresh :: String.from_bytes(bytes[self.output_read..<bytes.len()]) ?? return ""
+        fresh: String.from_bytes(bytes[self.output_read..<bytes.len()]) ?? return ""
         self.output_read = bytes.len()
         fresh
     }
 
     // End the program, if it still runs, and LLDB.
-    fn close(&self) Never! {
+    close: fn(&self) Never! {
         if self.child.stdin.write_text("process kill\nquit\n") == {
             .Err(_) -> {
                 if self.child.kill() == {
@@ -243,12 +243,12 @@ impl NativeSession {
 
 // The command that builds `entry` as the debuggable native image: this `jet`
 // (`jet`), unoptimized, with its DWARF, into `out_dir`.
-fn native_debug_build_argv(jet: String, entry: String, out_dir: String) -> [String] Never! {
+native_debug_build_argv: fn(jet: String, entry: String, out_dir: String) -> [String] Never! {
     [String]{jet, "build", "--optimize=none", "--output-dir={out_dir}", entry}
 }
 
 // The image `native_debug_build_argv` writes: the entry's stem in `out_dir`.
-fn native_debug_image(entry: String, out_dir: String) -> String Never! {
+native_debug_image: fn(entry: String, out_dir: String) -> String Never! {
     native_files.join(out_dir, native_files.basename(entry).before(".jet"))
 }
 
@@ -256,14 +256,14 @@ fn native_debug_image(entry: String, out_dir: String) -> String Never! {
 // both speak it. Every stop prints the Jet source line with its `<- here`
 // caret and the frame's locals; frames without Jet line information (the
 // runtime) are never shown.
-NATIVE_DEBUG_HELP :: "commands: step (s), next (n), continue (c), finish (f), break N (b N), locals, print NAME (p NAME), backtrace (bt), help (h), quit (q)"
+NATIVE_DEBUG_HELP: "commands: step (s), next (n), continue (c), finish (f), break N (b N), locals, print NAME (p NAME), backtrace (bt), help (h), quit (q)"
 
 // The deepest run of runtime frames a step finishes out of before it lets the
 // program continue.
-NATIVE_DEBUG_RUNTIME_DEPTH :: 16
+NATIVE_DEBUG_RUNTIME_DEPTH: 16
 
 // What one console command printed, and where it left the program.
-struct NativeDebugStep {
+NativeDebugStep: struct {
     text: String
     stop: NativeStop
 }
@@ -271,34 +271,34 @@ struct NativeDebugStep {
 impl NativeSession {
     // Run the program to the start of its `run`, in the Jet source `file`
     // whose text is `lines`. None when the program has no `run`.
-    fn open(&self, file: String, lines: [String]) -> NativeDebugStep? NativeDebugError! {
+    open: fn(&self, file: String, lines: [String]) -> NativeDebugStep? NativeDebugError! {
         start := -1
         if &self.break_in("run") == {
             .Ok(placed) -> start = placed ?? -1
             .Err(failure) -> return Err(failure)
         }
         if start < 0 -> return Ok(None)
-        first :: &self.launch([String]{}) ?? return Err(err)
+        first: &self.launch([String]{}) ?? return Err(err)
         &self.delete_breakpoint(start) ?? return Err(err)
-        text :: &self.report(first, file, lines) ?? return Err(err)
+        text: &self.report(first, file, lines) ?? return Err(err)
         Ok(Val(NativeDebugStep{text: text, stop: first}))
     }
 
     // One console command at `stop`. `quit` is the caller's: only it knows
     // how its session ends.
-    fn command(&self, command: String, stop: NativeStop, file: String, lines: [String]) -> NativeDebugStep NativeDebugError! {
-        trimmed :: command.trim()
-        word :: trimmed.before(" ")
-        operand :: if trimmed.contains(" ") -> trimmed.after(" ").trim().copy() else -> ""
+    command: fn(&self, command: String, stop: NativeStop, file: String, lines: [String]) -> NativeDebugStep NativeDebugError! {
+        trimmed: command.trim()
+        word: trimmed.before(" ")
+        operand: if trimmed.contains(" ") -> trimmed.after(" ").trim().copy() else -> ""
         text := ""
         if word == {
             "s" | "step" | "n" | "next" | "c" | "continue" | "f" | "finish" -> {
-                moved :: &self.move(word) ?? return Err(err)
+                moved: &self.move(word) ?? return Err(err)
                 text = &self.report(moved, file, lines) ?? return Err(err)
                 return Ok(NativeDebugStep{text: text, stop: moved})
             }
             "b" | "break" -> {
-                at :: Int.parse(operand) ?? -1
+                at: Int.parse(operand) ?? -1
                 placed := -1
                 if at >= 1 {
                     if &self.break_at(file, at) == {
@@ -313,15 +313,15 @@ impl NativeSession {
                 }
             }
             "locals" -> {
-                locals :: &self.locals() ?? return Err(err)
+                locals: &self.locals() ?? return Err(err)
                 text = "{native_debug_locals_line(locals)}\n"
             }
             "p" | "print" -> {
-                locals :: &self.locals() ?? return Err(err)
+                locals: &self.locals() ?? return Err(err)
                 text = "{native_debug_print(locals, operand)}\n"
             }
             "bt" | "backtrace" -> {
-                frames :: &self.backtrace() ?? return Err(err)
+                frames: &self.backtrace() ?? return Err(err)
                 text = native_debug_backtrace(frames)
             }
             "h" | "help" -> text = "{NATIVE_DEBUG_HELP}\n"
@@ -334,7 +334,7 @@ impl NativeSession {
     // Run one run-control command. A step that lands in code without Jet line
     // information finishes out of it back to the Jet caller, or continues when
     // no Jet frame is left to return to.
-    fn move(&self, word: String) -> NativeStop NativeDebugError! {
+    move: fn(&self, word: String) -> NativeStop NativeDebugError! {
         stop := if word == {
             "s" | "step" -> &self.step_in() ?? return Err(err)
             "n" | "next" -> &self.step_over() ?? return Err(err)
@@ -343,7 +343,7 @@ impl NativeSession {
         }
         depth := 0
         loop stop.kind == NativeStopKind.Paused && !native_debug_stop_in_jet(stop.frame) {
-            frames :: &self.backtrace() ?? return Err(err)
+            frames: &self.backtrace() ?? return Err(err)
             caller := false
             loop (k, frame) in frames {
                 if k > 0 && native_debug_jet_frame(frame) -> caller = true
@@ -355,16 +355,16 @@ impl NativeSession {
     }
 
     // The program's new output, then where `stop` left it.
-    fn report(&self, stop: NativeStop, file: String, lines: [String]) -> String NativeDebugError! {
+    report: fn(&self, stop: NativeStop, file: String, lines: [String]) -> String NativeDebugError! {
         text := &self.take_output()
         if stop.kind == {
             .Exited -> text = "{text}{if stop.code == 0 -> "program finished" else -> "program finished with exit status {stop.code}"}\n"
             .Signaled -> text = "{text}program stopped by {stop.reason}\n"
             .Paused -> {
-                frame :: stop.frame ?? NativeFrame{function: "?", file: "", line: 0}
+                frame: stop.frame ?? NativeFrame{function: "?", file: "", line: 0}
                 if stop.reason.starts_with("breakpoint") -> text = "{text}breakpoint hit  {frame.file}:{frame.line}  in {frame.function}()\n"
-                source :: if frame.file == file && frame.line >= 1 && frame.line <= lines.len() -> lines[frame.line - 1] else -> ""
-                locals :: &self.locals() ?? return Err(err)
+                source: if frame.file == file && frame.line >= 1 && frame.line <= lines.len() -> lines[frame.line - 1] else -> ""
+                locals: &self.locals() ?? return Err(err)
                 text = "{text}{frame.line} | {source}        <- here\n{native_debug_locals_line(locals)}\n"
             }
         }
@@ -374,32 +374,32 @@ impl NativeSession {
     // The paused facts at the current stop: the innermost Jet frame, its
     // locals, and the Jet call stack outermost first. None when no Jet frame
     // is on the stack.
-    fn snapshot(&self) -> DebugSnapshot? NativeDebugError! {
-        frames :: &self.backtrace() ?? return Err(err)
+    snapshot: fn(&self) -> DebugSnapshot? NativeDebugError! {
+        frames: &self.backtrace() ?? return Err(err)
         stack := [FrameSnapshot]{}
         loop frame in frames {
             if native_debug_jet_frame(frame) -> &stack.insert(0, FrameSnapshot{function: frame.function, line: frame.line})
         }
         if stack.len() == 0 -> return Ok(None)
-        top :: stack[stack.len() - 1]
+        top: stack[stack.len() - 1]
         values := [ValueSnapshot]{}
-        locals :: &self.locals() ?? return Err(err)
+        locals: &self.locals() ?? return Err(err)
         loop local in locals -> &values.push(ValueSnapshot{name: local.name, type_name: local.type_name, value: local.value})
         Ok(Val(DebugSnapshot{function: top.function, line: top.line, locals: values, call_stack: stack}))
     }
 }
 
-fn native_debug_stop_in_jet(frame: NativeFrame?) -> Bool Never! {
+native_debug_stop_in_jet: fn(frame: NativeFrame?) -> Bool Never! {
     if frame == .Val(found) -> return native_debug_jet_frame(found)
     false
 }
 
-fn native_debug_jet_frame(frame: NativeFrame) -> Bool Never! {
+native_debug_jet_frame: fn(frame: NativeFrame) -> Bool Never! {
     frame.file.ends_with(".jet") && frame.line > 0
 }
 
 // `locals:` and the frame's locals by name.
-fn native_debug_locals_line(locals: [NativeLocal]) -> String Never! {
+native_debug_locals_line: fn(locals: [NativeLocal]) -> String Never! {
     if locals.len() == 0 -> return "locals:  (none)"
     sorted := locals.copy()
     &sorted.sort_by((left: NativeLocal, right: NativeLocal) -> left.name <=> right.name)
@@ -408,7 +408,7 @@ fn native_debug_locals_line(locals: [NativeLocal]) -> String Never! {
     "locals:  {shown.join("   ")}"
 }
 
-fn native_debug_print(locals: [NativeLocal], name: String) -> String Never! {
+native_debug_print: fn(locals: [NativeLocal], name: String) -> String Never! {
     if name == "" -> return "print needs a local's name, as `print total`"
     loop local in locals {
         if local.name == name -> return "{local.name} = {local.value}"
@@ -417,7 +417,7 @@ fn native_debug_print(locals: [NativeLocal], name: String) -> String Never! {
 }
 
 // The Jet frames, innermost first.
-fn native_debug_backtrace(frames: [NativeFrame]) -> String Never! {
+native_debug_backtrace: fn(frames: [NativeFrame]) -> String Never! {
     text := ""
     index := 0
     loop frame in frames {
@@ -429,7 +429,7 @@ fn native_debug_backtrace(frames: [NativeFrame]) -> String Never! {
 }
 
 // A path or argument LLDB reads inside one command line.
-fn native_debug_control_free(value: String) -> Bool Never! {
+native_debug_control_free: fn(value: String) -> Bool Never! {
     loop byte in value.bytes() {
         if byte < (U8{32}) || byte == (U8{127}) -> return false
     }
@@ -437,13 +437,13 @@ fn native_debug_control_free(value: String) -> Bool Never! {
 }
 
 // `value` as one double-quoted LLDB command argument.
-fn native_debug_quote(value: String) -> String Never! {
+native_debug_quote: fn(value: String) -> String Never! {
     "\"{value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
 }
 
-fn native_debug_first_error(output: String) -> String Never! {
+native_debug_first_error: fn(output: String) -> String Never! {
     loop line in output.lines() {
-        trimmed :: line.trim()
+        trimmed: line.trim()
         if trimmed.starts_with("error:") -> return trimmed.copy()
     }
     "no debugger diagnostic"
@@ -451,20 +451,20 @@ fn native_debug_first_error(output: String) -> String Never! {
 
 // `Breakpoint 1: where = …` resolved a location; `… no locations (pending)`
 // did not.
-fn native_debug_breakpoint_resolved(output: String) -> Bool Never! {
+native_debug_breakpoint_resolved: fn(output: String) -> Bool Never! {
     loop line in output.lines() {
-        trimmed :: line.trim()
+        trimmed: line.trim()
         if trimmed.starts_with("Breakpoint ") -> return !trimmed.contains("no locations")
     }
     false
 }
 
 // The number of the `Breakpoint N: …` LLDB just set.
-fn native_debug_breakpoint_number(output: String) -> Int? Never! {
+native_debug_breakpoint_number: fn(output: String) -> Int? Never! {
     loop line in output.lines() {
-        trimmed :: line.trim()
+        trimmed: line.trim()
         if trimmed.starts_with("Breakpoint ") && trimmed.contains(":") {
-            number :: Int.parse(trimmed.after("Breakpoint ").before(":")) ?? return None
+            number: Int.parse(trimmed.after("Breakpoint ").before(":")) ?? return None
             return Val(number)
         }
     }
@@ -474,13 +474,13 @@ fn native_debug_breakpoint_number(output: String) -> Int? Never! {
 // The stop a run-control command reports: `Process N exited with status = C`,
 // a `stop reason = signal SIG…` stop, or a pause whose first `frame #0` names
 // the position.
-fn native_debug_parse_stop(output: String) -> NativeStop? Never! {
+native_debug_parse_stop: fn(output: String) -> NativeStop? Never! {
     reason := ""
     frame := NativeFrame?{None}
     loop line in output.lines() {
-        trimmed :: line.trim()
+        trimmed: line.trim()
         if trimmed.contains(" exited with status = ") {
-            code :: Int.parse(trimmed.after(" exited with status = ").before(" ").trim()) ?? -1
+            code: Int.parse(trimmed.after(" exited with status = ").before(" ").trim()) ?? -1
             return Val(NativeStop{kind: NativeStopKind.Exited, reason: "exited", code: code, frame: None})
         }
         if trimmed.contains("stop reason = ") && reason == "" -> reason = trimmed.after("stop reason = ").trim().copy()
@@ -488,7 +488,7 @@ fn native_debug_parse_stop(output: String) -> NativeStop? Never! {
     }
     if reason == "" -> return None
     if reason.starts_with("signal ") {
-        signal :: reason.after("signal ").before(" ").replace(":", "").trim()
+        signal: reason.after("signal ").before(" ").replace(":", "").trim()
         // A breakpoint trap is a pause; any other signal ends the program.
         if signal != "SIGTRAP" && signal != "SIGSTOP" -> return Val(NativeStop{kind: NativeStopKind.Signaled, reason: signal.copy(), code: -1, frame: frame})
     }
@@ -497,37 +497,37 @@ fn native_debug_parse_stop(output: String) -> NativeStop? Never! {
 
 // One `frame #N: 0xADDR module`function(args) at file.jet:LINE[:COL]` line;
 // a frame with no line information keeps line 0.
-fn native_debug_parse_frame(line: String) -> NativeFrame? Never! {
+native_debug_parse_frame: fn(line: String) -> NativeFrame? Never! {
     trimmed := line.trim()
     if trimmed.starts_with("* ") -> trimmed = trimmed.after("* ").trim()
     if !trimmed.starts_with("frame #") -> return None
     if !trimmed.contains("`") -> return None
-    symbol :: trimmed.after("`")
+    symbol: trimmed.after("`")
     function := symbol
     if function.contains(" at ") -> function = function.before(" at ")
     if function.contains(" + ") -> function = function.before(" + ")
     if function.contains("(") -> function = function.before("(")
     if !symbol.contains(" at ") -> return Val(NativeFrame{function: function.trim().copy(), file: "", line: 0})
-    location :: symbol.after(" at ")
+    location: symbol.after(" at ")
     if !location.contains(":") -> return Val(NativeFrame{function: function.trim().copy(), file: location.trim().copy(), line: 0})
-    after_file :: location.after(":")
-    line_text :: if after_file.contains(":") -> after_file.before(":") else -> after_file
-    line_number :: Int.parse(line_text.trim()) ?? 0
+    after_file: location.after(":")
+    line_text: if after_file.contains(":") -> after_file.before(":") else -> after_file
+    line_number: Int.parse(line_text.trim()) ?? 0
     Val(NativeFrame{function: function.trim().copy(), file: location.before(":").trim().copy(), line: line_number})
 }
 
 // `(type) name = value` rows of `frame variable`, in Jet terms.
-fn native_debug_parse_locals(output: String) -> [NativeLocal] Never! {
+native_debug_parse_locals: fn(output: String) -> [NativeLocal] Never! {
     locals := [NativeLocal]{}
     loop line in output.lines() {
-        trimmed :: line.trim()
+        trimmed: line.trim()
         if !trimmed.starts_with("(") || !trimmed.contains(") ") || !trimmed.contains(" = ") -> next
-        native_type :: trimmed.after("(").before(") ")
-        rest :: trimmed.after(") ")
-        name :: rest.before(" = ").trim()
-        raw :: rest.after(" = ").trim()
+        native_type: trimmed.after("(").before(") ")
+        rest: trimmed.after(") ")
+        name: rest.before(" = ").trim()
+        raw: rest.after(" = ").trim()
         if name == "" -> next
-        type_name :: native_debug_jet_type(native_type)
+        type_name: native_debug_jet_type(native_type)
         &locals.push(NativeLocal{name: name.copy(), type_name: type_name, value: native_debug_jet_value(type_name, raw)})
     }
     locals
@@ -535,7 +535,7 @@ fn native_debug_parse_locals(output: String) -> [NativeLocal] Never! {
 
 // The Jet type a DWARF base type spells: `long` is Int, `bool` is Bool; a
 // named Jet type keeps its name.
-fn native_debug_jet_type(native_type: String) -> String Never! {
+native_debug_jet_type: fn(native_type: String) -> String Never! {
     if native_type == "long" || native_type == "long long" || native_type == "int64_t" -> return "Int"
     if native_type == "bool" -> return "Bool"
     if native_type == "double" -> return "Float"
@@ -543,14 +543,14 @@ fn native_debug_jet_type(native_type: String) -> String Never! {
 }
 
 // A value LLDB printed, kept only when it is a whole literal of its Jet type.
-fn native_debug_jet_value(type_name: String, raw: String) -> String Never! {
+native_debug_jet_value: fn(type_name: String, raw: String) -> String Never! {
     if type_name == "Int" {
-        _ :: Int.parse(raw) ?? return "<unavailable>"
+        _: Int.parse(raw) ?? return "<unavailable>"
         return raw.copy()
     }
     if type_name == "Bool" && (raw == "true" || raw == "false") -> return raw.copy()
     if type_name == "Float" {
-        _ :: Float.parse(raw) ?? return "<unavailable>"
+        _: Float.parse(raw) ?? return "<unavailable>"
         return raw.copy()
     }
     "<unavailable>"

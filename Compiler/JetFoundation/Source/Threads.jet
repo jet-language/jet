@@ -21,14 +21,14 @@
 // `memory_available` is the memory free for new work, in bytes, when the
 // host can read it. The cap limits the compiler only, never the threads of a
 // program it builds or runs.
-struct CompilerThreads {
+CompilerThreads: struct {
     cap: Int?
     cores: Int
     memory_available: Int?
 }
 
 // One thread: every phase runs its jobs inline, in order.
-fn compiler_threads_single() -> CompilerThreads Never! {
+compiler_threads_single: fn() -> CompilerThreads Never! {
     CompilerThreads{cap: Val(1), cores: 1, memory_available: None}
 }
 
@@ -41,8 +41,8 @@ fn compiler_threads_single() -> CompilerThreads Never! {
 // the host reported free: `parallel_scratch` bytes once (the step's jobs
 // copied out for their threads, say) plus `scratch_per_thread` bytes for each
 // thread.
-fn compiler_threads_admit(threads: CompilerThreads, items: Int, work: Int, min_work_per_thread: Int, scratch_per_thread: Int, parallel_scratch: Int) -> Int Never! {
-    cores :: if threads.cores < 1 -> 1 else -> threads.cores
+compiler_threads_admit: fn(threads: CompilerThreads, items: Int, work: Int, min_work_per_thread: Int, scratch_per_thread: Int, parallel_scratch: Int) -> Int Never! {
+    cores: if threads.cores < 1 -> 1 else -> threads.cores
     limit := threads.cap ?? cores
     if limit > cores -> limit = cores
     if limit > items -> limit = items
@@ -58,7 +58,7 @@ fn compiler_threads_admit(threads: CompilerThreads, items: Int, work: Int, min_w
 // `bounds[p]` is the first job of part `p` and `bounds[workers]` is the job
 // count. Each part holds about an equal share of the total weight (a job
 // weighs at least 1); a part is empty when one heavy job covers its share.
-fn compiler_threads_partition(weights: [Int], workers: Int) -> [Int] Never! {
+compiler_threads_partition: fn(weights: [Int], workers: Int) -> [Int] Never! {
     total := 0
     loop weight in weights -> total += if weight < 1 -> 1 else -> weight
     bounds := [Int]{0}
@@ -83,8 +83,8 @@ fn compiler_threads_partition(weights: [Int], workers: Int) -> [Int] Never! {
 // step: heaviest first, equal weights in job order (a stable merge of the
 // indexes), so a heavy job starts while light ones remain to fill the
 // threads' tails. `order[rank]` is the job index claimed at `rank`.
-fn compiler_threads_heaviest_first(weights: [Int]) -> [Int] Never! {
-    count :: weights.len()
+compiler_threads_heaviest_first: fn(weights: [Int]) -> [Int] Never! {
+    count: weights.len()
     order := [Int]{}
     loop index in 0..<count -> &order.push(index)
     if count < 2 -> return order
@@ -131,7 +131,7 @@ fn compiler_threads_heaviest_first(weights: [Int]) -> [Int] Never! {
 
 // A failed compiler thread's panic text, re-raised on the caller unchanged so
 // an internal error reads the same with any thread count.
-fn compiler_threads_failure_text(failure: TaskFailure) -> String Never! {
+compiler_threads_failure_text: fn(failure: TaskFailure) -> String Never! {
     if failure == {
         .Panicked(reason) -> reason
         .DeadlineBlown -> "a compiler thread passed its deadline"

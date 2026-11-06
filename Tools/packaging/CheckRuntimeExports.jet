@@ -3,30 +3,30 @@
 // Archive ordering must never silently choose one of two strong definitions.
 // Usage: jet run Tools/packaging/CheckRuntimeExports.jet -- <jet_runtime_jet.o> <libjet_runtime.rlib>
 use {
-    process :: core.process
-    re :: core.regex
-    term :: core.term
+    process: core.process
+    re: core.regex
+    term: core.term
 }
 
-fn fail(message: String) -> Never {
+fail: fn(message: String) -> Never {
     term.eprint(message)
     process.exit(1)
 }
 
 // Global names nm reports as defined in `path`, first occurrence order; weak
 // (W), undefined (U) and versioned-undefined (V) rows are not definitions.
-fn definitions(path: String) -> [String] {
-    row :: Regex{"^(?:.*:\s+)?(\S+)\s+([A-Z])\s"}
-    receipt :: process.cmd(["nm", "-g", "--defined-only", "--format=posix", path.copy()]).output_limit(268435456).run() ?? fail("nm {path} failed: {err}")
+definitions: fn(path: String) -> [String] {
+    row: Regex{"^(?:.*:\s+)?(\S+)\s+([A-Z])\s"}
+    receipt: process.cmd(["nm", "-g", "--defined-only", "--format=posix", path.copy()]).output_limit(268435456).run() ?? fail("nm {path} failed: {err}")
     if receipt.code != 0 -> fail("nm {path} failed: {receipt.errors}")
     names := [String]{}
     seen := [String:Bool]{}
     loop line in receipt.output.split("\n").to_list() {
         if re.match(row, line) == None -> next
-        hit :: re.match(row, line) ?? panic("unreachable: matched row")
-        kind :: hit.group(2) ?? panic("unreachable: kind group")
+        hit: re.match(row, line) ?? panic("unreachable: matched row")
+        kind: hit.group(2) ?? panic("unreachable: kind group")
         if kind == "W" || kind == "V" || kind == "U" -> next
-        name :: hit.group(1) ?? panic("unreachable: name group")
+        name: hit.group(1) ?? panic("unreachable: name group")
         if seen.get(name) != None -> next
         seen[name.copy()] = true
         &names.push(name)
@@ -34,11 +34,11 @@ fn definitions(path: String) -> [String] {
     names
 }
 
-fn run() {
-    args :: process.args()
+run: fn() {
+    args: process.args()
     if args.len() != 2 -> fail("usage: check-runtime-exports.mjs <jet_runtime_jet.o> <libjet_runtime.rlib>")
-    jet :: definitions(args[0].copy())
-    rust :: definitions(args[1].copy())
+    jet: definitions(args[0].copy())
+    rust: definitions(args[1].copy())
     rust_set := [String:Bool]{}
     loop name in rust {
         rust_set[name.copy()] = true

@@ -16,14 +16,14 @@
 // write `#Unsafe` — they receive a ready `Pin<T>` from a safe API.
 use core.mem
 
-struct Node {
+Node: struct {
     payload: Int
     hops: Int
 }
 
 // Self-referential node: `self_addr` names this place's payload once wiring
 // finishes. The raw address write is audited locally; callers stay safe.
-struct SelfNode {
+SelfNode: struct {
     payload: Int
     self_addr: Int
 }
@@ -32,24 +32,24 @@ struct SelfNode {
 // and lends it, so `NodeQueue` records the promise instead of copying the node.
 // (`Queue` itself is a built-in Core type — E0106 — so the example names its
 // own carrier.)
-struct NodeQueue {
+NodeQueue: struct {
     label: String
     head: Pin<Node>
 }
 
 // Safe public API: the `#Unsafe` block stays inside the function body. Callers
 // of `wire_self` do not need an audited region (D-PIN1 step 5 / criterion 2).
-fn wire_self(node: &SelfNode) -> Pin<SelfNode> {
+wire_self: fn(node: &SelfNode) -> Pin<SelfNode> {
     #Unsafe("node storage is fixed for the returned pin; self_addr names this place") {
         node.self_addr = mem.address_of(node.payload)
     }
     return mem.pin(&node)
 }
 
-fn run() {
+run: fn() {
     // Caller storage: no allocator, no heap node, no copy of `node`.
     node := Node{payload: 41, hops: 0}
-    pinned :: mem.pin(&node)
+    pinned: mem.pin(&node)
 
     // Editing through the pin is legal and lands in `node` itself; only moving
     // or replacing the pinned storage is rejected.
@@ -60,14 +60,14 @@ fn run() {
     // The queue stores the same promise. `head` is declared `Pin<Node>`, so
     // reaching it through the queue projects to a pin again (D-PIN3=A) rather
     // than to a copy of the node.
-    queue :: NodeQueue{label: "ready", head: mem.pin(&node)}
+    queue: NodeQueue{label: "ready", head: mem.pin(&node)}
     print("label: {(queue.label)}")
     print("payload: {(queue.head.payload)}")
     print("hops: {(queue.head.hops)}")
 
     // Self-referential construction through a safe library API (criterion 2+5).
     self_node := SelfNode{payload: 7, self_addr: 0}
-    self_pinned :: wire_self(&self_node)
+    self_pinned: wire_self(&self_node)
     print("self_payload: {(self_pinned.payload)}")
     print("self_wired: {(self_pinned.self_addr != 0)}")
 }

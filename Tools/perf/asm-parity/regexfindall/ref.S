@@ -309,5 +309,5 @@ e_u8b:
     .ascii "      Ok(String.from_bytes(bytes) ?? return Err(io_err(\"read\", source, \"stream did not contain valid UTF-8\")))\n"
     .ascii " Trail [E3002] (1 hop via ?, origin first):\n"
     .ascii "  1. run (run.jet:6)\n"
-    .ascii "      text :: files.read(args.path)\n"
+    .ascii "      text: files.read(args.path)\n"
 e_end:

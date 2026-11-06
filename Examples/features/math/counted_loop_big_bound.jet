@@ -3,7 +3,7 @@
 // the index and what is computed from it stay exact, including results that
 // leave the word range and floored divisions of negative indexes near the
 // range's low end by a divisor that varies.
-fn sum_until(n: Int, stop: Int) -> Int {
+sum_until: fn(n: Int, stop: Int) -> Int {
     total := 0
     loop i in 0..<n {
         if i == stop -> break
@@ -12,7 +12,7 @@ fn sum_until(n: Int, stop: Int) -> Int {
     total
 }
 
-fn window(n: Int) -> Int {
+window: fn(n: Int) -> Int {
     total := 0
     loop i in (n - 3)..<n {
         total += i % 1000
@@ -20,7 +20,7 @@ fn window(n: Int) -> Int {
     total
 }
 
-fn last_double(n: Int) -> Int {
+last_double: fn(n: Int) -> Int {
     last := 0
     loop i in (n - 2)..<n {
         last = i * 2
@@ -28,16 +28,16 @@ fn last_double(n: Int) -> Int {
     last
 }
 
-fn neg_parts(n: Int) -> Int {
+neg_parts: fn(n: Int) -> Int {
     total := 0
     loop i in (0 - n)..<(3 - n) {
-        d :: i % 7 + 2
+        d: i % 7 + 2
         total += i /% d + i % d
     }
     total
 }
 
-fn span(start: Int, stop: Int) -> Int {
+span: fn(start: Int, stop: Int) -> Int {
     total := 0
     loop i in start..<stop {
         total += i * 3 + i % 5
@@ -45,17 +45,17 @@ fn span(start: Int, stop: Int) -> Int {
     total
 }
 
-fn run() {
-    stops :: [Int]{10, 4611686018427387909, -4611686018427387913}
+run: fn() {
+    stops: [Int]{10, 4611686018427387909, -4611686018427387913}
     loop n in stops {
         print(sum_until(n, 20))
     }
-    ends :: [Int]{4611686018427387901, 4611686018427387902, 4611686018427387906, 1003}
+    ends: [Int]{4611686018427387901, 4611686018427387902, 4611686018427387906, 1003}
     loop n in ends {
         print([Int]{window(n), last_double(n)})
     }
-    negs :: [Int]{10, 4611686018427387904, 4611686018427387909}
+    negs: [Int]{10, 4611686018427387904, 4611686018427387909}
     print([Int]{neg_parts(negs[0]), neg_parts(negs[1]), neg_parts(negs[2])})
-    spans :: [Int]{10, 14, -4611686018427387906, -4611686018427387902}
+    spans: [Int]{10, 14, -4611686018427387906, -4611686018427387902}
     print([Int]{span(spans[0], spans[1]), span(spans[2], spans[3])})
 }

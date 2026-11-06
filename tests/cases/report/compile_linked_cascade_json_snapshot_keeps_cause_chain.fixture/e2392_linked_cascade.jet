@@ -1,17 +1,17 @@
 // E2392: a dependent conversion report keeps its same-span root cause first.
 #Error
-enum SourceErr {
+SourceErr: enum {
     Missing
 }
 
 #Error
-enum TargetErr {
+TargetErr: enum {
     Wrapped
 }
 
-fn load_row() -> Int SourceErr! { return Err(SourceErr.Missing) }
+load_row: fn() -> Int SourceErr! { return Err(SourceErr.Missing) }
 
-fn run() -> Int TargetErr! {
+run: fn() -> Int TargetErr! {
     load_row(1)
     return Ok(0)
 }

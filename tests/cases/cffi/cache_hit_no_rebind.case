@@ -2,7 +2,7 @@
 # Claim: with an unchanged header and a matching hash sidecar, the compiler loads the cache as-is: its bytes and its modification time do not change (tests/cffi.rs:2888-2900)
 # The original called CBind::generate and CBind::write_bind_hash in-process; the case runs `jet inspect bind` and writes the same sidecar text, SHA-256("int mylib3_ping(int x);\n" || NUL)
 # The original read the mtime through std::fs::metadata; the case reads it with GNU `stat -c %.9Y`, and sleeps 50 ms first as the original did
-# Fixture migrated: the header line verbatim; `use "include/mylib3.h" as m` is written `use m :: "include/mylib3.h"`
+# Fixture migrated: the header line verbatim; `use "include/mylib3.h" as m` is written `use m: "include/mylib3.h"`
 # Not ported: jet::compile_with_path (internal Rust API); `jet check` runs the same loader, binder and checker
 requires: os-name:linux
 requires: tool:stat

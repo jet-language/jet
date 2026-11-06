@@ -1,12 +1,12 @@
-package {
+package: {
     name: "stdin_close"
     authority: { allow: [Exec, Mem.Alloc, Time.Wait] }
 }
 
-use process :: core.process
+use process: core.process
 
-fn run() {
-    child :: process.cmd(["cat"]).stdin(.Stream).spawn() ?? panic("spawn")
+run: fn() {
+    child: process.cmd(["cat"]).stdin(.Stream).spawn() ?? panic("spawn")
     child.stdin.close() ?? panic("close")
     child.wait() ?? panic("wait")
 }

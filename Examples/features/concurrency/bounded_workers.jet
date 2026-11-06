@@ -1,28 +1,28 @@
-package {
+package: {
     name: "bounded_workers"
     authority: { allow: [IO, Mem.Alloc, Time] }
 }
 
-use time :: core.time
+use time: core.time
 
-fn use_slot(token: Int, token_sender: Sender<Int>) -> Int {
+use_slot: fn(token: Int, token_sender: Sender<Int>) -> Int {
     time.sleep(20ms)
     token_sender.send(token)
     return token
 }
 
-fn receive_one(receiver: Receiver<Int>) -> Int {
+receive_one: fn(receiver: Receiver<Int>) -> Int {
     return receiver.receive() ?? panic("value channel closed")
 }
 
-fn run() {
+run: fn() {
     // A capacity-one buffer accepts the first value. The second sender waits
     // until the receiver drains that slot.
-    { sender, receiver: values } :: channel<Int>(capacity: 1)
-    second_sender :: sender.copy()
-    { sender: done_sender, receiver: done } :: channel<Int>(capacity: 8)
+    { sender, receiver: values }: channel<Int>(capacity: 1)
+    second_sender: sender.copy()
+    { sender: done_sender, receiver: done }: channel<Int>(capacity: 8)
     sender.send(10)
-    second :: task {
+    second: task {
         second_sender.send(20)
         done_sender.send(1)
     }
@@ -37,20 +37,20 @@ fn run() {
     // A capacity-two channel starts with two tokens. A worker receives one
     // before work and sends it back after work, so at most two workers can be
     // active. Returned slot IDs prove that every worker held one of two leases.
-    { sender: token_sender, receiver: tokens } :: channel<Int>(capacity: 2)
+    { sender: token_sender, receiver: tokens }: channel<Int>(capacity: 2)
     token_sender.send(1)
     token_sender.send(2)
-    token_sender_two :: token_sender.copy()
-    token_sender_three :: token_sender.copy()
-    token_sender_four :: token_sender.copy()
-    token_one :: tokens.receive() ?? panic("token channel closed")
-    first :: task use_slot(token_one, token_sender)
-    token_two :: tokens.receive() ?? panic("token channel closed")
-    second_worker :: task use_slot(token_two, token_sender_two)
-    token_three :: tokens.receive() ?? panic("token channel closed")
-    third :: task use_slot(token_three, token_sender_three)
-    token_four :: tokens.receive() ?? panic("token channel closed")
-    fourth :: task use_slot(token_four, token_sender_four)
+    token_sender_two: token_sender.copy()
+    token_sender_three: token_sender.copy()
+    token_sender_four: token_sender.copy()
+    token_one: tokens.receive() ?? panic("token channel closed")
+    first: task use_slot(token_one, token_sender)
+    token_two: tokens.receive() ?? panic("token channel closed")
+    second_worker: task use_slot(token_two, token_sender_two)
+    token_three: tokens.receive() ?? panic("token channel closed")
+    third: task use_slot(token_three, token_sender_three)
+    token_four: tokens.receive() ?? panic("token channel closed")
+    fourth: task use_slot(token_four, token_sender_four)
 
     leases := [
         ^first.join() ?? panic("first worker failed"),

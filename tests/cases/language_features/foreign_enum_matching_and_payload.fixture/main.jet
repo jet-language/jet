@@ -1,24 +1,24 @@
 use "note"
-enum Query {
+Query: enum {
     Tag(String)
     Kind(NoteType)
 }
-fn classify(raw: String) -> Query {
+classify: fn(raw: String) -> Query {
     if raw == "user" {
         return Query.Kind(NoteType.User)
     }
     return Query.Tag(raw.copy())
 }
-fn describe(n: Note, q: ^Query) -> String {
+describe: fn(n: Note, q: ^Query) -> String {
     if q == {
         .Tag(t) -> { return "tag:{t}" }
         .Kind(k) -> { return "kind:{note.kind_str(n)}" }
     }
 }
-fn run() {
-    n :: note.make_note("x", NoteType.User)
-    q :: classify("user")
+run: fn() {
+    n: note.make_note("x", NoteType.User)
+    q: classify("user")
     print(describe(n, ^q))
-    q2 :: classify("design")
+    q2: classify("design")
     print(describe(n, ^q2))
 }

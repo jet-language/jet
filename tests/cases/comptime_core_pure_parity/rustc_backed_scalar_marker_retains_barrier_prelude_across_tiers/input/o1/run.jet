@@ -1,17 +1,17 @@
-#Scalar fn scalar_marker(value: Float) -> Float {
+#Scalar scalar_marker: fn(value: Float) -> Float {
     total := 0.0
     loop i in 0..<4 {
         total += value
     }
     return total
 }
-fn simd_scalar_view() -> String {
+simd_scalar_view: fn() -> String {
     return "{scalar_marker(2.0)}"
 }
-EXPECTED :: comptime { simd_scalar_view() }
+EXPECTED: comptime { simd_scalar_view() }
 
-fn run() {
-    actual :: simd_scalar_view()
+run: fn() {
+    actual: simd_scalar_view()
     print("{EXPECTED}")
     print("{actual}")
 }

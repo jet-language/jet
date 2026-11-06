@@ -32,17 +32,17 @@
 <h2>What</h2>
 <p class="diag-copy what" data-registry-field="what">This compile-time code reads `{name}`, which is only known at startup</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">`{name}` could not be folded while building (its value reads the outside world, or computing it failed), so the program computes it at startup, before `fn run`. Compile-time code runs while building, before that value exists.</p>
+<p class="diag-copy why" data-registry-field="why">`{name}` could not be folded while building (its value reads the outside world, or computing it failed), so the program computes it at startup, before `run: fn`. Compile-time code runs while building, before that value exists.</p>
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Compute the value at runtime instead, or make `{name}` foldable: a pure expression that evaluates without failing.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0627</code>: <code>tests/ui/comptime_reads_startup_constant.stderr</code>.</p>
 <pre class="diag">Error [jet.CompileTimeReadsStartupValue]: This compile-time code reads `GOPHER`, which is only known at startup
-  --&gt; tests/ui/comptime_reads_startup_constant.jet:9:21
+  --&gt; tests/ui/comptime_reads_startup_constant.jet:9:19
     |
-  9 | TABLE :: comptime { [Int]{GOPHER, 1} }
-    |                     ^^^^^^^^^^^^^^^^
- Why: `GOPHER` could not be folded while building (its value reads the outside world, or computing it failed), so the program computes it at startup, before `fn run`; compile-time code runs while building, before that value exists
+  9 | TABLE: comptime { [Int]{GOPHER, 1} }
+    |                   ^^^^^^^^^^^^^^^^
+ Why: `GOPHER` could not be folded while building (its value reads the outside world, or computing it failed), so the program computes it at startup, before `run: fn`; compile-time code runs while building, before that value exists
  Fix: Compute the value at runtime instead, or make `GOPHER` foldable: a pure expression that evaluates without failing
 More: jet-lang.dev/e/E0627
 </pre>

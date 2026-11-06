@@ -1,17 +1,17 @@
-package {
+package: {
     name: "cli"
     authority: { allow: [Env, Exec, Exec.Args, IO] }
 }
 
 use {
-    io :: core.term
-    env :: core.sys
-    process :: core.process
+    io: core.term
+    env: core.sys
+    process: core.process
 }
 
-fn run() {
-    args :: process.args()
-    mode :: env.get("JET_M10_MODE") ?? "default"
+run: fn() {
+    args: process.args()
+    mode: env.get("JET_M10_MODE") ?? "default"
     // `jet run tool.jet alice` forwards the words after the file; `process.args()` holds only those words.
     if {
         args.len() >= 1 -> { print(args.get(0) ?? "") }

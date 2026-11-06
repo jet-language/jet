@@ -1,7 +1,7 @@
 Error [jet.SingleUseConsumedOnOneBranch]: `db` must be used exactly once, but one path through this `if` leaves it unused
   --> tests/ui/single_use_branch.jet:11:5
     |
- 11 |     db :: acquire("db")
+ 11 |     db: acquire("db")
     |     ^^
  Why: A `#SingleUse` value has to be used on every path — here it is consumed on one branch but not the other, so the program could reach the end of its scope without doing its job
  Fix: Use `db` exactly once on every branch: consume it in the missing arm, or move it out before the `if`

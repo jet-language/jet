@@ -1,19 +1,19 @@
 // `parse_age` fails with its own `BadNumber` case and with a plain message,
 // so its failures are the open union `Err | ParseAgeError`. A match that
 // handles only `.BadNumber` must also handle the general `Err` member.
-fn parse_age(raw: String) -> Int {
+parse_age: fn(raw: String) -> Int {
     if raw == "" -> return Err(.BadNumber(raw.copy()))
     if raw == "x" -> return Err("odd input")
     42
 }
 
-fn describe(raw: String) -> String {
+describe: fn(raw: String) -> String {
     if parse_age(raw) == {
         .Ok(n) -> "age {n}"
         .Err(.BadNumber(_)) -> "bad number"
     }
 }
 
-fn run() {
+run: fn() {
     print(describe("x"))
 }

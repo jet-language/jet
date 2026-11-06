@@ -24,7 +24,7 @@ test('native transport clears inherited bootstrap and observation hooks', () => 
 
 test('library uses doc FILE and rejects completion without fresh artifacts', (t) => {
     const root = temporary(t), file = join(root, 'unit.jet'), prefix = join(root, 'fixture'), lifecycle = join(root, 'lifecycle.list');
-    writeFileSync(file, 'fn run() {}\n');
+    writeFileSync(file, 'run: fn() {}\n');
     writeFileSync(lifecycle, 'explicit lifecycle fixture\n');
     for (const suffix of ['.o', '.exports', '.abi.json', '.threads', '.issues']) writeFileSync(prefix + suffix, 'stale artifact');
     const result = runNativeLibrary({ jet: '/pinned/jet', file, prefix, lifecycle, env: { JET_BOOTSTRAP_MODE: 'factory', JET_TOOLCHAIN_ROOT: root }, execute(command, args, options) {
@@ -44,7 +44,7 @@ test('library uses doc FILE and rejects completion without fresh artifacts', (t)
 
 test('program build completion without an executable is not a native feed', (t) => {
     const root = temporary(t), file = join(root, 'unit.jet'), prefix = join(root, 'case');
-    writeFileSync(file, 'fn run() {}\n'); writeFileSync(prefix + '.exe', 'stale executable');
+    writeFileSync(file, 'run: fn() {}\n'); writeFileSync(prefix + '.exe', 'stale executable');
     const result = runNativeProgram({ jet: '/pinned/jet', file, root, prefix, execute(command, args, options) {
         assert.deepEqual(args, ['build', file]); assert.equal(options.cwd, root);
         return completionOnly(command, args, options);

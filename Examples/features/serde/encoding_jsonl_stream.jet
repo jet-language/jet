@@ -1,4 +1,4 @@
-package {
+package: {
     name: "serde_encoding_jsonl_stream"
     version: "0.1.0"
     authority: { allow: [Exec, FS, FS.Read, IO, Mem.Alloc, Time.Wait] }
@@ -16,14 +16,14 @@ package {
 //   or one error, while the reader yields the records before a bad one.
 // - Cancelling the consuming task stops the read at its next wait point.
 use {
-    encoding :: core.encoding
-    json :: core.encoding.json
-    jsonl :: core.encoding.jsonl
-    files :: core.files
+    encoding: core.encoding
+    json: core.encoding.json
+    jsonl: core.encoding.jsonl
+    files: core.files
 }
 
-fn write_catalog(path: Path) -> Bool (EncodingError | IOError)! {
-    output :: files.create(path) ?? return Err(err)
+write_catalog: fn(path: Path) -> Bool (EncodingError | IOError)! {
+    output: files.create(path) ?? return Err(err)
     writer := jsonl.writer(^output, encoding.EncodingLimits.safe()) ?? return Err(err)
     &writer.write(Dyn.Object(["ok": Dyn.Bool(true)])) ?? return Err(err)
     &writer.write(Dyn.Object(["n": Dyn.Int(2)])) ?? return Err(err)
@@ -33,8 +33,8 @@ fn write_catalog(path: Path) -> Bool (EncodingError | IOError)! {
 }
 
 // Read every record, then show that a failure stays sticky.
-fn drain(label: String, path: Path, limits: encoding.EncodingLimits) IOError! {
-    input :: files.open(path) ?? return Err(err)
+drain: fn(label: String, path: Path, limits: encoding.EncodingLimits) IOError! {
+    input: files.open(path) ?? return Err(err)
     reader := jsonl.reader(^input, limits) ?? {
         print("{label}: refused {err}")
         return Ok(())
@@ -42,7 +42,7 @@ fn drain(label: String, path: Path, limits: encoding.EncodingLimits) IOError! {
     loop {
         if &reader.next() == {
             .Ok(next) -> {
-                row :: next ?? {
+                row: next ?? {
                     print("{label}: eof")
                     return Ok(())
                 }
@@ -60,20 +60,20 @@ fn drain(label: String, path: Path, limits: encoding.EncodingLimits) IOError! {
     }
 }
 
-fn read_until_cancel(path: Path, started: Sender<Int>, gate: Receiver<Int>) -> Int (EncodingError | IOError)! {
-    input :: files.open(path) ?? return Err(err)
+read_until_cancel: fn(path: Path, started: Sender<Int>, gate: Receiver<Int>) -> Int (EncodingError | IOError)! {
+    input: files.open(path) ?? return Err(err)
     reader := jsonl.reader(^input) ?? return Err(err)
     count := 0
     loop {
-        _row :: &reader.next() ?? break
+        _row: &reader.next() ?? break
         count += 1
         started.send(count)
-        _ :: gate.receive() ?? 0
+        _: gate.receive() ?? 0
     }
     Ok(count)
 }
 
-fn failure_label(error: TaskFailure) -> String {
+failure_label: fn(error: TaskFailure) -> String {
     if error == {
         .Panicked(reason) -> { return "panicked: {reason}" }
         .DeadlineBlown -> { return "deadline" }
@@ -81,11 +81,11 @@ fn failure_label(error: TaskFailure) -> String {
     }
 }
 
-fn run() (EncodingError | IOError)! {
+run: fn() (EncodingError | IOError)! {
     // Scratch output belongs in a fresh temp directory, never the working
     // directory the example happens to run from.
-    scratch :: files.temp_dir("jet-encoding-jsonl") ?? return
-    path :: Path.from(scratch.path).join("catalog.jsonl")
+    scratch: files.temp_dir("jet-encoding-jsonl") ?? return
+    path: Path.from(scratch.path).join("catalog.jsonl")
     write_catalog(path) ?? return
     drain("catalog", path, encoding.EncodingLimits.safe()) ?? return
 
@@ -116,9 +116,9 @@ fn run() (EncodingError | IOError)! {
     lines := [String]{}
     loop index in 0..<5 -> &lines.push("{{\"n\":{index}}}")
     files.write(path.to_string(), lines.join("\n")) ?? return
-    { sender: started_tx, receiver: started_rx } :: channel<Int>(capacity: 1)
-    { sender: gate_tx, receiver: gate_rx } :: channel<Int>(capacity: 1)
-    worker :: task read_until_cancel(path, started_tx, gate_rx)
+    { sender: started_tx, receiver: started_rx }: channel<Int>(capacity: 1)
+    { sender: gate_tx, receiver: gate_rx }: channel<Int>(capacity: 1)
+    worker: task read_until_cancel(path, started_tx, gate_rx)
     print("cancel: read {started_rx.receive() ?? -1} record before cancel")
     worker.cancel()
     if ^worker.join() == {

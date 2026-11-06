@@ -32,36 +32,27 @@
 <h2>What</h2>
 <p class="diag-copy what" data-registry-field="what">Module path `{path}` uses the reserved segment `__bindgen__`.</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">Autogen lives in `c.{lib}.__bindgen__`; users declare overlays as `#Import module c.{lib}` only.</p>
+<p class="diag-copy why" data-registry-field="why">Autogen lives in `c.{lib}.__bindgen__`; users declare overlays as `#Import c.{lib}: module` only.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Drop `__bindgen__` from your module path, or use `#Import module c.{lib} { … }`.</p>
+<p class="diag-copy fix" data-registry-field="fix">Drop `__bindgen__` from your module path, or use `#Import c.{lib}: module { … }`.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E3206</code>: <code>tests/ui/generated_cffi_e3206.stderr</code>.</p>
+<p>First UI snapshot mentioning <code>E3206</code>: <code>tests/ui/cffi_e3206_reserved_segment.stderr</code>.</p>
 <pre class="diag">Error [jet.ReservedBindgenSegment]: Module path `c.demo.__bindgen__` uses the reserved segment `__bindgen__`
-  --&gt; tests/ui/generated_cffi_e3206.jet:2:16
+  --&gt; tests/ui/cffi_e3206_reserved_segment.jet:1:9
     |
-  2 | #Import module c.demo.__bindgen__ {
-    |                ^^^^^^^^^^^^^^^^^^
- Why: Autogen lives in `c.&lt;lib&gt;.__bindgen__`; users declare overlays as `#Import module c.&lt;lib&gt;` only
- Fix: Drop `__bindgen__` from your module path, or use `#Import module c.demo { … }`
+  1 | #Import c.demo.__bindgen__: module {
+    |         ^^^^^^^^^^^^^^^^^^
+ Why: Generated bindings live under `c.&lt;lib&gt;.__bindgen__`; user overlays use `#Import c.&lt;lib&gt;: module`
+ Fix: Remove `.__bindgen__` and declare the overlay as `#Import c.&lt;lib&gt;: module`
 More: jet-lang.dev/e/E3206
 
-Error [jet.RetiredBodyMarker]: This function uses the retired `=` body marker.
-  --&gt; tests/ui/generated_cffi_e3206.jet:3:15
+Error [jet.InvalidStatement]: Expected `=` before the C symbol, found `{`
+  --&gt; tests/ui/cffi_e3206_reserved_segment.jet:2:16
     |
-  3 |     fn ping() = &quot;demo_ping&quot;
-    |               ^
- Why: A one-expression function body uses `-&gt;`; `::` binds a name, and `=` fills a slot inside a definition.
- Fix: Replace `=` with `-&gt;`; `jet fmt` applies this fix.
-More: jet-lang.dev/e/E0065
-
-Error [jet.InvalidStatement]: Expected a call, binding, assignment, or `return`, found `}`
-  --&gt; tests/ui/generated_cffi_e3206.jet:4:1
-    |
-  4 | }
-    | ^
- Why: Inside a function body, write a call, binding, assignment, or `return`
- Fix: e.g. print(&quot;hello&quot;) or x :: 1
+  2 |     ping: fn() { }
+    |                ^
+ Why: The parser needs the expected token to keep the surrounding syntax unambiguous
+ Fix: Write the expected token here
 More: jet-lang.dev/e/E0003
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

@@ -1,49 +1,49 @@
 
 use {
-    application :: app
-    db :: core.db
+    application: app
+    db: core.db
     core.web.[Live]
 }
 
 #Error
-enum TaskError {
+TaskError: enum {
     Read
 }
 
-fn task_bodies(scope: db.DBScope) -[DB.Read]> String TaskError! {
-    rows :: scope.query(SQL{"SELECT body FROM tasks"}) ?? return Err(TaskError.Read)
+task_bodies: fn(scope: db.DBScope) -[DB.Read]> String TaskError! {
+    rows: scope.query(SQL{"SELECT body FROM tasks"}) ?? return Err(TaskError.Read)
     bodies := [String]{}
     loop row in rows {
-        body :: db.row_text(row, "body") ?? return Err(TaskError.Read)
+        body: db.row_text(row, "body") ?? return Err(TaskError.Read)
         &bodies.push(body)
     }
     bodies.join(",")
 }
 
-fn live_text(binding: Live<String, TaskError>) -> String {
+live_text: fn(binding: Live<String, TaskError>) -> String {
     if application.state(binding) == {
         .Loaded(value) -> value
         else -> ""
     }
 }
 
-fn run() {
+run: fn() {
     conn := db.open_memory()
-    policy :: db.policy("tasks", "true") ?? panic("policy")
+    policy: db.policy("tasks", "true") ?? panic("policy")
     scoped := conn.with_policy(policy, "attacker")
-    _created :: db.migrate(scoped, "tasks-v1", [
+    _created: db.migrate(scoped, "tasks-v1", [
         SQL{"CREATE TABLE tasks (id INTEGER PRIMARY KEY, body TEXT)"}
     ]) ?? panic("create")
 
-    payload :: "x'); DROP TABLE tasks; --"
-    _inserted :: scoped.execute(
+    payload: "x'); DROP TABLE tasks; --"
+    _inserted: scoped.execute(
         SQL{"INSERT INTO tasks (id, body) VALUES (1, {payload})"}
     ) ?? panic("insert")
-    row :: scoped.query_one(SQL{"SELECT body FROM tasks"}) ?? panic("query")
-    body :: db.row_text(row, "body") ?? panic("missing body")
+    row: scoped.query_one(SQL{"SELECT body FROM tasks"}) ?? panic("query")
+    body: db.row_text(row, "body") ?? panic("missing body")
     print("interpolation:{body}")
 
-    duplicate :: scoped.query(
+    duplicate: scoped.query(
         SQL{"SELECT id FROM tasks WHERE body = {payload} OR body = {payload}"}
     ) ?? panic("duplicate")
     print("duplicate:{duplicate.len()}")
@@ -64,17 +64,17 @@ fn run() {
         print("authority:rejected")
     }
 
-    live :: application.live(task_bodies, scoped.copy())
-    live_before :: live_text(live)
+    live: application.live(task_bodies, scoped.copy())
+    live_before: live_text(live)
     print("live-before:{live_before.contains(payload)}")
-    updated :: "updated"
-    _updated :: scoped.execute(SQL{"UPDATE tasks SET body = {updated}"}) ?? panic("update")
+    updated: "updated"
+    _updated: scoped.execute(SQL{"UPDATE tasks SET body = {updated}"}) ?? panic("update")
     application.invalidate(task_bodies)
-    live_after :: live_text(live)
+    live_after: live_text(live)
     print("live-after:{live_after.contains(updated)}")
 
-    tx_body :: "rolled back"
-    tx_count :: db.transaction(scoped, "rollback", [
+    tx_body: "rolled back"
+    tx_count: db.transaction(scoped, "rollback", [
         SQL{"INSERT INTO tasks (id, body) VALUES (2, {tx_body})"},
         SQL{"INSERT INTO tasks (missing_column) VALUES (2)"}
     ]) ?? -1
@@ -82,9 +82,9 @@ fn run() {
         tx_count < 0 -> print("rollback:rejected")
         else -> print("rollback:accepted")
     }
-    rollback_rows :: scoped.query(SQL{"SELECT id FROM tasks"}) ?? panic("rollback query")
+    rollback_rows: scoped.query(SQL{"SELECT id FROM tasks"}) ?? panic("rollback query")
     print("rollback-rows:{rollback_rows.len()}")
-    migration_count :: db.migrate(scoped, "broken", [
+    migration_count: db.migrate(scoped, "broken", [
         SQL{"CREATE TABLE migration_marker (id INTEGER)"},
         SQL{"INSERT INTO tasks (missing_column) VALUES (3)"}
     ]) ?? -1
@@ -92,12 +92,12 @@ fn run() {
         migration_count < 0 -> print("migration:rejected")
         else -> print("migration:accepted")
     }
-    retry_count :: db.migrate(scoped, "broken", [
+    retry_count: db.migrate(scoped, "broken", [
         SQL{"CREATE TABLE migration_marker (id INTEGER)"}
     ]) ?? -1
     if {
         retry_count == 1 -> print("migration-retry:1")
         else -> print("migration-retry:rejected")
     }
-    _closed :: scoped.close()
+    _closed: scoped.close()
 }

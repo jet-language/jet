@@ -1,13 +1,13 @@
 
-use browser :: core.web.browser
+use browser: core.web.browser
 
-fn run() {
-    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
-    timeout :: browser.timeout(500) ?? panic("timeout")
-    session :: browser.connect_profile("ws://127.0.0.1:{free-port:cdp_lifecycle}/session", profile, timeout) ?? panic("connect")
-    context :: session.context() ?? panic("context")
-    page :: context.page() ?? panic("page")
-    cdp :: session.protocol("cdp") ?? panic("cdp")
+run: fn() {
+    profile: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout: browser.timeout(500) ?? panic("timeout")
+    session: browser.connect_profile("ws://127.0.0.1:{free-port:cdp_lifecycle}/session", profile, timeout) ?? panic("connect")
+    context: session.context() ?? panic("context")
+    page: context.page() ?? panic("page")
+    cdp: session.protocol("cdp") ?? panic("cdp")
     print(cdp.send("Page.enable", "{{}}") ?? panic("send"))
     page.close() ?? panic("page close")
     context.close() ?? panic("context close")

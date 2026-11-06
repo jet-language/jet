@@ -1,5 +1,5 @@
 // (ratified 2026-08-17, card #2018): the standard library declares
-// the conversion for its own error family. A program can write `fn run()` and
+// the conversion for its own error family. A program can write `run: fn()` and
 // pass a Core failure up automatically without declaring anything, because
 // these declarations already sit on the existing rail. One source;
 // every tier lowers the same `impl <CoreError> -> Err` block, the same way
@@ -11,7 +11,7 @@
 // cannot break a program that never produces that error.
 //
 // An author who wants the failure named still writes the named form
-// (`fn run() !EncodingError`), and that stays correct: this file only makes the
+// (`run: fn() !EncodingError`), and that stays correct: this file only makes the
 // unnamed form work.
 //
 // This rule keeps the rest of the rule intact. A user error type still
@@ -45,35 +45,35 @@
 // checked nominal types; only Err carries the existing default-error role.
 // Fresh construction evaluates the declared metadata default in this owner.
 // Copy, context and conversion retain the existing stored metadata instead.
-struct __jet_ErrorContextFrame {
+__jet_ErrorContextFrame: struct {
     text: String
     file: String
     line: Int
 }
-struct __jet_ErrorConversion {
+__jet_ErrorConversion: struct {
     source: String
     target: String
 }
-struct __jet_ErrorField {
+__jet_ErrorField: struct {
     name: String
     value: String
 }
-struct __jet_ErrorSpan {
+__jet_ErrorSpan: struct {
     start: Int
     end: Int
 }
-struct __jet_ErrorDetails {
+__jet_ErrorDetails: struct {
     variant: String
     fields: [__jet_ErrorField]
     source_span: __jet_ErrorSpan?
 }
-struct __jet_ErrorMetadata {
+__jet_ErrorMetadata: struct {
     typed_identity: String?
     context_frames: [__jet_ErrorContextFrame]
     conversion_history: [__jet_ErrorConversion]
     details: __jet_ErrorDetails?
 }
-struct Err {
+Err: struct {
     message: String
     code: String?
     cause: Err?

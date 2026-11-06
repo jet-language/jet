@@ -1,34 +1,34 @@
 // D-OPT-LIFT1=A: a plain value fills a slot whose type is already `T?`.
-struct Config {
+Config: struct {
     limit: Int?
 }
 
-fn describe(value: String?) -> String {
+describe: fn(value: String?) -> String {
     value ?? "none"
 }
 
-fn find(n: Int) -> Int? {
+find: fn(n: Int) -> Int? {
     if n > 0 -> return n
     return None
 }
 
-struct Box {
+Box: struct {
     v: Int
 }
 
 // A call result fills an optional argument or place the same way a name does.
-fn make_box(v: Int) -> Box {
+make_box: fn(v: Int) -> Box {
     Box{v: v}
 }
 
-fn box_value(box: Box?) -> Int {
+box_value: fn(box: Box?) -> Int {
     (box ?? Box{v: 0}).v
 }
 
-fn run() {
+run: fn() {
     limit := Val(10)          // no expected type: Val still infers Int?
-    cfg :: Config{limit: 5}
-    ids :: [Int?]{1, None}
+    cfg: Config{limit: 5}
+    ids: [Int?]{1, None}
     limit = 20
     print(describe("hi"))
     print(describe(None))

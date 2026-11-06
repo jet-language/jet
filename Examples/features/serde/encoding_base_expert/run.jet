@@ -1,15 +1,15 @@
 // D-ENCBASE-STRICT1: base64/base32 decoding is strict RFC 4648 by default;
 // transport-shaped input is admitted only through a named allowance.
 use {
-    base64 :: core.encoding.base64
-    base32 :: core.encoding.base32
+    base64: core.encoding.base64
+    base32: core.encoding.base32
 }
 
-fn run() {
+run: fn() {
     // MIME line breaks: `decodebytes` allows ASCII whitespace, `decode` rejects it.
-    mime :: base64.decodebytes("Zg==\n")
+    mime: base64.decodebytes("Zg==\n")
     print(mime.len())
     // No lowercase allowance exists for base32: the canonical alphabet decodes.
-    canonical :: base32.decode("MY======")
+    canonical: base32.decode("MY======")
     print(canonical.len())
 }

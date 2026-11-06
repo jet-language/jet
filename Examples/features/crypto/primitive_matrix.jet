@@ -1,4 +1,4 @@
-package {
+package: {
     name: "crypto_primitive_matrix"
     version: "0.1.0"
     authority: { allow: [Exec, IO, Mem.Alloc, Rand] }
@@ -13,17 +13,17 @@ package {
 // Error rows print the typed CryptoError variant. Secret-bearing bytes are
 // read only through the `#Unsafe` expert exposure functions (D-CRYPTO-API1).
 use {
-    crypto :: core.crypto
-    expert :: core.crypto.expert
-    csprng :: core.crypto.random
-    hex :: core.encoding.hex
+    crypto: core.crypto
+    expert: core.crypto.expert
+    csprng: core.crypto.random
+    hex: core.encoding.hex
 }
 
-fn unhex(text: String) -> [U8] {
+unhex: fn(text: String) -> [U8] {
     hex.decode(text) ?? panic("bad fixture hex")
 }
 
-fn repeat_byte(value: U8, count: Int) -> [U8] {
+repeat_byte: fn(value: U8, count: Int) -> [U8] {
     out := [U8]{}
     loop _ in 0..<count -> &out.push(value)
     out
@@ -31,20 +31,20 @@ fn repeat_byte(value: U8, count: Int) -> [U8] {
 
 // A length or count chosen at run time. A written out-of-range literal is
 // E2702 at compile time, so the error rows pass their values through here.
-fn runtime(value: Int) -> Int {
+runtime: fn(value: Int) -> Int {
     value
 }
 
-fn mod251(count: Int) -> [U8] {
+mod251: fn(count: Int) -> [U8] {
     out := [U8]{}
     loop i in 0..<count {
-        value :: i % 251
+        value: i % 251
         &out.push(U8{value})
     }
     out
 }
 
-fn crypto_error_name(e: crypto.CryptoError) -> String {
+crypto_error_name: fn(e: crypto.CryptoError) -> String {
     if e == {
         .OpenFailed -> "OpenFailed"
         .VerifyFailed -> "VerifyFailed"
@@ -54,8 +54,8 @@ fn crypto_error_name(e: crypto.CryptoError) -> String {
     }
 }
 
-fn run() {
-    abc :: "abc".bytes()
+run: fn() {
+    abc: "abc".bytes()
     print("-- hashes")
     print("sha1 {crypto.sha1(abc)}")
     print("sha224 {crypto.sha224(abc)}")
@@ -82,11 +82,11 @@ fn run() {
     print("hmac_rfc4231_1 {hex.encode(crypto.hmac_sha256(repeat_byte(U8{0x0b}, 20), "Hi There".bytes()))}")
     print("hmac_rfc4231_2 {hex.encode(crypto.hmac_sha256("Jefe".bytes(), "what do ya want for nothing?".bytes()))}")
     print("hmac_rfc4231_6 {hex.encode(crypto.hmac_sha256(repeat_byte(U8{0xaa}, 131), "Test Using Larger Than Block-Size Key - Hash Key First".bytes()))}")
-    ikm :: repeat_byte(U8{0x0b}, 22)
-    salt :: unhex("000102030405060708090a0b0c")
-    info :: unhex("f0f1f2f3f4f5f6f7f8f9")
-    okm :: crypto.hkdf_sha256(ikm, salt, info, 42) ?? return
-    expected_okm :: crypto.Secret{bytes: unhex("3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865")}
+    ikm: repeat_byte(U8{0x0b}, 22)
+    salt: unhex("000102030405060708090a0b0c")
+    info: unhex("f0f1f2f3f4f5f6f7f8f9")
+    okm: crypto.hkdf_sha256(ikm, salt, info, 42) ?? return
+    expected_okm: crypto.Secret{bytes: unhex("3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865")}
     print("hkdf_rfc5869_a1 {crypto.constant_time_equal(okm, expected_okm)}")
     print("pbkdf2_c1 {hex.encode(crypto.pbkdf2_hmac("password".bytes(), "salt".bytes(), 1, 32) ?? [U8]{})}")
     print("pbkdf2_c2 {hex.encode(crypto.pbkdf2_hmac("password".bytes(), "salt".bytes(), 2, 32) ?? [U8]{})}")
@@ -94,32 +94,32 @@ fn run() {
     print("ct_equal_bytes {crypto.constant_time_equal_bytes(abc, "abc".bytes())} {crypto.constant_time_equal_bytes(abc, "abd".bytes())} {crypto.constant_time_equal_bytes(abc, "ab".bytes())}")
 
     print("-- key agreement")
-    alice :: crypto.X25519SecretKey{bytes: unhex("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a")}
-    bob :: crypto.X25519SecretKey{bytes: unhex("5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb")}
-    alice_public :: crypto.x25519_public(alice) ?? return
-    bob_public :: crypto.x25519_public(bob) ?? return
+    alice: crypto.X25519SecretKey{bytes: unhex("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a")}
+    bob: crypto.X25519SecretKey{bytes: unhex("5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb")}
+    alice_public: crypto.x25519_public(alice) ?? return
+    bob_public: crypto.x25519_public(bob) ?? return
     print("x25519_public_alice {hex.encode(alice_public.bytes)}")
-    shared :: crypto.x25519(alice, bob_public) ?? return
-    shared_back :: crypto.x25519_shared(bob, alice_public) ?? return
+    shared: crypto.x25519(alice, bob_public) ?? return
+    shared_back: crypto.x25519_shared(bob, alice_public) ?? return
     #Unsafe("known-answer check reads the RFC 7748 shared secret") {
-        shared_bytes :: expert.shared_secret_bytes(shared)
+        shared_bytes: expert.shared_secret_bytes(shared)
         print("x25519_shared {hex.encode(shared_bytes)}")
         print("x25519_shared_symmetric {expert.shared_secret_bytes(shared_back) == shared_bytes}")
     }
 
     print("-- envelopes")
-    plaintext :: "matrix".bytes()
-    aad :: "aad".bytes()
-    sealed :: crypto.seal([crypto.X25519PublicKey]{alice_public.copy()}, plaintext, aad) ?? return
-    recipient_text :: alice.public_key().text()
+    plaintext: "matrix".bytes()
+    aad: "aad".bytes()
+    sealed: crypto.seal([crypto.X25519PublicKey]{alice_public.copy()}, plaintext, aad) ?? return
+    recipient_text: alice.public_key().text()
     print("x25519_recipient_text {recipient_text}")
     print("x25519_recipient_roundtrip {(crypto.X25519PublicKey.from_text(recipient_text) ?? crypto.X25519PublicKey{bytes: [U8]{}}).bytes == alice.public_key().bytes}")
-    uppercase_rejected :: if crypto.X25519PublicKey.from_text(recipient_text.to_upper()) == {
+    uppercase_rejected: if crypto.X25519PublicKey.from_text(recipient_text.to_upper()) == {
         .Err(.KeyRejected) -> true
         else -> false
     }
     print("x25519_recipient_uppercase {uppercase_rejected}")
-    opened :: crypto.open(alice, sealed, aad) ?? return
+    opened: crypto.open(alice, sealed, aad) ?? return
     print("seal_open {opened == plaintext}")
     if crypto.open(alice, sealed, "other".bytes()) == {
         .Ok(_) -> print("open_wrong_aad accepted")
@@ -129,8 +129,8 @@ fn run() {
         .Ok(_) -> print("open_wrong_key accepted")
         .Err(_) -> print("open_wrong_key Err")
     }
-    wrapped :: crypto.wrap(crypto.Secret.from_text("wrapped secret"), alice.public_key()) ?? return
-    unwrapped :: crypto.unwrap(alice, wrapped) ?? return
+    wrapped: crypto.wrap(crypto.Secret.from_text("wrapped secret"), alice.public_key()) ?? return
+    unwrapped: crypto.unwrap(alice, wrapped) ?? return
     print("wrap_unwrap {crypto.constant_time_equal(unwrapped, crypto.Secret{bytes: "wrapped secret".bytes()})}")
     if crypto.unwrap(bob, wrapped) == {
         .Ok(_) -> print("unwrap_wrong_key accepted")
@@ -138,63 +138,63 @@ fn run() {
     }
 
     print("-- signatures")
-    seed1 :: unhex("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60")
-    pk1 :: crypto.VerifyKey{bytes: unhex("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a")}
-    sig1 :: crypto.sign(crypto.SigningKey{bytes: seed1}, [U8]{}) ?? return
+    seed1: unhex("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60")
+    pk1: crypto.VerifyKey{bytes: unhex("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a")}
+    sig1: crypto.sign(crypto.SigningKey{bytes: seed1}, [U8]{}) ?? return
     print("ed25519_sig1 {hex.encode(sig1.bytes)}")
     print("ed25519_verify1 {crypto.verify(pk1, [U8]{}, sig1) ?? false}")
-    seed2 :: unhex("4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb")
-    pk2 :: crypto.VerifyKey{bytes: unhex("3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c")}
-    sig2 :: crypto.sign(crypto.SigningKey{bytes: seed2}, unhex("72")) ?? return
+    seed2: unhex("4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb")
+    pk2: crypto.VerifyKey{bytes: unhex("3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c")}
+    sig2: crypto.sign(crypto.SigningKey{bytes: seed2}, unhex("72")) ?? return
     print("ed25519_sig2 {hex.encode(sig2.bytes)}")
     print("ed25519_verify2 {crypto.verify(pk2, unhex("72"), sig2) ?? false} {crypto.verify(pk2, unhex("73"), sig2) ?? false}")
-    signer1 :: crypto.SigningKey{bytes: unhex("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60")}
-    derived_pk1 :: signer1.public_key()
+    signer1: crypto.SigningKey{bytes: unhex("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60")}
+    derived_pk1: signer1.public_key()
     print("signing_public_key {derived_pk1.bytes == pk1.bytes}")
-    short_verify_key :: if crypto.VerifyKey.from_bytes(repeat_byte(U8{1}, 31)) == {
+    short_verify_key: if crypto.VerifyKey.from_bytes(repeat_byte(U8{1}, 31)) == {
         .Err(.Length) -> true
         else -> false
     }
     print("verify_key_from_short {short_verify_key}")
 
     print("-- passwords")
-    password :: crypto.Secret{bytes: "password".bytes()}
-    stored :: crypto.password_hash_with_salt(password, "saltsalt".bytes()) ?? return
+    password: crypto.Secret{bytes: "password".bytes()}
+    stored: crypto.password_hash_with_salt(password, "saltsalt".bytes()) ?? return
     print("password_hash_with_salt {stored.text}")
     print("password_verify {crypto.password_verify(password, stored) ?? false} {crypto.password_verify(crypto.Secret{bytes: "wrong".bytes()}, stored) ?? true}")
 
     #Unsafe("expert known-answer vectors need raw key bytes") {
         print("-- expert")
-        raw_shared :: expert.x25519_raw(alice.bytes, bob_public.bytes) ?? return
+        raw_shared: expert.x25519_raw(alice.bytes, bob_public.bytes) ?? return
         print("x25519_raw {hex.encode(expert.secret_bytes(raw_shared))}")
-        raw_okm :: expert.hkdf_sha256_raw(ikm, salt, info, 42) ?? return
+        raw_okm: expert.hkdf_sha256_raw(ikm, salt, info, 42) ?? return
         print("hkdf_raw_a1 {hex.encode(expert.secret_bytes(raw_okm))}")
-        raw_sig :: expert.ed25519_sign(seed1, [U8]{}) ?? return
+        raw_sig: expert.ed25519_sign(seed1, [U8]{}) ?? return
         print("ed25519_sign_matches_typed {raw_sig.bytes == sig1.bytes}")
         print("ed25519_verify_strict {expert.ed25519_verify_strict(pk1.bytes, [U8]{}, sig1.bytes) ?? false}")
-        zero_key :: repeat_byte(U8{0}, 32)
-        zero_iv :: repeat_byte(U8{0}, 12)
-        tc13 :: expert.aes256gcm_seal(zero_key, zero_iv, [U8]{}, [U8]{}) ?? return
+        zero_key: repeat_byte(U8{0}, 32)
+        zero_iv: repeat_byte(U8{0}, 12)
+        tc13: expert.aes256gcm_seal(zero_key, zero_iv, [U8]{}, [U8]{}) ?? return
         print("aes256gcm_tc13 {hex.encode(tc13)}")
-        tc14 :: expert.aes256gcm_seal(zero_key, zero_iv, repeat_byte(U8{0}, 16), [U8]{}) ?? return
+        tc14: expert.aes256gcm_seal(zero_key, zero_iv, repeat_byte(U8{0}, 16), [U8]{}) ?? return
         print("aes256gcm_tc14 {hex.encode(tc14)}")
-        tc14_open :: expert.aes256gcm_open(zero_key, zero_iv, tc14, [U8]{}) ?? return
+        tc14_open: expert.aes256gcm_open(zero_key, zero_iv, tc14, [U8]{}) ?? return
         print("aes256gcm_open {tc14_open == repeat_byte(U8{0}, 16)}")
-        xkey :: unhex("808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f")
-        xnonce :: unhex("404142434445464748494a4b4c4d4e4f5051525354555657")
-        xaad :: unhex("50515253c0c1c2c3c4c5c6c7")
-        xplain :: "Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it.".bytes()
-        xbox :: expert.xchacha20poly1305_seal(xkey, xnonce, xplain, xaad) ?? return
+        xkey: unhex("808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f")
+        xnonce: unhex("404142434445464748494a4b4c4d4e4f5051525354555657")
+        xaad: unhex("50515253c0c1c2c3c4c5c6c7")
+        xplain: "Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it.".bytes()
+        xbox: expert.xchacha20poly1305_seal(xkey, xnonce, xplain, xaad) ?? return
         print("xchacha_a31 {hex.encode(xbox)}")
-        xopen :: expert.xchacha20poly1305_open(xkey, xnonce, xbox, xaad) ?? return
+        xopen: expert.xchacha20poly1305_open(xkey, xnonce, xbox, xaad) ?? return
         print("xchacha_open {xopen == xplain}")
-        argon_a :: expert.argon2id(password, "somesalt".bytes(), 8192, 1, 1, 16) ?? return
+        argon_a: expert.argon2id(password, "somesalt".bytes(), 8192, 1, 1, 16) ?? return
         print("argon2id_m8192_t1_p1 {hex.encode(expert.secret_bytes(argon_a))}")
-        argon_b :: expert.argon2id(password, "somesalt".bytes(), 8192, 2, 2, 32) ?? return
+        argon_b: expert.argon2id(password, "somesalt".bytes(), 8192, 2, 2, 32) ?? return
         print("argon2id_m8192_t2_p2 {hex.encode(expert.secret_bytes(argon_b))}")
 
         print("-- typed length errors")
-        short :: repeat_byte(U8{1}, 31)
+        short: repeat_byte(U8{1}, 31)
         if expert.aes256gcm_seal(short, zero_iv, [U8]{}, [U8]{}) == {
             .Ok(_) -> print("aes256gcm_short_key accepted")
             .Err(e) -> print("aes256gcm_short_key {crypto_error_name(e)}")

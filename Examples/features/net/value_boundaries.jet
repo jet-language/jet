@@ -2,60 +2,60 @@
 // original form beside the normalized one, invalid input is a typed failure,
 // and no parse touches the network.
 use {
-    uuid :: core.crypto.uuid
-    http :: core.http
-    ip :: core.net.ip
-    url :: core.net.url
+    uuid: core.crypto.uuid
+    http: core.http
+    ip: core.net.ip
+    url: core.net.url
 }
 
-fn url_line(text: String) -> String Never! {
+url_line: fn(text: String) -> String Never! {
     if url.parse(text) == {
         .Ok(value) -> "ok {value.to_string()}"
         .Err(_) -> "invalid"
     }
 }
 
-fn ipv4_line(text: String) -> String Never! {
+ipv4_line: fn(text: String) -> String Never! {
     if ip.parse_ipv4(text) == {
         .Ok(value) -> "ok {ip.ipv4_to_string(value)}"
         .Err(_) -> "invalid"
     }
 }
 
-fn ipv6_line(text: String) -> String Never! {
+ipv6_line: fn(text: String) -> String Never! {
     if ip.parse_ipv6(text) == {
         .Ok(value) -> "ok {ip.ipv6_compressed(value)}"
         .Err(_) -> "invalid"
     }
 }
 
-fn uuid_line(text: String) -> String Never! {
+uuid_line: fn(text: String) -> String Never! {
     if uuid.parse(text) == {
         .Ok(value) -> "ok {value}"
         .Err(_) -> "invalid"
     }
 }
 
-fn run() {
+run: fn() {
     // Normalize versus original: the caller keeps the written text; parse()
     // lowers the scheme and host and removes dot segments, but keeps an
     // explicitly written default port.
-    written :: "HTTPS://Example.TEST:443/a/./b/../c?x=1"
-    parsed :: url.parse(written) ?? panic("url")
-    normalized :: parsed.normalize()
+    written: "HTTPS://Example.TEST:443/a/./b/../c?x=1"
+    parsed: url.parse(written) ?? panic("url")
+    normalized: parsed.normalize()
     print("written: {written}")
     print("parsed: {parsed.to_string()}")
     print("normalized: {normalized.to_string()}")
     print("port: {parsed.port() ?? -1} default: {parsed.default_port() ?? -1}")
 
     // Repeated query keys keep their order and every occurrence.
-    repeated :: url.parse("https://example.test/search?tag=b&tag=a&tag=b") ?? panic("query")
+    repeated: url.parse("https://example.test/search?tag=b&tag=a&tag=b") ?? panic("query")
     loop pair in repeated.query_pairs() -> print("query {pair[0]}={pair[1]}")
-    added :: repeated.add_query("tag", "c")
+    added: repeated.add_query("tag", "c")
     print("added: {added.query()}")
 
     // An escape already in the input is not escaped again.
-    escaped :: url.parse("https://example.test/a%20b?q=x%26y") ?? panic("escaped")
+    escaped: url.parse("https://example.test/a%20b?q=x%26y") ?? panic("escaped")
     print("escaped: {escaped.to_string()}")
     print("segments: {escaped.path_segments().join("|")}")
     print("encode once: {url.percent_encode("a b")} decode: {url.percent_decode("a%20b") ?? "bad"}")
@@ -63,7 +63,7 @@ fn run() {
     // IDNA: a Unicode host becomes its ASCII form; empty and over-long labels
     // and spaces fail.
     print("idna: {url_line("https://Bücher.example/")}")
-    long_label :: "a".repeat(64)
+    long_label: "a".repeat(64)
     print("long label: {url_line("https://{long_label}.example/")}")
     print("empty label: {url_line("https://a..example/")}")
     print("space: {url_line("https://a b.example/")}")

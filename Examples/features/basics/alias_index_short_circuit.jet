@@ -3,17 +3,17 @@
 // operand's block does not dominate the arm, so its payload binding is an
 // ordinary slot, never an alias over an index evaluated in that block. The
 // nested form tests the same element under a dominating condition.
-enum Part {
+Part: enum {
     Lit(text: String)
     Hole
 }
 
-enum Expr {
+Expr: enum {
     Str(parts: [Part])
     Other
 }
 
-fn short_circuit_shape(value: Expr) -> String? {
+short_circuit_shape: fn(value: Expr) -> String? {
     if value == {
         .Str(parts) -> {
             if parts.len() == 1 && parts[0] == .Lit(text) -> return Val(text)
@@ -23,7 +23,7 @@ fn short_circuit_shape(value: Expr) -> String? {
     }
 }
 
-fn nested_shape(value: Expr) -> String? {
+nested_shape: fn(value: Expr) -> String? {
     if value == {
         .Str(parts) -> {
             if parts.len() == 1 {
@@ -35,9 +35,9 @@ fn nested_shape(value: Expr) -> String? {
     }
 }
 
-fn run() {
-    one :: Expr.Str{parts: [Part]{Part.Lit{text: "alpha"}}}
-    two :: Expr.Str{parts: [Part]{Part.Lit{text: "beta"}, Part.Hole}}
+run: fn() {
+    one: Expr.Str{parts: [Part]{Part.Lit{text: "alpha"}}}
+    two: Expr.Str{parts: [Part]{Part.Lit{text: "beta"}, Part.Hole}}
     print("{short_circuit_shape(one) ?? "-"} {short_circuit_shape(two) ?? "-"}")
     print("{nested_shape(one) ?? "-"} {nested_shape(two) ?? "-"}")
 }

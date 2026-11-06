@@ -1,20 +1,20 @@
-struct Res { name: String }
+Res: struct { name: String }
 impl Res.Close {
-    fn close(^self) { print("close {self.name}") }
+    close: fn(^self) { print("close {self.name}") }
 }
 
-struct Box { res: Res }
+Box: struct { res: Res }
 
-fn keep(res: ^Res) -> Res { res }
+keep: fn(res: ^Res) -> Res { res }
 
 // The shared storage keeps owning the guard's payload: a `^` out of the
 // guard would leave its other guards and its cleanup a closed value.
-fn steal(storage: Shared<Box>) -> Res {
+steal: fn(storage: Shared<Box>) -> Res {
     guard := storage.guard_edit()
     keep(^guard.value.res)
 }
 
-fn run() {
-    storage :: shared Box{res: Res{name: "kept"}}
-    _ :: steal(storage)
+run: fn() {
+    storage: shared Box{res: Res{name: "kept"}}
+    _: steal(storage)
 }

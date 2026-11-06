@@ -21,14 +21,14 @@ use jet_foundation.[
 ]
 
 // Rust Arithmetic{Mode,Operation}::as_str presentation, not policy inference.
-fn semindex_arithmetic_mode_label(mode: ArithmeticMode) -> String Never! {
+semindex_arithmetic_mode_label: fn(mode: ArithmeticMode) -> String Never! {
     if mode == {
         .Checked -> "Checked"
         .Wrapping -> "Wrapping"
         .Saturating -> "Saturating"
     }
 }
-fn semindex_arithmetic_operation_label(operation: ArithmeticOperation) -> String Never! {
+semindex_arithmetic_operation_label: fn(operation: ArithmeticOperation) -> String Never! {
     if operation == {
         .Add -> "add"
         .Sub -> "sub"
@@ -37,27 +37,27 @@ fn semindex_arithmetic_operation_label(operation: ArithmeticOperation) -> String
         .Pow -> "pow"
     }
 }
-fn semindex_format_arithmetic_hover(fact: ArithmeticPolicyFact, module_path: String) -> String Never! {
-    operation :: if fact.operation == {
+semindex_format_arithmetic_hover: fn(fact: ArithmeticPolicyFact, module_path: String) -> String Never! {
+    operation: if fact.operation == {
         .Val(operation) -> semindex_arithmetic_operation_label(operation)
         .None -> "operation"
     }
-    policy :: semindex_arithmetic_mode_label(fact.mode)
+    policy: semindex_arithmetic_mode_label(fact.mode)
     "fixed-width {operation}: .{policy}; scope = {module_path}:{fact.scope_span.start}..{fact.scope_span.end}"
 }
 
 // Checked fact sentinel AND exact original UTF-8 source bytes are required.
 // A user-authored @origin binding alone must never become a compiler fact read.
-fn semindex_comptime_origin_reference(name: String, span: Span, source: String) -> Bool Never! {
-    sentinel :: name.bytes()
-    prefix :: "jet.fact.".bytes()
+semindex_comptime_origin_reference: fn(name: String, span: Span, source: String) -> Bool Never! {
+    sentinel: name.bytes()
+    prefix: "jet.fact.".bytes()
     if sentinel.len() < prefix.len() + 1 || sentinel[0] != 0 -> return false
     loop index in 0..<prefix.len() {
         if sentinel[index + 1] != prefix[index] -> return false
     }
-    bytes :: source.bytes()
+    bytes: source.bytes()
     if span.start < 0 || span.end < span.start || span.end > bytes.len() -> return false
-    expected :: "origin".bytes()
+    expected: "origin".bytes()
     if span.end - span.start != expected.len() -> return false
     loop index in 0..<expected.len() {
         if bytes[span.start + index] != expected[index] -> return false
@@ -66,7 +66,7 @@ fn semindex_comptime_origin_reference(name: String, span: Span, source: String) 
 }
 
 // This is the existing structural_slot callback, not a second AST visitor.
-fn semindex_expr_child(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, expr: Expr, mp: String, slot: String) {
+semindex_expr_child: fn(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, expr: Expr, mp: String, slot: String) {
     semindex_structural_slot(&db, &ctx, slot, StructuralSlotKind.Scalar, (db: SymbolDB, ctx: WalkCtx) -> {
         semindex_collect_expr(&db, &ctx, names, program, source, expr, mp)
     })
@@ -74,14 +74,14 @@ fn semindex_expr_child(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: 
 
 // The same stateless provider-impl convention as CanonicalASTDefaultProvider.
 // Complete synchronous CallValue/OptField projection before generic node insertion.
-enum SemIndexOptionalCallVisitor { Borrowed }
+SemIndexOptionalCallVisitor: enum { Borrowed }
 impl SemIndexOptionalCallVisitor.CanonicalASTOptionalCallVisitor {
-    fn visit_optional_method_call(self, db: &SymbolDB, context: &WalkCtx, names: NameFacts, program: Program, source: String, module_path: String, receiver: Expr, receiver_span: Span, method: String, method_span: Span, type_args: [Type], args: [CallArg], call_span: Span) Never! {
-        call_id :: semindex_record_node(&db, context, "expr", "Discriminant(45)", module_path, call_span)
+    visit_optional_method_call: fn(self, db: &SymbolDB, context: &WalkCtx, names: NameFacts, program: Program, source: String, module_path: String, receiver: Expr, receiver_span: Span, method: String, method_span: Span, type_args: [Type], args: [CallArg], call_span: Span) Never! {
+        call_id: semindex_record_node(&db, context, "expr", "Discriminant(45)", module_path, call_span)
         if call_id == .Val(id) -> &context.structural_parents.push(id)
         semindex_structural_slot(&db, &context, "callee", StructuralSlotKind.Scalar, (db: SymbolDB, ctx: WalkCtx) -> {
-            field_span :: Span{start: receiver_span.start, end: method_span.end}
-            field_id :: semindex_record_node(&db, ctx, "expr", "Discriminant(26)", module_path, field_span)
+            field_span: Span{start: receiver_span.start, end: method_span.end}
+            field_id: semindex_record_node(&db, ctx, "expr", "Discriminant(26)", module_path, field_span)
             if field_id == .Val(id) -> &ctx.structural_parents.push(id)
             semindex_expr_child(&db, &ctx, names, program, source, receiver, module_path, "base")
             &db.refs.push(semindex_scoped_ref(&db, ctx, names, method, method_span, module_path))
@@ -95,13 +95,13 @@ impl SemIndexOptionalCallVisitor.CanonicalASTOptionalCallVisitor {
     }
 }
 
-fn semindex_collect_expr(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, expr: Expr, mp: String) {
+semindex_collect_expr: fn(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, expr: Expr, mp: String) {
     if canonical_ast_visit_optional_method_call<SemIndexOptionalCallVisitor, SymbolDB, WalkCtx, NameFacts, Program, String, String>(expr, SemIndexOptionalCallVisitor.Borrowed, &db, &ctx, names, program, source, mp) -> return
     // Implicit owning copies reuse the operand span; authored ~ includes its sigil.
     if expr == .Copy(inner, span, _) {
         if span == expr_span(inner) -> &db.inlay.push(InlayHint{span: span, module_path: mp, label: " ~ copy"})
     }
-    structural_id :: semindex_record_node(&db, ctx, "expr", semindex_expr_shape(expr), mp, semindex_structural_expr_span(expr))
+    structural_id: semindex_record_node(&db, ctx, "expr", semindex_expr_shape(expr), mp, semindex_structural_expr_span(expr))
     if structural_id == .Val(id) -> &ctx.structural_parents.push(id)
     if expr == {
         .PtrFromAddr(_, _, _, addr, _, _) -> semindex_expr_child(&db, &ctx, names, program, source, addr, mp, "address")
@@ -204,7 +204,7 @@ fn semindex_collect_expr(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program
         })
         .StructLit(type_name_value, type_args, _, _, fields, inferred, span, _) -> {
             if inferred && type_name_value != "" {
-                label :: if type_args.len() == 0 -> type_name_value else -> type_name(Type.Apply{name: type_name_value, args: type_args})
+                label: if type_args.len() == 0 -> type_name_value else -> type_name(Type.Apply{name: type_name_value, args: type_args})
                 &db.hover.push(HoverEntry{span: span, module_path: mp, text: "`{label}`"})
                 &db.inlay.push(InlayHint{span: span, module_path: mp, label: ": {label}"})
             }
@@ -328,7 +328,7 @@ fn semindex_collect_expr(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program
 
 // Lambda/if expression bodies intentionally visit only Val, Expr and DeferClose,
 // exactly Rust collect_expr_stmt, not the full statement walker.
-fn semindex_collect_expr_stmt(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, stmt: Stmt, mp: String) {
+semindex_collect_expr_stmt: fn(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, stmt: Stmt, mp: String) {
     if stmt == {
         .Expr(expr) -> semindex_collect_expr(&db, &ctx, names, program, source, expr, mp)
         .DeferClose(close, _) -> semindex_collect_expr(&db, &ctx, names, program, source, close, mp)

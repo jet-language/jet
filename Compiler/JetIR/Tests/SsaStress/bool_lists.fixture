@@ -2,20 +2,20 @@
 // O2 under SSA stress the moves SsaOut adds separate a stop poll from its If
 // (X64Select ir_x64_stop_point), and the poll must still be called.
 
-STATIC_FLAGS :: [true, false, false, true, true]
+STATIC_FLAGS: [true, false, false, true, true]
 
-struct Board {
+Board: struct {
     cells: [Bool]
     name: String
 }
 
-fn flip(xs: [Bool]) -> [Bool] {
+flip: fn(xs: [Bool]) -> [Bool] {
     out := [Bool]{}
     loop x in xs -> &out.push(!x)
     out
 }
 
-fn count(xs: [Bool]) -> Int {
+count: fn(xs: [Bool]) -> Int {
     n := 0
     loop x in xs {
         if x -> n += 1
@@ -23,7 +23,7 @@ fn count(xs: [Bool]) -> Int {
     n
 }
 
-fn sieve(n: Int) -> Int {
+sieve: fn(n: Int) -> Int {
     marks := [Bool]{}
     loop _ in 0..<n -> &marks.push(true)
     marks[0] = false
@@ -42,13 +42,13 @@ fn sieve(n: Int) -> Int {
     count(marks)
 }
 
-fn run() {
+run: fn() {
     xs := [true, false, true, true, false, false, true]
     print("{xs} {xs.len()} {count(xs)}")
     &xs.push(false)
     &xs.push(true)
     print("{xs} {xs.len()}")
-    popped :: &xs.pop()
+    popped: &xs.pop()
     print("{popped} {xs}")
     xs[1] = true
     xs[2] = false
@@ -82,8 +82,8 @@ fn run() {
     print("min {xs.min()} max {xs.max()}")
     words := [Int]{}
     loop k in 0..<9 -> &words.push(k)
-    odd :: words.filter((w: Int) -> w %% 2 == 1)
+    odd: words.filter((w: Int) -> w %% 2 == 1)
     print("odd {odd}")
-    flags :: words.map((w: Int) -> w > 4)
+    flags: words.map((w: Int) -> w > 4)
     print("flags {flags} {count(flags)}")
 }

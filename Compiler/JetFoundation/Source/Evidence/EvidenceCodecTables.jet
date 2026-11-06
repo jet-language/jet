@@ -1,11 +1,11 @@
 // Canonical evidence codec error and bidirectional derivation code tables.
 // Shared by EvidenceEncode and EvidenceCodec; unchanged wire mappings.
 
-fn evidence_codec_error(message: String) -> EvidenceCodecError Never! {
+evidence_codec_error: fn(message: String) -> EvidenceCodecError Never! {
     EvidenceCodecError{message: message}
 }
 
-fn evidence_derivation_method_code(value: DerivationMethod) -> Int Never! {
+evidence_derivation_method_code: fn(value: DerivationMethod) -> Int Never! {
     if value == {
         .StaticDerivation -> 0
         .FormalProof -> 1
@@ -15,7 +15,7 @@ fn evidence_derivation_method_code(value: DerivationMethod) -> Int Never! {
     }
 }
 
-fn evidence_derivation_method_from_code(code: Int) -> DerivationMethod EvidenceCodecError! {
+evidence_derivation_method_from_code: fn(code: Int) -> DerivationMethod EvidenceCodecError! {
     if code == {
         0 -> Ok(DerivationMethod.StaticDerivation)
         1 -> Ok(DerivationMethod.FormalProof)
@@ -26,7 +26,7 @@ fn evidence_derivation_method_from_code(code: Int) -> DerivationMethod EvidenceC
     }
 }
 
-fn evidence_derivation_disposition_code(value: DerivationDisposition) -> Int Never! {
+evidence_derivation_disposition_code: fn(value: DerivationDisposition) -> Int Never! {
     if value == {
         .Current -> 0
         .Stale -> 1
@@ -39,7 +39,7 @@ fn evidence_derivation_disposition_code(value: DerivationDisposition) -> Int Nev
     }
 }
 
-fn evidence_derivation_disposition_from_code(code: Int) -> DerivationDisposition EvidenceCodecError! {
+evidence_derivation_disposition_from_code: fn(code: Int) -> DerivationDisposition EvidenceCodecError! {
     if code == {
         0 -> Ok(DerivationDisposition.Current)
         1 -> Ok(DerivationDisposition.Stale)

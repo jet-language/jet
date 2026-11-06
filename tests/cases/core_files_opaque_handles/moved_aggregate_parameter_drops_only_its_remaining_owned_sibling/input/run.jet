@@ -1,22 +1,22 @@
 
-use files :: core.files
+use files: core.files
 
-struct Pair { left: files.TempFile, right: files.TempFile }
+Pair: struct { left: files.TempFile, right: files.TempFile }
 
-fn consume(pair: ^Pair) -> String {
-    left :: pair.left.path
-    sibling :: pair.right.path
+consume: fn(pair: ^Pair) -> String {
+    left: pair.left.path
+    sibling: pair.right.path
     close(^pair.left)
     print(!files.exists(left))
     print(files.exists(sibling))
     sibling
 }
 
-fn run() {
+run: fn() {
     pair := Pair{
         left: files.temp_file("parameter-left") ?? panic("left"),
         right: files.temp_file("parameter-right") ?? panic("right")
     }
-    sibling :: consume(^pair)
+    sibling: consume(^pair)
     print(!files.exists(sibling))
 }

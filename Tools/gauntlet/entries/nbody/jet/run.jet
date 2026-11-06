@@ -1,26 +1,26 @@
-#CLI struct Args { steps: Int }
+#CLI Args: struct { steps: Int }
 
-fn energy(b: [(p: Vec3, v: Vec3, m: Float)]) -> Float {
+energy: fn(b: [(p: Vec3, v: Vec3, m: Float)]) -> Float {
     e := Float{0.0}
     loop (i, x) in b {
         e += Float{0.5} * x.m * x.v.dot(x.v)
         loop j in (i + 1)..<5 {
-            y :: b[j]
+            y: b[j]
             e -= x.m * y.m / (x.p - y.p).length()
         }
     }
     e
 }
 
-fn advance(b: &[(p: Vec3, v: Vec3, m: Float)], n: Int) {
+advance: fn(b: &[(p: Vec3, v: Vec3, m: Float)], n: Int) {
     d := Float{0.01}
     loop _ in 0..<n {
         loop i in 0..<5 {
             loop j in (i + 1)..<5 {
                 x := b[i]
                 y := b[j]
-                r :: x.p - y.p
-                g :: d / (r.dot(r) * r.length())
+                r: x.p - y.p
+                g: d / (r.dot(r) * r.length())
                 x.v -= r * (y.m * g)
                 y.v += r * (x.m * g)
                 b[i] = x
@@ -35,10 +35,10 @@ fn advance(b: &[(p: Vec3, v: Vec3, m: Float)], n: Int) {
     }
 }
 
-fn run(args: Args) {
-    circle_pi :: Float{3.141592653589793}
-    s :: Float{4.0} * circle_pi * circle_pi
-    y :: Float{365.24}
+run: fn(args: Args) {
+    circle_pi: Float{3.141592653589793}
+    s: Float{4.0} * circle_pi * circle_pi
+    y: Float{365.24}
     b := [
         (p: Vec3(0.0, 0.0, 0.0), v: Vec3(0.0, 0.0, 0.0), m: s),
         (p: Vec3(4.84143144246472090, -1.16032004402742839, -0.103622044471123109), v: Vec3(0.00166007664274403694 * y, 0.00769901118419740425 * y, -0.0000690460016972063023 * y), m: Float{0.000954791938424326609} * s),

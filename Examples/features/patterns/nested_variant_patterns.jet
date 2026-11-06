@@ -3,36 +3,36 @@
 // exhaustive when its nested arms jointly cover every payload, and a table
 // evaluates a call subject once, whether it produces a value or not.
 #Error
-enum Fault {
+Fault: enum {
     Low
     High
 }
 
-enum Shape {
+Shape: enum {
     Circle(r: Int)
     Rect(w: Int, h: Int)
 }
 
-enum Slot {
+Slot: enum {
     Holds(shape: Shape?)
     Empty
 }
 
-fn pick(n: Int) -> Int Fault! {
+pick: fn(n: Int) -> Int Fault! {
     print("pick {n}")
     if n < 0 -> return Err(.Low)
     if n > 9 -> return Err(.High)
     Ok(n)
 }
 
-fn make(n: Int) -> Shape Fault! {
+make: fn(n: Int) -> Shape Fault! {
     if n < 0 -> return Err(.Low)
     if n == 0 -> return Ok(Shape.Circle{r: 1})
     Ok(Shape.Rect{w: n, h: n + 1})
 }
 
 // Result of enum: the two nested `.Err` arms cover `Fault` together.
-fn classify(n: Int) -> String {
+classify: fn(n: Int) -> String {
     if pick(n) == {
         .Ok(v) -> "ok {v}"
         .Err(.Low) -> "low"
@@ -41,7 +41,7 @@ fn classify(n: Int) -> String {
 }
 
 // Result whose success payload is an enum with bindings.
-fn shape_name(n: Int) -> String {
+shape_name: fn(n: Int) -> String {
     if make(n) == {
         .Ok(.Circle(r)) -> "circle {r}"
         .Ok(.Rect(w, h)) -> "rect {w}x{h}"
@@ -50,7 +50,7 @@ fn shape_name(n: Int) -> String {
 }
 
 // Option of enum.
-fn area(s: Shape?) -> Int {
+area: fn(s: Shape?) -> Int {
     if s == {
         .Val(.Circle(r)) -> 3 * r * r
         .Val(.Rect(w, h)) -> w * h
@@ -59,7 +59,7 @@ fn area(s: Shape?) -> Int {
 }
 
 // Two levels: enum payload → Option → enum.
-fn describe(slot: Slot) -> String {
+describe: fn(slot: Slot) -> String {
     if slot == {
         .Holds(.Val(.Circle(r))) -> "holds circle {r}"
         .Holds(.Val(.Rect(w, h))) -> "holds rect {w}x{h}"
@@ -68,7 +68,7 @@ fn describe(slot: Slot) -> String {
     }
 }
 
-fn run() {
+run: fn() {
     loop n in [-1, 5, 12] -> print(classify(n))
     loop n in [-1, 7] {
         if pick(n) == {

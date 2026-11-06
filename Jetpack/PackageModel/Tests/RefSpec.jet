@@ -8,44 +8,44 @@ use {
     jetpack_foundation.[REF_PROVIDER_AT]
 }
 
-fn pkg_test_ref_error(raw: String) -> RefError {
+pkg_test_ref_error: fn(raw: String) -> RefError {
     if RefSpec.classify(raw) == {
         .Ok(_) -> panic("expected a ref error for {raw}")
         .Err(error) -> error
     }
 }
 
-fn pkg_test_provider_ref_error(raw: String) -> RefError {
+pkg_test_provider_ref_error: fn(raw: String) -> RefError {
     if ProviderRef.classify(raw) == {
         .Ok(_) -> panic("expected a provider ref error for {raw}")
         .Err(error) -> error
     }
 }
 
-fn pkg_test_workspace_error(raw: String, index: WorkspaceIndex) -> RefError {
+pkg_test_workspace_error: fn(raw: String, index: WorkspaceIndex) -> RefError {
     if RefSpec.classify_with_workspace(raw, SourceTable.empty(), index) == {
         .Ok(_) -> panic("expected a workspace ref error for {raw}")
         .Err(error) -> error
     }
 }
 
-fn pkg_test_classify(raw: String) -> RefSpec {
+pkg_test_classify: fn(raw: String) -> RefSpec {
     RefSpec.classify(raw) ?? panic("{raw} should classify")
 }
 
-fn pkg_test_classify_in(raw: String, table: SourceTable) -> RefSpec {
+pkg_test_classify_in: fn(raw: String, table: SourceTable) -> RefSpec {
     RefSpec.classify_in(raw, table) ?? panic("{raw} should classify against the table")
 }
 
-fn pkg_test_classify_workspace(raw: String, table: SourceTable, index: WorkspaceIndex) -> RefSpec {
+pkg_test_classify_workspace: fn(raw: String, table: SourceTable, index: WorkspaceIndex) -> RefSpec {
     RefSpec.classify_with_workspace(raw, table, index) ?? panic("{raw} should classify in the workspace")
 }
 
-fn pkg_test_provider_ref(raw: String) -> ProviderRef {
+pkg_test_provider_ref: fn(raw: String) -> ProviderRef {
     ProviderRef.classify(raw) ?? panic("{raw} should classify as a provider ref")
 }
 
-fn pkg_test_ws_index() -> WorkspaceIndex {
+pkg_test_ws_index: fn() -> WorkspaceIndex {
     WorkspaceIndex.from_members([WorkspaceMember]{
         {name: "logging", path: "./infra/logging"},
         {name: "ranker", path: "packages/ranker"}
@@ -53,7 +53,7 @@ fn pkg_test_ws_index() -> WorkspaceIndex {
 }
 
 #Test("nixpkgs is not a public source") {
-    refs :: [String]{"ripgrep@nixpkgs", "ripgrep@nixpkgs#auto", "ripgrep@nixpkgs#version=15.2.0"}
+    refs: [String]{"ripgrep@nixpkgs", "ripgrep@nixpkgs#auto", "ripgrep@nixpkgs#version=15.2.0"}
     loop raw in refs {
         assert_eq(pkg_test_ref_error(raw), RefError.Malformed(raw))
         assert_eq(pkg_test_ref_error(raw).code(), Val("E1358"))
@@ -61,7 +61,7 @@ fn pkg_test_ws_index() -> WorkspaceIndex {
 }
 
 #Test("classifies jetpack and canonicalizes bare package refs") {
-    explicit :: pkg_test_classify("ripgrep@jetpack")
+    explicit: pkg_test_classify("ripgrep@jetpack")
     assert_eq(explicit.source, RefSource.Jetpack)
     assert_eq(pkg_with_default_source("ripgrep"), "ripgrep@jetpack")
     assert_eq(pkg_canonical_locked_ref(pkg_with_default_source("ripgrep")), pkg_canonical_locked_ref("ripgrep@jetpack"))
@@ -73,59 +73,59 @@ fn pkg_test_ws_index() -> WorkspaceIndex {
 }
 
 #Test("classifies github repo") {
-    spec :: pkg_test_classify("owner/my-fastfetch-jet-config@github")
+    spec: pkg_test_classify("owner/my-fastfetch-jet-config@github")
     assert_eq(spec.source, RefSource.Github)
     assert_eq(spec.package, "owner/my-fastfetch-jet-config")
     assert_eq(spec.short_name(), "my-fastfetch-jet-config")
 }
 
 #Test("classifies local path") {
-    spec :: pkg_test_classify("./my-env")
+    spec: pkg_test_classify("./my-env")
     assert_eq(spec.source, RefSource.Path)
     assert_eq(spec.package, "./my-env")
 }
 
 #Test("classifies direct cran root with exact version") {
-    spec :: pkg_test_classify("jsonlite@cran#version=1.9.0")
+    spec: pkg_test_classify("jsonlite@cran#version=1.9.0")
     assert_eq(spec.source, RefSource.Cran)
     assert_eq(spec.package, "jsonlite#version=1.9.0")
 }
 
 #Test("classifies direct luarocks root with exact version") {
-    spec :: pkg_test_classify("luasocket@luarocks#version=3.1.0-1")
+    spec: pkg_test_classify("luasocket@luarocks#version=3.1.0-1")
     assert_eq(spec.source, RefSource.LuaRocks)
     assert_eq(spec.package, "luasocket#version=3.1.0-1")
     assert_eq(ProviderKind.parse("luarocks"), ProviderKind.LuaRocks)
 }
 
 #Test("classifies direct scripting registry roots") {
-    cases :: [(raw: String, source: RefSource, provider: ProviderKind)]{
+    cases: [(raw: String, source: RefSource, provider: ProviderKind)]{
         (raw: "rack@ruby#version=3.2.0", source: RefSource.RubyGems, provider: ProviderKind.RubyGems),
         (raw: "JSON-MaybeXS@perl#version=1.004008", source: RefSource.Cpan, provider: ProviderKind.Cpan),
         (raw: "monolog/monolog@php#version=3.9.0", source: RefSource.Packagist, provider: ProviderKind.Packagist)
     }
     loop case in cases {
-        spec :: pkg_test_classify(case.raw)
+        spec: pkg_test_classify(case.raw)
         assert_eq(spec.source, case.source)
         assert_eq(ProviderKind.parse(spec.source.label()), case.provider)
     }
 }
 
 #Test("classifies direct jet registry npm and cargo roots") {
-    cases :: [(raw: String, source: RefSource, provider: ProviderKind)]{
+    cases: [(raw: String, source: RefSource, provider: ProviderKind)]{
         (raw: "hello@jet-registry#version=1.0.0", source: RefSource.JetRegistry, provider: ProviderKind.JetRegistry),
         (raw: "left-pad@npm#version=1.3.0", source: RefSource.Npm, provider: ProviderKind.Npm),
         (raw: "serde@cargo#version=1.0.200", source: RefSource.Cargo, provider: ProviderKind.Cargo)
     }
     loop case in cases {
-        spec :: pkg_test_classify(case.raw)
+        spec: pkg_test_classify(case.raw)
         assert_eq(spec.source, case.source)
         assert_eq(ProviderKind.parse(spec.source.label()), case.provider)
     }
 }
 
 #Test("classifies native release source") {
-    spec :: pkg_test_classify("omp@releases")
+    spec: pkg_test_classify("omp@releases")
     assert_eq(spec.source, RefSource.Releases)
     assert_eq(spec.package, "omp")
     assert_eq(ProviderKind.parse("jetpackage"), ProviderKind.JetPackage)
@@ -136,7 +136,7 @@ fn pkg_test_ws_index() -> WorkspaceIndex {
 }
 
 #Test("bare package defaults to jetpack") {
-    spec :: pkg_test_classify("fastfetch")
+    spec: pkg_test_classify("fastfetch")
     assert_eq(spec.source, RefSource.Jetpack)
     assert_eq(spec.package, "fastfetch")
 }
@@ -147,7 +147,7 @@ fn pkg_test_ws_index() -> WorkspaceIndex {
 }
 
 #Test("bare package selector uses jetpack") {
-    spec :: pkg_test_classify("fastfetch#latest")
+    spec: pkg_test_classify("fastfetch#latest")
     assert_eq(spec.source, RefSource.Jetpack)
     assert_eq(spec.package, "fastfetch#latest")
 }
@@ -160,15 +160,15 @@ fn pkg_test_ws_index() -> WorkspaceIndex {
 }
 
 #Test("provider first and path word refs are malformed") {
-    refs :: [String]{"github@owner/repo", "path@../helpers", "../helpers@path"}
+    refs: [String]{"github@owner/repo", "path@../helpers", "../helpers@path"}
     loop raw in refs {
         assert_eq(pkg_test_ref_error(raw), RefError.Malformed(raw))
     }
 }
 
 #Test("package ref keeps version after source") {
-    table :: SourceTable.from_decls([NamedSourceDecl]{NamedSourceDecl{name: "vendor", upstream: "acme/helpers@github", via: ProviderKind.Core}})
-    spec :: pkg_test_classify_in("textkit@vendor#1.2.0", table)
+    table: SourceTable.from_decls([NamedSourceDecl]{NamedSourceDecl{name: "vendor", upstream: "acme/helpers@github", via: ProviderKind.Core}})
+    spec: pkg_test_classify_in("textkit@vendor#1.2.0", table)
     assert_eq(spec.package, "textkit#1.2.0")
     assert_eq(spec.source, RefSource.Named("vendor"))
 }
@@ -181,15 +181,15 @@ fn pkg_test_ws_index() -> WorkspaceIndex {
 }
 
 #Test("classifies declared named source") {
-    table :: SourceTable.from_decls([NamedSourceDecl]{NamedSourceDecl{name: "stable", upstream: "github:NixOS/nixpkgs/nixos-24.05", via: ProviderKind.Nix}})
-    spec :: pkg_test_classify_in("ripgrep@stable", table)
+    table: SourceTable.from_decls([NamedSourceDecl]{NamedSourceDecl{name: "stable", upstream: "github:NixOS/nixpkgs/nixos-24.05", via: ProviderKind.Nix}})
+    spec: pkg_test_classify_in("ripgrep@stable", table)
     assert_eq(spec.source, RefSource.Named("stable"))
     assert_eq(spec.package, "ripgrep")
     assert_eq(spec.source.label(), "stable")
 }
 
 #Test("named source unknown lists declared") {
-    table :: SourceTable.from_decls([NamedSourceDecl]{
+    table: SourceTable.from_decls([NamedSourceDecl]{
         {name: "stable", upstream: "u1", via: ProviderKind.Nix},
         {name: "unstable", upstream: "u2", via: ProviderKind.Core}
     })
@@ -212,7 +212,7 @@ fn pkg_test_ws_index() -> WorkspaceIndex {
 
 // Rust: tests/workspace.rs:243
 #Test("bare form resolves unique member") {
-    spec :: pkg_test_classify_workspace("logging", SourceTable.empty(), pkg_test_ws_index())
+    spec: pkg_test_classify_workspace("logging", SourceTable.empty(), pkg_test_ws_index())
     assert_eq(spec.source, RefSource.Path)
     assert_eq(spec.package, "infra/logging")
 }
@@ -220,15 +220,15 @@ fn pkg_test_ws_index() -> WorkspaceIndex {
 // Rust: tests/workspace.rs:243
 #Test("path form resolves member") {
     // Path form matches the normalized relative path (`./` trimmed).
-    spec :: pkg_test_classify_workspace("infra/logging", SourceTable.empty(), pkg_test_ws_index())
+    spec: pkg_test_classify_workspace("infra/logging", SourceTable.empty(), pkg_test_ws_index())
     assert_eq(spec.source, RefSource.Path)
     assert_eq(spec.package, "infra/logging")
-    other :: pkg_test_classify_workspace("packages/ranker", SourceTable.empty(), pkg_test_ws_index())
+    other: pkg_test_classify_workspace("packages/ranker", SourceTable.empty(), pkg_test_ws_index())
     assert_eq(other.package, "packages/ranker")
 }
 
 #Test("unknown member is E1231 with suggestion") {
-    error :: pkg_test_workspace_error("loggin", pkg_test_ws_index())
+    error: pkg_test_workspace_error("loggin", pkg_test_ws_index())
     assert_eq(error.code(), Val("E1231"))
     if error == {
         .UnknownMember(_, suggestions) -> assert_eq(suggestions, [String]{"logging"})
@@ -245,11 +245,11 @@ fn pkg_test_ws_index() -> WorkspaceIndex {
 
 // Rust: tests/workspace.rs:269
 #Test("ambiguous bare member is E1230 and lists candidates") {
-    index :: WorkspaceIndex.from_members([WorkspaceMember]{
+    index: WorkspaceIndex.from_members([WorkspaceMember]{
         {name: "logging", path: "infra/logging"},
         {name: "logging", path: "apps/logging"}
     })
-    error :: pkg_test_workspace_error("logging", index)
+    error: pkg_test_workspace_error("logging", index)
     assert_eq(error.code(), Val("E1230"))
     if error == {
         .AmbiguousMember(_, candidates) -> {
@@ -263,26 +263,26 @@ fn pkg_test_ws_index() -> WorkspaceIndex {
 
 #Test("source form wins over index") {
     // An explicit `package@source` is never shadowed by the index.
-    table :: SourceTable.from_decls([NamedSourceDecl]{NamedSourceDecl{name: "nixpkgs", upstream: "u", via: ProviderKind.Nix}})
-    spec :: pkg_test_classify_workspace("logging@jetpack", table, pkg_test_ws_index())
+    table: SourceTable.from_decls([NamedSourceDecl]{NamedSourceDecl{name: "nixpkgs", upstream: "u", via: ProviderKind.Nix}})
+    spec: pkg_test_classify_workspace("logging@jetpack", table, pkg_test_ws_index())
     assert_eq(spec.source, RefSource.Jetpack)
     assert_eq(spec.package, "logging")
 }
 
 #Test("empty index uses jetpack for bare package") {
-    spec :: pkg_test_classify_workspace("logging", SourceTable.empty(), WorkspaceIndex.empty())
+    spec: pkg_test_classify_workspace("logging", SourceTable.empty(), WorkspaceIndex.empty())
     assert_eq(spec.source, RefSource.Jetpack)
     assert_eq(spec.package, "logging")
 }
 
 #Test("provider ref github with rev") {
-    parsed :: pkg_test_provider_ref("NixOS/nixpkgs/nixos-24.05@github")
+    parsed: pkg_test_provider_ref("NixOS/nixpkgs/nixos-24.05@github")
     assert_eq(parsed.provider, RefSource.Github)
     assert_eq(parsed.target, "NixOS/nixpkgs/nixos-24.05")
 }
 
 #Test("provider ref local path") {
-    parsed :: pkg_test_provider_ref("../helpers")
+    parsed: pkg_test_provider_ref("../helpers")
     assert_eq(parsed.provider, RefSource.Path)
     assert_eq(parsed.target, "../helpers")
 }
@@ -292,26 +292,26 @@ fn pkg_test_ws_index() -> WorkspaceIndex {
 }
 
 #Test("channel policies are checked and keep channel intent") {
-    pinned :: pkg_test_provider_ref("rustc@jetpack")
+    pinned: pkg_test_provider_ref("rustc@jetpack")
     assert_eq(pinned.policy, ChannelPolicy.Pinned)
     assert(pinned.channel == None)
 
-    manual :: pkg_test_provider_ref("jq@jetpack#latest")
+    manual: pkg_test_provider_ref("jq@jetpack#latest")
     assert_eq(manual.policy, ChannelPolicy.Manual)
     assert_eq(manual.target, "jq")
     assert_eq(manual.channel, Val(ChannelRef.Latest))
 
-    automatic :: pkg_test_provider_ref("omp@jetpack#auto")
+    automatic: pkg_test_provider_ref("omp@jetpack#auto")
     assert_eq(automatic.policy, ChannelPolicy.Automatic)
     assert_eq(automatic.target, "omp")
     assert_eq(automatic.channel, Val(ChannelRef.Latest))
 
-    retired :: "omp#auto{REF_PROVIDER_AT}jetpack"
+    retired: "omp#auto{REF_PROVIDER_AT}jetpack"
     assert_eq(pkg_test_provider_ref_error(retired), RefError.Malformed(retired))
 }
 
 #Test("retired selector forms do not fall back to canonical parsers") {
-    refs :: [String]{"#auto omp@releases", "omp#v18.0.4@releases"}
+    refs: [String]{"#auto omp@releases", "omp#v18.0.4@releases"}
     loop raw in refs {
         assert_eq(pkg_test_ref_error(raw), RefError.Malformed(raw))
         assert_eq(pkg_test_provider_ref_error(raw), RefError.Malformed(raw))
@@ -319,7 +319,7 @@ fn pkg_test_ws_index() -> WorkspaceIndex {
 }
 
 #Test("provider ref splits on last at") {
-    parsed :: pkg_test_provider_ref("owner@host/repo@github")
+    parsed: pkg_test_provider_ref("owner@host/repo@github")
     assert_eq(parsed.provider, RefSource.Github)
     assert_eq(parsed.target, "owner@host/repo")
 }

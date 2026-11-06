@@ -1,25 +1,25 @@
 
-struct UnservedRoute {
+UnservedRoute: struct {
     name: String
 
     impl Diagnostic {
-        fn what(self) -> String { "`{self.name}` has no served route" }
-        fn why(self) -> String { "a served function answers one route" }
-        fn fix(self) -> String { "add the route that `{self.name}` answers" }
+        what: fn(self) -> String { "`{self.name}` has no served route" }
+        why: fn(self) -> String { "a served function answers one route" }
+        fix: fn(self) -> String { "add the route that `{self.name}` answers" }
     }
 }
 
-struct Served {
+Served: struct {
     impl Marker {
-        sites :: [.Function]
+        sites: [.Function]
 
-        fn expand(self, target: Target) {
+        expand: fn(self, target: Target) {
             reject(UnservedRoute{name: target.name})
         }
     }
 }
 
 #Served
-fn serve() {}
+serve: fn() {}
 
-fn run() {}
+run: fn() {}

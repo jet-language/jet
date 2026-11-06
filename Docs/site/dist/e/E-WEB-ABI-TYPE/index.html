@@ -38,10 +38,10 @@
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E-WEB-ABI-TYPE</code>: <code>tests/ui/web_abi_callback.stderr</code>.</p>
 <pre class="diag">Error [jet.WebBoundaryTypeNotAllowed]: `Fn { params: [Int], ret: Some(Int), effect_bound: None }` cannot cross the JS/WASM boundary on a `#WasmExport` parameter
-  --&gt; tests/ui/web_abi_callback.jet:4:4
+  --&gt; tests/ui/web_abi_callback.jet:4:1
     |
-  4 | fn apply(cb: fn(Int) -&gt; Int, n: Int) -&gt; Int { cb(n) }
-    |    ^^^^^
+  4 | apply: fn(cb: fn(Int) -&gt; Int, n: Int) -&gt; Int { cb(n) }
+    | ^^^^^
  Why: Web exports and imports only admit ABI-safe types (scalars, `String`, `List`/`Map` of ABI-safe values, and `#[Codable]` structs/enums)
  Fix: Use a scalar, `String`, a `List`/`Map` of ABI-safe values, or a `#[Codable]` struct/enum whose fields are ABI-safe
 More: jet-lang.dev/e/E-WEB-ABI-TYPE

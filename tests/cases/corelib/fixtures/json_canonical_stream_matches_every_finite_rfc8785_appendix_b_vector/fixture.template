@@ -1,13 +1,13 @@
 
 use {
-    encoding :: core.encoding
-    json :: core.encoding.json
-    files :: core.files
-    math :: core.math
+    encoding: core.encoding
+    json: core.encoding.json
+    files: core.files
+    math: core.math
 }
 
-fn run() {
-    output :: files.create("{work}/appendix-b.json") ?? panic("create")
+run: fn() {
+    output: files.create("{work}/appendix-b.json") ?? panic("create")
     writer := json.writer(^output, encoding.EncodingLimits.safe(), true) ?? panic("writer")
     &writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
     &writer.write(encoding.DataEvent.Float(math.from_bits(0))) ?? panic("Appendix B value")

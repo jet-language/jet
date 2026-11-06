@@ -1,20 +1,20 @@
-use files :: core.files
+use files: core.files
 
-fn kit_steps_terminal_size(text: String) -> Bool {
+kit_steps_terminal_size: fn(text: String) -> Bool {
     kit_steps_terminal_dimensions(text) != None
 }
 
 // `ROWSxCOLS` as [rows, cols].
-fn kit_steps_terminal_dimensions(text: String) -> [Int]? {
-    pair :: text.split("x").to_list()
+kit_steps_terminal_dimensions: fn(text: String) -> [Int]? {
+    pair: text.split("x").to_list()
     if pair.len() != 2 -> return None
-    rows :: Int.parse(pair[0]) ?? return None
-    columns :: Int.parse(pair[1]) ?? return None
+    rows: Int.parse(pair[0]) ?? return None
+    columns: Int.parse(pair[1]) ?? return None
     if rows < 0 || columns < 0 -> return None
     Val([Int]{rows, columns})
 }
 
-fn kit_steps_has_terminal(step: KitStep) -> Bool {
+kit_steps_has_terminal: fn(step: KitStep) -> Bool {
     if step.terminal == {
         .Val(_) -> true
         .None -> false
@@ -23,7 +23,7 @@ fn kit_steps_has_terminal(step: KitStep) -> Bool {
 
 // Whether `label` names a live terminal session, so its `pty-send` and
 // `pty-close` lines may follow the session's recv and send steps.
-fn kit_steps_terminal_session(steps: [KitStep], label: String, joined: [String]) -> Bool {
+kit_steps_terminal_session: fn(steps: [KitStep], label: String, joined: [String]) -> Bool {
     if label == "" || kit_expect_named(joined, label) -> return false
     loop step in steps {
         if step.label == label && step.action == "session" && kit_steps_has_terminal(step) -> return true
@@ -37,10 +37,10 @@ fn kit_steps_terminal_session(steps: [KitStep], label: String, joined: [String])
 // (after a sleep for its delay) that runs where the line stands. A close
 // types the terminal's end-of-file character, as a terminal user ends input.
 // Partial terminal wiring such as `pty: stdout,stderr` stays refused.
-fn kit_steps_terminal_line(plan: KitPlan, key: String, original: String, joined: [String]) -> KitPlan Err! {
+kit_steps_terminal_line: fn(plan: KitPlan, key: String, original: String, joined: [String]) -> KitPlan Err! {
     result := plan
-    i :: result.steps.len() - 1
-    tokens :: kit_steps_tokens(kit_steps_body(original)) ?? return Err("invalid process wiring")
+    i: result.steps.len() - 1
+    tokens: kit_steps_tokens(kit_steps_body(original)) ?? return Err("invalid process wiring")
     words := [String]{}
     loop token in tokens -> &words.push(token.text)
     if key == "pty" {
@@ -49,7 +49,7 @@ fn kit_steps_terminal_line(plan: KitPlan, key: String, original: String, joined:
             return Ok(result)
         }
         if (result.steps[i].action != "" && result.steps[i].action != "session") || kit_steps_has_terminal(result.steps[i]) -> return Err("pty needs one process step or session")
-        size :: if words.len() == 3 -> kit_steps_terminal_dimensions(words[2]) ?? return Err("invalid terminal size") else -> [Int]{0, 0}
+        size: if words.len() == 3 -> kit_steps_terminal_dimensions(words[2]) ?? return Err("invalid terminal size") else -> [Int]{0, 0}
         result.steps[i].terminal = Val(KitTerminal{rows: size[0], cols: size[1]})
         return Ok(result)
     }
@@ -57,31 +57,31 @@ fn kit_steps_terminal_line(plan: KitPlan, key: String, original: String, joined:
     if result.steps[i].action == "" {
         terminal := result.steps[i].terminal ?? return Err("{key} needs a terminal step")
         if key == "pty-resize" {
-            size :: kit_steps_terminal_dimensions(words[0]) ?? return Err("invalid terminal size")
-            at :: kit_steps_offset_ns(words[2]) ?? return Err("invalid terminal event time")
+            size: kit_steps_terminal_dimensions(words[0]) ?? return Err("invalid terminal size")
+            at: kit_steps_offset_ns(words[2]) ?? return Err("invalid terminal event time")
             &terminal.events.push(KitTerminalEvent{kind: "resize", at: at, rows: size[0], cols: size[1]})
         } else {
-            delay :: kit_steps_offset_ns(words[words.len() - 1]) ?? return Err("invalid terminal event delay")
+            delay: kit_steps_offset_ns(words[words.len() - 1]) ?? return Err("invalid terminal event delay")
             terminal.clock += delay
-            sending :: key == "pty-send"
+            sending: key == "pty-send"
             &terminal.events.push(KitTerminalEvent{kind: if sending -> "send" else -> "close", text: if sending -> words[0] else -> "", at: terminal.clock})
         }
         result.steps[i].terminal = Val(terminal)
         return Ok(result)
     }
-    label :: result.steps[i].label
+    label: result.steps[i].label
     if key == "pty-resize" || !kit_steps_terminal_session(result.steps, label, joined) -> return Err("{key} needs a terminal step or a live terminal session")
-    delay_word :: words[words.len() - 1]
-    delay :: kit_steps_offset_ns(delay_word) ?? return Err("invalid terminal event delay")
+    delay_word: words[words.len() - 1]
+    delay: kit_steps_offset_ns(delay_word) ?? return Err("invalid terminal event delay")
     if delay > 0 -> &result.steps.push(KitStep{argv: ["sleep", delay_word], stdin: "", exit: "0", assertions: [], action: "sleep"})
-    eof :: String.from_bytes([U8{4}]) ?? panic("EOF character")
-    text :: if key == "pty-send" -> words[0] else -> eof
+    eof: String.from_bytes([U8{4}]) ?? panic("EOF character")
+    text: if key == "pty-send" -> words[0] else -> eof
     &result.steps.push(KitStep{argv: [text], stdin: "", exit: "0", assertions: [], label: label, action: "send", literal_input: true, session_mode: "raw"})
     Ok(result)
 }
 
-fn kit_steps_wiring_valid(key: String, original: String) -> Bool {
-    tokens :: kit_steps_tokens(kit_steps_body(original)) ?? return false
+kit_steps_wiring_valid: fn(key: String, original: String) -> Bool {
+    tokens: kit_steps_tokens(kit_steps_body(original)) ?? return false
     words := [String]{}
     loop token in tokens -> &words.push(token.text)
     if key == "stderr-to-stdout" -> return words == ["true"]
@@ -103,11 +103,11 @@ fn kit_steps_wiring_valid(key: String, original: String) -> Bool {
 // and 64 MiB lifetime-budget differences require process-null-fd refusal where
 // the original observes either. File wiring is observable only after completion;
 // a live observation requires process-file-fd instead.
-fn kit_steps_wiring_finish(step: KitStep, context: KitStepCtx, state: KitStepState) -> KitStepResult {
+kit_steps_wiring_finish: fn(step: KitStep, context: KitStepCtx, state: KitStepState) -> KitStepResult {
     result := state
     loop pair in [[step.stdout_target, result.last.stdout], [step.stderr_target, result.last.stderr]] {
         if pair[0] == "" || pair[0] == "null" -> next
-        path :: kit_steps_work_path(pair[0], context.env, context.work, context.scratch, state.built) ?? return kit_steps_action_error(state, "output file escapes work")
+        path: kit_steps_work_path(pair[0], context.env, context.work, context.scratch, state.built) ?? return kit_steps_action_error(state, "output file escapes work")
         files.create_dir_all(files.dirname(path)) ?? return kit_steps_action_error(state, "output file parent: {err}")
         files.write(path, pair[1]) ?? return kit_steps_action_error(state, "output file write: {err}")
     }
@@ -116,15 +116,15 @@ fn kit_steps_wiring_finish(step: KitStep, context: KitStepCtx, state: KitStepSta
     KitStepResult{state: result, verdict: kit_expect_verdict("PASS", "")}
 }
 
-fn kit_steps_stream_nulled(selector: String, output: Bool, errors: Bool) -> Bool {
-    subject :: kit_steps_subject(selector)
+kit_steps_stream_nulled: fn(selector: String, output: Bool, errors: Bool) -> Bool {
+    subject: kit_steps_subject(selector)
     if subject.starts_with("cap:") -> return false
     (output && (subject.contains("stdout") || subject == "machine")) || (errors && (subject.contains("stderr") || subject == "machine"))
 }
 
 // Joining inherits the opener's wiring. Check at the plan boundary so neither
 // JSON/capture selectors nor a later recv can bypass the stream assertion rule.
-fn kit_steps_wiring_error(plan: KitPlan) -> String {
+kit_steps_wiring_error: fn(plan: KitPlan) -> String {
     output := false
     errors := false
     loop step in plan.steps {

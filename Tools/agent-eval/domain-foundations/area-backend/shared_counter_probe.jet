@@ -1,18 +1,18 @@
-package {
+package: {
     name: "shared_counter_probe"
     authority: { allow: [IO, Mem.Alloc, Mem.Rc, Time.Wait] }
 }
 
-struct Counter {
+Counter: struct {
     value: Int
 }
 
-fn increment(counter: Shared<Counter>) {
+increment: fn(counter: Shared<Counter>) {
     counter.guard_edit().value.value += 1
 }
 
-fn run() {
-    counter :: shared Counter{value: 0}
+run: fn() {
+    counter: shared Counter{value: 0}
     workers := [Task<()>]{}
     loop _ in 1..1000 {
         &workers.push(task {
@@ -20,7 +20,7 @@ fn run() {
         })
     }
     loop workers.len() > 0 {
-        worker :: &workers.pop() ?? panic("missing worker")
+        worker: &workers.pop() ?? panic("missing worker")
         worker.join() ?? panic("worker failed")
     }
     print("count:{counter.guard_read().value.value}")

@@ -1,4 +1,4 @@
-use fs :: core.files
+use fs: core.files
 // FEATURE_CLAIMS:BEGIN
 // FEATURE_CLAIM: claim.syntax-law | Site examples use the documented Jet surface and source corpus.
 // FEATURE_CLAIM: claim.examples-spec | Site examples point to executable golden-tested corpus files.
@@ -15,36 +15,36 @@ use fs :: core.files
 // FEATURE_CLAIM: claim.product-boundaries | Jetpack is documented as a separate environment product.
 // FEATURE_CLAIMS:END
 
-fn current_attr(link: String, current: String) -> HTML {
+current_attr: fn(link: String, current: String) -> HTML {
     if link == current -> return HTML{" aria-current=\"page\""}
     HTML{""}
 }
 
-fn error_href(prefix: String) -> String { "{prefix}e/index.html" }
+error_href: fn(prefix: String) -> String { "{prefix}e/index.html" }
 
-fn code_card(file: String, code: HTML) -> HTML {
+code_card: fn(file: String, code: HTML) -> HTML {
     HTML{"""
     <div class="code"><div class="code-head"><span>{file}</span></div><div class="code-body"><pre><code>{code}</code></pre></div></div>
     """}
 }
 
-fn code_card_out(file: String, code: HTML, command: String, output: HTML) -> HTML {
+code_card_out: fn(file: String, code: HTML, command: String, output: HTML) -> HTML {
     HTML{"""
     <div class="code"><div class="code-head"><span>{file}</span></div><div class="code-body"><pre><code>{code}</code></pre></div><div class="code-out"><span class="ps">$ jet run {command}</span><br>{output}</div></div>
     """}
 }
 
-fn cta_buttons(prefix: String) -> HTML {
+cta_buttons: fn(prefix: String) -> HTML {
     HTML{"""
     <div class="hero-ctas"><a class="btn btn-primary" href="{prefix}install.html"><svg class="delta" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M15 8 L3 2.5 L6 8 L3 13.5 Z"/></svg>Install jet</a><a class="btn btn-ghost" href="https://github.com/jet-language/jet">GitHub</a></div>
     """}
 }
 
-fn page_shell(title: String, description: String, body: HTML, prefix: String, current: String) -> HTML {
-    tour_attr :: current_attr("tour", current)
-    install_attr :: current_attr("install", current)
-    error_attr :: current_attr("error", current)
-    error_link :: error_href(prefix)
+page_shell: fn(title: String, description: String, body: HTML, prefix: String, current: String) -> HTML {
+    tour_attr: current_attr("tour", current)
+    install_attr: current_attr("install", current)
+    error_attr: current_attr("error", current)
+    error_link: error_href(prefix)
     HTML{"""
     <!doctype html>
     <html lang="en">
@@ -100,21 +100,21 @@ fn page_shell(title: String, description: String, body: HTML, prefix: String, cu
     """}
 }
 
-fn hello_code() -> HTML {
+hello_code: fn() -> HTML {
     HTML{"""
-    <span class="c">// Your first program. `fn run` is where running starts.</span>
-    <span class="k">fn</span> <span class="f">run</span>() {{
+    <span class="c">// Your first program. `run: fn` is where running starts.</span>
+    <span class="f">run</span><span class="g">:</span> <span class="k">fn</span>() {{
         <span class="f">print</span>(<span class="s">"hello, world"</span>)
         <span class="k">return</span>
     }}
     """}
 }
 
-fn values_code() -> HTML {
+values_code: fn() -> HTML {
     HTML{"""
-    <span class="k">fn</span> <span class="f">run</span>() {{
-        name <span class="g">::</span> <span class="s">"Jet"</span>
-        year <span class="g">::</span> <span class="n">2026</span>
+    <span class="f">run</span><span class="g">:</span> <span class="k">fn</span>() {{
+        name<span class="g">:</span> <span class="s">"Jet"</span>
+        year<span class="g">:</span> <span class="n">2026</span>
         <span class="f">print</span>(<span class="s">"values: {{name}} {{year}}"</span>)
         count <span class="g">:=</span> <span class="n">0</span>
         count += <span class="n">3</span>
@@ -123,23 +123,23 @@ fn values_code() -> HTML {
     """}
 }
 
-fn signature_code() -> HTML {
+signature_code: fn() -> HTML {
     HTML{"""
     <span class="c">// D-SIG-SHAPE1=B: a result is bare after the parameters and `-&gt;` starts the body.</span>
-    <span class="k">fn</span> <span class="f">double</span>(n: <span class="t">Int</span>) <span class="t">Int</span> <span class="g">-&gt;</span> n * <span class="n">2</span>
+    <span class="f">double</span><span class="g">:</span> <span class="k">fn</span>(n: <span class="t">Int</span>) <span class="t">Int</span> <span class="g">-&gt;</span> n * <span class="n">2</span>
 
-    <span class="k">fn</span> <span class="f">bump</span>(n: <span class="t">Int</span>) <span class="t">Int</span> <span class="g">-[IO]&gt;</span> {{
+    <span class="f">bump</span><span class="g">:</span> <span class="k">fn</span>(n: <span class="t">Int</span>) <span class="t">Int</span> <span class="g">-[IO]&gt;</span> {{
         <span class="f">print</span>(n)
         n + <span class="n">1</span>
     }}
 
-    <span class="k">fn</span> <span class="f">run</span>() <span class="g">-[IO]&gt;</span> {{ <span class="f">print</span>(<span class="f">bump</span>(<span class="f">double</span>(<span class="n">20</span>))) }}
+    <span class="f">run</span><span class="g">:</span> <span class="k">fn</span>() <span class="g">-[IO]&gt;</span> {{ <span class="f">print</span>(<span class="f">bump</span>(<span class="f">double</span>(<span class="n">20</span>))) }}
     """}
 }
 
-fn pattern_code() -> HTML {
+pattern_code: fn() -> HTML {
     HTML{"""
-    <span class="k">fn</span> <span class="f">describe_conn</span>(c: <span class="t">Conn</span>) <span class="t">String</span> <span class="g">-&gt;</span> {{
+    <span class="f">describe_conn</span><span class="g">:</span> <span class="k">fn</span>(c: <span class="t">Conn</span>) <span class="t">String</span> <span class="g">-&gt;</span> {{
         <span class="k">if</span> c == {{
             .Active(id) | .Reconnecting(id) <span class="g">-&gt;</span> {{
                 <span class="c">// D-PATO: or-pattern — Active and Reconnecting share the same body.</span>
@@ -156,34 +156,34 @@ fn pattern_code() -> HTML {
     """}
 }
 
-fn failure_code() -> HTML {
+failure_code: fn() -> HTML {
     HTML{"""
-    <span class="k">fn</span> <span class="f">load_port</span>() <span class="t">Int</span> <span class="g">!</span><span class="t">IOError</span> <span class="g">-&gt;</span> <span class="f">Ok</span>(<span class="n">8080</span>)
+    <span class="f">load_port</span><span class="g">:</span> <span class="k">fn</span>() <span class="t">Int</span> <span class="g">!</span><span class="t">IOError</span> <span class="g">-&gt;</span> <span class="f">Ok</span>(<span class="n">8080</span>)
 
-    <span class="k">fn</span> <span class="f">run</span>() {{
-        port <span class="g">::</span> <span class="f">load_port</span>() <span class="g">??</span> <span class="n">3000</span>
+    <span class="f">run</span><span class="g">:</span> <span class="k">fn</span>() {{
+        port<span class="g">:</span> <span class="f">load_port</span>() <span class="g">??</span> <span class="n">3000</span>
         <span class="f">print</span>(<span class="s">"port {{port}}"</span>)
     }}
     """}
 }
 
-fn defaults_code() -> HTML {
+defaults_code: fn() -> HTML {
     HTML{"""
     <span class="c">// D-NARG-D2 (S61): a default may reference an earlier parameter.</span>
     <span class="c">// `height: Int{{width}}` fills height with whatever width was given.</span>
-    <span class="k">struct</span> <span class="t">Rect</span> {{
+    <span class="t">Rect</span><span class="g">:</span> <span class="k">struct</span> {{
         width: <span class="t">Int</span>
         height: <span class="t">Int</span>
 
-        <span class="k">fn</span> <span class="f">square</span>(width: <span class="t">Int</span>, height: <span class="t">Int</span>{{width}}) <span class="t">Rect</span> <span class="g">-&gt;</span> {{width: width, height: height}}
+        <span class="f">square</span><span class="g">:</span> <span class="k">fn</span>(width: <span class="t">Int</span>, height: <span class="t">Int</span>{{width}}) <span class="t">Rect</span> <span class="g">-&gt;</span> {{width: width, height: height}}
     }}
 
-    <span class="k">fn</span> <span class="f">box_dims</span>(w: <span class="t">Int</span>, h: <span class="t">Int</span>{{w}}, d: <span class="t">Int</span>{{h}}) <span class="t">String</span> <span class="g">-&gt;</span> <span class="s">"{{w}}x{{h}}x{{d}}"</span>
+    <span class="f">box_dims</span><span class="g">:</span> <span class="k">fn</span>(w: <span class="t">Int</span>, h: <span class="t">Int</span>{{w}}, d: <span class="t">Int</span>{{h}}) <span class="t">String</span> <span class="g">-&gt;</span> <span class="s">"{{w}}x{{h}}x{{d}}"</span>
 
-    <span class="k">fn</span> <span class="f">run</span>() {{
-        s <span class="g">::</span> <span class="t">Rect</span>.<span class="f">square</span>(<span class="n">5</span>)
+    <span class="f">run</span><span class="g">:</span> <span class="k">fn</span>() {{
+        s<span class="g">:</span> <span class="t">Rect</span>.<span class="f">square</span>(<span class="n">5</span>)
         <span class="f">print</span>(<span class="s">"{{s.width}}x{{s.height}}"</span>)
-        r <span class="g">::</span> <span class="t">Rect</span>.<span class="f">square</span>(<span class="n">5</span>, <span class="n">3</span>)
+        r<span class="g">:</span> <span class="t">Rect</span>.<span class="f">square</span>(<span class="n">5</span>, <span class="n">3</span>)
         <span class="f">print</span>(<span class="s">"{{r.width}}x{{r.height}}"</span>)
         <span class="f">print</span>(<span class="f">box_dims</span>(<span class="n">4</span>))
         <span class="f">print</span>(<span class="f">box_dims</span>(<span class="n">4</span>, <span class="n">2</span>))
@@ -192,34 +192,34 @@ fn defaults_code() -> HTML {
     """}
 }
 
-fn loops_code() -> HTML {
+loops_code: fn() -> HTML {
     HTML{"""
-    <span class="k">fn</span> <span class="f">run</span>() {{
-        values <span class="g">::</span> [<span class="t">Int</span>]{{<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>, <span class="n">4</span>}}
-        doubled <span class="g">::</span> <span class="k">loop</span> value <span class="k">in</span> values <span class="g">-&gt;</span> value * <span class="n">2</span>
-        even <span class="g">::</span> <span class="k">loop</span> value <span class="k">in</span> values <span class="k">if</span> value % <span class="n">2</span> == <span class="n">0</span> <span class="g">-&gt;</span> value
-        prefix <span class="g">::</span> <span class="k">loop</span> value <span class="k">in</span> values <span class="g">-&gt;</span> {{
+    <span class="f">run</span><span class="g">:</span> <span class="k">fn</span>() {{
+        values<span class="g">:</span> [<span class="t">Int</span>]{{<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>, <span class="n">4</span>}}
+        doubled<span class="g">:</span> <span class="k">loop</span> value <span class="k">in</span> values <span class="g">-&gt;</span> value * <span class="n">2</span>
+        even<span class="g">:</span> <span class="k">loop</span> value <span class="k">in</span> values <span class="k">if</span> value % <span class="n">2</span> == <span class="n">0</span> <span class="g">-&gt;</span> value
+        prefix<span class="g">:</span> <span class="k">loop</span> value <span class="k">in</span> values <span class="g">-&gt;</span> {{
             <span class="k">if</span> value &gt; <span class="n">3</span> <span class="g">-&gt;</span> <span class="k">break</span>
             value
         }}
-        nested <span class="g">::</span> <span class="k">loop</span> left <span class="k">in</span> [<span class="n">1</span>, <span class="n">2</span>] <span class="g">-&gt;</span> <span class="k">loop</span> right <span class="k">in</span> [<span class="n">10</span>, <span class="n">20</span>] <span class="g">-&gt;</span> left + right
+        nested<span class="g">:</span> <span class="k">loop</span> left <span class="k">in</span> [<span class="n">1</span>, <span class="n">2</span>] <span class="g">-&gt;</span> <span class="k">loop</span> right <span class="k">in</span> [<span class="n">10</span>, <span class="n">20</span>] <span class="g">-&gt;</span> left + right
 
         by_value <span class="g">:=</span> [<span class="t">Int</span>:<span class="t">Int</span>]{{}}
         <span class="k">loop</span> value <span class="k">in</span> values <span class="g">-&gt;</span> by_value.<span class="f">add</span>(value, value * <span class="n">10</span>).<span class="f">drop</span>(<span class="s">"keys are unique"</span>)
-        unique <span class="g">::</span> <span class="t">Set</span>.<span class="f">from</span>(<span class="k">loop</span> value <span class="k">in</span> [<span class="n">1</span>, <span class="n">2</span>, <span class="n">2</span>, <span class="n">3</span>] <span class="g">-&gt;</span> value)
-        lazy <span class="g">::</span> values.<span class="f">lazy</span>().<span class="f">map</span>(value <span class="g">-&gt;</span> value + <span class="n">10</span>)
+        unique<span class="g">:</span> <span class="t">Set</span>.<span class="f">from</span>(<span class="k">loop</span> value <span class="k">in</span> [<span class="n">1</span>, <span class="n">2</span>, <span class="n">2</span>, <span class="n">3</span>] <span class="g">-&gt;</span> value)
+        lazy<span class="g">:</span> values.<span class="f">lazy</span>().<span class="f">map</span>(value <span class="g">-&gt;</span> value + <span class="n">10</span>)
     """}
 }
 
-fn concurrency_code() -> HTML {
+concurrency_code: fn() -> HTML {
     HTML{"""
-    <span class="k">fn</span> <span class="f">run</span>() {{
+    <span class="f">run</span><span class="g">:</span> <span class="k">fn</span>() {{
         <span class="c">// Join discharges the duty and yields the value.</span>
-        joined <span class="g">::</span> <span class="k">task</span> <span class="f">work</span>(<span class="n">5</span>)
+        joined<span class="g">:</span> <span class="k">task</span> <span class="f">work</span>(<span class="n">5</span>)
         <span class="f">print</span>(joined.<span class="f">join</span>() <span class="g">??</span> <span class="f">panic</span>(<span class="s">"join failed"</span>))
 
         <span class="c">// `all` consumes every handle in the list.</span>
-        results <span class="g">::</span> <span class="k">task</span>.<span class="f">all</span> {{<span class="f">work</span>(<span class="n">1</span>), <span class="f">work</span>(<span class="n">2</span>), <span class="f">work</span>(<span class="n">3</span>)}} <span class="g">??</span> <span class="f">panic</span>(<span class="s">"task.all failed"</span>)
+        results<span class="g">:</span> <span class="k">task</span>.<span class="f">all</span> {{<span class="f">work</span>(<span class="n">1</span>), <span class="f">work</span>(<span class="n">2</span>), <span class="f">work</span>(<span class="n">3</span>)}} <span class="g">??</span> <span class="f">panic</span>(<span class="s">"task.all failed"</span>)
         <span class="f">print</span>(results[<span class="n">0</span>] + results[<span class="n">1</span>] + results[<span class="n">2</span>])
 
         <span class="k">task</span>.<span class="f">group</span> race_group {{
@@ -233,28 +233,28 @@ fn concurrency_code() -> HTML {
         }}
 
         <span class="c">// `detach` discharges the duty for fire-and-forget work.</span>
-        background <span class="g">::</span> <span class="k">task</span> <span class="f">work</span>(<span class="n">6</span>)
+        background<span class="g">:</span> <span class="k">task</span> <span class="f">work</span>(<span class="n">6</span>)
         background.<span class="f">detach</span>()
         <span class="f">print</span>(<span class="s">"detached"</span>)
     }}
     """}
 }
 
-fn files_code() -> HTML {
+files_code: fn() -> HTML {
     HTML{"""
-    <span class="k">use</span> core.files <span class="k">as</span> fs
+    <span class="k">use</span> fs<span class="g">:</span> core.files
 
-    <span class="k">fn</span> <span class="f">run</span>() {{
-        path <span class="g">::</span> <span class="s">"/tmp/jet_m10_files.txt"</span>
-        wrote <span class="g">::</span> fs.<span class="f">write</span>(path, <span class="s">"hello\\njet"</span>) <span class="g">??</span> <span class="k">return</span> <span class="f">Err</span>(<span class="s">"write failed"</span>)
-        text <span class="g">::</span> fs.<span class="f">read</span>(path) <span class="g">??</span> <span class="k">return</span> <span class="f">Err</span>(<span class="s">"read failed"</span>)
+    <span class="f">run</span><span class="g">:</span> <span class="k">fn</span>() {{
+        path<span class="g">:</span> <span class="s">"/tmp/jet_m10_files.txt"</span>
+        wrote<span class="g">:</span> fs.<span class="f">write</span>(path, <span class="s">"hello\\njet"</span>) <span class="g">??</span> <span class="k">return</span> <span class="f">Err</span>(<span class="s">"write failed"</span>)
+        text<span class="g">:</span> fs.<span class="f">read</span>(path) <span class="g">??</span> <span class="k">return</span> <span class="f">Err</span>(<span class="s">"read failed"</span>)
         <span class="f">print</span>(text.<span class="f">to_upper</span>())
         <span class="f">print</span>(fs.<span class="f">exists</span>(path))
     }}
     """}
 }
 
-fn diag_block() -> HTML {
+diag_block: fn() -> HTML {
     HTML{"""
     <div class="diag"><span class="e">Error [jet.ValueTypeMismatch]:</span> `plan` wants Int (a whole number) for argument 2, but this is String (text)
       <span class="loc">--&gt; broken.jet:4:26</span>
@@ -267,7 +267,7 @@ fn diag_block() -> HTML {
     """}
 }
 
-fn index_body() -> HTML {
+index_body: fn() -> HTML {
     HTML{"""
       <section class="wrap hero">
         <div class="hero-grid">
@@ -290,13 +290,13 @@ fn index_body() -> HTML {
               </div>
             </div>
             <div class="lens-code"><pre><code><span class="c">// hero.jet is a complete program. Run it: jet run hero.jet</span>
-    <span class="k">fn</span> <span class="f">plan</span>(dest: <span class="t">String</span>, seats: <span class="t">Int</span>{{<span class="n">2</span>}}) <span class="t">String</span> <span class="g">-&gt;</span> <span class="s">"{{dest}}, party of {{seats}}"</span>
+    <span class="f">plan</span><span class="g">:</span> <span class="k">fn</span>(dest: <span class="t">String</span>, seats: <span class="t">Int</span>{{<span class="n">2</span>}}) <span class="t">String</span> <span class="g">-&gt;</span> <span class="s">"{{dest}}, party of {{seats}}"</span>
     <span class="xr">          &#9492; default rides the type: plan("Lisbon") seats 2</span>
-    <span class="k">fn</span> <span class="f">load_port</span>() <span class="t">Int</span> <span class="g">!</span><span class="t">IOError</span> <span class="g">-&gt;</span> <span class="f">Ok</span>(<span class="n">8080</span>)
+    <span class="f">load_port</span><span class="g">:</span> <span class="k">fn</span>() <span class="t">Int</span> <span class="g">!</span><span class="t">IOError</span> <span class="g">-&gt;</span> <span class="f">Ok</span>(<span class="n">8080</span>)
     <span class="xr">             &#9492; the whole failure contract, in the signature</span>
-    <span class="k">fn</span> <span class="f">run</span>() {{
+    <span class="f">run</span><span class="g">:</span> <span class="k">fn</span>() {{
     <span class="xr">      &#9492; inferred effect row -[IO]&gt;: this program prints</span>
-        port <span class="g">::</span> <span class="f">load_port</span>() <span class="g">??</span> <span class="n">3000</span>
+        port<span class="g">:</span> <span class="f">load_port</span>() <span class="g">??</span> <span class="n">3000</span>
     <span class="xr">                        &#9492; ?? discharges the failure or it propagates</span>
         <span class="f">print</span>(<span class="f">plan</span>(<span class="s">"Lisbon"</span>, <span class="n">3</span>))
         <span class="f">print</span>(<span class="s">"listening on {{port}}"</span>)
@@ -361,9 +361,9 @@ fn index_body() -> HTML {
           <div class="duo-item">
             <h3>Defaults ride the type</h3>
             <p>A default value lives on the type, and it may name an earlier parameter. Call <code>box_dims(4)</code> and get a cube.</p>
-            <div class="code"><div class="code-head"><span>cube.jet</span><span>from Examples/features/basics/default_refs.jet</span></div><div class="code-body"><pre><code><span class="k">fn</span> <span class="f">box_dims</span>(w: <span class="t">Int</span>, h: <span class="t">Int</span>{{w}}, d: <span class="t">Int</span>{{h}}) <span class="t">String</span> <span class="g">-&gt;</span> <span class="s">"{{w}}x{{h}}x{{d}}"</span>
+            <div class="code"><div class="code-head"><span>cube.jet</span><span>from Examples/features/basics/default_refs.jet</span></div><div class="code-body"><pre><code><span class="f">box_dims</span><span class="g">:</span> <span class="k">fn</span>(w: <span class="t">Int</span>, h: <span class="t">Int</span>{{w}}, d: <span class="t">Int</span>{{h}}) <span class="t">String</span> <span class="g">-&gt;</span> <span class="s">"{{w}}x{{h}}x{{d}}"</span>
 
-    <span class="k">fn</span> <span class="f">run</span>() {{
+    <span class="f">run</span><span class="g">:</span> <span class="k">fn</span>() {{
         <span class="f">print</span>(<span class="f">box_dims</span>(<span class="n">4</span>))
         <span class="f">print</span>(<span class="f">box_dims</span>(<span class="n">4</span>, <span class="n">2</span>))
         <span class="f">print</span>(<span class="f">box_dims</span>(<span class="n">4</span>, <span class="n">2</span>, <span class="n">1</span>))
@@ -372,10 +372,10 @@ fn index_body() -> HTML {
           <div class="duo-item">
             <h3>Explicit task lifetimes</h3>
             <p>The example shows explicit join, <code>all</code>, <code>race</code>, <code>any</code>, and detach handling for spawned tasks.</p>
-            <div class="code"><div class="code-head"><span>Examples/features/concurrency/tasks_join_all.jet</span></div><div class="code-body"><pre><code>joined <span class="g">::</span> <span class="k">task</span> <span class="f">work</span>(<span class="n">5</span>)
+            <div class="code"><div class="code-head"><span>Examples/features/concurrency/tasks_join_all.jet</span></div><div class="code-body"><pre><code>joined<span class="g">:</span> <span class="k">task</span> <span class="f">work</span>(<span class="n">5</span>)
     <span class="f">print</span>(joined.<span class="f">join</span>() <span class="g">??</span> <span class="f">panic</span>(<span class="s">"join failed"</span>))
 
-    results <span class="g">::</span> <span class="k">task</span>.all {{<span class="f">work</span>(<span class="n">1</span>), <span class="f">work</span>(<span class="n">2</span>), <span class="f">work</span>(<span class="n">3</span>)}} <span class="g">??</span> <span class="f">panic</span>(<span class="s">"task.all failed"</span>)
+    results<span class="g">:</span> <span class="k">task</span>.all {{<span class="f">work</span>(<span class="n">1</span>), <span class="f">work</span>(<span class="n">2</span>), <span class="f">work</span>(<span class="n">3</span>)}} <span class="g">??</span> <span class="f">panic</span>(<span class="s">"task.all failed"</span>)
     <span class="f">print</span>(results[<span class="n">0</span>] + results[<span class="n">1</span>] + results[<span class="n">2</span>])</code></pre></div></div>
           </div>
         </div>
@@ -390,18 +390,18 @@ fn index_body() -> HTML {
             <iframe src="widget/index.html" title="A Jet web-widget example" loading="lazy"></iframe>
             <div class="live-tag">widget/counter.jet, web-target example</div>
           </div>
-          <div class="code"><div class="code-head"><span>widget/counter.jet</span></div><div class="code-body"><pre><code><span class="k">use</span> core.ui <span class="k">as</span> ui
-    <span class="k">use</span> core.reactive <span class="k">as</span> reactive
+          <div class="code"><div class="code-head"><span>widget/counter.jet</span></div><div class="code-body"><pre><code><span class="k">use</span> ui<span class="g">:</span> core.ui
+    <span class="k">use</span> reactive<span class="g">:</span> core.reactive
     <span class="g">#[Target(Web), HTML("shell.html")]</span>
 
-    <span class="k">fn</span> <span class="f">run</span>() {{
-        count <span class="g">::</span> reactive.<span class="f">signal</span>(<span class="n">0</span>)
+    <span class="f">run</span><span class="g">:</span> <span class="k">fn</span>() {{
+        count<span class="g">:</span> reactive.<span class="f">signal</span>(<span class="n">0</span>)
         ui.<span class="f">reactive_render</span>(() <span class="g">-&gt;</span> {{
             n <span class="g">:=</span> count.<span class="f">get</span>()
             color <span class="g">:=</span> <span class="s">"#2E2E33"</span>
             <span class="k">if</span> n % <span class="n">2</span> == <span class="n">1</span> <span class="g">-&gt;</span> color = <span class="s">"#E8232A"</span>
-            backend <span class="g">::</span> ui.<span class="f">null_backend</span>()
-            tree <span class="g">::</span> ui.<span class="f">box</span>([
+            backend<span class="g">:</span> ui.<span class="f">null_backend</span>()
+            tree<span class="g">:</span> ui.<span class="f">box</span>([
                 ui.<span class="f">node_color</span>(<span class="s">"count: {{n}}"</span>, <span class="n">160.0</span>, <span class="n">40.0</span>, color),
                 ui.<span class="f">button</span>(<span class="s">"Add one"</span>, on_click: () <span class="g">-&gt;</span> {{
                     count.<span class="f">set</span>(count.<span class="f">get</span>() + <span class="n">1</span>)
@@ -448,16 +448,16 @@ fn index_body() -> HTML {
     """}
 }
 
-fn tour_body() -> HTML {
-    hello :: code_card_out("Examples/features/basics/hello.jet", hello_code(), "Examples/features/basics/hello.jet", HTML{"hello, world"})
-    values :: code_card_out("run it", values_code(), "values.jet", HTML{"values: Jet 2026<br>count: 3"})
-    signature :: code_card_out("Examples/features/basics/signature_shape.jet", signature_code(), "Examples/features/basics/signature_shape.jet", HTML{"40<br>41"})
-    matching :: code_card("Examples/features/basics/pattern_matching.jet", pattern_code())
-    failure :: code_card_out("run it", failure_code(), "failure.jet", HTML{"port 8080"})
-    defaults :: code_card_out("Examples/features/basics/default_refs.jet", defaults_code(), "Examples/features/basics/default_refs.jet", HTML{"5x5<br>5x3<br>4x4x4<br>4x2x2<br>4x2x1"})
-    loops :: code_card("Examples/features/basics/loop_values.jet", loops_code())
-    concurrency :: code_card("Examples/features/concurrency/tasks_join_all.jet", concurrency_code())
-    files :: code_card("Examples/features/io/files.jet", files_code())
+tour_body: fn() -> HTML {
+    hello: code_card_out("Examples/features/basics/hello.jet", hello_code(), "Examples/features/basics/hello.jet", HTML{"hello, world"})
+    values: code_card_out("run it", values_code(), "values.jet", HTML{"values: Jet 2026<br>count: 3"})
+    signature: code_card_out("Examples/features/basics/signature_shape.jet", signature_code(), "Examples/features/basics/signature_shape.jet", HTML{"40<br>41"})
+    matching: code_card("Examples/features/basics/pattern_matching.jet", pattern_code())
+    failure: code_card_out("run it", failure_code(), "failure.jet", HTML{"port 8080"})
+    defaults: code_card_out("Examples/features/basics/default_refs.jet", defaults_code(), "Examples/features/basics/default_refs.jet", HTML{"5x5<br>5x3<br>4x4x4<br>4x2x2<br>4x2x1"})
+    loops: code_card("Examples/features/basics/loop_values.jet", loops_code())
+    concurrency: code_card("Examples/features/concurrency/tasks_join_all.jet", concurrency_code())
+    files: code_card("Examples/features/io/files.jet", files_code())
     HTML{"""
     <section class="wrap page">
       <div class="page-header">
@@ -549,26 +549,26 @@ fn tour_body() -> HTML {
     """}
 }
 
-fn install_body() -> HTML {
-    nix_term :: HTML{"""
+install_body: fn() -> HTML {
+    nix_term: HTML{"""
     <div class="term"><span class="ps">$</span> <span class="cmd">nix --extra-experimental-features "nix-command flakes" \\</span>
         <span class="cmd">profile install github:jet-language/jet</span>
     <span class="ps">$</span> <span class="cmd">jet version</span></div>
     """}
-    source_term :: HTML{"""
+    source_term: HTML{"""
     <div class="term"><span class="ps">$</span> <span class="cmd">git clone https://github.com/jet-language/jet</span>
     <span class="ps">$</span> <span class="cmd">cd jet</span>
     <span class="ps">$</span> <span class="cmd">nix build</span>
     <span class="ps">$</span> <span class="cmd">export PATH="$PWD/result/bin:$PATH"</span>
     <span class="ps">$</span> <span class="cmd">jet version</span></div>
     """}
-    first_term :: HTML{"""
+    first_term: HTML{"""
     <div class="term"><span class="ps">$</span> <span class="cmd">jet new hello</span>
     <span class="ps">$</span> <span class="cmd">cd hello</span>
     <span class="ps">$</span> <span class="cmd">jet run</span>
     <span class="out">hello, world</span></div>
     """}
-    breaks_term :: HTML{"""
+    breaks_term: HTML{"""
     <div class="term"><span class="ps">$</span> <span class="cmd">jet explain E0112</span>
     <span class="ps">$</span> <span class="cmd">jet fix run.jet</span></div>
     """}
@@ -618,8 +618,8 @@ fn install_body() -> HTML {
     """}
 }
 
-fn error_body() -> HTML {
-    diag :: diag_block()
+error_body: fn() -> HTML {
+    diag: diag_block()
     HTML{"""
     <section class="wrap page">
       <div class="page-header">
@@ -637,13 +637,13 @@ fn error_body() -> HTML {
     """}
 }
 
-fn run() Err! {
+run: fn() Err! {
     fs.create_dir_all("dist") ?? return
     // tests/diagnostic_pages.rs owns dist/e/<CODE>/index.html; this SSG owns the landing page.
     fs.create_dir_all("dist/e") ?? return
     fs.copy_dir("assets", "dist/assets") ?? return
 
-    assets :: [String]{
+    assets: [String]{
         "favicon.svg",
         "fonts/atkinson-400-italic.woff2",
         "fonts/atkinson-400.woff2",
@@ -664,23 +664,23 @@ fn run() Err! {
         print("wrote dist/assets/{asset}")
     }
 
-    index_body_html :: index_body()
-    index_page :: page_shell("Jet, a memory-safe compiled language", "Jet is a memory-safe compiled language. Start with no ceremony; go as deep as raw memory. Every step away from safety costs one written word.", index_body_html, "", "")
+    index_body_html: index_body()
+    index_page: page_shell("Jet, a memory-safe compiled language", "Jet is a memory-safe compiled language. Start with no ceremony; go as deep as raw memory. Every step away from safety costs one written word.", index_body_html, "", "")
     fs.write("dist/index.html", index_page.text()) ?? return
     print("wrote dist/index.html")
 
-    tour_body_html :: tour_body()
-    tour_page :: page_shell("The Jet tour", "A tour of Jet in runnable programs: values, functions, effects, pattern matching, failure, defaults, loops, concurrency, and files.", tour_body_html, "", "tour")
+    tour_body_html: tour_body()
+    tour_page: page_shell("The Jet tour", "A tour of Jet in runnable programs: values, functions, effects, pattern matching, failure, defaults, loops, concurrency, and files.", tour_body_html, "", "tour")
     fs.write("dist/tour.html", tour_page.text()) ?? return
     print("wrote dist/tour.html")
 
-    install_body_html :: install_body()
-    install_page :: page_shell("Install Jet", "Install the Jet toolchain on x86_64 Linux or macOS with Nix, or build it from source, and run your first program.", install_body_html, "", "install")
+    install_body_html: install_body()
+    install_page: page_shell("Install Jet", "Install the Jet toolchain on x86_64 Linux or macOS with Nix, or build it from source, and run your first program.", install_body_html, "", "install")
     fs.write("dist/install.html", install_page.text()) ?? return
     print("wrote dist/install.html")
 
-    error_body_html :: error_body()
-    error_page :: page_shell("Jet error codes", "Where jet-lang.dev/e links land: every Jet diagnostic has a code, a what, a why, and a fix, available offline through jet explain.", error_body_html, "../", "error")
+    error_body_html: error_body()
+    error_page: page_shell("Jet error codes", "Where jet-lang.dev/e links land: every Jet diagnostic has a code, a what, a why, and a fix, available offline through jet explain.", error_body_html, "../", "error")
     fs.write("dist/e/index.html", error_page.text()) ?? return
     print("wrote dist/e/index.html")
 

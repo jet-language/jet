@@ -1,6 +1,6 @@
 //! #4869: seven named inputs fit when syscall argument GPRs are preserved.
 #[Unsafe("the syscall may read at most four initialized stack words and retains no pointer; all pushes are balanced before return"), FFI(asm)]
-fn os_syscall_stack4_i64(number: I64, a1: I64, w0: I64, w1: I64, w2: I64, w3: I64, a4: I64) -> I64 {
+os_syscall_stack4_i64: fn(number: I64, a1: I64, w0: I64, w1: I64, w2: I64, w3: I64, a4: I64) -> I64 {
     """
     push rdi
     push rsi
@@ -44,7 +44,7 @@ fn os_syscall_stack4_i64(number: I64, a1: I64, w0: I64, w1: I64, w2: I64, w3: I6
     """
 }
 
-fn run() {
+run: fn() {
     pid := I64{0}
     #Unsafe("Linux getpid syscall 39 ignores all argument registers and retains no stack pointer") {
         pid = os_syscall_stack4_i64(I64{39}, I64{0}, I64{1}, I64{2}, I64{3}, I64{4}, I64{0})

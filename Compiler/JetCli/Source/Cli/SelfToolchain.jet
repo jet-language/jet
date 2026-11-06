@@ -2,8 +2,8 @@
 // selection is the checked package authority, not receipt/repository selection
 // or a text scan.
 use {
-    cli_files :: core.files
-    cli_process :: core.process
+    cli_files: core.files
+    cli_process: core.process
     jet_foundation.[diagnostic_render_all]
     jet_pkg_model.[WorkspaceDeclarationCache]
     jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_USER_ERROR]
@@ -12,10 +12,10 @@ use {
 }
 
 // The manifest-driven verbs a version-pinned project hands to its pinned `jet`.
-JET_CLI_PINNED_VERBS :: [String]{"run", "build", "test", "check", "fill", "jobs"}
+JET_CLI_PINNED_VERBS: [String]{"run", "build", "test", "check", "fill", "jobs"}
 
-fn jet_cli_self_toolchain(json: Bool) -[FS, Env]> JetCLIPlan Never! {
-    cwd :: cli_files.cwd() ?? "."
+jet_cli_self_toolchain: fn(json: Bool) -[FS, Env]> JetCLIPlan Never! {
+    cwd: cli_files.cwd() ?? "."
     cache := WorkspaceDeclarationCache.new()
     root := String?{None}
     if jet_cli_find_package_root_checked(&cache, cwd) == {
@@ -32,9 +32,9 @@ fn jet_cli_self_toolchain(json: Bool) -[FS, Env]> JetCLIPlan Never! {
 // builds: the package owning `target` (a source file or directory argument)
 // when the verb names one, the working directory's otherwise, so the pin means
 // the same thing whatever directory the verb runs from.
-fn jet_cli_pinned_toolchain(raw: [String], target: String?, color: Bool, quiet: Bool) -> JetCLIPlan? {
+jet_cli_pinned_toolchain: fn(raw: [String], target: String?, color: Bool, quiet: Bool) -> JetCLIPlan? {
     cache := WorkspaceDeclarationCache.new()
-    start :: if target == {
+    start: if target == {
         .Val(path) -> if cli_files.is_dir(path) -> path else -> jet_cli_parent(path) ?? "."
         .None -> cli_files.cwd() ?? "."
     }
@@ -43,8 +43,8 @@ fn jet_cli_pinned_toolchain(raw: [String], target: String?, color: Bool, quiet: 
         .Ok(value) -> found = value
         .Err(_) -> return None
     }
-    root :: found ?? return None
-    offline :: raw.contains("--offline") || raw.contains("--locked")
+    root: found ?? return None
+    offline: raw.contains("--offline") || raw.contains("--locked")
     if trust_pin_decide(root, JET_CLI_VERSION, offline) == {
         .RunNative -> return None
         .Report(diagnostic) -> return Val(JetCLIPlan.Refused{report: diagnostic, color: color, exit_code: JET_DRIVER_EXIT_USER_ERROR, notice: ""})
@@ -54,11 +54,11 @@ fn jet_cli_pinned_toolchain(raw: [String], target: String?, color: Bool, quiet: 
 
 // The pinned binary runs the same argv on inherited stdio, marked so it runs
 // natively; its exit status is this run's (a signal-ended child exits 1).
-fn jet_cli_pinned_exec(binary: String, channel: String, version: String, raw: [String], quiet: Bool) -> JetDriverVerbOutput {
+jet_cli_pinned_exec: fn(binary: String, channel: String, version: String, raw: [String], quiet: Bool) -> JetDriverVerbOutput {
     if !quiet -> jet_cli_write_notice("{trust_pin_handoff_line(channel, version, JET_CLI_VERSION)}\n")
     command := [String]{binary}
     loop argument in raw -> &command.push(argument)
-    receipt :: cli_process.cmd(command).env(TOOLCHAIN_EXEC_MARKER_ENV, version).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? return jet_cli_report_output("", "E2105", "couldn't exec the pinned toolchain `{binary}`: {jet_cli_io_error_text(err)}", jet_cli_why("E2105"), "correct the named problem, then run the command again", false, JET_DRIVER_EXIT_USER_ERROR)
+    receipt: cli_process.cmd(command).env(TOOLCHAIN_EXEC_MARKER_ENV, version).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? return jet_cli_report_output("", "E2105", "couldn't exec the pinned toolchain `{binary}`: {jet_cli_io_error_text(err)}", jet_cli_why("E2105"), "correct the named problem, then run the command again", false, JET_DRIVER_EXIT_USER_ERROR)
     exit_code := receipt.code
     if receipt.signal != None -> exit_code = JET_DRIVER_EXIT_USER_ERROR
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: exit_code}

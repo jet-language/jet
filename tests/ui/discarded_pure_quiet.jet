@@ -2,55 +2,55 @@
 // impure callee, a Unit result, a callback argument, a callee whose effects
 // depend on a trait bound (its row is not proven empty), a call that writes
 // through a `&` argument, a callee that can fail, or an explicit `.drop`.
-trait Shape {
-    fn area(self) -> Int
+Shape: trait {
+    area: fn(self) -> Int
 }
 
-struct Square {
+Square: struct {
     side: Int
 }
 
 impl Square.Shape {
-    fn area(self) -> Int {
+    area: fn(self) -> Int {
         print("measuring")
         self.side * self.side
     }
 }
 
-fn measure<T: Shape>(shape: T) -> Int { shape.area() }
+measure: fn<T: Shape>(shape: T) -> Int { shape.area() }
 
-fn logged_double(n: Int) -> Int {
+logged_double: fn(n: Int) -> Int {
     print(n)
     n * 2
 }
 
-fn announce(n: Int) {
+announce: fn(n: Int) {
     print(n)
 }
 
-fn apply(f: fn(Int) -> Int, n: Int) -> Int { f(n) }
+apply: fn(f: fn(Int) -> Int, n: Int) -> Int { f(n) }
 
-fn bump(counter: &Int) -> Int {
+bump: fn(counter: &Int) -> Int {
     counter += 1
     counter
 }
 
-fn checked_half(n: Int) -> Int Err! {
+checked_half: fn(n: Int) -> Int Err! {
     if n % 2 != 0 -> return Err("odd")
     n /% 2
 }
 
-fn double(n: Int) -> Int { n * 2 }
+double: fn(n: Int) -> Int { n * 2 }
 
 // An explicitly infallible no-arrow function still has no result to discard.
-fn quiet_unit() Never! {}
-fn audited_unit() Never! {
+quiet_unit: fn() Never! {}
+audited_unit: fn() Never! {
     #Unsafe("the test deliberately keeps this stderr write behind its audit boundary") {
         print("audited unit")
     }
 }
 
-fn run() {
+run: fn() {
     // The callee prints, so the call has an effect.
     logged_double(2)
     // A Unit result carries nothing to lose.

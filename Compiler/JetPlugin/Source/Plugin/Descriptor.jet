@@ -4,103 +4,103 @@
 // segments and functions. Every offset is relative to the descriptor start.
 use jet_wasm.[wasm_put_fixed]
 
-PLUG_DESC_VERSION :: 1
-PLUG_DESC_HEADER :: 24
+PLUG_DESC_VERSION: 1
+PLUG_DESC_HEADER: 24
 
-struct PlugDesc {
+PlugDesc: struct {
     out: [U8]
 
-    fn word(&self, value: Int) Never! {
+    word: fn(&self, value: Int) Never! {
         wasm_put_fixed(&self.out, value, 8)
     }
 
     // Appends `bytes` padded to a word; returns their offset.
-    fn bytes(&self, bytes: [U8]) -> Int Never! {
-        at :: self.out.len()
+    bytes: fn(&self, bytes: [U8]) -> Int Never! {
+        at: self.out.len()
         loop byte in bytes -> &self.out.push(byte)
         loop self.out.len() % 8 != 0 -> &self.out.push(U8{0})
         at
     }
 
-    fn words(&self, values: [Int]) -> Int Never! {
-        at :: self.out.len()
+    words: fn(&self, values: [Int]) -> Int Never! {
+        at: self.out.len()
         loop value in values -> &self.word(value)
         at
     }
 
     // Sets header word `index`.
-    fn set(&self, index: Int, value: Int) Never! {
+    set: fn(&self, index: Int, value: Int) Never! {
         loop k in 0..<8 -> self.out[index * 8 + k] = U8{(value >> (8 * k)).bit_and(255)}
     }
 
     // Sets header words `index`, `index` + 1 to a text's offset and length.
-    fn text(&self, index: Int, text: String) Never! {
-        raw :: text.bytes()
-        at :: &self.bytes(raw)
+    text: fn(&self, index: Int, text: String) Never! {
+        raw: text.bytes()
+        at: &self.bytes(raw)
         &self.set(index, at)
         &self.set(index + 1, raw.len())
     }
 }
 
-fn plug_desc_new(name: String, artifact: [U8]) -> PlugDesc Never! {
+plug_desc_new: fn(name: String, artifact: [U8]) -> PlugDesc Never! {
     d := PlugDesc{out: [U8]{}}
     loop _ in 0..<PLUG_DESC_HEADER -> &d.word(0)
     &d.set(0, PLUG_DESC_VERSION)
     &d.text(3, name)
-    at :: &d.bytes(artifact)
+    at: &d.bytes(artifact)
     &d.set(5, at)
     &d.set(6, artifact.len())
     d
 }
 
 // The descriptor of an artifact that didn't load: its error `detail`.
-fn plug_failure_descriptor(name: String, artifact: [U8], detail: String) -> [U8] Never! {
+plug_failure_descriptor: fn(name: String, artifact: [U8], detail: String) -> [U8] Never! {
     d := plug_desc_new(name, artifact)
     &d.text(1, detail)
     ^d.out
 }
 
-fn plug_thunk_op(thunks: [Int:Int], fid: Int) -> Int Never! {
+plug_thunk_op: fn(thunks: [Int:Int], fid: Int) -> Int Never! {
     if fid < 0 -> return -1
     thunks.get(fid) ?? -1
 }
 
 // The descriptor of flat instance `flat`: `thunks` maps a function to its
 // entry op, `sigs` gives each function's signature class.
-fn plug_descriptor(flat: PlugFlat, name: String, artifact: [U8], thunks: [Int:Int], sigs: [Int]) -> [U8] Never! {
+plug_descriptor: fn(flat: PlugFlat, name: String, artifact: [U8], thunks: [Int:Int], sigs: [Int]) -> [U8] Never! {
     d := plug_desc_new(name, artifact)
     export_names := [Int]{}
     export_params := [Int]{}
     loop export in flat.exports {
-        at :: &d.bytes(export.name.bytes())
+        at: &d.bytes(export.name.bytes())
         &export_names.push(at)
-        params :: &d.words(export.params)
+        params: &d.words(export.params)
         &export_params.push(params)
     }
     import_names := [Int]{}
     import_params := [Int]{}
     loop entry in flat.imports {
-        at :: &d.bytes(entry.name.bytes())
+        at: &d.bytes(entry.name.bytes())
         &import_names.push(at)
-        params :: &d.words(entry.params)
+        params: &d.words(entry.params)
         &import_params.push(params)
     }
     data_bytes := [Int]{}
     loop data in flat.datas {
-        at :: &d.bytes(data.bytes)
+        at: &d.bytes(data.bytes)
         &data_bytes.push(at)
     }
     elem_items := [Int]{}
     loop elem in flat.elems {
-        at :: &d.words(elem.items)
+        at: &d.words(elem.items)
         &elem_items.push(at)
     }
     func_names := [Int]{}
     func_modules := [Int]{}
     loop func in flat.funcs {
-        at :: &d.bytes(func.name.bytes())
+        at: &d.bytes(func.name.bytes())
         &func_names.push(at)
-        module_at :: &d.bytes(func.module_name.bytes())
+        module_at: &d.bytes(func.module_name.bytes())
         &func_modules.push(module_at)
     }
     &d.set(7, flat.exports.len())

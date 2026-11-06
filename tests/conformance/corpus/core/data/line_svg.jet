@@ -1,21 +1,21 @@
 // core-conformance: core.data.line_svg
-use data :: core.data
+use data: core.data
 
-struct Sale {
+Sale: struct {
     month: String
     value: Float
 }
 
-fn run() {
-    rows :: [Sale]{
+run: fn() {
+    rows: [Sale]{
         Sale{month: "Jan", value: 4.0},
         Sale{month: "Feb", value: 6.0}
     }
-    groups :: data.query(rows)
+    groups: data.query(rows)
         .group_by(sale -> sale.month)
         .mean(sale -> sale.value)
         .collect() ?? panic("groups")
-    options :: DataLineOptions{
+    options: DataLineOptions{
         title: "Sales",
         x_label: "month",
         y_label: "value",
@@ -25,6 +25,6 @@ fn run() {
         color: "#2f6f73",
         legend: "value"
     }
-    result :: data.line_svg(groups, options) ?? panic("line svg")
+    result: data.line_svg(groups, options) ?? panic("line svg")
     print(result.len())
 }

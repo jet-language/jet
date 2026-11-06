@@ -46,7 +46,7 @@ if (mode === 'assemble' || mode.startsWith('assemble-')) {
     include('Compiler/JetRuntime/Tests/Fragments.fixture/ObserveTests.jet');
   }
   const unit = paths.map(read).join('\n');
-  const names = [...unit.matchAll(/^#Export\(c\)\s+fn\s+(\w+)\(/gm)].map(m=>m[1]);
+  const names = [...unit.matchAll(/^#Export\(c\)\s+(\w+): fn\(/gm)].map(m=>m[1]);
   if (new Set(names).size !== names.length) throw Error('duplicate fixture exports');
   writeFileSync(join(fixture,'Source/Fixture.jet'),unit);
   writeFileSync(join(fixture,'lifecycle.list'),runtimeLifecycleList(parseRuntimeExports(unit,'Source/Fixture.jet')));

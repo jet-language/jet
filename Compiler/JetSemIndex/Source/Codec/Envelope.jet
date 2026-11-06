@@ -11,15 +11,15 @@ use {
 // own every nested codec; no escaped/raw JSON field, no payload reparse, no
 // index getter copies and no local report model.
 impl SemIndex {
-    fn to_json(self) -> String Never! { self.to_status_envelope().json() }
+    to_json: fn(self) -> String Never! { self.to_status_envelope().json() }
 
-    fn to_status_envelope(self) -> StatusEnvelope Never! {
+    to_status_envelope: fn(self) -> StatusEnvelope Never! {
         StatusEnvelope.new("inspect.semindex", true).with_field("semindex", StatusValue.Object{fields: self.status_payload_fields()})
     }
 
-    fn to_status_envelope_with_expand(self, expand: ExpandProjection) -> StatusEnvelope Never! {
-        fields :: self.status_payload_fields()
-        value :: semindex_status_expand_projection(expand) ?? panic("semindex payload must be valid JSON")
+    to_status_envelope_with_expand: fn(self, expand: ExpandProjection) -> StatusEnvelope Never! {
+        fields: self.status_payload_fields()
+        value: semindex_status_expand_projection(expand) ?? panic("semindex payload must be valid JSON")
         StatusEnvelope.new("inspect.semindex", true).with_field("semindex", StatusValue.Object{fields: ^fields.with("expand", value)})
     }
 
@@ -28,7 +28,7 @@ impl SemIndex {
     // rather than represent Rust's Option<&ExpandProjection> (#4462).
     // This is the full fifteen-field inspect payload, not the distinct
     // twelve-field CompilerSemanticIndex projection owned by the compiler.
-    fn status_payload_fields(self) -> StatusFields Never! {
+    status_payload_fields: fn(self) -> StatusFields Never! {
         definitions := [StatusValue]{}
         loop row in self.definitions() -> &definitions.push(semindex_status_def(row))
         definition_facts := [StatusValue]{}
@@ -41,11 +41,11 @@ impl SemIndex {
         loop row in self.outputs() -> &outputs.push(semindex_status_output(row))
         state_graphs := [StatusValue]{}
         loop row in self.state_graphs() -> &state_graphs.push(semindex_status_state_graph(row))
-        package :: if self.package_facts == {
+        package: if self.package_facts == {
             .Val(row) -> package_facts_status_value(row) ?? panic("semindex payload must be valid JSON")
             .None -> StatusValue.Null
         }
-        overlays :: if self.workspace_overlay_policy == {
+        overlays: if self.workspace_overlay_policy == {
             .Val(row) -> workspace_overlay_policy_status_value(row) ?? panic("semindex payload must be valid JSON")
             .None -> StatusValue.Null
         }
@@ -83,12 +83,12 @@ impl SemIndex {
 // preserves order and refuses duplicate object keys as Rust Report245 does.
 // Raw helper bytes below preserve duplicates; envelope conversion does NOT
 // collapse them through a Core map and does NOT escape/reparse those bytes.
-fn semindex_status_expand_projection(projection: ExpandProjection) -> StatusValue ReportError! {
+semindex_status_expand_projection: fn(projection: ExpandProjection) -> StatusValue ReportError! {
     lenses := [StatusValue]{}
     loop lens in projection.lenses {
         facts := [StatusValue]{}
         loop fact in lens.facts -> &facts.push(semindex_status_expand_value(fact))
-        fields :: StatusFields.new()
+        fields: StatusFields.new()
             .with("name", StatusValue.String{value: lens.name})
             .with("summary", StatusValue.String{value: lens.summary})
             .with("facts", StatusValue.Array{values: facts})
@@ -99,7 +99,7 @@ fn semindex_status_expand_projection(projection: ExpandProjection) -> StatusValu
         .with("lenses", StatusValue.Array{values: lenses})})
 }
 
-fn semindex_status_expand_value(value: ExpandValue) -> StatusValue ReportError! {
+semindex_status_expand_value: fn(value: ExpandValue) -> StatusValue ReportError! {
     if value == {
         .Null -> Ok(StatusValue.Null)
         .Bool(flag) -> Ok(StatusValue.Bool{value: flag})
@@ -123,7 +123,7 @@ fn semindex_status_expand_value(value: ExpandValue) -> StatusValue ReportError! 
 // Objects stable-sort by key only, retaining duplicate keys and equal-key input
 // order. Sort scalar indices, never clone the recursive fact graph to reorder
 // it.
-fn semindex_json_expand_projection(projection: ExpandProjection) -> String Never! {
+semindex_json_expand_projection: fn(projection: ExpandProjection) -> String Never! {
     lenses := [String]{}
     loop lens in projection.lenses {
         facts := [String]{}
@@ -133,7 +133,7 @@ fn semindex_json_expand_projection(projection: ExpandProjection) -> String Never
     "{{\"selection\":{foundation_json_quote(projection.selection)},\"lenses\":[{lenses.join(",")}]}}"
 }
 
-fn semindex_json_expand_value(value: ExpandValue) -> String Never! {
+semindex_json_expand_value: fn(value: ExpandValue) -> String Never! {
     if value == {
         .Null -> "null"
         .Bool(flag) -> if flag -> "true" else -> "false"
@@ -154,7 +154,7 @@ fn semindex_json_expand_value(value: ExpandValue) -> String Never! {
     }
 }
 
-fn semindex_expand_object_order(entries: [ExpandObjectEntry]) -> [Int] Never! {
+semindex_expand_object_order: fn(entries: [ExpandObjectEntry]) -> [Int] Never! {
     order := [Int]{}
     loop index in 0..<entries.len() -> &order.push(index)
     &order.sort_by((left: Int, right: Int) -> entries[left].key <=> entries[right].key)

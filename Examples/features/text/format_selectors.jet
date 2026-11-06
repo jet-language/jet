@@ -1,23 +1,23 @@
-use fmt :: core.text.fmt
+use fmt: core.text.fmt
 
 #UnitFamily(Length, dimension, base: meter) { meter }
 
 // Same-named user functions must not capture an implicit Core selector.
-fn decimal(n: Float, frac: Int) -> String { "wrong decimal" }
+decimal: fn(n: Float, frac: Int) -> String { "wrong decimal" }
 
-fn pretty(value: String) -> String { "wrong pretty" }
+pretty: fn(value: String) -> String { "wrong pretty" }
 
-struct Point {
+Point: struct {
     x: Int
     label: String
 }
 
-fn run() {
-    count :: 1234
-    ratio :: Float{0.125}
-    word :: "jet"
-    distance :: 12meter
-    point :: Point{x: 3, label: "ok"}
+run: fn() {
+    count: 1234
+    ratio: Float{0.125}
+    word: "jet"
+    distance: 12meter
+    point: Point{x: 3, label: "ok"}
     print("debug {count:Debug}")
     print("pretty {point:Pretty}")
     print("fixed {count:Fixed(2)}")
@@ -31,12 +31,12 @@ fn run() {
     print("oct {count:Oct}")
     print("unit-name {distance:Unit(name)}")
     print("unit-bare {distance:Unit(bare)}")
-    big :: -123456789012345678901234567890
+    big: -123456789012345678901234567890
     if "{big:Fixed(2)}" != "-123456789012345678901234567890.00" -> panic("selector exact fixed")
     if "{big:Grouped(1)}" != "-123,456,789,012,345,678,901,234,567,890.0" {
         panic("selector exact grouped")
     }
-    narrow :: I64{1234}
+    narrow: I64{1234}
     if "{narrow:Fixed(2)}" != "1234.00" -> panic("selector fixed-width integer")
     if "{narrow:Hex(8)}" != "000004d2" -> panic("selector fixed-width radix")
     if "{narrow:Bin}" != "10011010010" -> panic("selector fixed-width bin")

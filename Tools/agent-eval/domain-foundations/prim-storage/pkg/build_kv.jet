@@ -1,12 +1,12 @@
-package {
+package: {
     name: "build_kv"
     authority: { allow: [FS.Read, FS.Write, IO, Mem.Alloc, Time.Wait] }
 }
 
-use kv :: "kv"
-fn run() {
-    p :: Path.from("$JET_STATE_ROOT/dx3/prim-storage/build-kv.txt")
-    _ok :: kv.kv_put(p, "key", "value") ?? false
-    value :: kv.kv_get(p, "key") ?? "missing"
+use kv: "kv"
+run: fn() {
+    p: Path.from("$JET_STATE_ROOT/dx3/prim-storage/build-kv.txt")
+    _ok: kv.kv_put(p, "key", "value") ?? false
+    value: kv.kv_get(p, "key") ?? "missing"
     print(value)
 }

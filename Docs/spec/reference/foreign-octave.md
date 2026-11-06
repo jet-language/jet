@@ -53,14 +53,14 @@ A host program can use the generated module in the normal effect-declared loop:
 
 ```jet
 use {
-    scale :: octave.scale
-    compute :: core.compute
+    scale: octave.scale
+    compute: core.compute
 }
 
-fn run() -[FFI.Octave, GPU, IO]> {
-    session :: scale.open() ?? panic("Octave sidecar did not start")
-    input :: compute.matrix(2, 2, 3.0) ?? panic("matrix")
-    output :: scale.scale(session, input, 5000) ?? panic("Octave call failed")
+run: fn() -[FFI.Octave, GPU, IO]> {
+    session: scale.open() ?? panic("Octave sidecar did not start")
+    input: compute.matrix(2, 2, 3.0) ?? panic("matrix")
+    output: scale.scale(session, input, 5000) ?? panic("Octave call failed")
     print(compute.shape(output))
     print(compute.to_list(output))
     scale.close(^session)

@@ -1,11 +1,11 @@
 
-fn build(b: Build) -[FS]> {
-    files :: b.find("assets/*.txt")
-    message :: b.embed(files[0])
+build: fn(b: Build) -[FS]> {
+    files: b.find("assets/*.txt")
+    message: b.embed(files[0])
     b.generate("asset") {
-        fn generated_asset() -> String { "hello" }
+        generated_asset: fn() -> String { "hello" }
         }
-    app :: b.add_executable("app", ["main.jet", ".jet/generated/main/asset.jet"], [])
+    app: b.add_executable("app", ["main.jet", ".jet/generated/main/asset.jet"], [])
     b.default(app)
 }
-fn run() { print(generated_asset()) }
+run: fn() { print(generated_asset()) }

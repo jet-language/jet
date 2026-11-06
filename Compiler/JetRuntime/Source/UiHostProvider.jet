@@ -1,7 +1,8 @@
 // The UI host provider seam (core.ui.host): primitives only. Core owns every
-// rule, queue, registry and UIHostError; a provider answers four questions:
+// rule, queue, registry and UIHostError; a provider answers five questions:
 // is a capability present, the clipboard's text (get and set), the next raw
-// event of a queue, and a dialog's request and result.
+// event of a queue, a dialog's request and result, and whether it claimed a
+// key for the shortcut queue.
 //
 // The leaves below are C functions. This native runtime defines them headless:
 // no capability is present and every service declines. A web build's host
@@ -14,21 +15,22 @@
 // staged bytes into a buffer of that length and clears the stage.
 
 // The headless provider: 0 is absent, -1 declines, and nothing is staged.
-#Export(c) fn jet_ui_provider_capability(capability: I64) -> I64 { I64{0} }
-#Export(c) fn jet_ui_provider_clipboard_get() -> I64 { I64{-1} }
-#Export(c) fn jet_ui_provider_clipboard_set(bytes: I64, length: I64) -> I64 { I64{-1} }
-#Export(c) fn jet_ui_provider_event_pop(queue: I64) -> I64 { I64{-1} }
-#Export(c) fn jet_ui_provider_dialog_request(kind: I64, bytes: I64, length: I64) -> I64 { I64{-1} }
-#Export(c) fn jet_ui_provider_dialog_result(token: I64) -> I64 { I64{-1} }
-#Export(c) fn jet_ui_provider_take(buffer: I64) {}
+#Export(c) jet_ui_provider_capability: fn(capability: I64) -> I64 { I64{0} }
+#Export(c) jet_ui_provider_clipboard_get: fn() -> I64 { I64{-1} }
+#Export(c) jet_ui_provider_clipboard_set: fn(bytes: I64, length: I64) -> I64 { I64{-1} }
+#Export(c) jet_ui_provider_event_pop: fn(queue: I64) -> I64 { I64{-1} }
+#Export(c) jet_ui_provider_dialog_request: fn(kind: I64, bytes: I64, length: I64) -> I64 { I64{-1} }
+#Export(c) jet_ui_provider_dialog_result: fn(token: I64) -> I64 { I64{-1} }
+#Export(c) jet_ui_provider_key_claim: fn(bytes: I64, length: I64) -> I64 { I64{-1} }
+#Export(c) jet_ui_provider_take: fn(buffer: I64) {}
 
 // The staged text of `length` bytes as an owned string, into `some`; 0 when
 // the leaf staged none.
-fn ui_host_take_into(length: I64, some: I64) -> I64 {
+ui_host_take_into: fn(length: I64, some: I64) -> I64 {
     if (length < I64{0}) -> return I64{0}
-    buffer :: jet_rt_alloc(if (length == I64{0}) -> I64{1} else -> length, I64{1})
+    buffer: jet_rt_alloc(if (length == I64{0}) -> I64{1} else -> length, I64{1})
     jet_ui_provider_take(buffer)
-    text :: rt_text_lossy(buffer, length)
+    text: rt_text_lossy(buffer, length)
     jet_rt_free(buffer, if (length == I64{0}) -> I64{1} else -> length, I64{1})
     if (jet_rt_session_propagate() != I64{0}) -> return I64{0}
     trap_store(some, text)
@@ -36,26 +38,30 @@ fn ui_host_take_into(length: I64, some: I64) -> I64 {
 }
 
 // Core routes (core.ui.host.__*): the leaves' answers as Jet values.
-#Export(c) fn jet_ui_host_capability(capability: I64) -> Bool {
+#Export(c) jet_ui_host_capability: fn(capability: I64) -> Bool {
     jet_ui_provider_capability(jet_int_owned_to_i64(capability)) == I64{1}
 }
 
-#Export(c) fn jet_ui_host_clipboard_get(some: I64) -> I64 {
+#Export(c) jet_ui_host_clipboard_get: fn(some: I64) -> I64 {
     ui_host_take_into(jet_ui_provider_clipboard_get(), some)
 }
 
-#Export(c) fn jet_ui_host_clipboard_set(text: I64) -> Bool {
+#Export(c) jet_ui_host_clipboard_set: fn(text: I64) -> Bool {
     jet_ui_provider_clipboard_set(rt_text_data(text), rt_text_len(text)) == I64{0}
 }
 
-#Export(c) fn jet_ui_host_event_pop(queue: I64, some: I64) -> I64 {
+#Export(c) jet_ui_host_event_pop: fn(queue: I64, some: I64) -> I64 {
     ui_host_take_into(jet_ui_provider_event_pop(jet_int_owned_to_i64(queue)), some)
 }
 
-#Export(c) fn jet_ui_host_dialog_request(kind: I64, request: I64) -> I64 {
+#Export(c) jet_ui_host_key_claim: fn(claim: I64) -> Bool {
+    jet_ui_provider_key_claim(rt_text_data(claim), rt_text_len(claim)) == I64{0}
+}
+
+#Export(c) jet_ui_host_dialog_request: fn(kind: I64, request: I64) -> I64 {
     jet_int_owned_from_i64(jet_ui_provider_dialog_request(jet_int_owned_to_i64(kind), rt_text_data(request), rt_text_len(request)))
 }
 
-#Export(c) fn jet_ui_host_dialog_result(token: I64, some: I64) -> I64 {
+#Export(c) jet_ui_host_dialog_result: fn(token: I64, some: I64) -> I64 {
     ui_host_take_into(jet_ui_provider_dialog_result(jet_int_owned_to_i64(token)), some)
 }

@@ -1,9 +1,9 @@
 // Reused RtBurn3c draft literals: seed failure/label spellings. Immutable
 // process-lifetime UTF-8; twelve (pointer,length) pairs.
 layout_literal_root := I64{0}
-fn layout_literals_init() {
+layout_literals_init: fn() {
     if (layout_literal_root != I64{0}) -> return
-    root :: jet_rt_alloc(I64{432}, I64{8})
+    root: jet_rt_alloc(I64{432}, I64{8})
     coll_zero(root, I64{432})
     layout_put(root, root + I64{192})
     layout_put(wrapping(root + I64{8}), I64{60})
@@ -63,11 +63,11 @@ fn layout_literals_init() {
         layout_literal_root = root
     }
 }
-fn layout_append_literal(target: I64, kind: I64) {
-    entry :: wrapping(layout_literal_root + kind * I64{16})
+layout_append_literal: fn(target: I64, kind: I64) {
+    entry: wrapping(layout_literal_root + kind * I64{16})
     jet_rt_string_builder_push_static(target, layout_word(entry), layout_word(wrapping(entry + I64{8})))
 }
-fn layout_append_index(target: I64, index: I64) {
+layout_append_index: fn(target: I64, index: I64) {
     divisor := I64{1}
     loop divisor <= index /% (I64{10}) { divisor *= I64{10} }
     remainder := index
@@ -77,20 +77,20 @@ fn layout_append_index(target: I64, index: I64) {
         divisor = divisor /% I64{10}
     }
 }
-fn layout_row_label(index: I64, op: I64) -> I64 {
-    target :: jet_rt_string_builder_new()
+layout_row_label: fn(index: I64, op: I64) -> I64 {
+    target: jet_rt_string_builder_new()
     layout_append_literal(target, I64{1})
     layout_append_index(target, index)
     layout_append_literal(target, I64{2} + op)
     target
 }
-fn layout_stop_owned(message: I64) {
+layout_stop_owned: fn(message: I64) {
     jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
     // Task panic publishes Stop then returns. All callers must return immediately.
     jet_rt_string_drop(message)
 }
-fn layout_term_overflow() {
-    target :: jet_rt_string_builder_new()
+layout_term_overflow: fn() {
+    target: jet_rt_string_builder_new()
     layout_append_literal(target, I64{0})
     layout_stop_owned(target)
 }

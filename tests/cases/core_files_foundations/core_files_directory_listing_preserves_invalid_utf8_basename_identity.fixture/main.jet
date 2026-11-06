@@ -1,12 +1,12 @@
 
-use files :: core.files
+use files: core.files
 
-fn verify_names() {
-    directory :: files.open_directory("names")
-    entries :: directory.list()
+verify_names: fn() {
+    directory: files.open_directory("names")
+    entries: directory.list()
     assert(entries.len() == 2)
-    first :: entries[0]
-    second :: entries[1]
+    first: entries[0]
+    second: entries[1]
     assert(first.raw_name == [U8]{97, 128})
     assert(second.raw_name == [U8]{97, 255})
     assert(!first.name_is_unicode && !second.name_is_unicode)
@@ -21,7 +21,7 @@ fn verify_names() {
     verify_names()
 }
 
-fn run() {
+run: fn() {
     verify_names()
     print("distinct raw identities, equal display names: true")
 }

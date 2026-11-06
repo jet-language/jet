@@ -1,4 +1,4 @@
-// Inline code modules (`module bank { ... }`). The Rust bootstrap gives every
+// Inline code modules (`bank: module { ... }`). The Rust bootstrap gives every
 // member one compiler-owned identity before any declaration is registered
 // (`hoist_inline_module_member_types`, `mangle_inline_sibling_calls`, the
 // `Item::CodeModule` registration arm, and the inline-module body jobs). This
@@ -25,7 +25,7 @@
 // Rust, so they are dropped. A module that imports Core or a foreign
 // namespace keeps its functions in its body.
 use {
-    unicode :: core.text
+    unicode: core.text
     jet_foundation.[
         AST_NODE_GENERATED,
         BindPattern,
@@ -91,13 +91,13 @@ use {
 
 // A member reached through a `use` inside a module: an inline module member
 // function, or (qualified) a member of a file module imported by this file.
-struct SemaInlineTarget {
+SemaInlineTarget: struct {
     module_alias: String
     member: String
     qualified: Bool
 }
 
-struct SemaInlineModuleSurface {
+SemaInlineModuleSurface: struct {
     // How the rewritten body spells the module: its full dotted path, or,
     // inside an enclosing module, its path relative to that module.
     name: String
@@ -111,7 +111,7 @@ struct SemaInlineModuleSurface {
     reexports: [String:SemaInlineTarget]
 }
 
-struct SemaInlineFunctionBinding {
+SemaInlineFunctionBinding: struct {
     semantic_name: String
     module_alias: String
     source_name: String
@@ -121,12 +121,12 @@ struct SemaInlineFunctionBinding {
 
 // The existing binder's products, retained after body rewriting for checked
 // metadata references. These contain names/spans only, never function ASTs.
-struct SemaInlinePreparedBindings {
+SemaInlinePreparedBindings: struct {
     imports: [String:SemaInlineFunctionBinding]
     modules: [SemaInlineModuleSurface]
 }
 
-struct SemaInlineRewrite {
+SemaInlineRewrite: struct {
     types: [String:Type]
     // Generic-module value parameters and constants -> their literal value.
     values: [String:Expr]
@@ -135,7 +135,7 @@ struct SemaInlineRewrite {
     siblings: [String:Bool]
     // File-level inline modules reachable as `alias.f(...)`.
     modules: [SemaInlineModuleSurface]
-    // `use g :: bank.f`: local name -> member identity.
+    // `use g: bank.f`: local name -> member identity.
     imported: [String:SemaInlineFunctionBinding]
     // A module's own `use limits.[MAX]` over a file module alias.
     qualified: [String:SemaInlineTarget]
@@ -147,13 +147,13 @@ struct SemaInlineRewrite {
     diagnostics: [Diagnostic]
 }
 
-struct SemaInlineHoist {
+SemaInlineHoist: struct {
     declarations: [Item]
     exported: [String:Type]
     has_exported: Bool
 }
 
-struct SemaInlineHoisted {
+SemaInlineHoisted: struct {
     code_module: CodeModule
     // Every lifted type's full source path, in declaration order.
     paths: [String]
@@ -164,15 +164,15 @@ struct SemaInlineHoisted {
 // Member naming (Rust `Syntax::generated_path`, `Names::member_name`,
 // `GenericModules::module_type_name`).
 
-fn sema_inline_is_alphanumeric(code: Int) -> Bool Never! {
+sema_inline_is_alphanumeric: fn(code: Int) -> Bool Never! {
     (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
 }
 
-fn sema_inline_generated_path(path: String) -> String Never! {
-    hex :: "0123456789abcdef"
+sema_inline_generated_path: fn(path: String) -> String Never! {
+    hex: "0123456789abcdef"
     out := [U8]{}
     loop byte in path.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if sema_inline_is_alphanumeric(code) {
             &out.push(byte)
             next
@@ -195,7 +195,7 @@ fn sema_inline_generated_path(path: String) -> String Never! {
     "__jet_{String.from_bytes(out) ?? ""}"
 }
 
-fn sema_inline_hex_value(code: Int) -> Int Never! {
+sema_inline_hex_value: fn(code: Int) -> Int Never! {
     if {
         code >= 48 && code <= 57 -> code - 48
         code >= 97 && code <= 102 -> code - 87
@@ -205,19 +205,19 @@ fn sema_inline_hex_value(code: Int) -> Int Never! {
 }
 
 // Rust `decode_generated_path_suffix`.
-fn sema_inline_decode_generated_suffix(suffix: String) -> String? Never! {
-    bytes :: suffix.bytes()
+sema_inline_decode_generated_suffix: fn(suffix: String) -> String? Never! {
+    bytes: suffix.bytes()
     out := [U8]{}
     index := 0
     loop index < bytes.len() {
-        code :: Int.from_u8(bytes[index])
+        code: Int.from_u8(bytes[index])
         if sema_inline_is_alphanumeric(code) {
             &out.push(bytes[index])
             index += 1
             next
         }
         if code != 95 || index + 1 >= bytes.len() -> return None
-        escape :: Int.from_u8(bytes[index + 1])
+        escape: Int.from_u8(bytes[index + 1])
         if {
             escape == 117 -> &out.push(U8{95})
             escape == 100 -> &out.push(U8{46})
@@ -226,8 +226,8 @@ fn sema_inline_decode_generated_suffix(suffix: String) -> String? Never! {
             escape == 98 -> &out.push(U8{92})
             escape == 104 -> &out.push(U8{45})
             escape == 120 && index + 3 < bytes.len() -> {
-                high :: sema_inline_hex_value(Int.from_u8(bytes[index + 2]))
-                low :: sema_inline_hex_value(Int.from_u8(bytes[index + 3]))
+                high: sema_inline_hex_value(Int.from_u8(bytes[index + 2]))
+                low: sema_inline_hex_value(Int.from_u8(bytes[index + 3]))
                 if high < 0 || low < 0 -> return None
                 &out.push(U8{high * 16 + low})
                 index += 2
@@ -239,9 +239,9 @@ fn sema_inline_decode_generated_suffix(suffix: String) -> String? Never! {
     Val(String.from_bytes(out) ?? return None)
 }
 
-fn sema_inline_member_name(module_path: String, name: String) -> String Never! {
-    stripped :: if module_path.starts_with("__jet_") -> String.from_bytes(module_path.bytes()[6..<module_path.bytes().len()]) ?? module_path.copy() else -> module_path.copy()
-    decoded :: sema_inline_decode_generated_suffix(stripped) ?? stripped
+sema_inline_member_name: fn(module_path: String, name: String) -> String Never! {
+    stripped: if module_path.starts_with("__jet_") -> String.from_bytes(module_path.bytes()[6..<module_path.bytes().len()]) ?? module_path.copy() else -> module_path.copy()
+    decoded: sema_inline_decode_generated_suffix(stripped) ?? stripped
     sema_inline_generated_path("{decoded}.{name}")
 }
 
@@ -250,22 +250,22 @@ fn sema_inline_member_name(module_path: String, name: String) -> String Never! {
 // be an identifier: a module path whose `_s` reads back as `/` (Rust
 // `member_name` decodes an unprefixed module path too) still names its member.
 // Any other name is returned unchanged.
-fn sema_inline_member_source_name(name: String) -> String Never! {
+sema_inline_member_source_name: fn(name: String) -> String Never! {
     if !name.starts_with("__jet_") -> return name.copy()
-    decoded :: sema_inline_decode_generated_suffix(String.from_bytes(name.bytes()[6..<name.bytes().len()]) ?? "") ?? return name.copy()
+    decoded: sema_inline_decode_generated_suffix(String.from_bytes(name.bytes()[6..<name.bytes().len()]) ?? "") ?? return name.copy()
     if !decoded.contains(".") || sema_inline_generated_path(decoded) != name -> return name.copy()
-    segments :: decoded.split(".").to_list()
-    member :: segments[segments.len() - 1]
+    segments: decoded.split(".").to_list()
+    member: segments[segments.len() - 1]
     if member == "" -> return name.copy()
     loop byte in member.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if !sema_inline_is_alphanumeric(code) && code != 95 -> return name.copy()
     }
     member
 }
 
-fn sema_inline_trim_leading_underscores(name: String) -> String Never! {
-    bytes :: name.bytes()
+sema_inline_trim_leading_underscores: fn(name: String) -> String Never! {
+    bytes: name.bytes()
     start := 0
     loop start < bytes.len() && Int.from_u8(bytes[start]) == 95 {
         start += 1
@@ -273,32 +273,32 @@ fn sema_inline_trim_leading_underscores(name: String) -> String Never! {
     String.from_bytes(bytes[start..<bytes.len()]) ?? name.copy()
 }
 
-fn sema_inline_type_prefix(alias: String) -> String {
-    visibility :: if alias.starts_with("_") -> "_" else -> ""
-    body :: if alias.starts_with("_") -> String.from_bytes(alias.bytes()[1..<alias.bytes().len()]) ?? alias.copy() else -> alias.copy()
+sema_inline_type_prefix: fn(alias: String) -> String {
+    visibility: if alias.starts_with("_") -> "_" else -> ""
+    body: if alias.starts_with("_") -> String.from_bytes(alias.bytes()[1..<alias.bytes().len()]) ?? alias.copy() else -> alias.copy()
     encoded := ""
     loop segment in body.split("_") {
-        cased :: sema_casing_pascal_words(segment)
+        cased: sema_casing_pascal_words(segment)
         encoded = "{encoded}{unicode.scalars(cased).len()}{cased}"
     }
     "{visibility}M{encoded}"
 }
 
-fn sema_inline_type_name(alias: String, name: String) -> String {
+sema_inline_type_name: fn(alias: String, name: String) -> String {
     "{sema_inline_type_prefix(alias)}{sema_inline_trim_leading_underscores(name)}"
 }
 
 // Rust `inline_type_alias`.
-fn sema_inline_type_alias(source_path: String) -> String Never! {
+sema_inline_type_alias: fn(source_path: String) -> String Never! {
     source_path.split(".").to_list().join("_")
 }
 
-fn sema_inline_mapped_name(rewrite: SemaInlineRewrite, name: String) -> String Never! {
+sema_inline_mapped_name: fn(rewrite: SemaInlineRewrite, name: String) -> String Never! {
     if rewrite.types.get(name) == .Val(.Named(mapped)) -> return mapped
     name.copy()
 }
 
-fn sema_inline_mapped_names(rewrite: SemaInlineRewrite, names: [NamedSpan]) -> [NamedSpan] Never! {
+sema_inline_mapped_names: fn(rewrite: SemaInlineRewrite, names: [NamedSpan]) -> [NamedSpan] Never! {
     mapped := [NamedSpan]{}
     loop entry in names -> &mapped.push(NamedSpan{name: sema_inline_mapped_name(rewrite, entry.name), span: entry.span})
     mapped
@@ -307,8 +307,8 @@ fn sema_inline_mapped_names(rewrite: SemaInlineRewrite, names: [NamedSpan]) -> [
 // A program a `module` lowering leaves complete: nothing but nested modules
 // that are themselves lowered, and marker declarations, which stay in the
 // body as their home (MarkerModules resolves `#Alias.Module.Marker` there).
-fn sema_inline_module_lowered(definition: CodeModule) -> Bool Never! {
-    body :: definition.body ?? return false
+sema_inline_module_lowered: fn(definition: CodeModule) -> Bool Never! {
+    body: definition.body ?? return false
     loop item in body {
         if item == .CodeModule(child) {
             if !sema_inline_module_lowered(child) -> return false
@@ -326,7 +326,7 @@ fn sema_inline_module_lowered(definition: CodeModule) -> Bool Never! {
 // file's imports overlaid with its own, so an inline Core import that repeats a
 // file import's alias and module binds nothing new and the lifted members
 // resolve it through the file's binding.
-fn sema_inline_module_lowerable(definition: CodeModule, file_imports: [ImportDecl]) -> Bool Never! {
+sema_inline_module_lowerable: fn(definition: CodeModule, file_imports: [ImportDecl]) -> Bool Never! {
     if definition.body == None -> return false
     loop declaration in definition.imports {
         if declaration.kind == {
@@ -343,7 +343,7 @@ fn sema_inline_module_lowerable(definition: CodeModule, file_imports: [ImportDec
     true
 }
 
-fn sema_inline_file_binds_module(file_imports: [ImportDecl], alias: String, name: String) -> Bool Never! {
+sema_inline_file_binds_module: fn(file_imports: [ImportDecl], alias: String, name: String) -> Bool Never! {
     loop declaration in file_imports {
         if declaration.alias != alias -> next
         if declaration.kind == .Module(bound, _) -> return bound == name
@@ -356,11 +356,11 @@ fn sema_inline_file_binds_module(file_imports: [ImportDecl], alias: String, name
 // Rewriting (Rust `substitute_expr` / `substitute_stmts`,
 // `rewrite_inline_calls_expr` and the checker's inline-module call routes).
 
-fn sema_inline_rewrite_empty() -> SemaInlineRewrite Never! {
+sema_inline_rewrite_empty: fn() -> SemaInlineRewrite Never! {
     SemaInlineRewrite{types: [String:Type]{}, values: [String:Expr]{}, sibling_module: "", siblings: [String:Bool]{}, modules: [SemaInlineModuleSurface]{}, imported: [String:SemaInlineFunctionBinding]{}, qualified: [String:SemaInlineTarget]{}, locals: [String]{}, variadic: [String:Int]{}, variadic_arities: [String:[Int]]{}, diagnostics: [Diagnostic]{}}
 }
 
-fn sema_inline_is_local(rewrite: SemaInlineRewrite, name: String) -> Bool Never! {
+sema_inline_is_local: fn(rewrite: SemaInlineRewrite, name: String) -> Bool Never! {
     loop local in rewrite.locals {
         if local == name -> return true
     }
@@ -369,7 +369,7 @@ fn sema_inline_is_local(rewrite: SemaInlineRewrite, name: String) -> Bool Never!
 
 // `alias.Type` as a value's base (`internal.Failure.Missing`) names the
 // hoisted member type, as a type position spelling `alias.Type` does.
-fn sema_inline_type_path(rewrite: SemaInlineRewrite, base: Expr) -> Expr? Never! {
+sema_inline_type_path: fn(rewrite: SemaInlineRewrite, base: Expr) -> Expr? Never! {
     if base == .Field(inner, member, span, node) && inner == .Ident(alias, _, _) {
         if sema_inline_is_local(rewrite, alias) -> return None
         if rewrite.types.get("{alias}.{member}") == .Val(.Named(name)) -> return Val(Expr.Ident{name: name, span: span, id: node})
@@ -377,7 +377,7 @@ fn sema_inline_type_path(rewrite: SemaInlineRewrite, base: Expr) -> Expr? Never!
     None
 }
 
-fn sema_inline_surface(rewrite: SemaInlineRewrite, name: String) -> SemaInlineModuleSurface? Never! {
+sema_inline_surface: fn(rewrite: SemaInlineRewrite, name: String) -> SemaInlineModuleSurface? Never! {
     if sema_inline_is_local(rewrite, name) -> return None
     loop surface in rewrite.modules {
         if surface.name == name -> return Val(surface)
@@ -385,13 +385,13 @@ fn sema_inline_surface(rewrite: SemaInlineRewrite, name: String) -> SemaInlineMo
     None
 }
 
-fn sema_inline_restore_locals(rewrite: &SemaInlineRewrite, saved: Int) Never! {
+sema_inline_restore_locals: fn(rewrite: &SemaInlineRewrite, saved: Int) Never! {
     loop rewrite.locals.len() > saved {
         _ := &rewrite.locals.pop()
     }
 }
 
-fn sema_inline_rewrite_type(rewrite: SemaInlineRewrite, ty: Type) -> Type Never! {
+sema_inline_rewrite_type: fn(rewrite: SemaInlineRewrite, ty: Type) -> Type Never! {
     if ty == {
         .Named(name) -> {
             if rewrite.types.get(name) == .Val(mapped) -> return mapped
@@ -444,7 +444,7 @@ fn sema_inline_rewrite_type(rewrite: SemaInlineRewrite, ty: Type) -> Type Never!
 
 // Rust `Measure::resolve_symbols`: a fixed length named by an `Int` module
 // value parameter becomes that length.
-fn sema_inline_rewrite_measure(rewrite: SemaInlineRewrite, measure: Measure) -> Measure Never! {
+sema_inline_rewrite_measure: fn(rewrite: SemaInlineRewrite, measure: Measure) -> Measure Never! {
     if measure == {
         .Symbol(kind, name) -> {
             if rewrite.values.get(name) == .Val(.Int(value, _, _, _, _)) {
@@ -456,12 +456,12 @@ fn sema_inline_rewrite_measure(rewrite: SemaInlineRewrite, measure: Measure) -> 
             measure.copy()
         }
         .Combined(kind, rule, left, right) -> {
-            resolved_left :: sema_inline_rewrite_measure(rewrite, left)
-            resolved_right :: sema_inline_rewrite_measure(rewrite, right)
+            resolved_left: sema_inline_rewrite_measure(rewrite, left)
+            resolved_right: sema_inline_rewrite_measure(rewrite, right)
             if rule != MeasureRule.Match {
                 if measure_literal_value(resolved_left) == .Val(left_value) {
                     if measure_literal_value(resolved_right) == .Val(right_value) {
-                        folded :: if rule == MeasureRule.Add -> left_value + right_value else -> left_value * right_value
+                        folded: if rule == MeasureRule.Add -> left_value + right_value else -> left_value * right_value
                         return Measure.Literal{kind: measure_kind(resolved_left), value: folded}
                     }
                 }
@@ -477,7 +477,7 @@ fn sema_inline_rewrite_measure(rewrite: SemaInlineRewrite, measure: Measure) -> 
 
 // A substituted compile-time value takes the span of the name it replaces
 // (Rust `ct_value_expr`).
-fn sema_inline_value_at(value: Expr, span: Span) -> Expr Never! {
+sema_inline_value_at: fn(value: Expr, span: Span) -> Expr Never! {
     if value == {
         .Int(number, _, _, _, node) -> Expr.Int{value: number, span: span, width: None, raw: None, id: node}
         .Bool(flag, _, node) -> Expr.Bool{value: flag, span: span, id: node}
@@ -493,37 +493,37 @@ fn sema_inline_value_at(value: Expr, span: Span) -> Expr Never! {
 }
 
 // `limits.f(...)`: a call through a module's own `use limits.[f]`.
-fn sema_inline_qualified_call(rewrite: &SemaInlineRewrite, target: SemaInlineTarget, span: Span, type_args: [Type], args: [CallArg]) -> Expr Never! {
+sema_inline_qualified_call: fn(rewrite: &SemaInlineRewrite, target: SemaInlineTarget, span: Span, type_args: [Type], args: [CallArg]) -> Expr Never! {
     Expr.MethodCall{receiver: Expr.Ident{name: target.module_alias, span: span, id: AST_NODE_GENERATED}, method: target.member, method_span: span, owner_type_args: [Type]{}, type_args: sema_inline_rewrite_types(rewrite, type_args), args: sema_inline_rewrite_call_args(&rewrite, args), id: AST_NODE_GENERATED}
 }
 
-fn sema_inline_rewrite_types(rewrite: SemaInlineRewrite, types: [Type]) -> [Type] Never! {
+sema_inline_rewrite_types: fn(rewrite: SemaInlineRewrite, types: [Type]) -> [Type] Never! {
     mapped := [Type]{}
     loop ty in types -> &mapped.push(sema_inline_rewrite_type(rewrite, ty))
     mapped
 }
 
-fn sema_inline_rewrite_optional_type(rewrite: SemaInlineRewrite, ty: Type?) -> Type? Never! {
+sema_inline_rewrite_optional_type: fn(rewrite: SemaInlineRewrite, ty: Type?) -> Type? Never! {
     if ty == {
         .Val(value) -> Val(sema_inline_rewrite_type(rewrite, value))
         .None -> None
     }
 }
 
-fn sema_inline_rewrite_exprs(rewrite: &SemaInlineRewrite, expressions: [Expr]) -> [Expr] Never! {
+sema_inline_rewrite_exprs: fn(rewrite: &SemaInlineRewrite, expressions: [Expr]) -> [Expr] Never! {
     mapped := [Expr]{}
     loop expression in expressions -> &mapped.push(sema_inline_rewrite_expr(&rewrite, expression))
     mapped
 }
 
-fn sema_inline_rewrite_optional_expr(rewrite: &SemaInlineRewrite, expression: Expr?) -> Expr? Never! {
+sema_inline_rewrite_optional_expr: fn(rewrite: &SemaInlineRewrite, expression: Expr?) -> Expr? Never! {
     if expression == {
         .Val(value) -> Val(sema_inline_rewrite_expr(&rewrite, value))
         .None -> None
     }
 }
 
-fn sema_inline_rewrite_call_args(rewrite: &SemaInlineRewrite, args: [CallArg]) -> [CallArg] Never! {
+sema_inline_rewrite_call_args: fn(rewrite: &SemaInlineRewrite, args: [CallArg]) -> [CallArg] Never! {
     mapped := [CallArg]{}
     loop arg in args {
         updated := arg
@@ -533,19 +533,19 @@ fn sema_inline_rewrite_call_args(rewrite: &SemaInlineRewrite, args: [CallArg]) -
     mapped
 }
 
-fn sema_inline_rewrite_fields(rewrite: &SemaInlineRewrite, fields: [ExprField]) -> [ExprField] Never! {
+sema_inline_rewrite_fields: fn(rewrite: &SemaInlineRewrite, fields: [ExprField]) -> [ExprField] Never! {
     mapped := [ExprField]{}
     loop field in fields -> &mapped.push(ExprField{name: field.name, name_span: field.name_span, value: sema_inline_rewrite_expr(&rewrite, field.value)})
     mapped
 }
 
-fn sema_inline_rewrite_pairs(rewrite: &SemaInlineRewrite, entries: [ExprPair]) -> [ExprPair] Never! {
+sema_inline_rewrite_pairs: fn(rewrite: &SemaInlineRewrite, entries: [ExprPair]) -> [ExprPair] Never! {
     mapped := [ExprPair]{}
     loop entry in entries -> &mapped.push(ExprPair{key: sema_inline_rewrite_expr(&rewrite, entry.key), value: sema_inline_rewrite_expr(&rewrite, entry.value)})
     mapped
 }
 
-fn sema_inline_rewrite_str_parts(rewrite: &SemaInlineRewrite, parts: [StrPart]) -> [StrPart] Never! {
+sema_inline_rewrite_str_parts: fn(rewrite: &SemaInlineRewrite, parts: [StrPart]) -> [StrPart] Never! {
     mapped := [StrPart]{}
     loop part in parts {
         if part == {
@@ -556,13 +556,13 @@ fn sema_inline_rewrite_str_parts(rewrite: &SemaInlineRewrite, parts: [StrPart]) 
     mapped
 }
 
-fn sema_inline_rewrite_or_fallback(rewrite: &SemaInlineRewrite, fallback: OrFallback) -> OrFallback Never! {
+sema_inline_rewrite_or_fallback: fn(rewrite: &SemaInlineRewrite, fallback: OrFallback) -> OrFallback Never! {
     if fallback == {
         .Value(value) -> OrFallback.Value{value: sema_inline_rewrite_expr(&rewrite, value)}
         .Block(body, value, span) -> {
-            saved :: rewrite.locals.len()
-            mapped_body :: sema_inline_rewrite_stmts(&rewrite, body)
-            mapped_value :: sema_inline_rewrite_optional_expr(&rewrite, value)
+            saved: rewrite.locals.len()
+            mapped_body: sema_inline_rewrite_stmts(&rewrite, body)
+            mapped_value: sema_inline_rewrite_optional_expr(&rewrite, value)
             sema_inline_restore_locals(&rewrite, saved)
             OrFallback.Block{body: mapped_body, value: mapped_value, span: span}
         }
@@ -575,9 +575,9 @@ fn sema_inline_rewrite_or_fallback(rewrite: &SemaInlineRewrite, fallback: OrFall
     }
 }
 
-fn sema_inline_rewrite_lambda(rewrite: &SemaInlineRewrite, lambda: Lambda) -> Lambda Never! {
+sema_inline_rewrite_lambda: fn(rewrite: &SemaInlineRewrite, lambda: Lambda) -> Lambda Never! {
     updated := lambda
-    saved :: rewrite.locals.len()
+    saved: rewrite.locals.len()
     params := [LambdaParam]{}
     loop param in lambda.params {
         mapped := param
@@ -594,7 +594,7 @@ fn sema_inline_rewrite_lambda(rewrite: &SemaInlineRewrite, lambda: Lambda) -> La
     updated
 }
 
-fn sema_inline_rewrite_typed_body(rewrite: &SemaInlineRewrite, body: TypedLitBody) -> TypedLitBody Never! {
+sema_inline_rewrite_typed_body: fn(rewrite: &SemaInlineRewrite, body: TypedLitBody) -> TypedLitBody Never! {
     if body == {
         .Fields(fields) -> return TypedLitBody.Fields{fields: sema_inline_rewrite_fields(&rewrite, fields)}
         .Elements(elements) -> return TypedLitBody.Elements{elements: sema_inline_rewrite_exprs(&rewrite, elements)}
@@ -608,7 +608,7 @@ fn sema_inline_rewrite_typed_body(rewrite: &SemaInlineRewrite, body: TypedLitBod
     body.copy()
 }
 
-fn sema_inline_rewrite_enum_args(rewrite: &SemaInlineRewrite, args: [EnumLitArg]) -> [EnumLitArg] Never! {
+sema_inline_rewrite_enum_args: fn(rewrite: &SemaInlineRewrite, args: [EnumLitArg]) -> [EnumLitArg] Never! {
     mapped := [EnumLitArg]{}
     loop arg in args {
         if arg == {
@@ -623,23 +623,23 @@ fn sema_inline_rewrite_enum_args(rewrite: &SemaInlineRewrite, args: [EnumLitArg]
 // a `pub use` re-export calls its owner, a member function its member
 // identity; any other name is E0608. The file is the enclosing module, so it
 // reaches the members of its `priv module`s too.
-fn sema_inline_rewrite_module_call(rewrite: &SemaInlineRewrite, surface: SemaInlineModuleSurface, alias_span: Span, method: String, method_span: Span, type_args: [Type], args: [CallArg]) -> Expr? Never! {
+sema_inline_rewrite_module_call: fn(rewrite: &SemaInlineRewrite, surface: SemaInlineModuleSurface, alias_span: Span, method: String, method_span: Span, type_args: [Type], args: [CallArg]) -> Expr? Never! {
     if surface.reexports.get(method) == .Val(target) {
         if target.qualified -> return Val(sema_inline_qualified_call(&rewrite, target, method_span, type_args, args))
-        forwarded :: Call{name: sema_inline_member_name(target.module_alias, target.member), name_span: method_span, type_args: sema_inline_rewrite_types(rewrite, type_args), args: sema_inline_rewrite_call_args(&rewrite, args)}
+        forwarded: Call{name: sema_inline_member_name(target.module_alias, target.member), name_span: method_span, type_args: sema_inline_rewrite_types(rewrite, type_args), args: sema_inline_rewrite_call_args(&rewrite, args)}
         return Val(Expr.Call{call: forwarded, id: AST_NODE_GENERATED})
     }
     if surface.functions.get(method) == None {
         &rewrite.diagnostics.push(sema_error("E0608", alias_span, "`{method}` is not defined in module `{surface.path}`", "check the module body for the function you're calling", "make sure the function name is spelled correctly"))
         return None
     }
-    call :: Call{name: sema_inline_member_name(surface.path, method), name_span: method_span, type_args: sema_inline_rewrite_types(rewrite, type_args), args: sema_inline_rewrite_call_args(&rewrite, args)}
+    call: Call{name: sema_inline_member_name(surface.path, method), name_span: method_span, type_args: sema_inline_rewrite_types(rewrite, type_args), args: sema_inline_rewrite_call_args(&rewrite, args)}
     Val(Expr.Call{call: call, id: AST_NODE_GENERATED})
 }
 
 // `a.b.c` as a call receiver: each identifier segment with its span, false
 // for any other receiver.
-fn sema_inline_receiver_path(receiver: Expr, segments: &[NamedSpan]) -> Bool Never! {
+sema_inline_receiver_path: fn(receiver: Expr, segments: &[NamedSpan]) -> Bool Never! {
     if receiver == {
         .Ident(name, span, _) -> {
             &segments.push(NamedSpan{name: name, span: span})
@@ -657,19 +657,19 @@ fn sema_inline_receiver_path(receiver: Expr, segments: &[NamedSpan]) -> Bool Nev
 // A nested `priv module` on the path `segments` names is usable only inside
 // the module that encloses it: the body being rewritten (`sibling_module`,
 // "" for the file) must be that module or one nested in it (E0609).
-fn sema_inline_private_step(rewrite: SemaInlineRewrite, segments: [NamedSpan]) -> Diagnostic? Never! {
+sema_inline_private_step: fn(rewrite: SemaInlineRewrite, segments: [NamedSpan]) -> Diagnostic? Never! {
     prefix := segments[0].name.copy()
     loop index in 1..<segments.len() {
         prefix = "{prefix}.{segments[index].name}"
-        surface :: sema_inline_surface(rewrite, prefix) ?? return None
-        owner :: surface.private_to ?? next
+        surface: sema_inline_surface(rewrite, prefix) ?? return None
+        owner: surface.private_to ?? next
         if rewrite.sibling_module == owner || rewrite.sibling_module.starts_with("{owner}.") -> next
-        return Val(sema_error("E0609", segments[index].span, "`{segments[index].name}` is private in module `{owner}`", "a `priv module` is usable only by its enclosing module", "call it from inside `{owner}`, or remove `priv` from `module {segments[index].name}`"))
+        return Val(sema_error("E0609", segments[index].span, "`{segments[index].name}` is private in module `{owner}`", "a `priv module` is usable only by its enclosing module", "call it from inside `{owner}`, or remove `priv` from `{segments[index].name}: module`"))
     }
     None
 }
 
-fn sema_inline_rewrite_expr(rewrite: &SemaInlineRewrite, expression: Expr) -> Expr Never! {
+sema_inline_rewrite_expr: fn(rewrite: &SemaInlineRewrite, expression: Expr) -> Expr Never! {
     if expression == {
         .Str(parts, span, node) -> return Expr.Str{parts: sema_inline_rewrite_str_parts(&rewrite, parts), span: span, id: node}
         .ListLit(elements, span, node) -> return Expr.ListLit{elements: sema_inline_rewrite_exprs(&rewrite, elements), span: span, id: node}
@@ -737,7 +737,7 @@ fn sema_inline_rewrite_expr(rewrite: &SemaInlineRewrite, expression: Expr) -> Ex
         .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, node) -> {
             if receiver == .Ident(alias, alias_span, _) {
                 if sema_inline_surface(rewrite, alias) == .Val(surface) {
-                    rewritten :: sema_inline_rewrite_module_call(&rewrite, surface, alias_span, method, method_span, type_args, args)
+                    rewritten: sema_inline_rewrite_module_call(&rewrite, surface, alias_span, method, method_span, type_args, args)
                     if rewritten == .Val(value) -> return value
                     return Expr.MethodCall{receiver: receiver, method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: sema_inline_rewrite_call_args(&rewrite, args), id: node}
                 }
@@ -748,10 +748,10 @@ fn sema_inline_rewrite_expr(rewrite: &SemaInlineRewrite, expression: Expr) -> Ex
             if receiver == .Field(_, _, _, _) {
                 segments := [NamedSpan]{}
                 if sema_inline_receiver_path(receiver, &segments) && !sema_inline_is_local(rewrite, segments[0].name) {
-                    path :: (loop segment in segments -> segment.name).join(".")
+                    path: (loop segment in segments -> segment.name).join(".")
                     if sema_inline_surface(rewrite, path) == .Val(surface) {
                         if sema_inline_private_step(rewrite, segments) == .Val(diagnostic) -> &rewrite.diagnostics.push(diagnostic)
-                        rewritten :: sema_inline_rewrite_module_call(&rewrite, surface, segments[segments.len() - 1].span, method, method_span, type_args, args)
+                        rewritten: sema_inline_rewrite_module_call(&rewrite, surface, segments[segments.len() - 1].span, method, method_span, type_args, args)
                         if rewritten == .Val(value) -> return value
                         return Expr.MethodCall{receiver: receiver, method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: sema_inline_rewrite_call_args(&rewrite, args), id: node}
                     }
@@ -804,13 +804,13 @@ fn sema_inline_rewrite_expr(rewrite: &SemaInlineRewrite, expression: Expr) -> Ex
         .Try(value, span, conversion, context, node) -> return Expr.Try{value: sema_inline_rewrite_expr(&rewrite, value), span: span, conversion: conversion.copy(), context: sema_inline_rewrite_optional_expr(&rewrite, context), id: node}
         .OrFallback(value, fallback, is_option, span, node) -> return Expr.OrFallback{value: sema_inline_rewrite_expr(&rewrite, value), fallback: sema_inline_rewrite_or_fallback(&rewrite, fallback), is_option: is_option, span: span, id: node}
         .If(cond, then_body, then_value, else_body, else_value, span, node) -> {
-            mapped_cond :: sema_inline_rewrite_expr(&rewrite, cond)
-            saved :: rewrite.locals.len()
-            mapped_then_body :: sema_inline_rewrite_stmts(&rewrite, then_body)
-            mapped_then_value :: sema_inline_rewrite_expr(&rewrite, then_value)
+            mapped_cond: sema_inline_rewrite_expr(&rewrite, cond)
+            saved: rewrite.locals.len()
+            mapped_then_body: sema_inline_rewrite_stmts(&rewrite, then_body)
+            mapped_then_value: sema_inline_rewrite_expr(&rewrite, then_value)
             sema_inline_restore_locals(&rewrite, saved)
-            mapped_else_body :: sema_inline_rewrite_stmts(&rewrite, else_body)
-            mapped_else_value :: sema_inline_rewrite_expr(&rewrite, else_value)
+            mapped_else_body: sema_inline_rewrite_stmts(&rewrite, else_body)
+            mapped_else_value: sema_inline_rewrite_expr(&rewrite, else_value)
             sema_inline_restore_locals(&rewrite, saved)
             return Expr.If{cond: mapped_cond, then_body: mapped_then_body, then_value: mapped_then_value, else_body: mapped_else_body, else_value: mapped_else_value, span: span, id: node}
         }
@@ -831,10 +831,10 @@ fn sema_inline_rewrite_expr(rewrite: &SemaInlineRewrite, expression: Expr) -> Ex
     expression.copy()
 }
 
-fn sema_inline_declare_binding(rewrite: &SemaInlineRewrite, binding: Binding) Never! {
+sema_inline_declare_binding: fn(rewrite: &SemaInlineRewrite, binding: Binding) Never! {
     &rewrite.locals.push(binding.name)
     if binding.pattern == .Val(pattern) {
-        names :: if pattern == {
+        names: if pattern == {
             .Struct(_, _, fields, _, _) -> fields
             .List(elements, _) -> elements
             .Tuple(elements, _) -> elements
@@ -849,7 +849,7 @@ fn sema_inline_declare_binding(rewrite: &SemaInlineRewrite, binding: Binding) Ne
     }
 }
 
-fn sema_inline_rewrite_binding(rewrite: &SemaInlineRewrite, binding: Binding) -> Binding Never! {
+sema_inline_rewrite_binding: fn(rewrite: &SemaInlineRewrite, binding: Binding) -> Binding Never! {
     updated := binding
     updated.ty = sema_inline_rewrite_optional_type(rewrite, binding.ty)
     updated.init = sema_inline_rewrite_expr(&rewrite, binding.init)
@@ -866,26 +866,26 @@ fn sema_inline_rewrite_binding(rewrite: &SemaInlineRewrite, binding: Binding) ->
     updated
 }
 
-fn sema_inline_rewrite_arms(rewrite: &SemaInlineRewrite, arms: [SwitchArm]) -> [SwitchArm] Never! {
+sema_inline_rewrite_arms: fn(rewrite: &SemaInlineRewrite, arms: [SwitchArm]) -> [SwitchArm] Never! {
     mapped := [SwitchArm]{}
     loop arm in arms {
-        saved :: rewrite.locals.len()
-        cond :: sema_inline_rewrite_expr(&rewrite, arm.cond)
-        body :: sema_inline_rewrite_stmts(&rewrite, arm.body)
+        saved: rewrite.locals.len()
+        cond: sema_inline_rewrite_expr(&rewrite, arm.cond)
+        body: sema_inline_rewrite_stmts(&rewrite, arm.body)
         sema_inline_restore_locals(&rewrite, saved)
         &mapped.push(SwitchArm{cond: cond, body: body, span: arm.span})
     }
     mapped
 }
 
-fn sema_inline_rewrite_optional_body(rewrite: &SemaInlineRewrite, body: [Stmt]?) -> [Stmt]? Never! {
+sema_inline_rewrite_optional_body: fn(rewrite: &SemaInlineRewrite, body: [Stmt]?) -> [Stmt]? Never! {
     if body == {
         .Val(value) -> Val(sema_inline_rewrite_stmts(&rewrite, value))
         .None -> None
     }
 }
 
-fn sema_inline_rewrite_lvalue(rewrite: &SemaInlineRewrite, target: LValue) -> LValue Never! {
+sema_inline_rewrite_lvalue: fn(rewrite: &SemaInlineRewrite, target: LValue) -> LValue Never! {
     if target == {
         // copy: `kind` is a payload of read parameter `target`, which keeps the original; field `kind` of the new LValue.Index owns this one
         .Index(base, index, span, kind) -> LValue.Index{base: sema_inline_rewrite_expr(&rewrite, base), index: sema_inline_rewrite_expr(&rewrite, index), span: span, kind: kind.copy()}
@@ -898,19 +898,19 @@ fn sema_inline_rewrite_lvalue(rewrite: &SemaInlineRewrite, target: LValue) -> LV
 }
 
 // A block's bindings shadow module names for the rest of that block only.
-fn sema_inline_rewrite_stmts(rewrite: &SemaInlineRewrite, stmts: [Stmt]) -> [Stmt] Never! {
-    saved :: rewrite.locals.len()
+sema_inline_rewrite_stmts: fn(rewrite: &SemaInlineRewrite, stmts: [Stmt]) -> [Stmt] Never! {
+    saved: rewrite.locals.len()
     mapped := [Stmt]{}
     loop stmt in stmts -> &mapped.push(sema_inline_rewrite_stmt(&rewrite, stmt))
     sema_inline_restore_locals(&rewrite, saved)
     mapped
 }
 
-fn sema_inline_rewrite_stmt(rewrite: &SemaInlineRewrite, stmt: Stmt) -> Stmt Never! {
+sema_inline_rewrite_stmt: fn(rewrite: &SemaInlineRewrite, stmt: Stmt) -> Stmt Never! {
     if stmt == {
         .Expr(value) -> Stmt.Expr{expr: sema_inline_rewrite_expr(&rewrite, value)}
         .Val(binding) -> {
-            mapped :: sema_inline_rewrite_binding(&rewrite, binding)
+            mapped: sema_inline_rewrite_binding(&rewrite, binding)
             sema_inline_declare_binding(&rewrite, binding)
             Stmt.Val{binding: mapped}
         }
@@ -920,14 +920,14 @@ fn sema_inline_rewrite_stmt(rewrite: &SemaInlineRewrite, stmt: Stmt) -> Stmt Nev
         // copy: `label` is a payload of read parameter `stmt`, which keeps the original; field `label` of the new Stmt.While owns this one
         .While(cond, body, span, arrow_body, label) -> Stmt.While{cond: sema_inline_rewrite_expr(&rewrite, cond), body: sema_inline_rewrite_stmts(&rewrite, body), span: span, arrow_body: arrow_body, label: label.copy()}
         .For(var, var_span, var2, kind, body, span, arrow_body, label, auto_vectorization) -> {
-            mapped_kind :: if kind == {
+            mapped_kind: if kind == {
                 .Range(start, end, step, exclusive) -> ForKind.Range{start: sema_inline_rewrite_expr(&rewrite, start), end: sema_inline_rewrite_expr(&rewrite, end), step: sema_inline_rewrite_optional_expr(&rewrite, step), exclusive: exclusive}
                 .In(collection, step) -> ForKind.In{collection: sema_inline_rewrite_expr(&rewrite, collection), step: sema_inline_rewrite_optional_expr(&rewrite, step)}
             }
-            saved :: rewrite.locals.len()
+            saved: rewrite.locals.len()
             &rewrite.locals.push(var)
             if var2 == .Val(second) -> &rewrite.locals.push(second.name)
-            mapped_body :: sema_inline_rewrite_stmts(&rewrite, body)
+            mapped_body: sema_inline_rewrite_stmts(&rewrite, body)
             sema_inline_restore_locals(&rewrite, saved)
             Stmt.For{var: var, var_span: var_span, var2: var2, kind: mapped_kind, body: mapped_body, span: span, arrow_body: arrow_body, label: label, auto_vectorization: auto_vectorization}
         }
@@ -938,13 +938,13 @@ fn sema_inline_rewrite_stmt(rewrite: &SemaInlineRewrite, stmt: Stmt) -> Stmt Nev
         // copy: `label` is a payload of read parameter `stmt`, which keeps the original; field `label` of the new Stmt.Loop owns this one
         .Loop(body, span, arrow_body, label) -> Stmt.Loop{body: sema_inline_rewrite_stmts(&rewrite, body), span: span, arrow_body: arrow_body, label: label.copy()}
         .CountedLoop(init, cond, step, body, span, arrow_body, label) -> {
-            saved :: rewrite.locals.len()
-            mapped_init :: sema_inline_rewrite_binding(&rewrite, init)
+            saved: rewrite.locals.len()
+            mapped_init: sema_inline_rewrite_binding(&rewrite, init)
             sema_inline_declare_binding(&rewrite, init)
-            mapped_cond :: sema_inline_rewrite_expr(&rewrite, cond)
+            mapped_cond: sema_inline_rewrite_expr(&rewrite, cond)
             mapped_step := Stmt?{None}
             if step == .Val(value) -> mapped_step = Val(sema_inline_rewrite_stmt(&rewrite, value))
-            mapped_body :: sema_inline_rewrite_stmts(&rewrite, body)
+            mapped_body: sema_inline_rewrite_stmts(&rewrite, body)
             sema_inline_restore_locals(&rewrite, saved)
             Stmt.CountedLoop{init: mapped_init, cond: mapped_cond, step: mapped_step, body: mapped_body, span: span, arrow_body: arrow_body, label: label}
         }
@@ -985,7 +985,7 @@ fn sema_inline_rewrite_stmt(rewrite: &SemaInlineRewrite, stmt: Stmt) -> Stmt Nev
     }
 }
 
-fn sema_inline_rewrite_markers(rewrite: &SemaInlineRewrite, markers: [Marker]) -> [Marker] Never! {
+sema_inline_rewrite_markers: fn(rewrite: &SemaInlineRewrite, markers: [Marker]) -> [Marker] Never! {
     mapped := [Marker]{}
     loop marker in markers {
         updated := marker
@@ -1002,7 +1002,7 @@ fn sema_inline_rewrite_markers(rewrite: &SemaInlineRewrite, markers: [Marker]) -
     mapped
 }
 
-fn sema_inline_rewrite_clauses(rewrite: &SemaInlineRewrite, clauses: [ContractClause]) -> [ContractClause] Never! {
+sema_inline_rewrite_clauses: fn(rewrite: &SemaInlineRewrite, clauses: [ContractClause]) -> [ContractClause] Never! {
     mapped := [ContractClause]{}
     loop clause in clauses {
         updated := clause
@@ -1013,7 +1013,7 @@ fn sema_inline_rewrite_clauses(rewrite: &SemaInlineRewrite, clauses: [ContractCl
     mapped
 }
 
-fn sema_inline_rewrite_params(rewrite: &SemaInlineRewrite, params: [Param]) -> [Param] Never! {
+sema_inline_rewrite_params: fn(rewrite: &SemaInlineRewrite, params: [Param]) -> [Param] Never! {
     mapped := [Param]{}
     loop param in params {
         updated := param
@@ -1027,7 +1027,7 @@ fn sema_inline_rewrite_params(rewrite: &SemaInlineRewrite, params: [Param]) -> [
 
 // A bound names a trait the rewrite may rename (`<M: Native>` inside an
 // instance whose `Native` became the generated nominal).
-fn sema_inline_rewrite_type_params(rewrite: SemaInlineRewrite, params: [TypeParam]) -> [TypeParam] Never! {
+sema_inline_rewrite_type_params: fn(rewrite: SemaInlineRewrite, params: [TypeParam]) -> [TypeParam] Never! {
     mapped := [TypeParam]{}
     loop param in params {
         updated := param
@@ -1038,9 +1038,9 @@ fn sema_inline_rewrite_type_params(rewrite: SemaInlineRewrite, params: [TypePara
 }
 
 // Rust `specialize_func` / `specialize_function_types` plus the call routes.
-fn sema_inline_rewrite_func(rewrite: &SemaInlineRewrite, function: Func) -> Func Never! {
+sema_inline_rewrite_func: fn(rewrite: &SemaInlineRewrite, function: Func) -> Func Never! {
     updated := function
-    saved :: rewrite.locals.len()
+    saved: rewrite.locals.len()
     updated.type_params = sema_inline_rewrite_type_params(rewrite, function.type_params)
     updated.params = sema_inline_rewrite_params(&rewrite, function.params)
     updated.return_type = sema_inline_rewrite_optional_type(rewrite, function.return_type)
@@ -1052,13 +1052,13 @@ fn sema_inline_rewrite_func(rewrite: &SemaInlineRewrite, function: Func) -> Func
     updated
 }
 
-fn sema_inline_rewrite_funcs(rewrite: &SemaInlineRewrite, functions: [Func]) -> [Func] Never! {
+sema_inline_rewrite_funcs: fn(rewrite: &SemaInlineRewrite, functions: [Func]) -> [Func] Never! {
     mapped := [Func]{}
     loop function in functions -> &mapped.push(sema_inline_rewrite_func(&rewrite, function))
     mapped
 }
 
-fn sema_inline_rewrite_named_types(rewrite: SemaInlineRewrite, types: [NamedType]) -> [NamedType] Never! {
+sema_inline_rewrite_named_types: fn(rewrite: SemaInlineRewrite, types: [NamedType]) -> [NamedType] Never! {
     mapped := [NamedType]{}
     loop entry in types {
         updated := entry
@@ -1068,7 +1068,7 @@ fn sema_inline_rewrite_named_types(rewrite: SemaInlineRewrite, types: [NamedType
     mapped
 }
 
-fn sema_inline_rewrite_trait_blocks(rewrite: &SemaInlineRewrite, blocks: [TraitImplBlock]) -> [TraitImplBlock] Never! {
+sema_inline_rewrite_trait_blocks: fn(rewrite: &SemaInlineRewrite, blocks: [TraitImplBlock]) -> [TraitImplBlock] Never! {
     mapped := [TraitImplBlock]{}
     loop block in blocks {
         updated := block
@@ -1082,12 +1082,12 @@ fn sema_inline_rewrite_trait_blocks(rewrite: &SemaInlineRewrite, blocks: [TraitI
     mapped
 }
 
-fn sema_inline_rewrite_impl_constants(rewrite: &SemaInlineRewrite, constants: [ImplConstValue]) -> [ImplConstValue] Never! {
+sema_inline_rewrite_impl_constants: fn(rewrite: &SemaInlineRewrite, constants: [ImplConstValue]) -> [ImplConstValue] Never! {
     loop constant in constants -> ImplConstValue{name: constant.name, name_span: constant.name_span, value: sema_inline_rewrite_expr(&rewrite, constant.value), span: constant.span}
 }
 
 // Rust `specialize_struct` with the module alias.
-fn sema_inline_rewrite_struct(rewrite: &SemaInlineRewrite, definition: StructDef, alias: String) -> StructDef Never! {
+sema_inline_rewrite_struct: fn(rewrite: &SemaInlineRewrite, definition: StructDef, alias: String) -> StructDef Never! {
     updated := definition
     if alias != "" -> updated.name = sema_inline_type_name(alias, definition.name)
     updated.type_params = sema_inline_rewrite_type_params(rewrite, definition.type_params)
@@ -1109,7 +1109,7 @@ fn sema_inline_rewrite_struct(rewrite: &SemaInlineRewrite, definition: StructDef
 }
 
 // Rust `specialize_enum` with the module alias.
-fn sema_inline_rewrite_enum(rewrite: &SemaInlineRewrite, definition: EnumDef, alias: String) -> EnumDef Never! {
+sema_inline_rewrite_enum: fn(rewrite: &SemaInlineRewrite, definition: EnumDef, alias: String) -> EnumDef Never! {
     updated := definition
     if alias != "" -> updated.name = sema_inline_type_name(alias, definition.name)
     updated.type_params = sema_inline_rewrite_type_params(rewrite, definition.type_params)
@@ -1139,13 +1139,13 @@ fn sema_inline_rewrite_enum(rewrite: &SemaInlineRewrite, definition: EnumDef, al
 }
 
 // Rust `specialize_trait`.
-fn sema_inline_rewrite_trait(rewrite: &SemaInlineRewrite, definition: TraitDef) -> TraitDef Never! {
+sema_inline_rewrite_trait: fn(rewrite: &SemaInlineRewrite, definition: TraitDef) -> TraitDef Never! {
     updated := definition
     updated.name = sema_inline_mapped_name(rewrite, definition.name)
     methods := [TraitMethodSig]{}
     loop method_index in 0..<definition.methods.len() {
         mapped := definition.methods[method_index]
-        saved :: rewrite.locals.len()
+        saved: rewrite.locals.len()
         mapped.params = sema_inline_rewrite_params(&rewrite, definition.methods[method_index].params)
         mapped.return_type = sema_inline_rewrite_optional_type(rewrite, definition.methods[method_index].return_type)
         mapped.default_body = sema_inline_rewrite_optional_body(&rewrite, definition.methods[method_index].default_body)
@@ -1159,7 +1159,7 @@ fn sema_inline_rewrite_trait(rewrite: &SemaInlineRewrite, definition: TraitDef) 
 }
 
 // Rust `specialize_error_conv`.
-fn sema_inline_rewrite_error_conv(rewrite: &SemaInlineRewrite, definition: ErrorConvDef) -> ErrorConvDef Never! {
+sema_inline_rewrite_error_conv: fn(rewrite: &SemaInlineRewrite, definition: ErrorConvDef) -> ErrorConvDef Never! {
     updated := definition
     updated.from_ty = sema_inline_mapped_name(rewrite, definition.from_ty)
     updated.to_ty = sema_inline_mapped_name(rewrite, definition.to_ty)
@@ -1168,7 +1168,7 @@ fn sema_inline_rewrite_error_conv(rewrite: &SemaInlineRewrite, definition: Error
 }
 
 // Rust `specialize_impl`.
-fn sema_inline_rewrite_impl(rewrite: &SemaInlineRewrite, definition: ImplDef) -> ImplDef Never! {
+sema_inline_rewrite_impl: fn(rewrite: &SemaInlineRewrite, definition: ImplDef) -> ImplDef Never! {
     updated := definition
     updated.type_name = sema_inline_mapped_name(rewrite, definition.type_name)
     if definition.trait_name == .Val(trait_name) -> updated.trait_name = Val(sema_inline_mapped_name(rewrite, trait_name))
@@ -1181,13 +1181,13 @@ fn sema_inline_rewrite_impl(rewrite: &SemaInlineRewrite, definition: ImplDef) ->
 // ---------------------------------------------------------------------------
 // Rust `hoist_inline_module_types`.
 
-fn sema_inline_hoist_module(code_module: CodeModule, source_path: String, hoist: &SemaInlineHoist) -> SemaInlineHoisted {
+sema_inline_hoist_module: fn(code_module: CodeModule, source_path: String, hoist: &SemaInlineHoist) -> SemaInlineHoisted {
     updated := code_module
     if code_module.instance_identity != None -> return SemaInlineHoisted{code_module: updated, paths: [String]{}, types: [String:Type]{}}
-    body :: code_module.body ?? return SemaInlineHoisted{code_module: updated, paths: [String]{}, types: [String:Type]{}}
-    module_alias :: sema_inline_type_alias(source_path)
-    module_name :: code_module.name
-    display_alias :: sema_inline_type_alias(module_name)
+    body: code_module.body ?? return SemaInlineHoisted{code_module: updated, paths: [String]{}, types: [String:Type]{}}
+    module_alias: sema_inline_type_alias(source_path)
+    module_name: code_module.name
+    display_alias: sema_inline_type_alias(module_name)
     direct_types := [String:Type]{}
     direct_names := [String]{}
     loop inner in body {
@@ -1201,7 +1201,7 @@ fn sema_inline_hoist_module(code_module: CodeModule, source_path: String, hoist:
             .TypeAlias(definition) -> name = definition.name
             else -> next
         }
-        resolved :: Type.Named{name: sema_inline_type_name(module_alias, name)}
+        resolved: Type.Named{name: sema_inline_type_name(module_alias, name)}
         direct_types[name] = resolved
         direct_types["{module_name}.{name}"] = resolved
         direct_types["{source_path}.{name}"] = resolved
@@ -1221,8 +1221,8 @@ fn sema_inline_hoist_module(code_module: CodeModule, source_path: String, hoist:
     loop inner in body {
         if inner == {
             .CodeModule(child) -> {
-                child_path :: "{source_path}.{child.name}"
-                hoisted :: sema_inline_hoist_module(child, child_path, &hoist)
+                child_path: "{source_path}.{child.name}"
+                hoisted: sema_inline_hoist_module(child, child_path, &hoist)
                 loop full_path in hoisted.paths {
                     descendant_types[full_path] = hoisted.types.get(full_path) ?? next
                     &descendant_paths.push(full_path)
@@ -1235,12 +1235,12 @@ fn sema_inline_hoist_module(code_module: CodeModule, source_path: String, hoist:
     }
     visible := sema_inline_rewrite_empty()
     visible.types = direct_types
-    prefix :: "{source_path}."
+    prefix: "{source_path}."
     loop full_path in descendant_paths {
-        ty :: descendant_types.get(full_path) ?? next
+        ty: descendant_types.get(full_path) ?? next
         visible.types[full_path] = ty
         if full_path.starts_with(prefix) {
-            relative :: String.from_bytes(full_path.bytes()[prefix.bytes().len()..<full_path.bytes().len()]) ?? full_path
+            relative: String.from_bytes(full_path.bytes()[prefix.bytes().len()..<full_path.bytes().len()]) ?? full_path
             visible.types[relative] = ty
         }
     }
@@ -1287,7 +1287,7 @@ fn sema_inline_hoist_module(code_module: CodeModule, source_path: String, hoist:
     all_paths := [String]{}
     all_types := [String:Type]{}
     loop name in direct_names {
-        ty :: direct_types.get(name) ?? next
+        ty: direct_types.get(name) ?? next
         &all_paths.push("{source_path}.{name}")
         all_types["{source_path}.{name}"] = ty
     }
@@ -1302,7 +1302,7 @@ fn sema_inline_hoist_module(code_module: CodeModule, source_path: String, hoist:
 // the enclosing file (and its inline modules) by their qualified name. The
 // file's own structs, enums and tests name them the same way, so a field
 // `stream: transport.BodyStream` holds the hoisted member type.
-fn sema_inline_rewrite_exported(items: [Item], rewrite: &SemaInlineRewrite) -> [Item] Never! {
+sema_inline_rewrite_exported: fn(items: [Item], rewrite: &SemaInlineRewrite) -> [Item] Never! {
     mapped := [Item]{}
     loop item in items {
         if item == {
@@ -1332,20 +1332,20 @@ fn sema_inline_rewrite_exported(items: [Item], rewrite: &SemaInlineRewrite) -> [
 }
 
 // ---------------------------------------------------------------------------
-// `use g :: bank.f` over an inline module (Rust CheckInner 4).
+// `use g: bank.f` over an inline module (Rust CheckInner 4).
 
-fn sema_inline_import_target(declaration: ImportDecl, inline_names: [String:Bool]) -> String? Never! {
+sema_inline_import_target: fn(declaration: ImportDecl, inline_names: [String:Bool]) -> String? Never! {
     if declaration.kind == .Unqualified(module_alias, _, _, _, _) {
         if inline_names.get(module_alias) != None -> return Val(module_alias)
     }
     None
 }
 
-fn sema_inline_bind_imports(program: Program, surfaces: [SemaInlineModuleSurface], inline_names: [String:Bool], rewrite: &SemaInlineRewrite) -> [ImportDecl] {
+sema_inline_bind_imports: fn(program: Program, surfaces: [SemaInlineModuleSurface], inline_names: [String:Bool], rewrite: &SemaInlineRewrite) -> [ImportDecl] {
     kept := [ImportDecl]{}
     seen := [String:Bool]{}
     loop declaration in program.imports {
-        target :: sema_inline_import_target(declaration, inline_names) ?? {
+        target: sema_inline_import_target(declaration, inline_names) ?? {
             if declaration.kind == .Unqualified(_, _, items, _, _) {
                 loop item in items -> seen[sema_registration_import_local(item)] = true
             }
@@ -1358,15 +1358,15 @@ fn sema_inline_bind_imports(program: Program, surfaces: [SemaInlineModuleSurface
                 if candidate.name == target -> surface = Val(candidate)
             }
             // A module whose functions stay in its body binds nothing here.
-            members :: surface ?? next
+            members: surface ?? next
             loop (item_index, item) in items {
-                local :: sema_registration_import_local(item)
+                local: sema_registration_import_local(item)
                 if {
-                    seen.get(local) != None -> &rewrite.diagnostics.push(sema_error("E0105", declaration.alias_span, "the import name `{local}` is used twice", "each import needs a unique namespace name in this file", "rename one with an `alias :: path` row"))
+                    seen.get(local) != None -> &rewrite.diagnostics.push(sema_error("E0105", declaration.alias_span, "the import name `{local}` is used twice", "each import needs a unique namespace name in this file", "rename one with an `alias: path` row"))
                     members.functions.get(item.original) == None -> &rewrite.diagnostics.push(sema_error("E0611", module_alias_span, "`{item.original}` is not defined in module `{module_alias}`", "check the module body for the item you're importing", "make sure the name is spelled correctly"))
                     else -> {
                         seen[local] = true
-                        span :: if item_index < declaration.local_spans.len() -> declaration.local_spans[item_index] else -> declaration.span
+                        span: if item_index < declaration.local_spans.len() -> declaration.local_spans[item_index] else -> declaration.span
                         rewrite.imported[local] = SemaInlineFunctionBinding{semantic_name: sema_inline_member_name(target, item.original), module_alias: target.copy(), source_name: item.original.copy(), span: span, visibility: if declaration.is_pub -> 2 else -> if declaration.is_package_pub -> 1 else -> 0}
                     }
                 }
@@ -1381,12 +1381,12 @@ fn sema_inline_bind_imports(program: Program, surfaces: [SemaInlineModuleSurface
 // must exist, E0611, and be `pub`, E0609) or a file module this file imports
 // (the member is read qualified). A group with any problem binds nothing.
 // `pub use` also re-exports each bound name as `module.name`.
-fn sema_inline_bind_module_imports(definition: CodeModule, surfaces: [SemaInlineModuleSurface], file_aliases: [String:Bool], rewrite: &SemaInlineRewrite) -> [String:SemaInlineTarget] {
+sema_inline_bind_module_imports: fn(definition: CodeModule, surfaces: [SemaInlineModuleSurface], file_aliases: [String:Bool], rewrite: &SemaInlineRewrite) -> [String:SemaInlineTarget] {
     reexports := [String:SemaInlineTarget]{}
     names := [String:Bool]{}
     loop declaration in definition.imports {
         if declaration.kind == .Unqualified(module_alias, module_alias_span, items, _, _) {
-            group_start :: rewrite.diagnostics.len()
+            group_start: rewrite.diagnostics.len()
             bound_locals := [String]{}
             bound_targets := [SemaInlineTarget]{}
             members := SemaInlineModuleSurface?{None}
@@ -1394,9 +1394,9 @@ fn sema_inline_bind_module_imports(definition: CodeModule, surfaces: [SemaInline
                 if candidate.name == module_alias -> members = Val(candidate)
             }
             loop item in items {
-                local :: sema_registration_import_local(item)
+                local: sema_registration_import_local(item)
                 if names.get(local) != None {
-                    &rewrite.diagnostics.push(sema_error("E0105", declaration.alias_span, "the import name `{local}` is used twice", "each import needs a unique namespace name in this file", "rename one with an `alias :: path` row"))
+                    &rewrite.diagnostics.push(sema_error("E0105", declaration.alias_span, "the import name `{local}` is used twice", "each import needs a unique namespace name in this file", "rename one with an `alias: path` row"))
                     next
                 }
                 names[local] = true
@@ -1421,7 +1421,7 @@ fn sema_inline_bind_module_imports(definition: CodeModule, surfaces: [SemaInline
                 if bound_targets[index].qualified {
                     rewrite.qualified[local] = bound_targets[index]
                 } else {
-                    span :: if index < declaration.local_spans.len() -> declaration.local_spans[index] else -> declaration.span
+                    span: if index < declaration.local_spans.len() -> declaration.local_spans[index] else -> declaration.span
                     rewrite.imported[local] = SemaInlineFunctionBinding{semantic_name: sema_inline_member_name(bound_targets[index].module_alias, bound_targets[index].member), module_alias: bound_targets[index].module_alias.copy(), source_name: bound_targets[index].member.copy(), span: span, visibility: if declaration.is_pub -> 2 else -> if declaration.is_package_pub -> 1 else -> 0}
                 }
                 if declaration.is_pub -> reexports[local] = bound_targets[index]
@@ -1434,8 +1434,8 @@ fn sema_inline_bind_module_imports(definition: CodeModule, surfaces: [SemaInline
 // Rust `resolve_inline_module_imports` for a file-module member, once every
 // import is bound: `use limits.[MAX]` inside a module names a declaration of
 // `limits` (E0611) that this file may see (E0609).
-fn sema_inline_modules_collect_import_diagnostics(graph: SemaRegistrationGraph, module_index: Int, diagnostics: &[Diagnostic]) {
-    module_row :: graph.modules[module_index]
+sema_inline_modules_collect_import_diagnostics: fn(graph: SemaRegistrationGraph, module_index: Int, diagnostics: &[Diagnostic]) {
+    module_row: graph.modules[module_index]
     loop item in module_row.program.items {
         if item == .CodeModule(definition) {
             loop declaration in definition.imports {
@@ -1448,12 +1448,12 @@ fn sema_inline_modules_collect_import_diagnostics(graph: SemaRegistrationGraph, 
                     }
                     if target_index < 0 -> next
                     loop imported in items {
-                        original :: imported.original
+                        original: imported.original
                         if sema_registration_resolve_export(graph, target_index, original, module_row.module_identity, module_row.package_identity, [String]{}) != None -> next
-                        declared :: sema_registration_direct_symbol(graph.modules[target_index], original)
+                        declared: sema_registration_direct_symbol(graph.modules[target_index], original)
                         if declared == {
                             .Val(export) -> {
-                                fix :: if export.symbol.kind == SymbolKind.Function -> "import it from inside its enclosing module, or remove `priv` from its module" else -> "import it from inside its enclosing module, or remove `priv` from its module"
+                                fix: if export.symbol.kind == SymbolKind.Function -> "import it from inside its enclosing module, or remove `priv` from its module" else -> "import it from inside its enclosing module, or remove `priv` from its module"
                                 &diagnostics.push(sema_error("E0609", module_alias_span, "`{original}` is private in module `{module_alias}`", "an item of a `priv module` is usable only by its enclosing module", fix))
                             }
                             .None -> &diagnostics.push(sema_error("E0611", module_alias_span, "`{original}` is not defined in module `{module_alias}`", "check the module for the item you are importing", "make sure the name is spelled correctly"))
@@ -1465,7 +1465,7 @@ fn sema_inline_modules_collect_import_diagnostics(graph: SemaRegistrationGraph, 
     }
 }
 
-fn sema_inline_modules_check_imports(graph: &SemaRegistrationGraph, module_index: Int) {
+sema_inline_modules_check_imports: fn(graph: &SemaRegistrationGraph, module_index: Int) {
     diagnostics := [Diagnostic]{}
     sema_inline_modules_collect_import_diagnostics(graph, module_index, &diagnostics)
     loop diagnostic in diagnostics -> sema_registration_push_graph_diagnostic(&graph, module_index, diagnostic)
@@ -1475,12 +1475,12 @@ fn sema_inline_modules_check_imports(graph: &SemaRegistrationGraph, module_index
 // the import bindings its members see. Each module binds its imports here,
 // once, so its `pub use` re-exports are on its surface before any body is
 // rewritten.
-fn sema_inline_collect_nested(body: [Item], parent: String, file_imports: [ImportDecl], surfaces: [SemaInlineModuleSurface], file_aliases: [String:Bool], nested: &[SemaInlineModuleSurface], bindings: &[SemaInlineRewrite]) Never! {
+sema_inline_collect_nested: fn(body: [Item], parent: String, file_imports: [ImportDecl], surfaces: [SemaInlineModuleSurface], file_aliases: [String:Bool], nested: &[SemaInlineModuleSurface], bindings: &[SemaInlineRewrite]) Never! {
     loop item in body {
         if item == .CodeModule(child) {
-            child_body :: child.body ?? next
+            child_body: child.body ?? next
             if !sema_inline_module_lowerable(child, file_imports) -> next
-            path :: "{parent}.{child.name}"
+            path: "{parent}.{child.name}"
             private_to := String?{None}
             if !child.is_pub && !child.is_package_pub -> private_to = Val(parent.copy())
             surface := SemaInlineModuleSurface{name: path.copy(), path: path.copy(), private_to: private_to, functions: [String:Bool]{}, reexports: [String:SemaInlineTarget]{}}
@@ -1501,9 +1501,9 @@ fn sema_inline_collect_nested(body: [Item], parent: String, file_imports: [Impor
 // The inline modules a body inside module `context` calls through: every
 // nested module by its full path, and those nested in `context` also by their
 // path relative to it (`inner.f()` inside `math` is `math.inner.f()`).
-fn sema_inline_scope_surfaces(nested: [SemaInlineModuleSurface], context: String) -> [SemaInlineModuleSurface] Never! {
+sema_inline_scope_surfaces: fn(nested: [SemaInlineModuleSurface], context: String) -> [SemaInlineModuleSurface] Never! {
     scope := [SemaInlineModuleSurface]{}
-    prefix :: "{context}."
+    prefix: "{context}."
     loop surface in nested {
         &scope.push(surface)
         if !surface.path.starts_with(prefix) -> next
@@ -1517,13 +1517,13 @@ fn sema_inline_scope_surfaces(nested: [SemaInlineModuleSurface], context: String
 // Lifts the member functions of every module nested in `body` (module
 // `parent`) under their member identities, each body rewritten with the
 // bindings sema_inline_collect_nested made for its module.
-fn sema_inline_lift_nested(body: [Item], parent: String, file_imports: [ImportDecl], nested: [SemaInlineModuleSurface], bindings: [SemaInlineRewrite], lifted: &[Item], diagnostics: &[Diagnostic]) Never! {
+sema_inline_lift_nested: fn(body: [Item], parent: String, file_imports: [ImportDecl], nested: [SemaInlineModuleSurface], bindings: [SemaInlineRewrite], lifted: &[Item], diagnostics: &[Diagnostic]) Never! {
     loop item in body {
         if item == .CodeModule(child) {
-            child_body :: child.body ?? next
+            child_body: child.body ?? next
             if !sema_inline_module_lowerable(child, file_imports) -> next
-            path :: "{parent}.{child.name}"
-            row :: loop (index, surface) in nested {
+            path: "{parent}.{child.name}"
+            row: loop (index, surface) in nested {
                 if surface.path == path -> break index
             } ?? -1
             if row < 0 -> next
@@ -1547,7 +1547,7 @@ fn sema_inline_lift_nested(body: [Item], parent: String, file_imports: [ImportDe
 // module constant or test is never registered (registers an inline body's
 // `Item::Func` members only): functions, constants and tests leave the lowered
 // program.
-fn sema_inline_strip_members(body: [Item]) -> [Item] Never! {
+sema_inline_strip_members: fn(body: [Item]) -> [Item] Never! {
     kept := [Item]{}
     loop item in body {
         if item == {
@@ -1566,7 +1566,7 @@ fn sema_inline_strip_members(body: [Item]) -> [Item] Never! {
 // ---------------------------------------------------------------------------
 // The pass.
 
-fn sema_inline_rewrite_item(rewrite: &SemaInlineRewrite, item: Item) -> Item Never! {
+sema_inline_rewrite_item: fn(rewrite: &SemaInlineRewrite, item: Item) -> Item Never! {
     if item == {
         .Func(function) -> Item.Func{value: sema_inline_rewrite_func(&rewrite, function)}
         .Struct(definition) -> Item.Struct{value: sema_inline_rewrite_struct(&rewrite, definition, "")}
@@ -1578,7 +1578,7 @@ fn sema_inline_rewrite_item(rewrite: &SemaInlineRewrite, item: Item) -> Item Nev
         }
         .Test(definition) -> {
             updated := definition
-            saved :: rewrite.locals.len()
+            saved: rewrite.locals.len()
             updated.params = sema_inline_rewrite_params(&rewrite, definition.params)
             updated.body = sema_inline_rewrite_stmts(&rewrite, definition.body)
             sema_inline_restore_locals(&rewrite, saved)
@@ -1593,7 +1593,7 @@ fn sema_inline_rewrite_item(rewrite: &SemaInlineRewrite, item: Item) -> Item Nev
 
 // Rebuilding items must not first copy the old item list only to discard it.
 // Keep the remaining source metadata, and transfer the replacement list.
-fn sema_program_with_items(program: Program, items: ^[Item]) -> Program Never! {
+sema_program_with_items: fn(program: Program, items: ^[Item]) -> Program Never! {
     Program{
         imports: program.imports,
         items: ^items,
@@ -1617,7 +1617,7 @@ fn sema_program_with_items(program: Program, items: ^[Item]) -> Program Never! {
 
 // Lowers `program`'s inline modules in place; a program without one is left
 // untouched (not copied).
-fn sema_inline_modules_lower(program: &Program, diagnostics: &[Diagnostic]) -> SemaInlinePreparedBindings {
+sema_inline_modules_lower: fn(program: &Program, diagnostics: &[Diagnostic]) -> SemaInlinePreparedBindings {
     if !sema_inline_modules_any_body(program.items) -> return SemaInlinePreparedBindings{imports: [String:SemaInlineFunctionBinding]{}, modules: [SemaInlineModuleSurface]{}}
 
     // 1. Member types, in item order, then the enclosing file's qualified names.
@@ -1625,7 +1625,7 @@ fn sema_inline_modules_lower(program: &Program, diagnostics: &[Diagnostic]) -> S
     hoisted_items := [Item]{}
     loop item in program.items {
         if item == .CodeModule(definition) {
-            hoisted :: sema_inline_hoist_module(definition, definition.name, &hoist)
+            hoisted: sema_inline_hoist_module(definition, definition.name, &hoist)
             &hoisted_items.push(Item.CodeModule{value: hoisted.code_module})
             next
         }
@@ -1650,7 +1650,7 @@ fn sema_inline_modules_lower(program: &Program, diagnostics: &[Diagnostic]) -> S
     surfaces := [SemaInlineModuleSurface]{}
     inline_names := [String:Bool]{}
     loop item_index in 0..<hoisted_items.len() {
-        item :: hoisted_items[item_index]
+        item: hoisted_items[item_index]
         if item == .CodeModule(definition) {
             if definition.body == .Val(body) {
                 inline_names[definition.name] = true
@@ -1675,7 +1675,7 @@ fn sema_inline_modules_lower(program: &Program, diagnostics: &[Diagnostic]) -> S
     }
     lowered_items := [Item]{}
     loop item_index in 0..<hoisted_items.len() {
-        item :: hoisted_items[item_index]
+        item: hoisted_items[item_index]
         if item == .CodeModule(definition) {
             if definition.body == .Val(body) {
                 if sema_inline_module_lowerable(definition, program.imports) {
@@ -1716,7 +1716,7 @@ fn sema_inline_modules_lower(program: &Program, diagnostics: &[Diagnostic]) -> S
 
     // 3. Qualified calls and `use` bindings, in every body of the file.
     calls := sema_inline_rewrite_empty()
-    imports :: sema_inline_bind_imports(program, surfaces, inline_names, &calls)
+    imports: sema_inline_bind_imports(program, surfaces, inline_names, &calls)
     loop surface in nested -> &surfaces.push(surface)
     calls.modules = ^surfaces
     rewritten := [Item]{}
@@ -1729,7 +1729,7 @@ fn sema_inline_modules_lower(program: &Program, diagnostics: &[Diagnostic]) -> S
 
 // Whether `items` declares an inline module with a body; each item is read
 // in place.
-fn sema_inline_modules_any_body(items: [Item]) -> Bool Never! {
+sema_inline_modules_any_body: fn(items: [Item]) -> Bool Never! {
     loop item in items {
         if item == .CodeModule(definition) {
             if definition.body != None -> return true
@@ -1739,17 +1739,17 @@ fn sema_inline_modules_any_body(items: [Item]) -> Bool Never! {
 }
 
 #Test("private inline member types resolve in the enclosing file without becoming public") {
-    span :: Span{start: 0, end: 1}
-    carrier :: ast_struct("OrderedRow", span, span)
-    helper :: ast_func("compare", span, span)
-    internal :: CodeModule{name: "internal", name_span: span, is_pub: false, is_package_pub: false, body: Val([Item]{Item.Struct{value: carrier}, Item.Func{value: helper}}), imports: [ImportDecl]{}, web_target: None, instance_identity: None, span: span}
+    span: Span{start: 0, end: 1}
+    carrier: ast_struct("OrderedRow", span, span)
+    helper: ast_func("compare", span, span)
+    internal: CodeModule{name: "internal", name_span: span, is_pub: false, is_package_pub: false, body: Val([Item]{Item.Struct{value: carrier}, Item.Func{value: helper}}), imports: [ImportDecl]{}, web_target: None, instance_identity: None, span: span}
     consumer := ast_func("execute", span, span)
     consumer.is_pub = true
     consumer.return_type = Val(Type.List{element: Type.Named{name: "internal.OrderedRow"}})
     program := ast_program()
     program.items = [Item]{Item.CodeModule{value: internal}, Item.Func{value: consumer}}
     diagnostics := [Diagnostic]{}
-    _ :: sema_inline_modules_lower(&program, &diagnostics)
+    _: sema_inline_modules_lower(&program, &diagnostics)
     assert(diagnostics.is_empty())
     resolved := false
     private_type := false

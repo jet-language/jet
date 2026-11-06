@@ -1,29 +1,29 @@
 
 #Error
-enum PatternError { Bad }
-Pattern :: distinct String
+PatternError: enum { Bad }
+Pattern: distinct String
 impl Pattern.CheckedText {
-    type Error = PatternError
-    fn check(text: String) PatternError! -[]> {
+    Error: PatternError
+    check: fn(text: String) PatternError! -[]> {
         return
     }
-    fn encode_hole<T: Printable>(value: T) -[]> String {
+    encode_hole: fn<T: Printable>(value: T) -[]> String {
         return ""
     }
 }
-fn run() {}
+run: fn() {}
 
-REFLECTION_APP :: Output.Executable{ name: "reflection", entry: reflection_probe }
-REFLECTION_BASE :: comptime { Pattern.reflect().base }
-fn reflection_implements() -> Bool {
+REFLECTION_APP: Output.Executable{ name: "reflection", entry: reflection_probe }
+REFLECTION_BASE: comptime { Pattern.reflect().base }
+reflection_implements: fn() -> Bool {
     found := false
     loop name in Pattern.reflect().implements {
         if name == "CheckedText" -> found = true
     }
     return found
 }
-REFLECTION_IMPLEMENTS :: comptime { reflection_implements() }
-fn reflection_contract() -> [Bool] {
+REFLECTION_IMPLEMENTS: comptime { reflection_implements() }
+reflection_contract: fn() -> [Bool] {
     found := false
     error_type := false
     check_method := false
@@ -43,8 +43,8 @@ fn reflection_contract() -> [Bool] {
     }
     return [found, error_type, check_method, encode_method]
 }
-REFLECTION_CONTRACT :: comptime { reflection_contract() }
-fn reflection_probe() {
+REFLECTION_CONTRACT: comptime { reflection_contract() }
+reflection_probe: fn() {
     
     // Original tests/reflect.rs:126-129 base String.
     print(REFLECTION_BASE)

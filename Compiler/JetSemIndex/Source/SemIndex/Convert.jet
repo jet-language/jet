@@ -18,7 +18,7 @@ use {
 
 // First member with an identity owns its callable presentation, even when a
 // later trait/inherent row has the same identity but a different owner.
-fn semindex_convert_member_owners(members: [MemberFact]) -> [String:String] Never! {
+semindex_convert_member_owners: fn(members: [MemberFact]) -> [String:String] Never! {
     owners := [String:String]{}
     loop member in members {
         if owners.get(member.identity) == None -> owners[member.identity] = member.owner
@@ -26,9 +26,9 @@ fn semindex_convert_member_owners(members: [MemberFact]) -> [String:String] Neve
     owners
 }
 
-fn semindex_convert_defs(defs: [SymDef], view_provenance: [String:ViewProvenanceMap], members: [MemberFact], registration: SemaRegistrationGraph, names: NameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) -> [SymbolDef] Never! {
-    owners :: semindex_convert_member_owners(members)
-    sources :: semindex_loaded_source_rows_by_path(module_sources, loaded_module_rows)
+semindex_convert_defs: fn(defs: [SymDef], view_provenance: [String:ViewProvenanceMap], members: [MemberFact], registration: SemaRegistrationGraph, names: NameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) -> [SymbolDef] Never! {
+    owners: semindex_convert_member_owners(members)
+    sources: semindex_loaded_source_rows_by_path(module_sources, loaded_module_rows)
     output := [SymbolDef]{}
     loop definition in defs {
         module_index := Int?{None}
@@ -45,13 +45,13 @@ fn semindex_convert_defs(defs: [SymDef], view_provenance: [String:ViewProvenance
         if view_provenance.get(definition.identity) == .Val(map) {
             loop entry in map.entries -> &views.push(semindex_convert_view_provenance(entry.slot, entry.value))
         }
-        owner :: if definition.kind == {
+        owner: if definition.kind == {
             .EnumVariant(parent) -> Val(parent)
             .Field(_, parent) -> Val(parent)
             .Function(_, _, _, _, _, _, _, _, _, _, _, _, _, _) -> owners.get(definition.identity)
             else -> None
         }
-        derives :: if definition.kind == {
+        derives: if definition.kind == {
             .Struct(_, derives) -> derives
             .Enum(_, derives) -> derives
             .Type(derives) -> derives
@@ -72,18 +72,18 @@ fn semindex_convert_defs(defs: [SymDef], view_provenance: [String:ViewProvenance
 }
 
 // #4357: Rust's (nominal_base, contracts) result, never another checked fact.
-struct SemIndexContractMetadata {
+SemIndexContractMetadata: struct {
     nominal_base: String?
     trait_contracts: [TraitContractFact]
 }
-fn semindex_contract_metadata(definition: SymDef, registration: SemaRegistrationGraph, module_index: Int?, members: [MemberFact]) -> SemIndexContractMetadata Never! {
+semindex_contract_metadata: fn(definition: SymDef, registration: SemaRegistrationGraph, module_index: Int?, members: [MemberFact]) -> SemIndexContractMetadata Never! {
     if module_index == .Val(index) {
-        module_ref :: registration.modules[index]
+        module_ref: registration.modules[index]
         if semindex_find_declaration(module_ref.program.items, semindex_source_span(definition.def_span)) == .Val(item) -> return semindex_declaration_contract_metadata(item, module_ref.program.items, members)
     }
     SemIndexContractMetadata{nominal_base: None, trait_contracts: [TraitContractFact]{}}
 }
-fn semindex_declaration_contract_metadata(item: Item, items: [Item], members: [MemberFact]) -> SemIndexContractMetadata Never! {
+semindex_declaration_contract_metadata: fn(item: Item, items: [Item], members: [MemberFact]) -> SemIndexContractMetadata Never! {
     if item == {
         .Distinct(definition) -> { return SemIndexContractMetadata{nominal_base: Val(type_name(definition.base)), trait_contracts: semindex_trait_contracts_for_owner(items, definition.name, members)} }
         .Struct(definition) -> { return SemIndexContractMetadata{nominal_base: None, trait_contracts: semindex_trait_contracts_for_owner(items, definition.name, members)} }
@@ -100,9 +100,9 @@ fn semindex_declaration_contract_metadata(item: Item, items: [Item], members: [M
     }
     SemIndexContractMetadata{nominal_base: None, trait_contracts: [TraitContractFact]{}}
 }
-fn semindex_find_declaration(items: [Item], span: SourceSpan) -> Item? Never! {
+semindex_find_declaration: fn(items: [Item], span: SourceSpan) -> Item? Never! {
     loop item in items {
-        declaration_span :: if item == {
+        declaration_span: if item == {
             .Distinct(definition) -> Val(semindex_source_span(definition.name_span))
             .Struct(definition) -> Val(semindex_source_span(definition.name_span))
             .Enum(definition) -> Val(semindex_source_span(definition.name_span))
@@ -110,7 +110,7 @@ fn semindex_find_declaration(items: [Item], span: SourceSpan) -> Item? Never! {
             else -> None
         }
         if declaration_span == (Val(span)) -> return Val(item)
-        nested :: if item == {
+        nested: if item == {
             .CodeModule(module_row) -> module_row.body
             .GenericModule(module_row) -> Val(module_row.body)
             else -> None
@@ -121,16 +121,16 @@ fn semindex_find_declaration(items: [Item], span: SourceSpan) -> Item? Never! {
     }
     None
 }
-fn semindex_trait_contracts_for_owner(items: [Item], owner: String, members: [MemberFact]) -> [TraitContractFact] Never! {
+semindex_trait_contracts_for_owner: fn(items: [Item], owner: String, members: [MemberFact]) -> [TraitContractFact] Never! {
     contracts := [TraitContractFact]{}
     semindex_collect_trait_contracts(items, owner, members, &contracts)
     contracts
 }
-fn semindex_collect_trait_contracts(items: [Item], owner: String, members: [MemberFact], contracts: &[TraitContractFact]) Never! {
+semindex_collect_trait_contracts: fn(items: [Item], owner: String, members: [MemberFact], contracts: &[TraitContractFact]) Never! {
     loop item in items {
         if item == {
             .Impl(implementation) -> {
-                leaves :: implementation.type_name.split(".")
+                leaves: implementation.type_name.split(".")
                 leaf := leaves[leaves.len() - 1] // #4303
                 if leaf == owner {
                     if implementation.trait_name == .Val(trait_name) -> &contracts.push(semindex_trait_contract(trait_name, implementation.assoc_type_impls, members, owner))
@@ -154,12 +154,12 @@ fn semindex_collect_trait_contracts(items: [Item], owner: String, members: [Memb
         }
     }
 }
-fn semindex_trait_contract(trait_name: String, associated_types: [NamedType], members: [MemberFact], owner: String) -> TraitContractFact Never! {
+semindex_trait_contract: fn(trait_name: String, associated_types: [NamedType], members: [MemberFact], owner: String) -> TraitContractFact Never! {
     associated := [SemIndexAssociatedTypeFact]{}
     loop row in associated_types -> &associated.push(SemIndexAssociatedTypeFact{name: row.name, implementation: Val(type_name(row.ty))})
     TraitContractFact{trait_name: trait_name, associated_types: associated, methods: semindex_member_signatures(members, owner, MemberOrigin.TraitImpl{trait_name: trait_name})}
 }
-fn semindex_member_signatures(members: [MemberFact], owner: String, origin: MemberOrigin) -> [String] Never! {
+semindex_member_signatures: fn(members: [MemberFact], owner: String, origin: MemberOrigin) -> [String] Never! {
     methods := [String]{}
     loop member in members { if member.owner == owner && member.origin == origin -> &methods.push(member.signature) }
     &methods.sort()
@@ -170,7 +170,7 @@ fn semindex_member_signatures(members: [MemberFact], owner: String, origin: Memb
     unique
 }
 
-fn semindex_callable_signature(kind: SymKind, returned_views: [ViewProvenanceFact]) -> CallableSignatureFact? Never! {
+semindex_callable_signature: fn(kind: SymKind, returned_views: [ViewProvenanceFact]) -> CallableSignatureFact? Never! {
     if kind == .Function(params, param_sources, available, param_contract, param_variadic, return_type, failure_contract, _, effects, effect_via, param_access, param_defaults, policies, generic_parameters) {
         if !available -> return None
         parameters := [CallableParameterFact]{}
@@ -206,7 +206,7 @@ fn semindex_callable_signature(kind: SymKind, returned_views: [ViewProvenanceFac
     None
 }
 
-fn semindex_convert_refs(refs: [SymRef]) -> [SymbolRef] Never! {
+semindex_convert_refs: fn(refs: [SymRef]) -> [SymbolRef] Never! {
     output := [SymbolRef]{}
     loop reference in refs -> &output.push(SymbolRef{
         name: reference.name, module_path: reference.module_path, scope_identity: reference.scope_identity,
@@ -214,7 +214,7 @@ fn semindex_convert_refs(refs: [SymRef]) -> [SymbolRef] Never! {
     })
     output
 }
-fn semindex_convert_kind(kind: SymKind) -> SemIndexSymbolKind Never! {
+semindex_convert_kind: fn(kind: SymKind) -> SemIndexSymbolKind Never! {
     if kind == {
         .Module -> .Module
         .Function(params, _, _, param_contract, param_variadic, return_type, failure_contract, _, _, _, _, _, _, _) -> {
@@ -222,14 +222,14 @@ fn semindex_convert_kind(kind: SymKind) -> SemIndexSymbolKind Never! {
             loop parameter in params -> &projected.push(SemIndexNameTypeFact{name: parameter.name, ty: type_name(parameter.ty)})
             contract := [SemIndexCallContractEntry]{}
             loop index in 0..<param_contract.len() {
-                zone :: if param_contract[index].zone == {
+                zone: if param_contract[index].zone == {
                     .PositionalOnly -> "positional_only"
                     .Either -> "either"
                     .LabelOnly -> "label_only"
                 }
                 &contract.push(SemIndexCallContractEntry{label: param_contract[index].label, zone: zone, variadic: index < param_variadic.len() && param_variadic[index]})
             }
-            ret :: if failure_contract == {
+            ret: if failure_contract == {
                 .Checked(failure) -> failure_contract_shown_return(failure).map((ty) -> type_name(ty))
                 .Unavailable(_) -> if return_type == {
                     .Val(ty) -> Val(type_name(ty))
@@ -257,17 +257,17 @@ fn semindex_convert_kind(kind: SymKind) -> SemIndexSymbolKind Never! {
         .Param(ty) -> .Param{ty: type_name(ty)}
     }
 }
-fn semindex_convert_view_provenance(output_path: [String], provenance: ViewProvenance) -> ViewProvenanceFact Never! {
+semindex_convert_view_provenance: fn(output_path: [String], provenance: ViewProvenance) -> ViewProvenanceFact Never! {
     sources := [ViewSourcePathFact]{}
     loop source_path in provenance.sources {
-        source :: if source_path.source == {
+        source: if source_path.source == {
             .Receiver -> ViewSourceFact.Receiver
             .Parameter(index) -> ViewSourceFact.Parameter{index: index}
             .Static(module_path, name) -> ViewSourceFact.Static{module_path: module_path, name: name}
         }
         projections := [ViewProjectionFact]{}
         loop projection in source_path.projections {
-            converted :: if projection == {
+            converted: if projection == {
                 .Field(name) -> ViewProjectionFact.Field{name: name}
                 .Index -> ViewProjectionFact.Index
                 .Range -> ViewProjectionFact.Range
@@ -283,15 +283,15 @@ fn semindex_convert_view_provenance(output_path: [String], provenance: ViewProve
 // The ancestry map is restored on every return, so sibling branches never share
 // visited descendants. This is Rust's branch-local seen.clone without allocating
 // a second set for each edge.
-fn semindex_effect_witness(function: String, effect_name: String, facts: SemIndexEffectFacts, seen: &[String:Bool]) -> EffectProvenance? Never! {
+semindex_effect_witness: fn(function: String, effect_name: String, facts: SemIndexEffectFacts, seen: &[String:Bool]) -> EffectProvenance? Never! {
     if seen.get(function) != None -> return None
     seen[function] = true
     result := semindex_effect_witness_entered(function, effect_name, facts, &seen)
-    _removed :: &seen.remove(function)
+    _removed: &seen.remove(function)
     result
 }
-fn semindex_effect_witness_entered(function: String, effect_name: String, facts: SemIndexEffectFacts, seen: &[String:Bool]) -> EffectProvenance? Never! {
-    summary :: facts.summaries.get(function) ?? return None
+semindex_effect_witness_entered: fn(function: String, effect_name: String, facts: SemIndexEffectFacts, seen: &[String:Bool]) -> EffectProvenance? Never! {
+    summary: facts.summaries.get(function) ?? return None
     loop direct in summary.direct {
         if direct == effect_name {
             spans := [SourceSpan]{}
@@ -305,7 +305,7 @@ fn semindex_effect_witness_entered(function: String, effect_name: String, facts:
         return Val(EffectProvenance{effect_name: effect_name, call_path: [String]{function}, spans: spans})
     }
     loop callee in summary.edges {
-        solved :: facts.solved.get(callee) ?? next
+        solved: facts.solved.get(callee) ?? next
         contains := false
         loop name in solved { if name == effect_name { contains = true; break } }
         if !contains -> next
@@ -323,10 +323,10 @@ fn semindex_effect_witness_entered(function: String, effect_name: String, facts:
     }
     None
 }
-fn semindex_convert_effects(facts: SemIndexEffectFacts) -> [EffectFact] Never! {
+semindex_convert_effects: fn(facts: SemIndexEffectFacts) -> [EffectFact] Never! {
     output := [EffectFact]{}
     loop (function, summary) in facts.summaries {
-        inferred :: facts.solved.get(function) ?? [String]{}
+        inferred: facts.solved.get(function) ?? [String]{}
         provenance := [EffectProvenance]{}
         loop effect_name in inferred {
             seen := [String:Bool]{}

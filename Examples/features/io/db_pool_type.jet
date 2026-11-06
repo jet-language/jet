@@ -1,19 +1,19 @@
 // D-DBPOOL1: a pool handed to a function is spelled `DBPool` in its signature.
-package {
+package: {
     name: "db_pool_type"
     authority: { allow: [DB, IO, Mem.Alloc, Time.Wait] }
 }
 
-use db :: core.db
+use db: core.db
 
-fn describe(pool: DBPool) -> String {
-    ready :: pool.ready() ?? false
+describe: fn(pool: DBPool) -> String {
+    ready: pool.ready() ?? false
     "pool ready: {ready}"
 }
 
-fn run() {
-    pool :: db.pool(":memory:", max: 1) ?? return
+run: fn() {
+    pool: db.pool(":memory:", max: 1) ?? return
     print(describe(pool))
-    _receipt :: pool.drain() ?? return
+    _receipt: pool.drain() ?? return
     print("drained")
 }

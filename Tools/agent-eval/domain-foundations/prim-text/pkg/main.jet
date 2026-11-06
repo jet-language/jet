@@ -1,37 +1,37 @@
 use {
-    files :: core.files
-    process :: core.process
-    re :: core.regex
-    text :: core.text
-    time :: core.time
+    files: core.files
+    process: core.process
+    re: core.regex
+    text: core.text
+    time: core.time
 }
 
-struct BPEModel {
+BPEModel: struct {
     merges: [String]
     words: Int
     tokens: Int
 }
 
-struct ScanResult {
+ScanResult: struct {
     bytes: Int
     lines: Int
     matches: Int
     millis: Int
 }
 
-fn pair_key(left: String, right: String) -> String { left}|{right }}"
+pair_key: fn(left: String, right: String) -> String { left}|{right }}"
 
-fn merge_sequence(sequence: [String], key: String) -> [String] {
-    pieces :: key.split("|").to_list()
-    left :: pieces.get(0) ?? ""
-    right :: pieces.get(1) ?? ""
-    merged :: "{left}{right}"
+merge_sequence: fn(sequence: [String], key: String) -> [String] {
+    pieces: key.split("|").to_list()
+    left: pieces.get(0) ?? ""
+    right: pieces.get(1) ?? ""
+    merged: "{left}{right}"
     result := [String]{}
     index := 0
     loop index < sequence.len() {
-        current :: sequence.get(index) ?? ""
+        current: sequence.get(index) ?? ""
         if index + 1 < sequence.len() {
-            next :: sequence.get(index + 1) ?? ""
+            next: sequence.get(index + 1) ?? ""
             if pair_key(current, next) == key {
                 &result.push(merged)
                 index += 2
@@ -47,8 +47,8 @@ fn merge_sequence(sequence: [String], key: String) -> [String] {
     return result
 }
 
-fn train_bpe(corpus: String) -> BPEModel {
-    words :: text.words(corpus)
+train_bpe: fn(corpus: String) -> BPEModel {
+    words: text.words(corpus)
     sequences := [[String]]{}
     loop word in words {
         &sequences.push(text.graphemes(word))
@@ -59,9 +59,9 @@ fn train_bpe(corpus: String) -> BPEModel {
         loop sequence in sequences {
             if sequence.len() > 1 {
                 loop index in 0..<(sequence.len() - 1) {
-                    left :: sequence.get(index) ?? ""
-                    right :: sequence.get(index + 1) ?? ""
-                    key :: pair_key(left, right)
+                    left: sequence.get(index) ?? ""
+                    right: sequence.get(index + 1) ?? ""
+                    key: pair_key(left, right)
                     counts[key] = (counts.get(key) ?? 0) + 1
                 }
             }
@@ -91,7 +91,7 @@ fn train_bpe(corpus: String) -> BPEModel {
     return BPEModel{merges: merges, words: words.len(), tokens: token_count}
 }
 
-fn encode_text(source: String, model: BPEModel) -> [String] {
+encode_text: fn(source: String, model: BPEModel) -> [String] {
     encoded := [String]{}
     loop word in text.words(source) {
         sequence := text.graphemes(word)
@@ -105,10 +105,10 @@ fn encode_text(source: String, model: BPEModel) -> [String] {
     return encoded
 }
 
-fn scan_logs(path: String) -> ScanResult {
-    source :: files.read(path) ?? panic("read log")
-    pattern :: re.compile("ERROR .* user_id=\\d+") ?? panic("compile log pattern")
-    started :: time.instant()
+scan_logs: fn(path: String) -> ScanResult {
+    source: files.read(path) ?? panic("read log")
+    pattern: re.compile("ERROR .* user_id=\\d+") ?? panic("compile log pattern")
+    started: time.instant()
     line_count := 0
     match_count := 0
     loop line in source.lines() {
@@ -125,39 +125,39 @@ fn scan_logs(path: String) -> ScanResult {
     }
 }
 
-fn shape_with_harfbuzz(font: String, sample: String) -> String {
-    hb :: "/nix/store/i6ds3pnzsk05yms568mc9jm5c5ly46b5-harfbuzz-13.2.1-dev/bin/hb-shape"
-    result :: process.cmd([hb, "--output-format=json", font, sample])
+shape_with_harfbuzz: fn(font: String, sample: String) -> String {
+    hb: "/nix/store/i6ds3pnzsk05yms568mc9jm5c5ly46b5-harfbuzz-13.2.1-dev/bin/hb-shape"
+    result: process.cmd([hb, "--output-format=json", font, sample])
         .stdout(.Capture)
         .stderr(.Capture)
         .run() ?? return "process-failed"
     return result.output.trim()
 }
 
-fn run() {
-    corpus_path :: "$JET_STATE_ROOT/dx3/prim-text/fixtures/corpus_1m.txt"
-    log_path :: "$JET_STATE_ROOT/dx3/prim-text/fixtures/logs_100m.txt"
-    corpus :: files.read(corpus_path) ?? panic("read corpus")
-    corpus_bytes :: text.byte_count(corpus)
-    bpe_started :: time.instant()
-    model :: train_bpe(corpus)
-    bpe_millis :: bpe_started.elapsed_millis()
-    sample_tokens :: encode_text("Hello café नमस्ते سلام", model)
+run: fn() {
+    corpus_path: "$JET_STATE_ROOT/dx3/prim-text/fixtures/corpus_1m.txt"
+    log_path: "$JET_STATE_ROOT/dx3/prim-text/fixtures/logs_100m.txt"
+    corpus: files.read(corpus_path) ?? panic("read corpus")
+    corpus_bytes: text.byte_count(corpus)
+    bpe_started: time.instant()
+    model: train_bpe(corpus)
+    bpe_millis: bpe_started.elapsed_millis()
+    sample_tokens: encode_text("Hello café नमस्ते سلام", model)
     print("bpe bytes={corpus_bytes} words={model.words} merges={model.merges.len()} tokens={model.tokens} sample_tokens={sample_tokens.len()} elapsed_ms={bpe_millis}")
 
-    segmented :: "Café 👨‍👩‍👦. Привет κόσμε नमस्ते سلام! One. Two?"
+    segmented: "Café 👨‍👩‍👦. Привет κόσμε नमस्ते سلام! One. Two?"
     print("segments bytes={text.byte_count(segmented)} scalars={text.scalar_count(segmented)} graphemes={text.graphemes(segmented).len()} words={text.words(segmented).len()} sentences={text.sentences(segmented).len()}")
-    normalized :: text.nfc("Café")
+    normalized: text.nfc("Café")
     print("normalized={normalized}")
-    caseless :: text.caseless_eq("Straße", "STRASSE")
+    caseless: text.caseless_eq("Straße", "STRASSE")
     print("casefold_equal={caseless}")
 
-    scan :: scan_logs(log_path)
+    scan: scan_logs(log_path)
     print("scan bytes={scan.bytes} lines={scan.lines} matches={scan.matches} elapsed_ms={scan.millis}")
 
-    font :: "/nix/store/z8636pzn6xlbazz1m7jmwgp44fib7svz-home-manager-path/share/fonts/truetype/DejaVuSans.ttf"
-    arabic_shape :: shape_with_harfbuzz(font, "سلام")
-    dev_shape :: shape_with_harfbuzz(font, "नमस्ते")
+    font: "/nix/store/z8636pzn6xlbazz1m7jmwgp44fib7svz-home-manager-path/share/fonts/truetype/DejaVuSans.ttf"
+    arabic_shape: shape_with_harfbuzz(font, "سلام")
+    dev_shape: shape_with_harfbuzz(font, "नमस्ते")
     print("shape_arabic={arabic_shape}")
     print("shape_devanagari={dev_shape}")
 }

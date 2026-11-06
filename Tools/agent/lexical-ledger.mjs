@@ -18,10 +18,10 @@ const SYNTAX_DIR = "Compiler/JetFoundation/Data/Syntax";
 const SPEC = "Docs/spec/syntax-decisions.md";
 const OPEN = "<!-- BEGIN GENERATED LEXICAL LEDGER -->";
 const CLOSE = "<!-- END GENERATED LEXICAL LEDGER -->";
-const TABLE_RE = /^LEXICAL_LEDGER :: \[LexicalEntry\]\{[\s\S]*?\n\}/m;
+const TABLE_RE = /^LEXICAL_LEDGER: \[LexicalEntry\]\{[\s\S]*?\n\}/m;
 const ROW_RE = /\{\s*spelling:\s*("(?:\\.|[^"\\])*"|[A-Za-z_][A-Za-z0-9_]*)\s*,\s*meaning:\s*("(?:\\.|[^"\\])*")\s*,\s*decision:\s*("(?:\\.|[^"\\])*")\s*\}/g;
-const STRING_CONST_DECL_RE = /^([A-Za-z_][A-Za-z0-9_]*)\s*::/gm;
-const STRING_CONST_LITERAL_RE = /^([A-Za-z_][A-Za-z0-9_]*)\s*::\s*("(?:\\.|[^"\\])*")\s*$/gm;
+const STRING_CONST_DECL_RE = /^([A-Za-z_][A-Za-z0-9_]*):(?!=)/gm;
+const STRING_CONST_LITERAL_RE = /^([A-Za-z_][A-Za-z0-9_]*):\s*("(?:\\.|[^"\\])*")\s*$/gm;
 
 function readStringConstants(source) {
   const declarationCounts = new Map();

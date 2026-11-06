@@ -1,22 +1,22 @@
 // D-LAMBDA-IFACE2=A: lambdas write parameters and an optional effect row only.
 #Error
-enum LambdaError {
+LambdaError: enum {
     Invalid
 }
 
-struct LambdaPoint {
+LambdaPoint: struct {
     x: Int
 }
 
-fn finish(n: Int) -[]> Int LambdaError! {
+finish: fn(n: Int) -[]> Int LambdaError! {
     Ok(n)
 }
 
-fn apply(f: fn(Int) -[]> Int LambdaError!, n: Int) -> Int LambdaError! {
+apply: fn(f: fn(Int) -[]> Int LambdaError!, n: Int) -> Int LambdaError! {
     f(n)
 }
 
-fn run() {
-    points :: [41].map(x -> LambdaPoint{x})
+run: fn() {
+    points: [41].map(x -> LambdaPoint{x})
     print(apply((n: Int) -[]> finish(n + 1), points[0].x) ?? 0)
 }

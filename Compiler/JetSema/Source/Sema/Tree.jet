@@ -82,12 +82,12 @@ use jet_foundation.[
     WebPartitionMarker,
 ]
 
-enum TStrPart {
+TStrPart: enum {
     Literal(text: String)
     Interpolation(value: TExpr, format: TStrFormat)
 }
 
-struct TCallArg {
+TCallArg: struct {
     value: TExpr
     template_items: [SymbolID]
     borrow: Bool
@@ -100,22 +100,22 @@ struct TCallArg {
     spread: Bool
 }
 
-struct TEnumArg {
+TEnumArg: struct {
     value: TExpr
 }
 
-enum TEnumPayload {
+TEnumPayload: enum {
     Unit
     Positional(args: [TEnumArg])
     Named(fields: [TNamedEnumArg])
 }
 
-struct TNamedEnumArg {
+TNamedEnumArg: struct {
     name: String
     value: TEnumArg
 }
 
-enum TPatternShape {
+TPatternShape: enum {
     Variant(variant: String, bindings: [TPatternBinding], leading_dot: Bool, span: Span)
     // S31: `inner` is a nested payload pattern (`.Val(.Rect(w, h))`).
     Present(binding: String, binding_span: Span, inner: TNestedPattern?, span: Span)
@@ -132,12 +132,12 @@ enum TPatternShape {
 }
 
 // S31: a checked nested payload pattern with the payload type's owner.
-struct TNestedPattern {
+TNestedPattern: struct {
     shape: TPatternShape
     enum_type: SymbolID?
 }
 
-struct TPattern {
+TPattern: struct {
     shape: TPatternShape
     bindings: [TPatternBindingFact]
     enum_type: SymbolID?
@@ -146,7 +146,7 @@ struct TPattern {
     boxed: Bool
 }
 
-enum TPatternBinding {
+TPatternBinding: enum {
     Wildcard
     Bind(name: String, span: Span)
     Range(lo: Int, hi: Int)
@@ -154,13 +154,13 @@ enum TPatternBinding {
     Value(value: TExpr)
 }
 
-enum TPatternField {
+TPatternField: enum {
     Bind(field: String, local: String, span: Span)
     Value(field: String, value: TExpr, span: Span)
     Nested(field: String, pattern: TNestedPattern, span: Span)
 }
 
-struct TMapPatternEntry {
+TMapPatternEntry: struct {
     key: TExpr
     optional: Bool
     slot: TPatternBinding
@@ -168,7 +168,7 @@ struct TMapPatternEntry {
 }
 
 // Logical key identity ignores source spelling and resolved constant aliases.
-fn tree_pattern_key_identity(key: TExpr, context: SemaCheckContext) -> String? Never! {
+tree_pattern_key_identity: fn(key: TExpr, context: SemaCheckContext) -> String? Never! {
     if key.kind == {
         .IntLit(value, _) -> Val("int:{value}")
         .StrLit(value) -> Val("text:{value}")
@@ -196,18 +196,18 @@ fn tree_pattern_key_identity(key: TExpr, context: SemaCheckContext) -> String? N
     }
 }
 
-struct TMatchArm {
+TMatchArm: struct {
     pattern: TPattern
     body: [TStmt]
 }
 
-enum TIfCond {
+TIfCond: enum {
     Plain(value: TExpr)
     And(left: TIfCond, right: TIfCond)
     IfLet(pattern: TPattern, subj: TExpr)
 }
 
-struct TContract {
+TContract: struct {
     kind: TContractKind
     condition: TExpr
     message: TExpr
@@ -218,7 +218,7 @@ struct TContract {
     site: TContractSite
 }
 
-enum TStmt {
+TStmt: enum {
     Contract(contract: TContract)
     ContractScope(pre: [TContract], body: [TStmt], post: [TContract], result: TContractResult, span: Span)
     Let(local: TLocal, let_ty: TLetTy, init: TExpr, gc_promotion: TGCPromotion?, gc_transferred: Bool, span: Span)
@@ -262,25 +262,25 @@ enum TStmt {
     GCEdit(root: String, slot: String, edges: [String], replace_all: Bool, index_temp: TExpr?, statement: TStmt, span: Span)
 }
 
-struct TRangeArm {
+TRangeArm: struct {
     lo: Int
     hi: Int
     body: [TStmt]
 }
 
-struct TMixedArm {
+TMixedArm: struct {
     condition: TExpr
     body: [TStmt]
 }
 
-struct TContextGuard {
+TContextGuard: struct {
     field: String
     value: TExpr
 }
 
-struct TUnitRounding { mode: TUnitRoundingMode, digits: TExpr }
+TUnitRounding: struct { mode: TUnitRoundingMode, digits: TExpr }
 
-enum TExprKind {
+TExprKind: enum {
     IntLit(value: Int, width: TIntegerWidth?)
     StrLit(parts: [TStrPart])
     Local(local: TLocal)
@@ -368,7 +368,7 @@ enum TExprKind {
 // function-local id (below AST_NODE_GENERATED) for a node the checker gave
 // one in its context (sema_check_record_expr_id). A node built without one is
 // AST_NODE_GENERATED and takes a fresh id when it is flattened.
-struct TExpr {
+TExpr: struct {
     ty: Type
     kind: TExprKind
     span: Span
@@ -378,28 +378,28 @@ struct TExpr {
 // Gives `value` a type other than the one its checked source node has (a
 // coercion or wrapper retyping a checked node): the node leaves its source
 // id and takes a function-local one of its own when it is flattened.
-fn tree_expr_retype(value: &TExpr, ty: Type) Never! {
+tree_expr_retype: fn(value: &TExpr, ty: Type) Never! {
     value.ty = ty
     value.id = AST_NODE_GENERATED
 }
 
-struct TStructFieldValue {
+TStructFieldValue: struct {
     field: TFieldRef
     value: TExpr
     boxed: Bool
 }
 
-struct TMapEntry {
+TMapEntry: struct {
     key: TExpr
     value: TExpr
 }
 
-enum TListSpreadPart {
+TListSpreadPart: enum {
     Element(value: TExpr)
     Spread(value: TExpr)
 }
 
-enum TScopeMemberKind {
+TScopeMemberKind: enum {
     Setup
     ExpectFail(code: String?, message: String?)
     Timeout(duration: TExpr)
@@ -407,7 +407,7 @@ enum TScopeMemberKind {
     Skip
 }
 
-enum TOrFallback {
+TOrFallback: enum {
     Value(value: TExpr)
     Return(value: TExpr?)
     Panic(message: TExpr, location: TPanicLoc)
@@ -417,7 +417,7 @@ enum TOrFallback {
     ContinueLabel(label: String)
 }
 
-enum THostCall {
+THostCall: enum {
     Method(receiver: TExpr, method: String, args: [TExpr])
     CellGuardProject(receiver: TExpr, paths: [[String]], result_type: Type, editable: Bool, edit_paths_disjoint: Bool)
     OptionProbe(inner: TExpr, kind: TOptionProbe)
@@ -434,7 +434,7 @@ enum THostCall {
     MemoStats(function: DeclID, bound: String)
 }
 
-enum TCoreClosureKind {
+TCoreClosureKind: enum {
     Spawn(group: TExpr?, site: Int, label: String?, executable: TLambda)
     Realtime(rate: TExpr, frames: TExpr, executable: TLambda)
     Guard(executable: TLambda)
@@ -447,14 +447,14 @@ enum TCoreClosureKind {
     UIReactiveRender(executable: TLambda)
 }
 
-enum TFnValueKind {
+TFnValueKind: enum {
     NamedFn(function: DeclID?, lambda: TLambda?)
     Policy(fn_type: Type, policy_args: [TCallArg], policy_conventions: [AccessConvention], wrapper: DeclID?, captures: [TCapture], callee: TExpr)
     Call(callee: TExpr, args: [TCallArg])
     Send(value: TExpr)
 }
 
-enum THandleOp {
+THandleOp: enum {
     Hardware(operation: THardwareCall)
     DurationNew(unit: String, float: Bool)
     FileReaderReadLine
@@ -721,7 +721,7 @@ enum THandleOp {
     ProcessLines
 }
 
-enum TRequireKind {
+TRequireKind: enum {
     Require(cond: TExpr, msg: TExpr?)
     // `hook`: the authored `equal`/`compare` implementation `==` dispatches
     // to for the operands' type; None compares them structurally.
@@ -729,7 +729,7 @@ enum TRequireKind {
     Panic(msg: TExpr)
 }
 
-struct TLambda {
+TLambda: struct {
     executable: TLambdaBody
     source_span: Span
     frame_schedule: FrameSchedule?
@@ -751,12 +751,12 @@ struct TLambda {
     uses_stack_sentry: Bool
 }
 
-enum TLambdaBody {
+TLambdaBody: enum {
     Expr(value: TExpr)
     Block(body: [TStmt])
 }
 
-struct TFunc {
+TFunc: struct {
     name: String
     module_name: String
     module_identity: String
@@ -801,7 +801,7 @@ struct TFunc {
     pre: [TContract]{[TContract]{}}
 }
 
-struct TParameter {
+TParameter: struct {
     local: TLocal
     name: String
     span: Span
@@ -813,16 +813,16 @@ struct TParameter {
     variadic: Bool
 }
 
-enum TPlace {
+TPlace: enum {
     Local(local: TLocal)
     Expr(value: TExpr)
 }
 
-fn tree_each_pattern_child(pattern: TPattern, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+tree_each_pattern_child: fn(pattern: TPattern, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     tree_each_pattern_shape_child(pattern.shape, visit)
 }
 
-fn tree_each_pattern_shape_child(shape: TPatternShape, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+tree_each_pattern_shape_child: fn(shape: TPatternShape, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if shape == {
         .Variant(_, slots, _, _) | .List(slots, _, _) -> {
             loop slot in slots {
@@ -854,7 +854,7 @@ fn tree_each_pattern_shape_child(shape: TPatternShape, visit: fn(TExpr) -[Mem.Al
     }
 }
 
-fn tree_each_pattern_slot_child(slot: TPatternBinding, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+tree_each_pattern_slot_child: fn(slot: TPatternBinding, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if slot == {
         .Value(value) -> visit(value)
         .Nested(inner) -> tree_each_pattern_shape_child(inner.shape, visit)
@@ -862,7 +862,7 @@ fn tree_each_pattern_slot_child(slot: TPatternBinding, visit: fn(TExpr) -[Mem.Al
     }
 }
 
-fn tree_each_if_cond_child(condition: TIfCond, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+tree_each_if_cond_child: fn(condition: TIfCond, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if condition == {
         .Plain(value) -> visit(value)
         .And(left, right) -> {
@@ -876,7 +876,7 @@ fn tree_each_if_cond_child(condition: TIfCond, visit: fn(TExpr) -[Mem.Alloc, Mem
     }
 }
 
-fn tree_each_lambda_child(lambda: TLambda, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+tree_each_lambda_child: fn(lambda: TLambda, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if lambda.executable == {
         .Expr(value) -> visit(value)
         .Block(body) -> {
@@ -887,13 +887,13 @@ fn tree_each_lambda_child(lambda: TLambda, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc,
     }
 }
 
-fn tree_each_stmt_list_child(statements: [TStmt], visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+tree_each_stmt_list_child: fn(statements: [TStmt], visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     loop statement in statements {
         tree_each_stmt_child(statement, visit)
     }
 }
 
-fn tree_each_match_arm_child(arms: [TMatchArm], visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+tree_each_match_arm_child: fn(arms: [TMatchArm], visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     loop arm in arms {
         tree_each_pattern_child(arm.pattern, visit)
         tree_each_stmt_list_child(arm.body, visit)
@@ -904,7 +904,7 @@ fn tree_each_match_arm_child(arms: [TMatchArm], visit: fn(TExpr) -[Mem.Alloc, Me
 // exactly one `if`, the shape sema gives every N-arm decision table) is
 // followed by direct recursion over read parameters, one frame per arm:
 // each link is read in place, never copied.
-fn tree_each_else_child(else_body: [TStmt]?, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+tree_each_else_child: fn(else_body: [TStmt]?, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if else_body == .Val(statements) {
         loop statement in statements {
             if statement == .If(condition, then_body, nested_else, _, _) {
@@ -918,7 +918,7 @@ fn tree_each_else_child(else_body: [TStmt]?, visit: fn(TExpr) -[Mem.Alloc, Mem.R
     }
 }
 
-fn tree_each_stmt_child(statement: TStmt, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+tree_each_stmt_child: fn(statement: TStmt, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if statement == {
         .Contract(contract) -> {
             visit(contract.condition)
@@ -1050,14 +1050,14 @@ fn tree_each_stmt_child(statement: TStmt, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, 
     }
 }
 
-fn tree_each_place_child(place: TPlace, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+tree_each_place_child: fn(place: TPlace, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if place == {
         .Expr(value) -> visit(value)
         else -> {}
     }
 }
 
-fn tree_each_require_child(requirement: TRequireKind, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+tree_each_require_child: fn(requirement: TRequireKind, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if requirement == {
         .Require(condition, message) -> {
             visit(condition)
@@ -1071,7 +1071,7 @@ fn tree_each_require_child(requirement: TRequireKind, visit: fn(TExpr) -[Mem.All
     }
 }
 
-fn tree_each_or_fallback_child(fallback: TOrFallback, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+tree_each_or_fallback_child: fn(fallback: TOrFallback, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if fallback == {
         .Value(value) -> visit(value)
         .Return(value) -> {
@@ -1082,7 +1082,7 @@ fn tree_each_or_fallback_child(fallback: TOrFallback, visit: fn(TExpr) -[Mem.All
     }
 }
 
-fn tree_each_list_spread_child(parts: [TListSpreadPart], visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+tree_each_list_spread_child: fn(parts: [TListSpreadPart], visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     loop part in parts {
         if part == {
             .Element(value) | .Spread(value) -> visit(value)
@@ -1090,7 +1090,7 @@ fn tree_each_list_spread_child(parts: [TListSpreadPart], visit: fn(TExpr) -[Mem.
     }
 }
 
-fn tree_each_host_call_child(call: THostCall, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+tree_each_host_call_child: fn(call: THostCall, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if call == {
         .Method(receiver, _, args) -> {
             visit(receiver)
@@ -1104,7 +1104,7 @@ fn tree_each_host_call_child(call: THostCall, visit: fn(TExpr) -[Mem.Alloc, Mem.
     }
 }
 
-fn tree_each_core_closure_child(kind: TCoreClosureKind, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+tree_each_core_closure_child: fn(kind: TCoreClosureKind, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if kind == {
         .Spawn(group, _, _, executable) -> {
             if group == Val(group_value) -> visit(group_value)
@@ -1133,7 +1133,7 @@ fn tree_each_core_closure_child(kind: TCoreClosureKind, visit: fn(TExpr) -[Mem.A
 
 }
 
-fn tree_each_expr_child(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+tree_each_expr_child: fn(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if expression.kind == {
         .StrLit(parts) -> loop part in parts {
             if part == {
@@ -1284,7 +1284,7 @@ fn tree_each_expr_child(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc,
     }
 }
 
-fn tree_each_fn_value_child(kind: TFnValueKind, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+tree_each_fn_value_child: fn(kind: TFnValueKind, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if kind == {
         .NamedFn(_, lambda) -> {
             if lambda == Val(lambda_value) {

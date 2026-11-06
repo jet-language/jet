@@ -7,10 +7,10 @@ use {
 }
 
 #Test("fleet_valid_captures_hosts_and_overrides") {
-    source :: "\nmodule system.web {{ target: linux.x64 }}\nmodule fleet.prod {{\n    hosts: {{\n        web1: system.web{{ region: \"us-east\" }},\n        web2: system.web,\n    }}\n}}\n"
-    fleets :: envmodel_test_host_groups(source, false)
+    source: "\nsystem.web: module {{ target: linux.x64 }}\nfleet.prod: module {{\n    hosts: {{\n        web1: system.web{{ region: \"us-east\" }},\n        web2: system.web,\n    }}\n}}\n"
+    fleets: envmodel_test_host_groups(source, false)
     assert_eq(fleets.len(), 1)
-    fleet :: fleets[0]
+    fleet: fleets[0]
     assert_eq(fleet.name, "prod")
     assert_eq(fleet.hosts.len(), 2)
     assert_eq(fleet.hosts[0].system, "web")
@@ -19,9 +19,9 @@ use {
 }
 
 #Test("fleet_override_computes_fields_in_dependency_order_with_provenance") {
-    source :: "\nmodule system.web {{ target: linux.x64 }}\nmodule fleet.prod {{\n    hosts: {{\n        web1: system.web{{ region: base + 2, base: 40 }}\n    }}\n}}\n"
-    override_plan :: envmodel_test_host_groups(source, false)[0].hosts[0].overrides ?? panic("host has an override")
-    first :: override_plan.fields[0].value
+    source: "\nsystem.web: module {{ target: linux.x64 }}\nfleet.prod: module {{\n    hosts: {{\n        web1: system.web{{ region: base + 2, base: 40 }}\n    }}\n}}\n"
+    override_plan: envmodel_test_host_groups(source, false)[0].hosts[0].overrides ?? panic("host has an override")
+    first: override_plan.fields[0].value
     assert(if first == { .Value(value) -> value == CtValue.Int{value: 42} else -> false })
     found := false
     loop region in override_plan.provenance {
@@ -37,10 +37,10 @@ use {
 }
 
 #Test("fleet_override_options_keep_symbolic_atoms_and_evaluate_values") {
-    source :: "\nmodule system.web {{ target: linux.x64 }}\nmodule fleet.prod {{\n    hosts: {{\n        web1: system.web{{ options: [network.hostName: laptop, filesystem.timeZone: \"UTC\", tuning.retries: base + 1], base: 4 }}\n    }}\n}}\n"
-    override_plan :: envmodel_test_host_groups(source, false)[0].hosts[0].overrides ?? panic("host has an override")
-    first :: override_plan.fields[0].value
-    options :: if first == { .Options(options) -> options else -> panic("expected options override") }
+    source: "\nsystem.web: module {{ target: linux.x64 }}\nfleet.prod: module {{\n    hosts: {{\n        web1: system.web{{ options: [network.hostName: laptop, filesystem.timeZone: \"UTC\", tuning.retries: base + 1], base: 4 }}\n    }}\n}}\n"
+    override_plan: envmodel_test_host_groups(source, false)[0].hosts[0].overrides ?? panic("host has an override")
+    first: override_plan.fields[0].value
+    options: if first == { .Options(options) -> options else -> panic("expected options override") }
     assert_eq(options.len(), 3)
     assert_eq(options[0].key, "network.hostName")
     assert_eq(options[0].value, "laptop")
@@ -61,8 +61,8 @@ use {
 }
 
 #Test("fleet_override_dependency_cycle_is_rejected_before_capture") {
-    source :: "\nmodule system.web {{ target: linux.x64 }}\nmodule fleet.prod {{\n    hosts: {{\n        web1: system.web{{ region: base + 1, base: region + 1 }}\n    }}\n}}\n"
-    error :: envmodel_test_env_error(envmodel_evaluate_env(source, envmodel_test_base_dir()))
+    source: "\nsystem.web: module {{ target: linux.x64 }}\nfleet.prod: module {{\n    hosts: {{\n        web1: system.web{{ region: base + 1, base: region + 1 }}\n    }}\n}}\n"
+    error: envmodel_test_env_error(envmodel_evaluate_env(source, envmodel_test_base_dir()))
     assert_eq(error.code, "E0338")
 }
 

@@ -6,76 +6,76 @@
 use {
     jet_pkg_model.[PublicationRegistryConfig, pkg_bytes_space_width, pkg_bytes_text, pkg_hex_bytes, publication_registry_url_has_credentials]
     jetpack_foundation.[foundation_hardened_git_command, foundation_hardened_ssh_command]
-    publication_dns :: core.http.client
-    ip :: core.net.ip
-    sys :: core.sys
+    publication_dns: core.http.client
+    ip: core.net.ip
+    sys: core.sys
 }
 
 #Error
-struct PublicationRegistryAuthorityError {
+PublicationRegistryAuthorityError: struct {
     detail: String
 }
-struct PublicationRegistryAuthority {
+PublicationRegistryAuthority: struct {
     host: String
     port: Int?
 }
-fn publication_parse_registry_port(port: String?) -> Int? PublicationRegistryAuthorityError! {
-    raw :: port ?? return Ok(None)
-    digits :: raw.removeprefix("+")
+publication_parse_registry_port: fn(port: String?) -> Int? PublicationRegistryAuthorityError! {
+    raw: port ?? return Ok(None)
+    digits: raw.removeprefix("+")
     if digits == "" -> return Err(PublicationRegistryAuthorityError{detail: "port is malformed"})
     loop byte in digits.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if code < 48 || code > 57 -> return Err(PublicationRegistryAuthorityError{detail: "port is malformed"})
     }
-    number :: Int.parse(digits) ?? return Err(PublicationRegistryAuthorityError{detail: "port is malformed"})
+    number: Int.parse(digits) ?? return Err(PublicationRegistryAuthorityError{detail: "port is malformed"})
     if number > 65535 -> return Err(PublicationRegistryAuthorityError{detail: "port is malformed"})
     if number == 0 -> return Err(PublicationRegistryAuthorityError{detail: "port must not be zero"})
     Ok(Val(number))
 }
-fn publication_registry_host_and_port(authority: String) -> PublicationRegistryAuthority PublicationRegistryAuthorityError! {
+publication_registry_host_and_port: fn(authority: String) -> PublicationRegistryAuthority PublicationRegistryAuthorityError! {
     if authority.starts_with("[") {
-        rest :: authority.removeprefix("[")
-        pair :: rest.split_once("]") ?? return Err(PublicationRegistryAuthorityError{detail: "IPv6 host is not closed"})
+        rest: authority.removeprefix("[")
+        pair: rest.split_once("]") ?? return Err(PublicationRegistryAuthorityError{detail: "IPv6 host is not closed"})
         if pair.before == "" || (pair.after != "" && !pair.after.starts_with(":")) -> return Err(PublicationRegistryAuthorityError{detail: "IPv6 host is malformed"})
-        raw_port :: if pair.after.starts_with(":") -> Val(pair.after.removeprefix(":")) else -> None
-        port :: publication_parse_registry_port(raw_port)
+        raw_port: if pair.after.starts_with(":") -> Val(pair.after.removeprefix(":")) else -> None
+        port: publication_parse_registry_port(raw_port)
         return Ok(PublicationRegistryAuthority{host: pair.before, port: port})
     }
-    pair :: authority.cut_last(":")
-    host :: if pair == .Val(parts) -> parts.before else -> authority
-    raw_port :: if pair == .Val(parts) -> Val(parts.after) else -> None
+    pair: authority.cut_last(":")
+    host: if pair == .Val(parts) -> parts.before else -> authority
+    raw_port: if pair == .Val(parts) -> Val(parts.after) else -> None
     if host == "" || host.contains(":") -> return Err(PublicationRegistryAuthorityError{detail: "host is malformed"})
-    host_bytes :: host.bytes()
+    host_bytes: host.bytes()
     loop index in 0..<host_bytes.len() {
         if pkg_bytes_space_width(host_bytes, index) > 0 -> return Err(PublicationRegistryAuthorityError{detail: "host is malformed"})
     }
-    port :: publication_parse_registry_port(raw_port)
+    port: publication_parse_registry_port(raw_port)
     Ok(PublicationRegistryAuthority{host: host, port: port})
 }
-fn publication_registry_host(host: String) -> String Never! {
+publication_registry_host: fn(host: String) -> String Never! {
     if host.contains(":") -> "[{host}]" else -> host
 }
 
 // Pre-DNS parse preserves refusal precedence, including case-sensitive file://.
 // Network validation must subsequently reject EVERY non-public DNS answer.
-enum PublicationRegistryEndpoint {
+PublicationRegistryEndpoint: enum {
     Local
     Network(scheme: String, host: String, port: Int, explicit_port: Bool)
 }
-fn publication_parse_registry_endpoint(registry: PublicationRegistryConfig) -> PublicationRegistryEndpoint PublicationDiagnosticError! {
+publication_parse_registry_endpoint: fn(registry: PublicationRegistryConfig) -> PublicationRegistryEndpoint PublicationDiagnosticError! {
     if publication_registry_url_has_credentials(registry.url) -> return Err(PublicationDiagnosticError{diagnostic: publication_e1235(registry.url, "registry URLs must not contain embedded credentials or query/fragment parameters")})
     if registry.url.starts_with("file://") {
-        path :: registry.url.removeprefix("file://")
+        path: registry.url.removeprefix("file://")
         if path == "" || !path.starts_with("/") || path.contains("?") || path.contains("#") || path.contains("\\") -> return Err(PublicationDiagnosticError{diagnostic: publication_e1235(registry.url, "file registry URLs must name an absolute local repository")})
         return Ok(PublicationRegistryEndpoint.Local)
     }
-    pair :: registry.url.split_once("://") ?? return Err(PublicationDiagnosticError{diagnostic: publication_e1235(registry.url, "registry URL must use file://, https://, http://, git://, or ssh://")})
-    scheme :: pair.before.to_ascii_lower()
+    pair: registry.url.split_once("://") ?? return Err(PublicationDiagnosticError{diagnostic: publication_e1235(registry.url, "registry URL must use file://, https://, http://, git://, or ssh://")})
+    scheme: pair.before.to_ascii_lower()
     if scheme != "git" && scheme != "http" && scheme != "https" && scheme != "ssh" -> return Err(PublicationDiagnosticError{diagnostic: publication_e1235(registry.url, "the registry transport scheme is not allowed")})
-    authority :: if pair.after.split_once("/") == .Val(parts) -> parts.before else -> pair.after
+    authority: if pair.after.split_once("/") == .Val(parts) -> parts.before else -> pair.after
     if authority == "" || authority.contains("@") -> return Err(PublicationDiagnosticError{diagnostic: publication_e1235(registry.url, "registry URL must not contain embedded credentials")})
-    parsed :: publication_registry_host_and_port(authority) ?? return Err(PublicationDiagnosticError{diagnostic: publication_e1235(registry.url, "invalid registry transport: {err.detail}")})
-    default_port :: if scheme == {
+    parsed: publication_registry_host_and_port(authority) ?? return Err(PublicationDiagnosticError{diagnostic: publication_e1235(registry.url, "invalid registry transport: {err.detail}")})
+    default_port: if scheme == {
         "https" -> 443
         "http" -> 80
         "git" -> 9418
@@ -86,18 +86,18 @@ fn publication_parse_registry_endpoint(registry: PublicationRegistryConfig) -> P
 
 // Rust RegistryTransport: the address is the FIRST member of the complete,
 // validated resolver answer set. It is never obtained by string re-parsing.
-enum PublicationRegistryTransport {
+PublicationRegistryTransport: enum {
     Local
     Network(scheme: String, host: String, port: Int, explicit_port: Bool, address: [U8])
 
-    fn remote(self, url: String) -> String Never! {
+    remote: fn(self, url: String) -> String Never! {
         if self == {
             .Local -> url.copy()
             .Network(scheme, host, port, explicit_port, address) ->
                 publication_registry_remote(url, scheme, port, explicit_port, publication_registry_ip(address))
         }
     }
-    fn command(self) -[Env, Exec]> ProcessSpec Never! {
+    command: fn(self) -[Env, Exec]> ProcessSpec Never! {
         spec := foundation_hardened_git_command()
         if self == .Network(scheme, host, port, explicit_port, address) {
             if scheme == "http" || scheme == "https" {
@@ -111,32 +111,32 @@ enum PublicationRegistryTransport {
 }
 // The shared formatter is both Rust registry_ip and registry_curl_address.
 // Their IPv6 bracket semantics are identical, so neither needs a second body.
-fn publication_address_text(address: [U8]) -> String Never! {
+publication_address_text: fn(address: [U8]) -> String Never! {
     if address.len() == 4 -> return "{Int.from_u8(address[0])}.{Int.from_u8(address[1])}.{Int.from_u8(address[2])}.{Int.from_u8(address[3])}"
     groups := [String]{}
     loop index in 0..<8 -> &groups.push(pkg_hex_bytes([U8]{address[index * 2], address[index * 2 + 1]}))
     groups.join(":")
 }
-fn publication_registry_ip(address: [U8]) -> String Never! {
-    text :: publication_address_text(address)
+publication_registry_ip: fn(address: [U8]) -> String Never! {
+    text: publication_address_text(address)
     if address.len() == 4 -> text else -> "[{text}]"
 }
-fn publication_registry_remote(url: String, scheme: String, port: Int, explicit_port: Bool, address: String) -> String Never! {
+publication_registry_remote: fn(url: String, scheme: String, port: Int, explicit_port: Bool, address: String) -> String Never! {
     if scheme != "git" -> return url.copy()
-    pair :: url.split_once("://") ?? return url.copy()
-    rest :: pair.after.bytes()
+    pair: url.split_once("://") ?? return url.copy()
+    rest: pair.after.bytes()
     authority_end := rest.len()
     loop index in 0..<rest.len() {
-        code :: Int.from_u8(rest[index])
+        code: Int.from_u8(rest[index])
         if code == 47 || code == 63 || code == 35 {
             authority_end = index
             break
         }
     }
-    port_suffix :: if explicit_port -> ":{port}" else -> ""
+    port_suffix: if explicit_port -> ":{port}" else -> ""
     "{pair.before}://{address}{port_suffix}{pkg_bytes_text(rest, authority_end, rest.len())}"
 }
-fn publication_registry_http_config(host: String, port: Int, address: String) -> [String] Never! {
+publication_registry_http_config: fn(host: String, port: Int, address: String) -> [String] Never! {
     [String]{
         "http.followRedirects=false",
         "http.proxy=",
@@ -144,10 +144,10 @@ fn publication_registry_http_config(host: String, port: Int, address: String) ->
         "http.curloptResolve={publication_registry_host(host)}:{port}:{address}",
     }
 }
-fn publication_registry_git_command(transport: PublicationRegistryTransport) -[Env, Exec]> ProcessSpec EnvError! {
+publication_registry_git_command: fn(transport: PublicationRegistryTransport) -[Env, Exec]> ProcessSpec EnvError! {
     // Enumeration failure cannot leave credential-shaped ambient variables in
     // the helper environment. Core's typed EnvError propagates before spawn.
-    names :: sys.vars()
+    names: sys.vars()
     spec := transport.command().args_extend([String]{"-c", "credential.useHttpPath=true"}).env("GIT_TERMINAL_PROMPT", "0")
     loop name in names {
         if name.starts_with("JET_REGISTRY_") -> spec = spec.env_remove(name)
@@ -155,13 +155,13 @@ fn publication_registry_git_command(transport: PublicationRegistryTransport) -[E
     Ok(spec)
 }
 
-fn publication_addresses_public(addresses: [[U8]]) -> Bool Never! {
+publication_addresses_public: fn(addresses: [[U8]]) -> Bool Never! {
     if addresses.len() == 0 -> return false
     loop address in addresses {
         if address.len() == 4 {
             if !ip.is_public_destination(IPv4{a: Int.from_u8(address[0]), b: Int.from_u8(address[1]), c: Int.from_u8(address[2]), d: Int.from_u8(address[3])}) -> return false
         } else if address.len() == 16 {
-            words :: loop index in 0..<8 -> Int.from_u8(address[index * 2]) * 256 + Int.from_u8(address[index * 2 + 1])
+            words: loop index in 0..<8 -> Int.from_u8(address[index * 2]) * 256 + Int.from_u8(address[index * 2 + 1])
             if !ip.ipv6_is_public_destination(IPv6{words: words}) -> return false
         } else {
             return false
@@ -172,35 +172,35 @@ fn publication_addresses_public(addresses: [[U8]]) -> Bool Never! {
 // The registry client's network seam: the DNS answers for a registry host and
 // the remote a clone fetches from. PublicationRegistryNetwork, the real
 // resolver and pinned transport, is its one production implementation.
-trait PublicationRegistryNet {
-    fn resolve(self, host: String, port: Int) -[Net, Time.Wait]> [[U8]] PublicationRegistryAuthorityError!
+PublicationRegistryNet: trait {
+    resolve: fn(self, host: String, port: Int) -[Net, Time.Wait]> [[U8]] PublicationRegistryAuthorityError!
 
-    fn fetch_remote(self, url: String, transport: PublicationRegistryTransport) -> String Never!
+    fetch_remote: fn(self, url: String, transport: PublicationRegistryTransport) -> String Never!
 }
 
-struct PublicationRegistryNetwork {}
+PublicationRegistryNetwork: struct {}
 
 impl PublicationRegistryNetwork.PublicationRegistryNet {
-    fn resolve(self, host: String, port: Int) -[Net, Time.Wait]> [[U8]] PublicationRegistryAuthorityError! {
-        answers :: publication_dns.jet_http_build_resolve(host, port) ?? return Err(PublicationRegistryAuthorityError{detail: "{err}"})
+    resolve: fn(self, host: String, port: Int) -[Net, Time.Wait]> [[U8]] PublicationRegistryAuthorityError! {
+        answers: publication_dns.jet_http_build_resolve(host, port) ?? return Err(PublicationRegistryAuthorityError{detail: "{err}"})
         Ok(answers)
     }
 
-    fn fetch_remote(self, url: String, transport: PublicationRegistryTransport) -> String Never! {
+    fetch_remote: fn(self, url: String, transport: PublicationRegistryTransport) -> String Never! {
         transport.remote(url)
     }
 }
 
-fn publication_validate_registry_transport(registry: PublicationRegistryConfig) -[Net, Time.Wait]> PublicationRegistryTransport PublicationDiagnosticError! {
-    network :: PublicationRegistryNetwork{}
+publication_validate_registry_transport: fn(registry: PublicationRegistryConfig) -[Net, Time.Wait]> PublicationRegistryTransport PublicationDiagnosticError! {
+    network: PublicationRegistryNetwork{}
     publication_validate_registry_transport_with_network(registry, network)
 }
-fn publication_validate_registry_transport_with_network<N: PublicationRegistryNet>(registry: PublicationRegistryConfig, network: N) -[Net, Time.Wait]> PublicationRegistryTransport PublicationDiagnosticError! {
-    endpoint :: publication_parse_registry_endpoint(registry)
+publication_validate_registry_transport_with_network: fn<N: PublicationRegistryNet>(registry: PublicationRegistryConfig, network: N) -[Net, Time.Wait]> PublicationRegistryTransport PublicationDiagnosticError! {
+    endpoint: publication_parse_registry_endpoint(registry)
     if endpoint == {
         .Local -> Ok(PublicationRegistryTransport.Local)
         .Network(scheme, host, port, explicit_port) -> {
-            answers :: network.resolve(host, port) ?? return Err(PublicationDiagnosticError{diagnostic: publication_e1235(registry.url, "could not resolve registry host: {err.detail}")})
+            answers: network.resolve(host, port) ?? return Err(PublicationDiagnosticError{diagnostic: publication_e1235(registry.url, "could not resolve registry host: {err.detail}")})
             if !publication_addresses_public(answers) -> return Err(PublicationDiagnosticError{diagnostic: publication_e1235(registry.url, "registry host resolves to a non-public address")})
             Ok(PublicationRegistryTransport.Network{scheme: scheme, host: host, port: port, explicit_port: explicit_port, address: answers[0]})
         }

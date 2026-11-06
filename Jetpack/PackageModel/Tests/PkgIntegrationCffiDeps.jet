@@ -3,13 +3,13 @@
 use jet_pkg_model.[DepSource, PackageFacts]
 
 #Test("C deps are parsed by the one Package parser as exact native link references") {
-    manifest :: "\nname: \"p\"\nversion: \"0.1.0\"\ndeps: {{\n    raylib: c@system,\n    foo:    c@\"/opt/foo\",\n}}\n"
-    facts :: PackageFacts.parse(manifest, "test") ?? panic("manifest parses")
-    raylib_matches :: if facts.deps.get("raylib") == {
+    manifest: "\nname: \"p\"\nversion: \"0.1.0\"\ndeps: {{\n    raylib: c@system,\n    foo:    c@\"/opt/foo\",\n}}\n"
+    facts: PackageFacts.parse(manifest, "test") ?? panic("manifest parses")
+    raylib_matches: if facts.deps.get("raylib") == {
         .Val(value) -> value == DepSource.CLib{target: "system"}
         .None -> false
     }
-    foo_matches :: if facts.deps.get("foo") == {
+    foo_matches: if facts.deps.get("foo") == {
         .Val(value) -> value == DepSource.CLib{target: "/opt/foo"}
         .None -> false
     }

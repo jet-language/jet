@@ -5,39 +5,39 @@
 // runs 40,000 times on 16 rows. A result that is never dropped keeps 50 MB
 // or more resident, so the resident set may grow by at most 8 MB across a
 // scenario.
-package {
+package: {
     name: "match_and_method_on_a_call_result_drop_the_result"
     authority: { allow: [FS.Read] }
 }
 
-use files :: core.files
+use files: core.files
 
-ROUNDS :: 40000
-GROWTH_LIMIT_KB :: 8192
+ROUNDS: 40000
+GROWTH_LIMIT_KB: 8192
 
-struct Row {
+Row: struct {
     name: String
     items: [String]
 }
 
-struct Table {
+Table: struct {
     rows: [Row]
     count: Int
 }
 
 impl Table {
-    fn total(self) -> Int {
+    total: fn(self) -> Int {
         self.count + self.rows.len()
     }
 }
 
-enum Shape {
+Shape: enum {
     Rows(rows: [Row])
     Empty
 }
 
-fn status_kb(field: String) -> Int {
-    status :: files.read("/proc/self/status") ?? panic("read /proc/self/status")
+status_kb: fn(field: String) -> Int {
+    status: files.read("/proc/self/status") ?? panic("read /proc/self/status")
     loop line in status.split("\n") {
         if !line.starts_with(field) -> next
         loop part in line.slice(field.len(), line.len()).trim().split(" ") {
@@ -47,32 +47,32 @@ fn status_kb(field: String) -> Int {
     panic("no {field} line")
 }
 
-fn make_rows(n: Int) -> [Row] {
+make_rows: fn(n: Int) -> [Row] {
     rows := [Row]{}
     loop i in 0..<n -> &rows.push(Row{name: "row {i}", items: [String]{"a {i}", "b {i}"}})
     rows
 }
 
-fn make_table(n: Int) -> Table {
+make_table: fn(n: Int) -> Table {
     Table{rows: make_rows(n), count: n}
 }
 
-fn make_option(n: Int) -> Table? {
+make_option: fn(n: Int) -> Table? {
     Val(make_table(n))
 }
 
-fn make_shape(n: Int) -> Shape {
+make_shape: fn(n: Int) -> Shape {
     Shape.Rows{rows: make_rows(n)}
 }
 
-fn make_text(n: Int) -> String {
+make_text: fn(n: Int) -> String {
     parts := [String]{}
     loop i in 0..<n -> &parts.push("part {i}")
     parts.join(",")
 }
 
 // A match whose arm binds the payload.
-fn match_binding() -> Int {
+match_binding: fn() -> Int {
     if make_shape(16) == {
         .Rows(rows) -> rows.len()
         .Empty -> 0
@@ -80,7 +80,7 @@ fn match_binding() -> Int {
 }
 
 // A match whose arm ignores the payload.
-fn match_ignoring() -> Int {
+match_ignoring: fn() -> Int {
     if make_shape(16) == {
         .Rows(_) -> 1
         .Empty -> 0
@@ -88,42 +88,42 @@ fn match_ignoring() -> Int {
 }
 
 // An `if ==` pattern that binds the value, with a return under it.
-fn if_pattern() -> Int {
+if_pattern: fn() -> Int {
     if make_option(16) == .Val(table) -> return table.count
     0
 }
 
 // A method of a struct on a fresh receiver.
-fn struct_method() -> Int {
+struct_method: fn() -> Int {
     make_table(16).total()
 }
 
 // A chain of String methods on a fresh receiver.
-fn text_chain() -> Int {
+text_chain: fn() -> Int {
     make_text(64).trim().len()
 }
 
 // A field and a method through `?.` on a fresh Option.
-fn optional_chain() -> Int {
+optional_chain: fn() -> Int {
     (make_option(16)?.count ?? 0) + (make_option(16)?.total() ?? 0)
 }
 
 // A fresh value compared and interpolated.
-fn compared_and_interpolated() -> Int {
+compared_and_interpolated: fn() -> Int {
     if make_text(64) == "x" -> return 0
     "{make_text(64)}!".len()
 }
 
-fn measure(name: String, scenario: fn() -> Int) {
+measure: fn(name: String, scenario: fn() -> Int) {
     total := scenario()
-    start :: status_kb("VmRSS:")
+    start: status_kb("VmRSS:")
     loop _ in 1..<ROUNDS -> total += scenario()
-    grown :: status_kb("VmRSS:") - start
+    grown: status_kb("VmRSS:") - start
     if grown > GROWTH_LIMIT_KB -> panic("{name}: the resident set grew {grown} kB over {ROUNDS} rounds")
     print("{name}: {total}, every result dropped")
 }
 
-fn run() {
+run: fn() {
     measure("match binding", match_binding)
     measure("match ignoring", match_ignoring)
     measure("if pattern", if_pattern)

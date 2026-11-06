@@ -1,18 +1,18 @@
 // core-conformance: core.files.set_mode
 use {
-    files :: core.files
-    testing :: core.testing
+    files: core.files
+    testing: core.testing
 }
 
-fn run() {
-    root :: testing.temp_dir("files-set-mode")
-    path :: Path.from(root).join("fixture.txt")
+run: fn() {
+    root: testing.temp_dir("files-set-mode")
+    path: Path.from(root).join("fixture.txt")
     files.write(path, "fixture") ?? panic("seed")
     print((() -> {
         files.set_mode(path, 0o600)
         true
     })())
-    result :: files.stat(path) ?? panic("stat")
+    result: files.stat(path) ?? panic("stat")
     print((result.mode).bit_and(0o777) == 0o600)
     files.remove_all(root) ?? panic("cleanup")
 }

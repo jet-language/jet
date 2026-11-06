@@ -1,47 +1,47 @@
 
 use {
-    net :: core.net
-    tasks :: core.tasks
-    time :: core.time
+    net: core.net
+    tasks: core.tasks
+    time: core.time
 }
 
-fn run() {
-    cancelled_listener :: net.tcp_listen("127.0.0.1:0") ?? panic("cancel listen")
-    cancelled_address :: net.socket_to_string(net.listener_local_socket_addr(cancelled_listener) ?? panic("cancel address"))
-    { sender: accept_tx, receiver: accept_rx } :: channel<Int>()
-    cancelled_accept :: task {
+run: fn() {
+    cancelled_listener: net.tcp_listen("127.0.0.1:0") ?? panic("cancel listen")
+    cancelled_address: net.socket_to_string(net.listener_local_socket_addr(cancelled_listener) ?? panic("cancel address"))
+    { sender: accept_tx, receiver: accept_rx }: channel<Int>()
+    cancelled_accept: task {
         accept_tx.send(1)
         if &cancelled_listener.accept() == {
             .Ok(_) -> print("accept unexpectedly succeeded")
             .Err(error) -> print(net.error_message(error))
         }
     }
-    _accept_ready :: accept_rx.receive() ?? panic("accept ready")
+    _accept_ready: accept_rx.receive() ?? panic("accept ready")
     time.sleep(10ms)
     cancelled_accept.cancel()
     time.sleep(10ms)
-    release_accept :: net.tcp_connect(cancelled_address) ?? panic("release accept")
+    release_accept: net.tcp_connect(cancelled_address) ?? panic("release accept")
     release_accept.close() ?? panic("release close")
     cancelled_accept.join() ?? panic("cancelled accept task failed")
 
-    ready_listener :: net.tcp_listen("127.0.0.1:0") ?? panic("ready listen")
-    ready_address :: net.socket_to_string(net.listener_local_socket_addr(ready_listener) ?? panic("ready address"))
-    ready_client :: net.tcp_connect(ready_address) ?? panic("ready connect")
+    ready_listener: net.tcp_listen("127.0.0.1:0") ?? panic("ready listen")
+    ready_address: net.socket_to_string(net.listener_local_socket_addr(ready_listener) ?? panic("ready address"))
+    ready_client: net.tcp_connect(ready_address) ?? panic("ready connect")
     ready_server := net.tcp_accept(ready_listener) ?? panic("ready accept")
-    write_interest :: NetReadyInterest.Write
-    write_ready :: ready_server.ready(write_interest, deadline: Duration.milliseconds(1000) ?? panic("write ready deadline")) ?? panic("write ready")
+    write_interest: NetReadyInterest.Write
+    write_ready: ready_server.ready(write_interest, deadline: Duration.milliseconds(1000) ?? panic("write ready deadline")) ?? panic("write ready")
     print(net.ready_readable(write_ready))
     print(net.ready_writable(write_ready))
-    interest :: NetReadyInterest.Read
-    { sender: wait_tx, receiver: wait_rx } :: channel<Int>()
-    ready_wait :: task ^ready_server {
+    interest: NetReadyInterest.Read
+    { sender: wait_tx, receiver: wait_rx }: channel<Int>()
+    ready_wait: task ^ready_server {
         wait_tx.send(1)
         if ready_server.ready(interest, deadline: Duration.milliseconds(1000) ?? panic("ready deadline")) == {
             .Ok(_) -> print("ready unexpectedly succeeded")
             .Err(error) -> print(net.error_message(error))
         }
     }
-    _wait_ready :: wait_rx.receive() ?? panic("wait ready")
+    _wait_ready: wait_rx.receive() ?? panic("wait ready")
     time.sleep(10ms)
     ready_wait.cancel()
     ready_wait.join() ?? panic("ready wait task failed")

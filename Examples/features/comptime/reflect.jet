@@ -1,54 +1,54 @@
 // D-METAREFLECT1 / D-REFLECT1 / D-FACT-READ1: aggregate reflection and the
 // typed `@` reader consume the same registered fact carriers.
 #Numeric
-Severity :: distinct Int(0..10)
+Severity: distinct Int(0..10)
 
 #UnitFamily(Length, dimension) { meter }
 
-struct Order {
+Order: struct {
     state { Draft, Published }
 
     value: Int
 }
 
-fn send_report() -[IO]> {}
+send_report: fn() -[IO]> {}
 
-RANGE :: comptime { Severity.$range }
+RANGE: comptime { Severity.$range }
 
-DIMENSION :: comptime { Meter.$dimension }
+DIMENSION: comptime { Meter.$dimension }
 
-STATES :: comptime { Order.$states }
+STATES: comptime { Order.$states }
 
-EFFECTS :: comptime { send_report.$effects }
+EFFECTS: comptime { send_report.$effects }
 
-SENDABILITY :: comptime { Severity.$sendability }
+SENDABILITY: comptime { Severity.$sendability }
 
-MOVEDNESS :: comptime { Severity.$movedness }
+MOVEDNESS: comptime { Severity.$movedness }
 
-ATTRIBUTION :: comptime { report.$attribution }
+ATTRIBUTION: comptime { report.$attribution }
 
-ORIGIN :: comptime { Severity.$origin }
+ORIGIN: comptime { Severity.$origin }
 
-VIEW_PROVENANCE :: comptime { send_report.$view_provenance }
+VIEW_PROVENANCE: comptime { send_report.$view_provenance }
 
-UNIT_SCALE :: comptime { Meter.$unit_scale_provenance }
+UNIT_SCALE: comptime { Meter.$unit_scale_provenance }
 
-MATURITY :: comptime { send_report.$maturity }
+MATURITY: comptime { send_report.$maturity }
 
 derive T.Summarize {
-    info :: T.reflect()
-    method :: info.methods[0].name
-    method_marker :: info.methods[0].markers[0].name
-    method_effects :: info.methods[0].$effects.values.len()
-    method_sendability :: info.methods[0].$sendability.known
-    method_movedness :: info.methods[0].$movedness.known
-    method_origin :: info.methods[0].$origin.tracked
-    method_view_mutable :: info.methods[0].$view_provenance.mutable
-    method_maturity :: info.methods[0].$maturity.level
-    pub_field :: info.fields[0].name
-    hidden_pub :: info.fields[1].is_pub
-    has_debug :: info.has_marker("Debug")
-    fn summary(self) -> String { "{T.$name}/{$method}[{$method_marker}]/{$pub_field} debug={$has_debug} hidden_pub={$hidden_pub} effects={$method_effects} send={$method_sendability} moved={$method_movedness} track={$method_origin} view={$method_view_mutable}" }
+    info: T.reflect()
+    method: info.methods[0].name
+    method_marker: info.methods[0].markers[0].name
+    method_effects: info.methods[0].$effects.values.len()
+    method_sendability: info.methods[0].$sendability.known
+    method_movedness: info.methods[0].$movedness.known
+    method_origin: info.methods[0].$origin.tracked
+    method_view_mutable: info.methods[0].$view_provenance.mutable
+    method_maturity: info.methods[0].$maturity.level
+    pub_field: info.fields[0].name
+    hidden_pub: info.fields[1].is_pub
+    has_debug: info.has_marker("Debug")
+    summary: fn(self) -> String { "{T.$name}/{$method}[{$method_marker}]/{$pub_field} debug={$has_debug} hidden_pub={$hidden_pub} effects={$method_effects} send={$method_sendability} moved={$method_movedness} track={$method_origin} view={$method_view_mutable}" }
 }
 
 // D-MARK-DEBUG1=A: `Debug` no longer has an explicit derive spelling — it
@@ -56,16 +56,16 @@ derive T.Summarize {
 // below reads the type's WRITTEN markers, so it now honestly reports
 // `false` for a type that only qualifies for auto-derive.
 #Summarize
-struct Widget {
+Widget: struct {
     label: String
     priv secret: Int
     level: Int(0..10)
 
-    #Inline fn show(self) -> String { self.label.copy() }
+    #Inline show: fn(self) -> String { self.label.copy() }
 }
 
-fn run() {
-    w :: Widget{label: "gear", secret: 1, level: 2}
+run: fn() {
+    w: Widget{label: "gear", secret: 1, level: 2}
     print(w.summary())
     print("planes:{RANGE.start}-{RANGE.end}/{DIMENSION.axes.len()}/{STATES[0].name}/{EFFECTS.values.len()}")
     print("homed:{SENDABILITY.known}/{MOVEDNESS.known}/{ATTRIBUTION.source}/{ORIGIN.tracked}/{VIEW_PROVENANCE.mutable}")

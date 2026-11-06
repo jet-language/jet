@@ -5,59 +5,59 @@
 // s unless set), and a passed task deadline is Cancelled. Read failures
 // classify as the reference's io kinds (timed out, closed, other I/O); every
 // write failure is I/O.
-WS_MAX_MESSAGE :: I64{1048576}
-WS_MAX_CONTROL :: I64{125}
-WS_DEFAULT_TIMEOUT_MS :: I64{30000}
-WS_READ_CHUNK :: I64{4096}
-WS_MAX_HANDSHAKE :: I64{16384}
+WS_MAX_MESSAGE: I64{1048576}
+WS_MAX_CONTROL: I64{125}
+WS_DEFAULT_TIMEOUT_MS: I64{30000}
+WS_READ_CHUNK: I64{4096}
+WS_MAX_HANDSHAKE: I64{16384}
 
-fn ws_error_new(kind: I64, limit: I64, operation: I64) -> I64 {
-    value :: jet_rt_alloc(WS_ERROR_BYTES, I64{8})
+ws_error_new: fn(kind: I64, limit: I64, operation: I64) -> I64 {
+    value: jet_rt_alloc(WS_ERROR_BYTES, I64{8})
     data_tree_store(wrapping(value + WS_ERROR_TAG), kind)
     data_tree_store(wrapping(value + WS_ERROR_LIMIT), limit)
     data_tree_store(wrapping(value + WS_ERROR_OPERATION), operation)
     value
 }
-fn ws_fail(kind: I64, error: I64) -> I64 {
+ws_fail: fn(kind: I64, error: I64) -> I64 {
     net_put(error, I64{0}, ws_error_new(kind, if (kind == WS_ERROR_MESSAGE_TOO_LARGE) -> WS_MAX_MESSAGE else -> I64{0}, I64{0}))
     I64{0}
 }
-fn ws_fail_io(operation: I64, error: I64) -> I64 {
+ws_fail_io: fn(operation: I64, error: I64) -> I64 {
     net_put(error, I64{0}, ws_error_new(WS_ERROR_IO, I64{0}, jet_rt_string_clone(operation)))
     I64{0}
 }
 // The WsError for the JetNetError a stream route left in `failure` (0 when a
 // native stop is propagating: then no error is written). A read classifies
 // it; a write is always I/O.
-fn ws_net_failure(failure: I64, reading: Bool, operation: I64, error: I64) -> I64 {
+ws_net_failure: fn(failure: I64, reading: Bool, operation: I64, error: I64) -> I64 {
     if (failure == I64{0}) -> return I64{0}
-    kind :: jet_rt_record_tag_jet_net_error(failure)
+    kind: jet_rt_record_tag_jet_net_error(failure)
     jet_rt_handle_drop_jet_net_error(failure)
     if !reading -> return ws_fail_io(operation, error)
     if (kind == NET_ERROR_TIMEOUT) -> return ws_fail(WS_ERROR_TIMEOUT, error)
     if (kind == NET_ERROR_CONNECTION_RESET || kind == NET_ERROR_CLOSED || kind == NET_ERROR_NOT_CONNECTED) -> return ws_fail(WS_ERROR_CLOSED, error)
     ws_fail_io(operation, error)
 }
-fn ws_deadline_passed() -> Bool { jet_ctx_deadline_present() && jet_deadline_remaining_ms() <= I64{0} }
+ws_deadline_passed: fn() -> Bool { jet_ctx_deadline_present() && jet_deadline_remaining_ms() <= I64{0} }
 
-#Export(c) fn jet_rt_record_tag_jet_ws_error(value: I64) -> I64 { data_tree_word(wrapping(value + WS_ERROR_TAG)) }
-#Export(c) fn jet_rt_record_new_jet_ws_error_invalid_url() -> I64 { ws_error_new(WS_ERROR_INVALID_URL, I64{0}, I64{0}) }
-#Export(c) fn jet_rt_record_new_jet_ws_error_invalid_handshake() -> I64 { ws_error_new(WS_ERROR_INVALID_HANDSHAKE, I64{0}, I64{0}) }
-#Export(c) fn jet_rt_record_new_jet_ws_error_protocol() -> I64 { ws_error_new(WS_ERROR_PROTOCOL, I64{0}, I64{0}) }
-#Export(c) fn jet_rt_record_new_jet_ws_error_message_too_large(limit: I64) -> I64 { ws_error_new(WS_ERROR_MESSAGE_TOO_LARGE, jet_int_owned_to_i64(limit), I64{0}) }
-#Export(c) fn jet_rt_record_new_jet_ws_error_io(operation: I64) -> I64 { ws_error_new(WS_ERROR_IO, I64{0}, jet_rt_string_clone(operation)) }
-#Export(c) fn jet_rt_record_new_jet_ws_error_timeout() -> I64 { ws_error_new(WS_ERROR_TIMEOUT, I64{0}, I64{0}) }
-#Export(c) fn jet_rt_record_new_jet_ws_error_closed() -> I64 { ws_error_new(WS_ERROR_CLOSED, I64{0}, I64{0}) }
-#Export(c) fn jet_rt_record_new_jet_ws_error_cancelled() -> I64 { ws_error_new(WS_ERROR_CANCELLED, I64{0}, I64{0}) }
-#Export(c) fn jet_rt_record_new_jet_ws_error_unsupported_target() -> I64 { ws_error_new(WS_ERROR_UNSUPPORTED_TARGET, I64{0}, I64{0}) }
-#Export(c) fn jet_rt_record_get_jet_ws_error_message_too_large_limit(value: I64) -> I64 {
+#Export(c) jet_rt_record_tag_jet_ws_error: fn(value: I64) -> I64 { data_tree_word(wrapping(value + WS_ERROR_TAG)) }
+#Export(c) jet_rt_record_new_jet_ws_error_invalid_url: fn() -> I64 { ws_error_new(WS_ERROR_INVALID_URL, I64{0}, I64{0}) }
+#Export(c) jet_rt_record_new_jet_ws_error_invalid_handshake: fn() -> I64 { ws_error_new(WS_ERROR_INVALID_HANDSHAKE, I64{0}, I64{0}) }
+#Export(c) jet_rt_record_new_jet_ws_error_protocol: fn() -> I64 { ws_error_new(WS_ERROR_PROTOCOL, I64{0}, I64{0}) }
+#Export(c) jet_rt_record_new_jet_ws_error_message_too_large: fn(limit: I64) -> I64 { ws_error_new(WS_ERROR_MESSAGE_TOO_LARGE, jet_int_owned_to_i64(limit), I64{0}) }
+#Export(c) jet_rt_record_new_jet_ws_error_io: fn(operation: I64) -> I64 { ws_error_new(WS_ERROR_IO, I64{0}, jet_rt_string_clone(operation)) }
+#Export(c) jet_rt_record_new_jet_ws_error_timeout: fn() -> I64 { ws_error_new(WS_ERROR_TIMEOUT, I64{0}, I64{0}) }
+#Export(c) jet_rt_record_new_jet_ws_error_closed: fn() -> I64 { ws_error_new(WS_ERROR_CLOSED, I64{0}, I64{0}) }
+#Export(c) jet_rt_record_new_jet_ws_error_cancelled: fn() -> I64 { ws_error_new(WS_ERROR_CANCELLED, I64{0}, I64{0}) }
+#Export(c) jet_rt_record_new_jet_ws_error_unsupported_target: fn() -> I64 { ws_error_new(WS_ERROR_UNSUPPORTED_TARGET, I64{0}, I64{0}) }
+#Export(c) jet_rt_record_get_jet_ws_error_message_too_large_limit: fn(value: I64) -> I64 {
     if (data_tree_word(wrapping(value + WS_ERROR_TAG)) != WS_ERROR_MESSAGE_TOO_LARGE) {
         rt_record_variant_panic()
         if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     }
     jet_int_owned_from_i64(data_tree_word(wrapping(value + WS_ERROR_LIMIT)))
 }
-#Export(c) fn jet_rt_record_get_jet_ws_error_io_operation(value: I64) -> I64 {
+#Export(c) jet_rt_record_get_jet_ws_error_io_operation: fn(value: I64) -> I64 {
     if (data_tree_word(wrapping(value + WS_ERROR_TAG)) != WS_ERROR_IO) {
         rt_record_variant_panic()
         if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
@@ -65,32 +65,32 @@ fn ws_deadline_passed() -> Bool { jet_ctx_deadline_present() && jet_deadline_rem
     jet_rt_string_clone(data_tree_word(wrapping(value + WS_ERROR_OPERATION)))
 }
 
-fn ws_conn_new(stream: I64, client: Bool) -> I64 {
-    conn :: jet_rt_alloc(WS_CONN_BYTES, I64{8})
+ws_conn_new: fn(stream: I64, client: Bool) -> I64 {
+    conn: jet_rt_alloc(WS_CONN_BYTES, I64{8})
     thread_zero(conn, WS_CONN_BYTES)
     net_put(conn, WS_CONN_STREAM, stream)
     net_put(conn, WS_CONN_CLIENT, if client -> I64{1} else -> I64{0})
     net_put(conn, WS_CONN_TIMEOUT_MS, WS_DEFAULT_TIMEOUT_MS)
     conn
 }
-#Export(c) fn jet_rt_handle_drop_jet_ws_conn(conn: I64) {
+#Export(c) jet_rt_handle_drop_jet_ws_conn: fn(conn: I64) {
     if (conn == I64{0}) -> return
     ws_hub_leave(conn)
     net_stream_drop(net_word(conn, WS_CONN_STREAM))
-    capacity :: net_word(conn, WS_CONN_CAPACITY)
+    capacity: net_word(conn, WS_CONN_CAPACITY)
     if (capacity != I64{0}) -> jet_rt_free(net_word(conn, WS_CONN_BUFFER), capacity, I64{1})
     jet_rt_free(conn, WS_CONN_BYTES, I64{8})
 }
-fn ws_buffered(conn: I64) -> I64 { net_word(conn, WS_CONN_LENGTH) - net_word(conn, WS_CONN_START) }
-fn ws_unread(conn: I64) -> I64 { net_word(conn, WS_CONN_BUFFER) + net_word(conn, WS_CONN_START) }
+ws_buffered: fn(conn: I64) -> I64 { net_word(conn, WS_CONN_LENGTH) - net_word(conn, WS_CONN_START) }
+ws_unread: fn(conn: I64) -> I64 { net_word(conn, WS_CONN_BUFFER) + net_word(conn, WS_CONN_START) }
 // Room for `more` bytes after the buffered ones, moving them to the front.
-fn ws_reserve(conn: I64, more: I64) {
-    buffer :: net_word(conn, WS_CONN_BUFFER)
-    start :: net_word(conn, WS_CONN_START)
-    held :: ws_buffered(conn)
-    capacity :: net_word(conn, WS_CONN_CAPACITY)
+ws_reserve: fn(conn: I64, more: I64) {
+    buffer: net_word(conn, WS_CONN_BUFFER)
+    start: net_word(conn, WS_CONN_START)
+    held: ws_buffered(conn)
+    capacity: net_word(conn, WS_CONN_CAPACITY)
     if (held + more > capacity) {
-        grown :: jet_rt_alloc(held + more, I64{1})
+        grown: jet_rt_alloc(held + more, I64{1})
         if (held != I64{0}) -> rt_text_bytes_copy(grown, wrapping(buffer + start), held)
         if (capacity != I64{0}) -> jet_rt_free(buffer, capacity, I64{1})
         net_put(conn, WS_CONN_BUFFER, grown)
@@ -107,56 +107,56 @@ fn ws_reserve(conn: I64, more: I64) {
 }
 // Read until `need` bytes are buffered: 1, or 0 with the error written, or
 // -1 at end of stream (no error written).
-fn ws_fill(conn: I64, need: I64, error: I64) -> I64 {
+ws_fill: fn(conn: I64, need: I64, error: I64) -> I64 {
     loop ws_buffered(conn) < need {
         if ws_deadline_passed() -> return ws_fail(WS_ERROR_CANCELLED, error)
-        missing :: need - ws_buffered(conn)
-        want :: if (missing > WS_READ_CHUNK) -> missing else -> WS_READ_CHUNK
+        missing: need - ws_buffered(conn)
+        want: if (missing > WS_READ_CHUNK) -> missing else -> WS_READ_CHUNK
         ws_reserve(conn, want)
-        scratch :: jet_rt_alloc(I64{24}, I64{8})
+        scratch: jet_rt_alloc(I64{24}, I64{8})
         thread_zero(scratch, I64{24})
-        ok :: net_tcp_read_deadline(net_word(conn, WS_CONN_STREAM), want, net_word(conn, WS_CONN_TIMEOUT_MS), scratch, wrapping(scratch + I64{8}), false, wrapping(scratch + I64{16}))
+        ok: net_tcp_read_deadline(net_word(conn, WS_CONN_STREAM), want, net_word(conn, WS_CONN_TIMEOUT_MS), scratch, wrapping(scratch + I64{8}), false, wrapping(scratch + I64{16}))
         if (ok == I64{0}) {
-            failure :: net_word(scratch, I64{16})
+            failure: net_word(scratch, I64{16})
             jet_rt_free(scratch, I64{24}, I64{8})
             return ws_net_failure(failure, true, rt_static_text("read"), error)
         }
-        bytes :: net_word(scratch, I64{0})
-        count :: net_word(scratch, I64{8})
+        bytes: net_word(scratch, I64{0})
+        count: net_word(scratch, I64{8})
         jet_rt_free(scratch, I64{24}, I64{8})
         if (count == I64{0}) -> return I64{-1}
-        length :: net_word(conn, WS_CONN_LENGTH)
+        length: net_word(conn, WS_CONN_LENGTH)
         rt_text_bytes_copy(wrapping(net_word(conn, WS_CONN_BUFFER) + length), bytes, count)
         jet_rt_free(bytes, count * RT_HOST_U8_STRIDE, I64{8})
         net_put(conn, WS_CONN_LENGTH, length + count)
     }
     I64{1}
 }
-fn ws_write(conn: I64, data: I64, length: I64, operation: I64, error: I64) -> I64 {
-    scratch :: jet_rt_alloc(I64{8}, I64{8})
+ws_write: fn(conn: I64, data: I64, length: I64, operation: I64, error: I64) -> I64 {
+    scratch: jet_rt_alloc(I64{8}, I64{8})
     net_put(scratch, I64{0}, I64{0})
-    ok :: net_tcp_write_deadline(net_word(conn, WS_CONN_STREAM), data, length, net_word(conn, WS_CONN_TIMEOUT_MS), true, I64{0}, scratch)
-    failure :: net_word(scratch, I64{0})
+    ok: net_tcp_write_deadline(net_word(conn, WS_CONN_STREAM), data, length, net_word(conn, WS_CONN_TIMEOUT_MS), true, I64{0}, scratch)
+    failure: net_word(scratch, I64{0})
     jet_rt_free(scratch, I64{8}, I64{8})
     if (ok == I64{0}) -> return ws_net_failure(failure, false, operation, error)
     I64{1}
 }
-fn ws_write_text(conn: I64, text: I64, operation: I64, error: I64) -> I64 {
-    result :: ws_write(conn, rt_text_data(text), rt_text_len(text), operation, error)
+ws_write_text: fn(conn: I64, text: I64, operation: I64, error: I64) -> I64 {
+    result: ws_write(conn, rt_text_data(text), rt_text_len(text), operation, error)
     jet_rt_string_drop(text)
     result
 }
 // One final frame; the client masks it with fresh entropy.
-fn ws_write_frame(conn: I64, opcode: I64, data: I64, length: I64, error: I64) -> I64 {
+ws_write_frame: fn(conn: I64, opcode: I64, data: I64, length: I64, error: I64) -> I64 {
     if (length > WS_MAX_MESSAGE) -> return ws_fail(WS_ERROR_MESSAGE_TOO_LARGE, error)
     if (opcode >= I64{8} && length > WS_MAX_CONTROL) -> return ws_fail(WS_ERROR_PROTOCOL, error)
-    client :: net_word(conn, WS_CONN_CLIENT) != I64{0}
-    header :: if (length < I64{126}) -> I64{2} else if (length <= I64{65535}) -> I64{4} else -> I64{10}
-    mask_bytes :: if client -> I64{4} else -> I64{0}
-    total :: header + mask_bytes + length
-    frame :: jet_rt_alloc(total, I64{1})
+    client: net_word(conn, WS_CONN_CLIENT) != I64{0}
+    header: if (length < I64{126}) -> I64{2} else if (length <= I64{65535}) -> I64{4} else -> I64{10}
+    mask_bytes: if client -> I64{4} else -> I64{0}
+    total: header + mask_bytes + length
+    frame: jet_rt_alloc(total, I64{1})
     rt_text_put(frame, I64{128}.bit_or(opcode))
-    mask_bit :: if client -> I64{128} else -> I64{0}
+    mask_bit: if client -> I64{128} else -> I64{0}
     if (length < I64{126}) {
         rt_text_put(wrapping(frame + I64{1}), mask_bit.bit_or(length))
     } else if (length <= I64{65535}) {
@@ -171,91 +171,91 @@ fn ws_write_frame(conn: I64, opcode: I64, data: I64, length: I64, error: I64) ->
             at += I64{1}
         }
     }
-    mask :: wrapping(frame + header)
+    mask: wrapping(frame + header)
     if (client && rt_crypto_entropy_fill(mask, I64{4}) != I64{0}) {
         jet_rt_free(frame, total, I64{1})
         return ws_fail_io(rt_static_text("mask entropy"), error)
     }
-    body :: wrapping(wrapping(frame + header) + mask_bytes)
+    body: wrapping(wrapping(frame + header) + mask_bytes)
     at := I64{0}
     loop at < length {
-        byte :: rt_text_byte(wrapping(data + at))
+        byte: rt_text_byte(wrapping(data + at))
         rt_text_put(wrapping(body + at), if client -> byte.bit_xor(rt_text_byte(wrapping(mask + at % I64{4}))) else -> byte)
         at += I64{1}
     }
     // The write lock keeps this frame whole beside a hub publish.
-    lock :: wrapping(conn + WS_CONN_WRITE_LOCK)
+    lock: wrapping(conn + WS_CONN_WRITE_LOCK)
     sync_mutex_lock(lock)
-    result :: ws_write(conn, frame, total, rt_static_text("write frame"), error)
+    result: ws_write(conn, frame, total, rt_static_text("write frame"), error)
     sync_mutex_unlock(lock)
     jet_rt_free(frame, total, I64{1})
     result
 }
-fn ws_send(conn: I64, opcode: I64, data: I64, length: I64, error: I64) -> I64 {
+ws_send: fn(conn: I64, opcode: I64, data: I64, length: I64, error: I64) -> I64 {
     if (net_word(conn, WS_CONN_CLOSED) != I64{0}) -> return ws_fail(WS_ERROR_CLOSED, error)
     if ws_deadline_passed() -> return ws_fail(WS_ERROR_CANCELLED, error)
     ws_write_frame(conn, opcode, data, length, error)
 }
 // After a close frame either way: no further frames, both directions shut.
-fn ws_shut(conn: I64) {
+ws_shut: fn(conn: I64) {
     net_put(conn, WS_CONN_CLOSED, I64{1})
-    scratch :: jet_rt_alloc(I64{8}, I64{8})
+    scratch: jet_rt_alloc(I64{8}, I64{8})
     net_put(scratch, I64{0}, I64{0})
     _ := net_stream_shutdown(net_word(conn, WS_CONN_STREAM), I64{2}, rt_static_text("tcp shutdown"), scratch)
     jet_rt_handle_drop_jet_net_error(net_word(scratch, I64{0}))
     jet_rt_free(scratch, I64{8}, I64{8})
 }
 
-#Export(c) fn jet_ws_send_text(conn: I64, text: I64, error: I64) -> I64 {
+#Export(c) jet_ws_send_text: fn(conn: I64, text: I64, error: I64) -> I64 {
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     ws_send(conn, I64{1}, rt_text_data(text), rt_text_len(text), error)
 }
-#Export(c) fn jet_ws_close(conn: I64, code: I64, reason: I64, error: I64) -> I64 {
-    requested :: host_native_int(code)
+#Export(c) jet_ws_close: fn(conn: I64, code: I64, reason: I64, error: I64) -> I64 {
+    requested: host_native_int(code)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     if (net_word(conn, WS_CONN_CLOSED) != I64{0}) -> return I64{1}
-    status :: if (requested >= I64{1000} && requested <= I64{4999}) -> requested else -> I64{1000}
-    kept :: if (rt_text_len(reason) > I64{123}) -> I64{123} else -> rt_text_len(reason)
-    payload :: jet_rt_alloc(I64{2} + kept, I64{1})
+    status: if (requested >= I64{1000} && requested <= I64{4999}) -> requested else -> I64{1000}
+    kept: if (rt_text_len(reason) > I64{123}) -> I64{123} else -> rt_text_len(reason)
+    payload: jet_rt_alloc(I64{2} + kept, I64{1})
     rt_text_put(payload, status >> I64{8})
     rt_text_put(wrapping(payload + I64{1}), status.bit_and(I64{255}))
     if (kept != I64{0}) -> rt_text_bytes_copy(wrapping(payload + I64{2}), rt_text_data(reason), kept)
-    result :: ws_send(conn, I64{8}, payload, I64{2} + kept, error)
+    result: ws_send(conn, I64{8}, payload, I64{2} + kept, error)
     jet_rt_free(payload, I64{2} + kept, I64{1})
     ws_shut(conn)
     result
 }
-#Export(c) fn jet_ws_conn_set_timeout(conn: I64, milliseconds: I64, error: I64) -> I64 {
-    native :: host_native_int(milliseconds)
+#Export(c) jet_ws_conn_set_timeout: fn(conn: I64, milliseconds: I64, error: I64) -> I64 {
+    native: host_native_int(milliseconds)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     if (native <= I64{0}) -> return ws_fail_io(rt_static_text("set timeout"), error)
     net_put(conn, WS_CONN_TIMEOUT_MS, native)
     I64{1}
 }
 
-fn ws_utf8_valid(data: I64, length: I64) -> Bool {
+ws_utf8_valid: fn(data: I64, length: I64) -> Bool {
     at := I64{0}
     loop at < length {
-        width :: rt_text_valid_width(wrapping(data + at), length - at, I64{1})
+        width: rt_text_valid_width(wrapping(data + at), length - at, I64{1})
         if (width < I64{0}) -> return false
         at += width
     }
     true
 }
-fn ws_message_new(kind: I64, payload: I64, reason: I64) -> I64 {
-    message :: jet_rt_alloc(WS_MESSAGE_BYTES, I64{8})
+ws_message_new: fn(kind: I64, payload: I64, reason: I64) -> I64 {
+    message: jet_rt_alloc(WS_MESSAGE_BYTES, I64{8})
     data_tree_store(wrapping(message + WS_MESSAGE_TAG), kind)
     data_tree_store(wrapping(message + WS_MESSAGE_PAYLOAD), payload)
     data_tree_store(wrapping(message + WS_MESSAGE_REASON), reason)
     message
 }
 // A complete text (1) or binary (2) message, or 0 after a Protocol error.
-fn ws_finish_data(opcode: I64, data: I64, length: I64, error: I64) -> I64 {
+ws_finish_data: fn(opcode: I64, data: I64, length: I64, error: I64) -> I64 {
     if (opcode == I64{1}) {
         if !ws_utf8_valid(data, length) -> return ws_fail(WS_ERROR_PROTOCOL, error)
         return ws_message_new(I64{0}, rt_text_copy(data, length), I64{0})
     }
-    bytes :: data_sequence_new(length, RT_HOST_U8_STRIDE)
+    bytes: data_sequence_new(length, RT_HOST_U8_STRIDE)
     at := I64{0}
     loop at < length {
         host_u8_put(data_tree_word(wrapping(bytes + DATA_SEQUENCE_DATA)), at, rt_text_byte(wrapping(data + at)))
@@ -265,12 +265,12 @@ fn ws_finish_data(opcode: I64, data: I64, length: I64, error: I64) -> I64 {
     ws_message_new(I64{1}, bytes, I64{0})
 }
 // The fragments of one data message: buffer0, length8, capacity16.
-fn ws_assembly_push(assembly: I64, data: I64, length: I64) {
-    held :: net_word(assembly, I64{8})
-    capacity :: net_word(assembly, I64{16})
+ws_assembly_push: fn(assembly: I64, data: I64, length: I64) {
+    held: net_word(assembly, I64{8})
+    capacity: net_word(assembly, I64{16})
     if (held + length > capacity) {
-        grown_capacity :: if (held + length > capacity * I64{2}) -> held + length else -> capacity * I64{2}
-        grown :: jet_rt_alloc(grown_capacity, I64{1})
+        grown_capacity: if (held + length > capacity * I64{2}) -> held + length else -> capacity * I64{2}
+        grown: jet_rt_alloc(grown_capacity, I64{1})
         if (held != I64{0}) -> rt_text_bytes_copy(grown, net_word(assembly, I64{0}), held)
         if (capacity != I64{0}) -> jet_rt_free(net_word(assembly, I64{0}), capacity, I64{1})
         net_put(assembly, I64{0}, grown)
@@ -279,24 +279,24 @@ fn ws_assembly_push(assembly: I64, data: I64, length: I64) {
     if (length != I64{0}) -> rt_text_bytes_copy(wrapping(net_word(assembly, I64{0}) + held), data, length)
     net_put(assembly, I64{8}, held + length)
 }
-fn ws_assembly_drop(assembly: I64) {
-    capacity :: net_word(assembly, I64{16})
+ws_assembly_drop: fn(assembly: I64) {
+    capacity: net_word(assembly, I64{16})
     if (capacity != I64{0}) -> jet_rt_free(net_word(assembly, I64{0}), capacity, I64{1})
     jet_rt_free(assembly, I64{24}, I64{8})
 }
 // The next message: data frames are reassembled, a ping is answered, a pong
 // is skipped, and a close is echoed and ends the connection.
-fn ws_receive(conn: I64, assembly: I64, output: I64, error: I64) -> I64 {
-    expect_masked :: net_word(conn, WS_CONN_CLIENT) == I64{0}
+ws_receive: fn(conn: I64, assembly: I64, output: I64, error: I64) -> I64 {
+    expect_masked: net_word(conn, WS_CONN_CLIENT) == I64{0}
     data_opcode := I64{-1}
     loop {
         if ws_deadline_passed() -> return ws_fail(WS_ERROR_CANCELLED, error)
         filled := ws_fill(conn, I64{2}, error)
         if (filled <= I64{0}) -> return if (filled < I64{0}) -> ws_fail(WS_ERROR_CLOSED, error) else -> I64{0}
-        first :: rt_text_byte(ws_unread(conn))
-        second :: rt_text_byte(wrapping(ws_unread(conn) + I64{1}))
-        fin :: first.bit_and(I64{128}) != I64{0}
-        opcode :: first.bit_and(I64{15})
+        first: rt_text_byte(ws_unread(conn))
+        second: rt_text_byte(wrapping(ws_unread(conn) + I64{1}))
+        fin: first.bit_and(I64{128}) != I64{0}
+        opcode: first.bit_and(I64{15})
         if (first.bit_and(I64{112}) != I64{0}) -> return ws_fail(WS_ERROR_PROTOCOL, error)
         if ((second.bit_and(I64{128}) != I64{0}) != expect_masked) -> return ws_fail(WS_ERROR_PROTOCOL, error)
         length := second.bit_and(I64{127})
@@ -318,18 +318,18 @@ fn ws_receive(conn: I64, assembly: I64, output: I64, error: I64) -> I64 {
             }
             offset = I64{10}
         }
-        control :: opcode == I64{8} || opcode == I64{9} || opcode == I64{10}
+        control: opcode == I64{8} || opcode == I64{9} || opcode == I64{10}
         if control {
             if (!fin || length > WS_MAX_CONTROL) -> return ws_fail(WS_ERROR_PROTOCOL, error)
         } else if (length > WS_MAX_MESSAGE) {
             return ws_fail(WS_ERROR_MESSAGE_TOO_LARGE, error)
         }
-        mask_at :: offset
+        mask_at: offset
         if expect_masked -> offset += I64{4}
         filled = ws_fill(conn, offset + length, error)
         if (filled <= I64{0}) -> return if (filled < I64{0}) -> ws_fail(WS_ERROR_CLOSED, error) else -> I64{0}
-        frame :: ws_unread(conn)
-        payload :: wrapping(frame + offset)
+        frame: ws_unread(conn)
+        payload: wrapping(frame + offset)
         if expect_masked {
             at := I64{0}
             loop at < length {
@@ -345,7 +345,7 @@ fn ws_receive(conn: I64, assembly: I64, output: I64, error: I64) -> I64 {
                 if (net_word(assembly, I64{8}) + length > WS_MAX_MESSAGE) -> return ws_fail(WS_ERROR_MESSAGE_TOO_LARGE, error)
                 ws_assembly_push(assembly, payload, length)
                 if fin {
-                    message :: ws_finish_data(data_opcode, net_word(assembly, I64{0}), net_word(assembly, I64{8}), error)
+                    message: ws_finish_data(data_opcode, net_word(assembly, I64{0}), net_word(assembly, I64{8}), error)
                     if (message == I64{0}) -> return I64{0}
                     net_put(output, I64{0}, message)
                     return I64{1}
@@ -354,7 +354,7 @@ fn ws_receive(conn: I64, assembly: I64, output: I64, error: I64) -> I64 {
             (opcode == I64{1} || opcode == I64{2}) -> {
                 if (data_opcode >= I64{0}) -> return ws_fail(WS_ERROR_PROTOCOL, error)
                 if fin {
-                    message :: ws_finish_data(opcode, payload, length, error)
+                    message: ws_finish_data(opcode, payload, length, error)
                     if (message == I64{0}) -> return I64{0}
                     net_put(output, I64{0}, message)
                     return I64{1}
@@ -363,9 +363,9 @@ fn ws_receive(conn: I64, assembly: I64, output: I64, error: I64) -> I64 {
                 ws_assembly_push(assembly, payload, length)
             }
             (opcode == I64{8}) -> {
-                status :: if (length >= I64{2}) -> (rt_text_byte(payload) << I64{8}).bit_or(rt_text_byte(wrapping(payload + I64{1}))) else -> I64{1000}
-                reason :: if (length >= I64{2}) -> rt_text_lossy(wrapping(payload + I64{2}), length - I64{2}) else -> jet_rt_string_clone(rt_static_text(""))
-                echo :: jet_rt_alloc(I64{8}, I64{8})
+                status: if (length >= I64{2}) -> (rt_text_byte(payload) << I64{8}).bit_or(rt_text_byte(wrapping(payload + I64{1}))) else -> I64{1000}
+                reason: if (length >= I64{2}) -> rt_text_lossy(wrapping(payload + I64{2}), length - I64{2}) else -> jet_rt_string_clone(rt_static_text(""))
+                echo: jet_rt_alloc(I64{8}, I64{8})
                 net_put(echo, I64{0}, I64{0})
                 _ := ws_send(conn, I64{8}, payload, length, echo)
                 jet_rt_handle_drop_jet_ws_error(net_word(echo, I64{0}))
@@ -383,37 +383,37 @@ fn ws_receive(conn: I64, assembly: I64, output: I64, error: I64) -> I64 {
     }
     I64{0}
 }
-#Export(c) fn jet_ws_recv(conn: I64, output: I64, error: I64) -> I64 {
+#Export(c) jet_ws_recv: fn(conn: I64, output: I64, error: I64) -> I64 {
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     if (net_word(conn, WS_CONN_CLOSED) != I64{0}) -> return ws_fail(WS_ERROR_CLOSED, error)
-    assembly :: jet_rt_alloc(I64{24}, I64{8})
+    assembly: jet_rt_alloc(I64{24}, I64{8})
     thread_zero(assembly, I64{24})
-    result :: ws_receive(conn, assembly, output, error)
+    result: ws_receive(conn, assembly, output, error)
     ws_assembly_drop(assembly)
     result
 }
-#Export(c) fn jet_ws_message_is_text(message: I64) -> Bool { data_tree_word(wrapping(message + WS_MESSAGE_TAG)) == I64{0} }
-#Export(c) fn jet_ws_message_is_binary(message: I64) -> Bool { data_tree_word(wrapping(message + WS_MESSAGE_TAG)) == I64{1} }
-#Export(c) fn jet_ws_message_is_close(message: I64) -> Bool { data_tree_word(wrapping(message + WS_MESSAGE_TAG)) == I64{2} }
-#Export(c) fn jet_ws_message_text(message: I64, output: I64, error: I64) -> I64 {
+#Export(c) jet_ws_message_is_text: fn(message: I64) -> Bool { data_tree_word(wrapping(message + WS_MESSAGE_TAG)) == I64{0} }
+#Export(c) jet_ws_message_is_binary: fn(message: I64) -> Bool { data_tree_word(wrapping(message + WS_MESSAGE_TAG)) == I64{1} }
+#Export(c) jet_ws_message_is_close: fn(message: I64) -> Bool { data_tree_word(wrapping(message + WS_MESSAGE_TAG)) == I64{2} }
+#Export(c) jet_ws_message_text: fn(message: I64, output: I64, error: I64) -> I64 {
     if (data_tree_word(wrapping(message + WS_MESSAGE_TAG)) != I64{0}) -> return ws_fail(WS_ERROR_PROTOCOL, error)
     net_put(output, I64{0}, jet_rt_string_clone(data_tree_word(wrapping(message + WS_MESSAGE_PAYLOAD))))
     I64{1}
 }
 
 // RFC 4648 base64 with padding.
-fn ws_base64(data: I64, length: I64) -> I64 {
-    table :: rt_text_data(rt_static_text("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"))
-    size :: (length + I64{2}) / I64{3} * I64{4}
-    out :: jet_rt_alloc(size, I64{1})
+ws_base64: fn(data: I64, length: I64) -> I64 {
+    table: rt_text_data(rt_static_text("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"))
+    size: (length + I64{2}) / I64{3} * I64{4}
+    out: jet_rt_alloc(size, I64{1})
     at := I64{0}
     written := I64{0}
     loop at < length {
-        rest :: length - at
-        b0 :: rt_text_byte(wrapping(data + at))
-        b1 :: if (rest > I64{1}) -> rt_text_byte(wrapping(wrapping(data + at) + I64{1})) else -> I64{0}
-        b2 :: if (rest > I64{2}) -> rt_text_byte(wrapping(wrapping(data + at) + I64{2})) else -> I64{0}
-        group :: (b0 << I64{16}).bit_or(b1 << I64{8}).bit_or(b2)
+        rest: length - at
+        b0: rt_text_byte(wrapping(data + at))
+        b1: if (rest > I64{1}) -> rt_text_byte(wrapping(wrapping(data + at) + I64{1})) else -> I64{0}
+        b2: if (rest > I64{2}) -> rt_text_byte(wrapping(wrapping(data + at) + I64{2})) else -> I64{0}
+        group: (b0 << I64{16}).bit_or(b1 << I64{8}).bit_or(b2)
         rt_text_put(wrapping(out + written), rt_text_byte(wrapping(table + (group >> I64{18}).bit_and(I64{63}))))
         rt_text_put(wrapping(wrapping(out + written) + I64{1}), rt_text_byte(wrapping(table + (group >> I64{12}).bit_and(I64{63}))))
         rt_text_put(wrapping(wrapping(out + written) + I64{2}), if (rest > I64{1}) -> rt_text_byte(wrapping(table + (group >> I64{6}).bit_and(I64{63}))) else -> I64{61})
@@ -421,40 +421,40 @@ fn ws_base64(data: I64, length: I64) -> I64 {
         at += I64{3}
         written += I64{4}
     }
-    text :: rt_text_copy(out, size)
+    text: rt_text_copy(out, size)
     jet_rt_free(out, size, I64{1})
     text
 }
 // Sec-WebSocket-Accept for `key`: base64(SHA-1(key ++ the RFC 6455 GUID)).
-fn ws_accept_key(key: I64) -> I64 {
-    guid :: rt_static_text("258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
-    length :: rt_text_len(key) + rt_text_len(guid)
-    material :: jet_rt_alloc(length, I64{1})
+ws_accept_key: fn(key: I64) -> I64 {
+    guid: rt_static_text("258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
+    length: rt_text_len(key) + rt_text_len(guid)
+    material: jet_rt_alloc(length, I64{1})
     rt_text_bytes_copy(material, rt_text_data(key), rt_text_len(key))
     rt_text_bytes_copy(wrapping(material + rt_text_len(key)), rt_text_data(guid), rt_text_len(guid))
-    digest :: jet_rt_alloc(I64{20}, I64{1})
-    scratch :: jet_rt_alloc(I64{680}, I64{8})
+    digest: jet_rt_alloc(I64{20}, I64{1})
+    scratch: jet_rt_alloc(I64{680}, I64{8})
     rt_crypto_sha1(material, length, digest, scratch)
     jet_rt_free(scratch, I64{680}, I64{8})
     jet_rt_free(material, length, I64{1})
-    accept :: ws_base64(digest, I64{20})
+    accept: ws_base64(digest, I64{20})
     jet_rt_free(digest, I64{20}, I64{1})
     accept
 }
 
 // Server side of an HTTP/1.1 upgrade on the accepted socket `fd`: the
 // connection owns a duplicate of it, so the server's stream can drop freely.
-#Export(c) fn jet_ws_upgrade(fd: I64, key: I64, output: I64, error: I64) -> I64 {
-    number :: host_native_int(fd)
+#Export(c) jet_ws_upgrade: fn(fd: I64, key: I64, output: I64, error: I64) -> I64 {
+    number: host_native_int(fd)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
-    duplicate :: if (number < I64{0}) -> I64{-9} else -> host_call(I64{72}, number, I64{1030}, I64{3})
+    duplicate: if (number < I64{0}) -> I64{-9} else -> host_call(I64{72}, number, I64{1030}, I64{3})
     if (duplicate < I64{0}) -> return ws_fail_io(rt_static_text("clone upgrade stream"), error)
-    state :: jet_fd_adopt_unbuffered_raw(duplicate, I64{0})
+    state: jet_fd_adopt_unbuffered_raw(duplicate, I64{0})
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
-    conn :: ws_conn_new(jet_socket_stream_from_fd_raw(state), false)
-    response :: jet_rt_string_builder_new()
+    conn: ws_conn_new(jet_socket_stream_from_fd_raw(state), false)
+    response: jet_rt_string_builder_new()
     jet_rt_string_builder_push(response, rt_static_text("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: "))
-    accept :: ws_accept_key(key)
+    accept: ws_accept_key(key)
     jet_rt_string_builder_push(response, accept)
     jet_rt_string_drop(accept)
     jet_rt_string_builder_push(response, rt_static_text("\r\n\r\n"))
@@ -480,20 +480,20 @@ fn ws_accept_key(key: I64) -> I64 {
 // Hub40: lock0, connections8 (WS_HUB_MAX_CONNECTIONS words), count16,
 // topics24 (WS_HUB_MAX_TOPICS [topic, event] text pairs, oldest first),
 // topic count32.
-WS_HUB_BYTES :: I64{40}
-WS_HUB_CONNECTIONS :: I64{8}
-WS_HUB_COUNT :: I64{16}
-WS_HUB_TOPICS :: I64{24}
-WS_HUB_TOPIC_COUNT :: I64{32}
-WS_HUB_MAX_CONNECTIONS :: I64{1024}
-WS_HUB_MAX_TOPICS :: I64{2048}
-WS_HUB_MAX_TOPIC :: I64{512}
+WS_HUB_BYTES: I64{40}
+WS_HUB_CONNECTIONS: I64{8}
+WS_HUB_COUNT: I64{16}
+WS_HUB_TOPICS: I64{24}
+WS_HUB_TOPIC_COUNT: I64{32}
+WS_HUB_MAX_CONNECTIONS: I64{1024}
+WS_HUB_MAX_TOPICS: I64{2048}
+WS_HUB_MAX_TOPIC: I64{512}
 ws_hub_root := I64{0}
 
 // runtime-init: 3 when ws_hub_root
-#Export(c) fn jet_rt_ws_hub_init() {
+#Export(c) jet_rt_ws_hub_init: fn() {
     if (ws_hub_root != I64{0}) -> return
-    root :: jet_rt_alloc(WS_HUB_BYTES, I64{8})
+    root: jet_rt_alloc(WS_HUB_BYTES, I64{8})
     thread_zero(root, WS_HUB_BYTES)
     net_put(root, WS_HUB_CONNECTIONS, jet_rt_alloc(WS_HUB_MAX_CONNECTIONS * I64{8}, I64{8}))
     net_put(root, WS_HUB_TOPICS, jet_rt_alloc(WS_HUB_MAX_TOPICS * I64{16}, I64{8}))
@@ -503,9 +503,9 @@ ws_hub_root := I64{0}
 }
 
 // One text frame of `event` to a joined connection, unless it is closed.
-fn ws_hub_send(conn: I64, event: I64) {
+ws_hub_send: fn(conn: I64, event: I64) {
     if (net_word(conn, WS_CONN_CLOSED) != I64{0}) -> return
-    error :: jet_rt_alloc(I64{8}, I64{8})
+    error: jet_rt_alloc(I64{8}, I64{8})
     net_put(error, I64{0}, I64{0})
     _ := ws_write_frame(conn, I64{1}, rt_text_data(event), rt_text_len(event), error)
     jet_rt_handle_drop_jet_ws_error(net_word(error, I64{0}))
@@ -514,16 +514,16 @@ fn ws_hub_send(conn: I64, event: I64) {
 
 // Joins `conn` and replays every topic's latest event to it; a full hub
 // leaves it out.
-fn ws_hub_join(conn: I64) {
-    root :: ws_hub_root
+ws_hub_join: fn(conn: I64) {
+    root: ws_hub_root
     if (root == I64{0}) -> return
     sync_mutex_lock(root)
-    count :: net_word(root, WS_HUB_COUNT)
+    count: net_word(root, WS_HUB_COUNT)
     if (count < WS_HUB_MAX_CONNECTIONS) {
         net_put(net_word(root, WS_HUB_CONNECTIONS), count * I64{8}, conn)
         net_put(root, WS_HUB_COUNT, count + I64{1})
         net_put(conn, WS_CONN_HUB, I64{1})
-        topics :: net_word(root, WS_HUB_TOPICS)
+        topics: net_word(root, WS_HUB_TOPICS)
         at := I64{0}
         loop at < net_word(root, WS_HUB_TOPIC_COUNT) {
             ws_hub_send(conn, net_word(topics, at * I64{16} + I64{8}))
@@ -533,12 +533,12 @@ fn ws_hub_join(conn: I64) {
     sync_mutex_unlock(root)
 }
 
-fn ws_hub_leave(conn: I64) {
+ws_hub_leave: fn(conn: I64) {
     if (net_word(conn, WS_CONN_HUB) == I64{0}) -> return
-    root :: ws_hub_root
+    root: ws_hub_root
     sync_mutex_lock(root)
-    connections :: net_word(root, WS_HUB_CONNECTIONS)
-    count :: net_word(root, WS_HUB_COUNT)
+    connections: net_word(root, WS_HUB_CONNECTIONS)
+    count: net_word(root, WS_HUB_COUNT)
     at := I64{0}
     loop at < count {
         if (net_word(connections, at * I64{8}) == conn) {
@@ -554,11 +554,11 @@ fn ws_hub_leave(conn: I64) {
 }
 
 // Drops topic pair `at` of `count`, moving the later ones down.
-fn ws_hub_topic_remove(topics: I64, at: I64, count: I64) {
+ws_hub_topic_remove: fn(topics: I64, at: I64, count: I64) {
     jet_rt_string_drop(net_word(topics, at * I64{16}))
     jet_rt_string_drop(net_word(topics, at * I64{16} + I64{8}))
     index := at
-    last :: count - I64{1}
+    last: count - I64{1}
     loop index < last {
         net_put(topics, index * I64{16}, net_word(topics, (index + I64{1}) * I64{16}))
         net_put(topics, index * I64{16} + I64{8}, net_word(topics, (index + I64{1}) * I64{16} + I64{8}))
@@ -568,13 +568,13 @@ fn ws_hub_topic_remove(topics: I64, at: I64, count: I64) {
 
 // core.web.__live_publish: `event` becomes `topic`'s latest and goes to every
 // joined connection. An empty or oversized topic or event is dropped.
-#Export(c) fn jet_web_live_publish(topic: I64, event: I64) {
-    root :: ws_hub_root
+#Export(c) jet_web_live_publish: fn(topic: I64, event: I64) {
+    root: ws_hub_root
     if (root == I64{0}) -> return
     if (rt_text_len(topic) == I64{0} || rt_text_len(topic) > WS_HUB_MAX_TOPIC) -> return
     if (rt_text_len(event) == I64{0} || rt_text_len(event) > WS_MAX_MESSAGE) -> return
     sync_mutex_lock(root)
-    topics :: net_word(root, WS_HUB_TOPICS)
+    topics: net_word(root, WS_HUB_TOPICS)
     count := net_word(root, WS_HUB_TOPIC_COUNT)
     at := I64{0}
     loop at < count {
@@ -593,8 +593,8 @@ fn ws_hub_topic_remove(topics: I64, at: I64, count: I64) {
     net_put(topics, count * I64{16}, jet_rt_string_clone(topic))
     net_put(topics, count * I64{16} + I64{8}, jet_rt_string_clone(event))
     net_put(root, WS_HUB_TOPIC_COUNT, count + I64{1})
-    connections :: net_word(root, WS_HUB_CONNECTIONS)
-    joined :: net_word(root, WS_HUB_COUNT)
+    connections: net_word(root, WS_HUB_CONNECTIONS)
+    joined: net_word(root, WS_HUB_COUNT)
     index := I64{0}
     loop index < joined {
         ws_hub_send(net_word(connections, index * I64{8}), event)
@@ -603,21 +603,21 @@ fn ws_hub_topic_remove(topics: I64, at: I64, count: I64) {
     sync_mutex_unlock(root)
 }
 
-fn ws_ascii_lower(byte: I64) -> I64 { if (byte >= I64{65} && byte <= I64{90}) -> byte + I64{32} else -> byte }
-fn ws_space(byte: I64) -> Bool { byte == I64{32} || byte == I64{9} || byte == I64{10} || byte == I64{11} || byte == I64{12} || byte == I64{13} }
-fn ws_bytes_equal(data: I64, length: I64, text: I64, fold: Bool) -> Bool {
+ws_ascii_lower: fn(byte: I64) -> I64 { if (byte >= I64{65} && byte <= I64{90}) -> byte + I64{32} else -> byte }
+ws_space: fn(byte: I64) -> Bool { byte == I64{32} || byte == I64{9} || byte == I64{10} || byte == I64{11} || byte == I64{12} || byte == I64{13} }
+ws_bytes_equal: fn(data: I64, length: I64, text: I64, fold: Bool) -> Bool {
     if (length != rt_text_len(text)) -> return false
     at := I64{0}
     loop at < length {
-        a :: rt_text_byte(wrapping(data + at))
-        b :: rt_text_byte(wrapping(rt_text_data(text) + at))
+        a: rt_text_byte(wrapping(data + at))
+        b: rt_text_byte(wrapping(rt_text_data(text) + at))
         if (if fold -> ws_ascii_lower(a) != ws_ascii_lower(b) else -> a != b) -> return false
         at += I64{1}
     }
     true
 }
 // The trimmed span [start, end) of data, written as start0/end8 into span.
-fn ws_trim(data: I64, start: I64, end: I64, span: I64) {
+ws_trim: fn(data: I64, start: I64, end: I64, span: I64) {
     first := start
     last := end
     loop first < last && ws_space(rt_text_byte(wrapping(data + first))) { first += I64{1} }
@@ -625,7 +625,7 @@ fn ws_trim(data: I64, start: I64, end: I64, span: I64) {
     net_put(span, I64{0}, first)
     net_put(span, I64{8}, last)
 }
-fn ws_has_token(data: I64, start: I64, end: I64, token: I64, span: I64) -> Bool {
+ws_has_token: fn(data: I64, start: I64, end: I64, token: I64, span: I64) -> Bool {
     piece := start
     at := start
     loop at <= end {
@@ -639,21 +639,21 @@ fn ws_has_token(data: I64, start: I64, end: I64, token: I64, span: I64) -> Bool 
     false
 }
 // Whether a CRLF starts at `at` within [data, data+length).
-fn ws_line_end(data: I64, at: I64, length: I64) -> Bool {
+ws_line_end: fn(data: I64, at: I64, length: I64) -> Bool {
     rt_text_byte(wrapping(data + at)) == I64{13} && at + I64{1} < length && rt_text_byte(wrapping(wrapping(data + at) + I64{1})) == I64{10}
 }
 
 // Whether the response head [data, data+length) (no final CRLFCRLF) accepts
 // the upgrade: a 101 status, `Upgrade: websocket`, a `Connection` naming
 // upgrade, and the expected accept key.
-fn ws_handshake_accepted(data: I64, length: I64, expected: I64) -> Bool {
+ws_handshake_accepted: fn(data: I64, length: I64, expected: I64) -> Bool {
     if !ws_utf8_valid(data, length) -> return false
     if (length < I64{12}) -> return false
     if !ws_bytes_equal(data, I64{12}, rt_static_text("HTTP/1.1 101"), false) && !ws_bytes_equal(data, I64{12}, rt_static_text("HTTP/1.0 101"), false) -> return false
     upgrade := false
     connection := false
     accept := false
-    span :: jet_rt_alloc(I64{16}, I64{8})
+    span: jet_rt_alloc(I64{16}, I64{8})
     line := I64{0}
     loop line < length {
         end := line
@@ -663,9 +663,9 @@ fn ws_handshake_accepted(data: I64, length: I64, expected: I64) -> Bool {
             loop colon < end && rt_text_byte(wrapping(data + colon)) != (I64{58}) { colon += I64{1} }
             if (colon < end) {
                 ws_trim(data, colon + I64{1}, end, span)
-                value_start :: net_word(span, I64{0})
-                value_length :: net_word(span, I64{8}) - value_start
-                name_length :: colon - line
+                value_start: net_word(span, I64{0})
+                value_length: net_word(span, I64{8}) - value_start
+                name_length: colon - line
                 if (ws_bytes_equal(wrapping(data + line), name_length, rt_static_text("upgrade"), true) && ws_bytes_equal(wrapping(data + value_start), value_length, rt_static_text("websocket"), true)) {
                     upgrade = true
                 } else if (ws_bytes_equal(wrapping(data + line), name_length, rt_static_text("connection"), true) && ws_has_token(data, value_start, value_start + value_length, rt_static_text("upgrade"), span)) {
@@ -681,8 +681,8 @@ fn ws_handshake_accepted(data: I64, length: I64, expected: I64) -> Bool {
     upgrade && connection && accept
 }
 // The offset of the first CRLFCRLF among the buffered bytes, or -1.
-fn ws_head_end(conn: I64) -> I64 {
-    data :: ws_unread(conn)
+ws_head_end: fn(conn: I64) -> I64 {
+    data: ws_unread(conn)
     at := I64{0}
     loop at + (I64{4}) <= ws_buffered(conn) {
         if (rt_text_byte(wrapping(data + at)) == I64{13} && rt_text_byte(wrapping(wrapping(data + at) + I64{1})) == I64{10} && rt_text_byte(wrapping(wrapping(data + at) + I64{2})) == I64{13} && rt_text_byte(wrapping(wrapping(data + at) + I64{3})) == I64{10}) -> return at
@@ -690,13 +690,13 @@ fn ws_head_end(conn: I64) -> I64 {
     }
     I64{-1}
 }
-fn ws_url_byte_bad(byte: I64) -> Bool { byte <= I64{32} || byte == I64{127} }
-fn ws_port(data: I64, start: I64, end: I64) -> I64 {
+ws_url_byte_bad: fn(byte: I64) -> Bool { byte <= I64{32} || byte == I64{127} }
+ws_port: fn(data: I64, start: I64, end: I64) -> I64 {
     if (start >= end || end - start > I64{5}) -> return I64{-1}
     port := I64{0}
     at := start
     loop at < end {
-        digit :: rt_text_byte(wrapping(data + at)) - I64{48}
+        digit: rt_text_byte(wrapping(data + at)) - I64{48}
         if (digit < I64{0} || digit > I64{9}) -> return I64{-1}
         port = port * I64{10} + digit
         at += I64{1}
@@ -705,9 +705,9 @@ fn ws_port(data: I64, start: I64, end: I64) -> I64 {
 }
 // `ws://authority[/path]` split into host (span start0/end8), port16 and the
 // path start24 (the URL's length when the path is `/`). False when invalid.
-fn ws_parse_url(url: I64, parts: I64) -> Bool {
-    data :: rt_text_data(url)
-    length :: rt_text_len(url)
+ws_parse_url: fn(url: I64, parts: I64) -> Bool {
+    data: rt_text_data(url)
+    length: rt_text_len(url)
     if (length < I64{5} || !ws_bytes_equal(data, I64{5}, rt_static_text("ws://"), false)) -> return false
     authority_end := I64{5}
     loop authority_end < length && rt_text_byte(wrapping(data + authority_end)) != (I64{47}) { authority_end += I64{1} }
@@ -762,8 +762,8 @@ fn ws_parse_url(url: I64, parts: I64) -> Bool {
 }
 // `host:port` (an IPv6 host bracketed), the port left off when `default` and
 // it is 80.
-fn ws_host_port(data: I64, start: I64, end: I64, port: I64, always: Bool) -> I64 {
-    text :: jet_rt_string_builder_new()
+ws_host_port: fn(data: I64, start: I64, end: I64, port: I64, always: Bool) -> I64 {
+    text: jet_rt_string_builder_new()
     v6 := false
     at := start
     loop at < end {
@@ -780,56 +780,56 @@ fn ws_host_port(data: I64, start: I64, end: I64, port: I64, always: Bool) -> I64
     jet_rt_string_builder_finish(text)
 }
 // Read the upgrade response; the bytes after its head stay buffered.
-fn ws_client_handshake(conn: I64, key: I64, error: I64) -> I64 {
+ws_client_handshake: fn(conn: I64, key: I64, error: I64) -> I64 {
     loop {
-        end :: ws_head_end(conn)
+        end: ws_head_end(conn)
         if (end >= I64{0}) {
-            expected :: ws_accept_key(key)
-            accepted :: ws_handshake_accepted(ws_unread(conn), end, expected)
+            expected: ws_accept_key(key)
+            accepted: ws_handshake_accepted(ws_unread(conn), end, expected)
             jet_rt_string_drop(expected)
             if !accepted -> return ws_fail(WS_ERROR_INVALID_HANDSHAKE, error)
             net_put(conn, WS_CONN_START, net_word(conn, WS_CONN_START) + end + I64{4})
             return I64{1}
         }
         if (ws_buffered(conn) > WS_MAX_HANDSHAKE) -> return ws_fail(WS_ERROR_INVALID_HANDSHAKE, error)
-        filled :: ws_fill(conn, ws_buffered(conn) + I64{1}, error)
+        filled: ws_fill(conn, ws_buffered(conn) + I64{1}, error)
         if (filled < I64{0}) -> return ws_fail(WS_ERROR_INVALID_HANDSHAKE, error)
         if (filled == I64{0}) -> return I64{0}
     }
     I64{0}
 }
-#Export(c) fn jet_ws_connect(url: I64, output: I64, error: I64) -> I64 {
+#Export(c) jet_ws_connect: fn(url: I64, output: I64, error: I64) -> I64 {
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
-    parts :: jet_rt_alloc(I64{32}, I64{8})
+    parts: jet_rt_alloc(I64{32}, I64{8})
     if !ws_parse_url(url, parts) {
         jet_rt_free(parts, I64{32}, I64{8})
         return ws_fail(WS_ERROR_INVALID_URL, error)
     }
-    data :: rt_text_data(url)
-    host_start :: net_word(parts, I64{0})
-    host_end :: net_word(parts, I64{8})
-    port :: net_word(parts, I64{16})
-    path_start :: net_word(parts, I64{24})
+    data: rt_text_data(url)
+    host_start: net_word(parts, I64{0})
+    host_end: net_word(parts, I64{8})
+    port: net_word(parts, I64{16})
+    path_start: net_word(parts, I64{24})
     jet_rt_free(parts, I64{32}, I64{8})
-    address :: ws_host_port(data, host_start, host_end, port, true)
-    scratch :: jet_rt_alloc(I64{16}, I64{8})
+    address: ws_host_port(data, host_start, host_end, port, true)
+    scratch: jet_rt_alloc(I64{16}, I64{8})
     thread_zero(scratch, I64{16})
-    connected :: jet_net_tcp_connect(address, scratch, wrapping(scratch + I64{8}))
+    connected: jet_net_tcp_connect(address, scratch, wrapping(scratch + I64{8}))
     jet_rt_string_drop(address)
-    stream :: net_word(scratch, I64{0})
-    failure :: net_word(scratch, I64{8})
+    stream: net_word(scratch, I64{0})
+    failure: net_word(scratch, I64{8})
     jet_rt_free(scratch, I64{16}, I64{8})
     if (connected == I64{0}) -> return ws_net_failure(failure, false, rt_static_text("connect"), error)
-    conn :: ws_conn_new(stream, true)
-    nonce :: jet_rt_alloc(I64{16}, I64{1})
+    conn: ws_conn_new(stream, true)
+    nonce: jet_rt_alloc(I64{16}, I64{1})
     if (rt_crypto_entropy_fill(nonce, I64{16}) != I64{0}) {
         jet_rt_free(nonce, I64{16}, I64{1})
         jet_rt_handle_drop_jet_ws_conn(conn)
         return ws_fail_io(rt_static_text("handshake key entropy"), error)
     }
-    key :: ws_base64(nonce, I64{16})
+    key: ws_base64(nonce, I64{16})
     jet_rt_free(nonce, I64{16}, I64{1})
-    request :: jet_rt_string_builder_new()
+    request: jet_rt_string_builder_new()
     jet_rt_string_builder_push(request, rt_static_text("GET "))
     if (path_start == rt_text_len(url)) {
         jet_rt_string_builder_push(request, rt_static_text("/"))
@@ -837,7 +837,7 @@ fn ws_client_handshake(conn: I64, key: I64, error: I64) -> I64 {
         rt_text_append(request, data + path_start, rt_text_len(url) - path_start)
     }
     jet_rt_string_builder_push(request, rt_static_text(" HTTP/1.1\r\nHost: "))
-    host :: ws_host_port(data, host_start, host_end, port, false)
+    host: ws_host_port(data, host_start, host_end, port, false)
     jet_rt_string_builder_push(request, host)
     jet_rt_string_drop(host)
     jet_rt_string_builder_push(request, rt_static_text("\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: "))

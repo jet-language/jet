@@ -37,13 +37,13 @@
 <p class="diag-copy fix" data-registry-field="fix">Use a supported `Decimal` operator or convert before operating.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0133</code>: <code>tests/ui/decimal_unsupported_operator.stderr</code>.</p>
-<pre class="diag">Error [jet.UnsupportedDecimalOperator]: `/` isn&#39;t defined between `Decimal` and `Decimal`
-  --&gt; tests/ui/decimal_unsupported_operator.jet:4:11
+<pre class="diag">Error [jet.UnsupportedDecimalOperator]: `%` isn&#39;t defined between `Decimal` and `Decimal`
+  --&gt; tests/ui/decimal_unsupported_operator.jet:6:11
     |
-  4 |     print(price / tax)
+  6 |     print(price % tax)
     |           ^^^^^^^^^^^
- Why: `Decimal` supports `+`, `-`, `*`, and `==`/`!=` on matching values only
- Fix: Use a method like `.add(other)` or make both operands the same precise type
+ Why: `Decimal` supports `+`, `-`, `*`, `/` (giving a `Fraction`), and `==`/`!=`; `Fraction` and `Complex` support only their declared exact operations
+ Fix: Use a named exact constructor or make both operands the same precise type
 More: jet-lang.dev/e/E0133
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

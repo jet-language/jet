@@ -1,5 +1,5 @@
 use {
-    core :: core
+    core: core
     core.ui.host.[UIClipboardText, UIClipboardWrite, UIHostError]
 }
 
@@ -7,13 +7,13 @@ use {
 // clipboard text primitives (capability code 1). On the web, read_text answers
 // the clipboard text the page last observed (a paste, copy or cut, or its own
 // write_text); a browser lends the live clipboard only to a user gesture.
-fn read_text() -[IO]> UIClipboardText UIHostError! {
+read_text: fn() -[IO]> UIClipboardText UIHostError! {
     if !core.ui.host.__capability(1) -> return Err(UIHostError.CapabilityUnavailable{capability: "Clipboard"})
-    text :: core.ui.host.__clipboard_get() ?? return Err(UIHostError.HostFailure{service: "Clipboard", message: "no clipboard text has been observed yet: the host has seen no paste, copy, cut or write"})
+    text: core.ui.host.__clipboard_get() ?? return Err(UIHostError.HostFailure{service: "Clipboard", message: "no clipboard text has been observed yet: the host has seen no paste, copy, cut or write"})
     Ok(UIClipboardText{text: text, selection: None})
 }
 
-fn write_text(text: String) -[IO]> UIClipboardWrite UIHostError! {
+write_text: fn(text: String) -[IO]> UIClipboardWrite UIHostError! {
     if !core.ui.host.__capability(1) -> return Err(UIHostError.CapabilityUnavailable{capability: "Clipboard"})
     if !core.ui.host.__clipboard_set(text) -> return Err(UIHostError.HostFailure{service: "Clipboard", message: "the provider could not write the clipboard"})
     characters := 0
@@ -23,10 +23,10 @@ fn write_text(text: String) -[IO]> UIClipboardWrite UIHostError! {
     Ok(UIClipboardWrite{characters: characters})
 }
 
-fn clear() -[IO]> UIClipboardWrite UIHostError! {
+clear: fn() -[IO]> UIClipboardWrite UIHostError! {
     write_text("")
 }
 
-fn is_empty() -[IO]> Bool UIHostError! {
+is_empty: fn() -[IO]> Bool UIHostError! {
     read_text().text.len() == 0
 }

@@ -1,14 +1,14 @@
 
-use process :: core.process
+use process: core.process
 
-struct SessionHolder {
+SessionHolder: struct {
     authority: Authority
 }
 
-fn run() {
-    session :: SessionHolder{authority: Authority.workspace()}
+run: fn() {
+    session: SessionHolder{authority: Authority.workspace()}
     #FX(authority: Exec, IO, Time.Wait) {
-        result :: process.run(["echo", "authority"], authority)
+        result: process.run(["echo", "authority"], authority)
         print("boundary")
     }
 }

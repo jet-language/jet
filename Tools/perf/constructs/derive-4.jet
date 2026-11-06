@@ -1,20 +1,20 @@
 derive T.FieldNames {
     comptime loop field in T.$fields {
-        method :: "field_{field.$name}"
-        fn $method(self) -> String { field.$name }
+        method: "field_{field.$name}"
+        $method: fn(self) -> String { field.$name }
     }
 }
 
-struct AddMarkerFields {
+AddMarkerFields: struct {
     impl Marker {
-        sites :: [.Type]
+        sites: [.Type]
 
-        fn expand(self, target: Target) {
-            type_name :: target.$name
+        expand: fn(self, target: Target) {
+            type_name: target.$name
             comptime loop field in target.$fields {
-                method :: "marked_{field.$name}"
+                method: "marked_{field.$name}"
                 impl $type_name {
-                    fn $method(self) -> String { field.$name }
+                    $method: fn(self) -> String { field.$name }
                 }
             }
         }
@@ -22,15 +22,15 @@ struct AddMarkerFields {
 }
 
 #[FieldNames, AddMarkerFields]
-struct Point {
+Point: struct {
     x: Int
     y: Int
     z: Int
     w: Int
 }
 
-fn run() {
-    point :: Point{x: 1, y: 2, z: 3, w: 4}
+run: fn() {
+    point: Point{x: 1, y: 2, z: 3, w: 4}
     print(point.field_x())
     print(point.field_y())
     print(point.field_z())

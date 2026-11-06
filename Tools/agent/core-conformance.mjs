@@ -36,218 +36,218 @@ const EXCLUSIONS = join(ROOT, "tests/conformance/exclusions.tsv");
 // this map, decides whether the rest of Core is covered.
 const RECIPES = new Map([
   ["core.math.sqrt", `// core-conformance: core.math.sqrt
-use math :: core.math
+use math: core.math
 
-fn run() {
-    result :: math.sqrt(4.0)
+run: fn() {
+    result: math.sqrt(4.0)
     print(result)
 }
 `],
   ["core.math.round", `// core-conformance: core.math.round
-use math :: core.math
+use math: core.math
 
-fn run() {
-    result :: math.round(2.5)
+run: fn() {
+    result: math.round(2.5)
     print(result)
 }
 `],
   ["core.math.gcd", `// core-conformance: core.math.gcd
-use math :: core.math
+use math: core.math
 
-fn run() {
-    result :: math.gcd(18, 12)
+run: fn() {
+    result: math.gcd(18, 12)
     print(result)
 }
 `],
   ["core.math.is_even", `// core-conformance: core.math.is_even
-use math :: core.math
+use math: core.math
 
-fn run() {
-    result :: math.is_even(18)
+run: fn() {
+    result: math.is_even(18)
     print(result)
 }
 `],
   ["core.text.lower", `// core-conformance: core.text.lower
-use text :: core.text
+use text: core.text
 
-fn run() {
-    result :: text.lower("JET")
+run: fn() {
+    result: text.lower("JET")
     print(result)
 }
 `],
   ["core.text.trim", `// core-conformance: core.text.trim
-use text :: core.text
+use text: core.text
 
-fn run() {
-    result :: text.trim("  jet  ")
+run: fn() {
+    result: text.trim("  jet  ")
     print(result)
 }
 `],
   ["core.text.byte_count", `// core-conformance: core.text.byte_count
-use text :: core.text
+use text: core.text
 
-fn run() {
-    result :: text.byte_count("jet")
+run: fn() {
+    result: text.byte_count("jet")
     print(result)
 }
 `],
   ["core.text.fmt.grouped", `// core-conformance: core.text.fmt.grouped
-use fmt :: core.text.fmt
+use fmt: core.text.fmt
 
-fn run() {
-    result :: fmt.grouped(Float{1234.5678}, 2)
+run: fn() {
+    result: fmt.grouped(Float{1234.5678}, 2)
     print(result)
 }
 `],
   ["core.args.spec", `// core-conformance: core.args.spec
-use args :: core.args
+use args: core.args
 
-fn run() {
-    result :: args.spec()
+run: fn() {
+    result: args.spec()
     print(result.completion("bash").contains("--help"))
 }
 `],
   ["core.crypto.uuid.v4", `// core-conformance: core.crypto.uuid.v4
-use uuid :: core.crypto.uuid
+use uuid: core.crypto.uuid
 
-fn run() {
-    result :: uuid.v4()
+run: fn() {
+    result: uuid.v4()
     print(result.len())
 }
 `],
   ["core.time.parse_rfc3339", `// core-conformance: core.time.parse_rfc3339
-use time :: core.time
+use time: core.time
 
-fn run() {
-    result :: time.parse_rfc3339("2024-03-01T12:00:00Z") ?? panic("parse")
+run: fn() {
+    result: time.parse_rfc3339("2024-03-01T12:00:00Z") ?? panic("parse")
     print(result.to_timestamp())
 }
 `],
   ["core.math.random.choices", `// core-conformance: core.math.random.choices
-use random :: core.math.random
+use random: core.math.random
 
-fn run() {
+run: fn() {
     print(random.choices([Int]{1, 2, 3}, 4))
 }
 `],
   ["core.math.random.triangular", `// core-conformance: core.math.random.triangular
-use random :: core.math.random
+use random: core.math.random
 
-fn run() {
+run: fn() {
     print(random.triangular(0.0, 1.0, 0.5))
 }
 `],
   ["core.math.random.gammavariate", `// core-conformance: core.math.random.gammavariate
-use random :: core.math.random
+use random: core.math.random
 
-fn run() {
+run: fn() {
     print(random.gammavariate(2.0, 1.0))
 }
 `],
   ["core.math.random.betavariate", `// core-conformance: core.math.random.betavariate
-use random :: core.math.random
+use random: core.math.random
 
-fn run() {
+run: fn() {
     print(random.betavariate(2.0, 3.0))
 }
 `],
   ["core.math.random.lognormvariate", `// core-conformance: core.math.random.lognormvariate
-use random :: core.math.random
+use random: core.math.random
 
-fn run() {
+run: fn() {
     print(random.lognormvariate(0.0, 1.0))
 }
 `],
   ["core.math.random.paretovariate", `// core-conformance: core.math.random.paretovariate
-use random :: core.math.random
+use random: core.math.random
 
-fn run() {
+run: fn() {
     print(random.paretovariate(2.0))
 }
 `],
   ["core.math.random.weibullvariate", `// core-conformance: core.math.random.weibullvariate
-use random :: core.math.random
+use random: core.math.random
 
-fn run() {
+run: fn() {
     print(random.weibullvariate(1.0, 2.0))
 }
 `],
   ["core.math.random.vonmisesvariate", `// core-conformance: core.math.random.vonmisesvariate
-use random :: core.math.random
+use random: core.math.random
 
-fn run() {
+run: fn() {
     print(random.vonmisesvariate(0.0, 1.0))
 }
 `],
   ["core.math.random.binomialvariate", `// core-conformance: core.math.random.binomialvariate
-use random :: core.math.random
+use random: core.math.random
 
-fn run() {
+run: fn() {
     print(random.binomialvariate(4, 0.5))
 }
 `],
   ["core.encoding.json.dump", `// core-conformance: core.encoding.json.dump
-use json :: core.encoding.json
+use json: core.encoding.json
 
-fn run() {
-    value :: json.loads(\`{"ok":true}\`) ?? panic("JSON parse")
+run: fn() {
+    value: json.loads(\`{"ok":true}\`) ?? panic("JSON parse")
     print(json.dump(value) ?? panic(err.reason))
 }
 `],
   ["core.encoding.json.dumps", `// core-conformance: core.encoding.json.dumps
-use api :: core.encoding.json
+use api: core.encoding.json
 
-fn run() {
+run: fn() {
     print(api.dumps(Dyn{}) ?? panic(err.reason))
 }
 `],
   ["core.encoding.jsonl.dumps", `// core-conformance: core.encoding.jsonl.dumps
-use api :: core.encoding.jsonl
+use api: core.encoding.jsonl
 
-fn run() {
+run: fn() {
     print(api.dumps([Dyn]{}) ?? panic(err.reason))
 }
 `],
   ["core.encoding.jsonl.append_line", `// core-conformance: core.encoding.jsonl.append_line
-use api :: core.encoding.jsonl
+use api: core.encoding.jsonl
 
-fn run() {
+run: fn() {
     print(api.append_line("jet", Dyn{}) ?? panic(err.reason))
 }
 `],
   ["core.encoding.json.load", `// core-conformance: core.encoding.json.load
-use json :: core.encoding.json
+use json: core.encoding.json
 
-fn run() {
+run: fn() {
     print(json.load("{\"ok\":true}"))
 }
 `],
   ["core.encoding.toml.loads", `// core-conformance: core.encoding.toml.loads
-use toml :: core.encoding.toml
+use toml: core.encoding.toml
 
-fn run() {
+run: fn() {
     print(toml.loads("ok = true"))
 }
 `],
   ["core.encoding.toml.load", `// core-conformance: core.encoding.toml.load
-use toml :: core.encoding.toml
+use toml: core.encoding.toml
 
-fn run() {
+run: fn() {
     print(toml.load("ok = true"))
 }
 `],
   ["core.net.tls.flags", `// core-conformance: core.net.tls.flags
-use tls :: core.net.tls
+use tls: core.net.tls
 
-fn run() {
-    cfg :: tls.config("example.test")
+run: fn() {
+    cfg: tls.config("example.test")
     print(tls.flags(cfg).len())
 }
 `],
   ["core.net.tls.unwrap", `// core-conformance: core.net.tls.unwrap
-use tls :: core.net.tls
+use tls: core.net.tls
 
-fn run() -[Net]> {
+run: fn() -[Net]> {
     print(tls.unwrap(TLSStream{}) == .Err(_))
 }
 `],
@@ -612,7 +612,7 @@ function escapedRegExp(value) {
 
 function moduleItems() {
   const source = withoutComments(readFileSync(MODULE_EXPORTS, "utf8"));
-  const table = source.match(/^CORE_MODULE_EXPORTS :: \[CoreModuleExportNames\]\{\n([\s\S]*?)\n\}/m)?.[1];
+  const table = source.match(/^CORE_MODULE_EXPORTS: \[CoreModuleExportNames\]\{\n([\s\S]*?)\n\}/m)?.[1];
   if (!table) throw new Error("missing CORE_MODULE_EXPORTS table");
   const out = new Map();
   const rows = table.split("\n").filter((line) => line.trim());
@@ -622,7 +622,7 @@ function moduleItems() {
     const names = quoted(match[2]);
     const values = new Set(names);
     if (values.size !== names.length) throw new Error(`duplicate Core export members in ${match[1]}`);
-    if (out.has(match[1])) throw new Error(`duplicate Core module ${match[1]}`);
+    if (out.has(match[1])) throw new Error(`duplicate Core ${match[1]}: module`);
     out.set(match[1], values);
   }
   if (out.size === 0) throw new Error("Core export table has no modules");
@@ -787,12 +787,12 @@ function observerCalls(code) {
 }
 
 // A registered result also counts as consumed when it reaches an observer
-// through later bindings: `first :: reader.next()` followed by `print(first)`
+// through later bindings: `first: reader.next()` followed by `print(first)`
 // reads `reader`. Walking that chain to a fixpoint keeps genuinely unread
 // bindings failing while accepting a program that really consumes the value.
 function valueReachesObserver(code, source, observers, value, after) {
   const bindings = [];
-  const pattern = /(?:^|[{};\n])\s*(@?[A-Za-z_][A-Za-z0-9_]*)\s*(?:::|:=)\s*([^\n;]*)/g;
+  const pattern = /(?:^|[{};\n])\s*(@?[A-Za-z_][A-Za-z0-9_]*)\s*:=?\s*([^\n;]*)/g;
   for (const match of code.matchAll(pattern)) {
     bindings.push({ name: match[1], init: match[2] });
   }
@@ -826,7 +826,7 @@ function valueReachesObserver(code, source, observers, value, after) {
 }
 
 // Branching on a value and printing from the arms observes it. The arm binders
-// are introduced by the pattern, not by a `::` binding, so the chain above
+// are introduced by the pattern, not by a `:` binding, so the chain above
 // cannot see them; this reads the match as one consumption site.
 function matchArmObserves(code, observers, held) {
   const pattern = /(?<![A-Za-z0-9_.])if\s+([^\n{]*?)==\s*\{/g;
@@ -863,7 +863,7 @@ function sourceErrors(key, source) {
   const module = key.slice(0, dot);
   const name = key.slice(dot + 1);
   const code = codeOnly(source);
-  const unitRun = code.match(/\bfn\s+run\s*\(\s*\)\s*\{/);
+  const unitRun = code.match(/\brun:\s*fn\s*\(\s*\)\s*\{/);
   if (unitRun) {
     const opening = unitRun.index + unitRun[0].lastIndexOf("{");
     const closing = matching(code, opening, "{", "}");
@@ -913,7 +913,7 @@ function sourceErrors(key, source) {
 
   const lineStart = code.lastIndexOf("\n", callStart) + 1;
   const beforeCall = code.slice(lineStart, callStart);
-  const binding = beforeCall.match(/(?:^|[{};])\s*(@?[A-Za-z_][A-Za-z0-9_]*)\s*(?:::|:=)\s*$/);
+  const binding = beforeCall.match(/(?:^|[{};])\s*(@?[A-Za-z_][A-Za-z0-9_]*)\s*:=?\s*$/);
   const observers = observerCalls(code);
   if (binding) {
     const value = binding[1];
@@ -1083,7 +1083,7 @@ function canonicalizeUnitWitness(key, source) {
     const argumentCode = code.slice(directObserver.open + 1, directObserver.close).trim();
     if (argumentCode.startsWith("(() ->")) {
       const staleNames = ["result", "changed"].filter(
-        (value) => !new RegExp(`(?:^|[{};\\n])\\s*${escapedRegExp(value)}\\s*(?:::|:=)`).test(code),
+        (value) => !new RegExp(`(?:^|[{};\\n])\\s*${escapedRegExp(value)}\\s*:=?`).test(code),
       );
       if (staleNames.length === 0) return source;
       const staleLine = new RegExp(
@@ -1114,11 +1114,11 @@ function canonicalizeUnitWitness(key, source) {
 
   const { start: callLineStart, end: callLineEnd } = lineRange(source, callStart);
   const callLine = source.slice(callLineStart, callLineEnd);
-  const binding = callLine.match(/^(\s*)(@?[A-Za-z_][A-Za-z0-9_]*)\s*(?:::|:=)\s*(.*?)\s*$/);
+  const binding = callLine.match(/^(\s*)(@?[A-Za-z_][A-Za-z0-9_]*)\s*:=?\s*(.*?)\s*$/);
   if (!binding) return source;
   const expression = binding[3].trim();
   const expressionCode = code.slice(callLineStart, callLineEnd).match(
-    /^\s*@?[A-Za-z_][A-Za-z0-9_]*\s*(?:::|:=)\s*(.*?)\s*$/,
+    /^\s*@?[A-Za-z_][A-Za-z0-9_]*\s*:=?\s*(.*?)\s*$/,
   )?.[1]?.trim();
   const targetCode = code.slice(callStart, callClose + 1).trim();
   if (!expressionCode || !expressionCode.startsWith(targetCode)) return source;
@@ -1214,7 +1214,7 @@ function sourceSignatures() {
   for (const path of coreSourceFiles()) {
     const source = readFileSync(path, "utf8");
     const code = withoutComments(source);
-    const pattern = /^fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm;
+    const pattern = /^([A-Za-z_][A-Za-z0-9_]*):\s*fn\s*\(/gm;
     for (const match of code.matchAll(pattern)) {
       const open = match.index + match[0].lastIndexOf("(");
       let close;
@@ -1357,132 +1357,132 @@ function nominalWitness(key) {
   const name = key.slice(dot + 1);
   if (module === "core.collections.set") {
     const setBodies = {
-      new: `s :: api.new()
+      new: `s: api.new()
 print(api.len(s))`,
-      from_list: `s :: api.from_list([String]{"jet", "jet"})
+      from_list: `s: api.from_list([String]{"jet", "jet"})
 print(api.len(s))`,
-      add: `s :: api.add(api.new(), "jet")
+      add: `s: api.add(api.new(), "jet")
 print(api.len(s))`,
-      discard: `s :: api.discard(api.from_list([String]{"jet"}), "jet")
+      discard: `s: api.discard(api.from_list([String]{"jet"}), "jet")
 print(api.len(s))`,
-      remove: `s :: api.remove(api.from_list([String]{"jet"}), "jet") ?? api.new()
+      remove: `s: api.remove(api.from_list([String]{"jet"}), "jet") ?? api.new()
 print(api.len(s))`,
-      contains: `s :: api.from_list([String]{"jet"})
+      contains: `s: api.from_list([String]{"jet"})
 print(api.contains(s, "jet"))`,
-      len: `s :: api.from_list([String]{"jet"})
+      len: `s: api.from_list([String]{"jet"})
 print(api.len(s))`,
       is_empty: `print(api.is_empty(api.new()))`,
-      to_list: `s :: api.from_list([String]{"jet"})
+      to_list: `s: api.from_list([String]{"jet"})
 print(api.to_list(s))`,
-      clear: `s :: api.clear(api.from_list([String]{"jet"}))
+      clear: `s: api.clear(api.from_list([String]{"jet"}))
 print(api.len(s))`,
-      union: `a :: api.from_list([String]{"jet"})
-b :: api.from_list([String]{"lang"})
+      union: `a: api.from_list([String]{"jet"})
+b: api.from_list([String]{"lang"})
 print(api.len(api.union(a, b)))`,
-      intersection: `a :: api.from_list([String]{"jet"})
-b :: api.from_list([String]{"lang"})
+      intersection: `a: api.from_list([String]{"jet"})
+b: api.from_list([String]{"lang"})
 print(api.len(api.intersection(a, b)))`,
-      difference: `a :: api.from_list([String]{"jet"})
-b :: api.from_list([String]{"lang"})
+      difference: `a: api.from_list([String]{"jet"})
+b: api.from_list([String]{"lang"})
 print(api.len(api.difference(a, b)))`,
-      symmetric_difference: `a :: api.from_list([String]{"jet"})
-b :: api.from_list([String]{"lang"})
+      symmetric_difference: `a: api.from_list([String]{"jet"})
+b: api.from_list([String]{"lang"})
 print(api.len(api.symmetric_difference(a, b)))`,
-      issubset: `a :: api.from_list([String]{"jet"})
-b :: api.from_list([String]{"jet", "lang"})
+      issubset: `a: api.from_list([String]{"jet"})
+b: api.from_list([String]{"jet", "lang"})
 print(api.issubset(a, b))`,
-      issuperset: `a :: api.from_list([String]{"jet", "lang"})
-b :: api.from_list([String]{"jet"})
+      issuperset: `a: api.from_list([String]{"jet", "lang"})
+b: api.from_list([String]{"jet"})
 print(api.issuperset(a, b))`,
-      isdisjoint: `a :: api.from_list([String]{"jet"})
-b :: api.from_list([String]{"lang"})
+      isdisjoint: `a: api.from_list([String]{"jet"})
+b: api.from_list([String]{"lang"})
 print(api.isdisjoint(a, b))`,
-      clone_set: `s :: api.clone_set(api.from_list([String]{"jet"}))
+      clone_set: `s: api.clone_set(api.from_list([String]{"jet"}))
 print(api.len(s))`,
     };
     const body = setBodies[name];
     if (body === undefined) return null;
     const indented = body.split("\n").map((line) => `    ${line}`).join("\n");
     return `// core-conformance: ${key}
-use api :: core.collections.set
+use api: core.collections.set
 
-fn run() {
+run: fn() {
 ${indented}
 }
 `;
   }
   const bodies = {
-    counter: `c :: api.counter()
+    counter: `c: api.counter()
 print(api.total(c))`,
-    counter_from: `c :: api.counter_from([String]{"jet"})
+    counter_from: `c: api.counter_from([String]{"jet"})
 print(api.total(c))`,
-    add: `c :: api.counter()
-out :: api.add(c, "jet", 1)
+    add: `c: api.counter()
+out: api.add(c, "jet", 1)
 print(api.total(out))`,
-    inc: `c :: api.counter()
-out :: api.inc(c, "jet")
+    inc: `c: api.counter()
+out: api.inc(c, "jet")
 print(api.total(out))`,
-    dec: `c :: api.counter()
-out :: api.dec(c, "jet")
+    dec: `c: api.counter()
+out: api.dec(c, "jet")
 print(api.total(out))`,
-    get: `c :: api.counter_from([String]{"jet"})
+    get: `c: api.counter_from([String]{"jet"})
 print(api.get(c, "jet"))`,
-    set_count: `c :: api.counter()
-out :: api.set_count(c, "jet", 2)
+    set_count: `c: api.counter()
+out: api.set_count(c, "jet", 2)
 print(api.total(out))`,
-    total: `c :: api.counter_from([String]{"jet"})
+    total: `c: api.counter_from([String]{"jet"})
 print(api.total(c))`,
-    names: `c :: api.counter_from([String]{"jet"})
+    names: `c: api.counter_from([String]{"jet"})
 print(api.names(c))`,
-    elements: `c :: api.counter_from([String]{"jet"})
+    elements: `c: api.counter_from([String]{"jet"})
 print(api.elements(c))`,
-    most_common: `c :: api.counter_from([String]{"jet"})
-out :: api.most_common(c, 1)
+    most_common: `c: api.counter_from([String]{"jet"})
+out: api.most_common(c, 1)
 print(api.total(out))`,
-    subtract: `c :: api.counter_from([String]{"jet"})
-out :: api.subtract(c, c)
+    subtract: `c: api.counter_from([String]{"jet"})
+out: api.subtract(c, c)
 print(api.total(out))`,
-    merge_add: `c :: api.counter_from([String]{"jet"})
-out :: api.merge_add(c, c)
+    merge_add: `c: api.counter_from([String]{"jet"})
+out: api.merge_add(c, c)
 print(api.total(out))`,
-    clear_counter: `c :: api.counter_from([String]{"jet"})
-out :: api.clear_counter(c)
+    clear_counter: `c: api.counter_from([String]{"jet"})
+out: api.clear_counter(c)
 print(api.total(out))`,
-    ordered_map: `m :: api.ordered_map()
+    ordered_map: `m: api.ordered_map()
 print(api.map_len(m))`,
-    map_get: `m :: api.ordered_map()
+    map_get: `m: api.ordered_map()
 print(api.map_get(m, "jet") == None)`,
-    map_set: `m :: api.ordered_map()
-out :: api.map_set(m, "jet", "value")
+    map_set: `m: api.ordered_map()
+out: api.map_set(m, "jet", "value")
 print(api.map_len(out))`,
-    map_remove: `m :: api.ordered_map()
-out :: api.map_remove(m, "jet")
+    map_remove: `m: api.ordered_map()
+out: api.map_remove(m, "jet")
 print(api.map_len(out))`,
-    map_keys: `m :: api.ordered_map()
+    map_keys: `m: api.ordered_map()
 print(api.map_keys(m))`,
-    map_values: `m :: api.ordered_map()
+    map_values: `m: api.ordered_map()
 print(api.map_values(m))`,
-    map_contains: `m :: api.ordered_map()
+    map_contains: `m: api.ordered_map()
 print(api.map_contains(m, "jet"))`,
-    map_len: `m :: api.ordered_map()
+    map_len: `m: api.ordered_map()
 print(api.map_len(m))`,
-    chain: `c :: api.chain()
+    chain: `c: api.chain()
 print(api.chain_contains(c, "jet"))`,
-    chain_push: `c :: api.chain()
-out :: api.chain_push(c, [String]{"jet"}, [String]{"value"})
+    chain_push: `c: api.chain()
+out: api.chain_push(c, [String]{"jet"}, [String]{"value"})
 print(api.chain_contains(out, "jet"))`,
-    chain_get: `c :: api.chain()
+    chain_get: `c: api.chain()
 print(api.chain_get(c, "jet") == None)`,
-    chain_contains: `c :: api.chain()
+    chain_contains: `c: api.chain()
 print(api.chain_contains(c, "jet"))`,
   };
   const body = bodies[name];
   if (body === undefined) return null;
   const indented = body.split("\n").map((line) => `    ${line}`).join("\n");
   return `// core-conformance: ${key}
-use api :: core.collections
+use api: core.collections
 
-fn run() {
+run: fn() {
 ${indented}
 }
 `;
@@ -1509,9 +1509,9 @@ function signatureDerivedRecipes(expected, exclusions) {
       .map(signatureArgument)
       .join(", ");
     generated.set(key, `// core-conformance: ${key}
-use api :: ${module}
+use api: ${module}
 
-fn run() {
+run: fn() {
     print(api.${name}(${args}))
 }
 `);
@@ -1542,15 +1542,15 @@ function generate() {
     if (existsSync(path)) {
       const existing = readFileSync(path, "utf8");
       const oldDerivedPrefix = `${key}
-use api :: ${module}
+use api: ${module}
 
-fn run() {
+run: fn() {
     print(api.${name}(`;
       const isNominal = nominalWitness(key) !== null;
       const legacySelectivePrefix = `${key}
 use ${module}.[${name}]
 
-fn run() {
+run: fn() {
     print(${name}(`;
       const isLegacyGenerated = existing.startsWith(`// core-conformance: ${oldDerivedPrefix}`)
         || existing.startsWith(`// core-conformance: ${legacySelectivePrefix}`);
@@ -1597,9 +1597,9 @@ function hostileFixtures() {
 
   const key = "core.crypto.uuid.v4";
   const valid = `// core-conformance: ${key}
-use uuid :: core.crypto.uuid
-fn run() {
-    result :: uuid.v4()
+use uuid: core.crypto.uuid
+run: fn() {
+    result: uuid.v4()
     print(result)
 }
 `;
@@ -1607,9 +1607,9 @@ fn run() {
     [
       "bind-and-discard",
       `// core-conformance: ${key}
-use uuid :: core.crypto.uuid
-fn run() {
-    _result :: uuid.v4()
+use uuid: core.crypto.uuid
+run: fn() {
+    _result: uuid.v4()
     print("ok")
 }
 `,
@@ -1618,9 +1618,9 @@ fn run() {
     [
       "observerless binding",
       `// core-conformance: ${key}
-use uuid :: core.crypto.uuid
-fn run() {
-    result :: uuid.v4()
+use uuid: core.crypto.uuid
+run: fn() {
+    result: uuid.v4()
     sink(result)
 }
 `,
@@ -1629,8 +1629,8 @@ fn run() {
     [
       "direct unobserved call",
       `// core-conformance: ${key}
-use uuid :: core.crypto.uuid
-fn run() {
+use uuid: core.crypto.uuid
+run: fn() {
     uuid.v4()
 }
 `,
@@ -1639,8 +1639,8 @@ fn run() {
     [
       "comment call ghost",
       `// core-conformance: ${key}
-use uuid :: core.crypto.uuid
-fn run() {
+use uuid: core.crypto.uuid
+run: fn() {
     // uuid.v4()
     print("ok")
 }
@@ -1650,8 +1650,8 @@ fn run() {
     [
       "string call ghost",
       `// core-conformance: ${key}
-use uuid :: core.crypto.uuid
-fn run() {
+use uuid: core.crypto.uuid
+run: fn() {
     print("uuid.v4()")
 }
 `,
@@ -1660,9 +1660,9 @@ fn run() {
     [
       "comment observer ghost",
       `// core-conformance: ${key}
-use uuid :: core.crypto.uuid
-fn run() {
-    result :: uuid.v4()
+use uuid: core.crypto.uuid
+run: fn() {
+    result: uuid.v4()
     /* print(result) */
 }
 `,
@@ -1671,9 +1671,9 @@ fn run() {
     [
       "string observer ghost",
       `// core-conformance: ${key}
-use uuid :: core.crypto.uuid
-fn run() {
-    result :: uuid.v4()
+use uuid: core.crypto.uuid
+run: fn() {
+    result: uuid.v4()
     print("result")
 }
 `,
@@ -1682,8 +1682,8 @@ fn run() {
     [
       "malformed marker",
       `// core-conformance: ${key} extra
-use uuid :: core.crypto.uuid
-fn run() {
+use uuid: core.crypto.uuid
+run: fn() {
     print(uuid.v4())
 }
 `,
@@ -1692,8 +1692,8 @@ fn run() {
     [
       "malformed call shape",
       `// core-conformance: ${key}
-use uuid :: core.crypto.uuid
-fn run() {
+use uuid: core.crypto.uuid
+run: fn() {
     print(uuid.v4)
 }
 `,
@@ -1702,8 +1702,8 @@ fn run() {
     [
       "unbalanced call",
       `// core-conformance: ${key}
-use uuid :: core.crypto.uuid
-fn run() {
+use uuid: core.crypto.uuid
+run: fn() {
     print(uuid.v4(}
 }
 `,
@@ -1712,8 +1712,8 @@ fn run() {
     [
       "duplicate call",
       `// core-conformance: ${key}
-use uuid :: core.crypto.uuid
-fn run() {
+use uuid: core.crypto.uuid
+run: fn() {
     print(uuid.v4())
     print(uuid.v4())
 }
@@ -1723,8 +1723,8 @@ fn run() {
     [
       "direct Unit return propagation",
       `// core-conformance: ${key}
-use uuid :: core.crypto.uuid
-fn run() {
+use uuid: core.crypto.uuid
+run: fn() {
     uuid.v4() ?? return Err("uuid")
     print("ok")
 }
@@ -1734,9 +1734,9 @@ fn run() {
     [
       "bound Unit return propagation",
       `// core-conformance: ${key}
-use uuid :: core.crypto.uuid
-fn run() {
-    result :: uuid.v4() ?? return Err("uuid")
+use uuid: core.crypto.uuid
+run: fn() {
+    result: uuid.v4() ?? return Err("uuid")
     print(result)
 }
 `,
@@ -1751,8 +1751,8 @@ fn run() {
   }
 
   const directPanic = `// core-conformance: ${key}
-use uuid :: core.crypto.uuid
-fn run() {
+use uuid: core.crypto.uuid
+run: fn() {
     uuid.v4() ?? panic("uuid")
     print("ok")
 }
@@ -1766,15 +1766,15 @@ fn run() {
     throw new Error("interpolated observer fixture was rejected");
   }
 
-  const comptime = valid.replace("result ::", "@result ::").replace("print(result)", "print(@result)");
+  const comptime = valid.replace("result: ", "@result: ").replace("print(result)", "print(@result)");
   if (sourceErrors(key, comptime).length !== 0) {
     throw new Error("comptime binding fixture was rejected");
   }
 
   const generic = `// core-conformance: core.data.csv
-use data :: core.data
-fn run() {
-    result :: data.csv<Ticket>("rows")
+use data: core.data
+run: fn() {
+    result: data.csv<Ticket>("rows")
     print(result)
 }
 `;
@@ -1802,8 +1802,8 @@ fn run() {
 
   const expectedRows = ["core.fake.one", "core.fake.two"];
   const witness = (row, path) => ({ key: row, path, source: `// core-conformance: ${row}
-use fake :: core.fake
-fn run() {
+use fake: core.fake
+run: fn() {
     print(fake.${row.slice(row.lastIndexOf(".") + 1)}())
 }
 ` });

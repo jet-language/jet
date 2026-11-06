@@ -2,43 +2,43 @@
 // one valid hole must leave the receiver unchanged; retries see the same tail.
 use core.math
 
-fn float_bits(raw: String, expected: Int) -> Bool {
-    cursor :: Cursor.over(raw)
-    captured :: cursor.take_pattern("{value:Float}") ?? panic("Float capture rejected")
+float_bits: fn(raw: String, expected: Int) -> Bool {
+    cursor: Cursor.over(raw)
+    captured: cursor.take_pattern("{value:Float}") ?? panic("Float capture rejected")
     math.to_bits(captured.value) == expected
 }
 
-fn run() {
-    text :: Cursor.over("id=7;enabled=TRUE;tail")
+run: fn() {
+    text: Cursor.over("id=7;enabled=TRUE;tail")
     if text.take_pattern("id={id:Int};enabled={enabled:Bool};") == {
         .Err(error) -> print(error)
         .Ok(_) -> panic("uppercase Bool must miss")
     }
-    retry :: text.take_pattern("id={id:Int};enabled={enabled:String};") ?? panic("text miss consumed input")
+    retry: text.take_pattern("id={id:Int};enabled={enabled:String};") ?? panic("text miss consumed input")
     print("retry={retry.id}/{retry.enabled}")
-    tail :: text.take_pattern("{tail:String}") ?? panic("missing tail")
+    tail: text.take_pattern("{tail:String}") ?? panic("missing tail")
     print("tail={tail.tail}")
 
-    overflow :: Cursor.over("9223372036854775808!")
+    overflow: Cursor.over("9223372036854775808!")
     if overflow.take_pattern("{value:Int}!") == {
         .Err(error) -> print(error)
         .Ok(_) -> panic("i64 overflow must miss")
     }
-    preserved :: overflow.take_pattern("{raw:String}!") ?? panic("overflow miss consumed input")
+    preserved: overflow.take_pattern("{raw:String}!") ?? panic("overflow miss consumed input")
     print(preserved.raw)
-    minimum :: Cursor.over("-9223372036854775808!")
-    low :: minimum.take_pattern("{value:Int}!") ?? panic("MIN rejected")
+    minimum: Cursor.over("-9223372036854775808!")
+    low: minimum.take_pattern("{value:Int}!") ?? panic("MIN rejected")
     print(low.value)
 
-    reader :: Reader.over([U8]{0xAB, 0x01, 0x02, 0x03, 0xFE})
+    reader: Reader.over([U8]{0xAB, 0x01, 0x02, 0x03, 0xFE})
     if reader.take_pattern([U8]{"{first:U8}wrong"}) == {
         .Err(error) -> print(error)
         .Ok(_) -> panic("reader literal must miss")
     }
     print("remaining={reader.remaining()}")
-    packet :: reader.take_pattern([U8]{"{hi:U4}{lo:U4}{word:U24le}"}) ?? panic("reader miss consumed input")
+    packet: reader.take_pattern([U8]{"{hi:U4}{lo:U4}{word:U24le}"}) ?? panic("reader miss consumed input")
     print("packet={packet.hi}/{packet.lo}/{packet.word} remaining={reader.remaining()}")
-    rest :: reader.take_pattern([U8]{"{rest:...}"}) ?? panic("rest rejected")
+    rest: reader.take_pattern([U8]{"{rest:...}"}) ?? panic("rest rejected")
     print("rest={rest.rest.len()}/{rest.rest[0]}")
 
     if ([U8]{0xAB, 0xCD}) == {

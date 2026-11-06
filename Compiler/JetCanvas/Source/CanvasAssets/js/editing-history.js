@@ -505,7 +505,7 @@
     const end = spans[spans.length - 1].end;
     const snippet = src.slice(start, end);
     const trimmed = snippet.trim();
-    if (!trimmed || /^(?:pub\s+)?[A-Za-z_][\w.]*:\s*fn\b/.test(trimmed) || /^fn\s/.test(trimmed) || /^pub\s+fn\s/.test(trimmed)) return null;
+    if (!trimmed || /^(?:pub\s+)?[A-Za-z_][\w.]*:\s*fn\b/.test(trimmed) || /^fn\s/.test(trimmed)) return null;
     for (const span of spans) {
       if (span.start < start || span.end > end) return null;
     }

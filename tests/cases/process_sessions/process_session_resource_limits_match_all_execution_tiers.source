@@ -1,9 +1,9 @@
 
-use process :: core.process
+use process: core.process
 
-fn run() {
-    cpu_budget :: Duration.milliseconds(100) ?? panic("duration failed")
-    accepted :: process.cmd(["{work}/session_fixture", "output", "small"]){cap:resource_builders}.output_limit(16).run() ?? panic("under-limit run failed")
+run: fn() {
+    cpu_budget: Duration.milliseconds(100) ?? panic("duration failed")
+    accepted: process.cmd(["{work}/session_fixture", "output", "small"]){cap:resource_builders}.output_limit(16).run() ?? panic("under-limit run failed")
     print(accepted.success)
     print(accepted.output == "ok\n")
     if process.cmd(["{work}/session_fixture", "output", "large"]).output_limit(16).run() == {

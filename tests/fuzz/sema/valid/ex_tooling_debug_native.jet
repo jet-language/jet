@@ -10,19 +10,19 @@
 // real compiled binary via lldb instead, transparently. `--raw-frames`
 // (D-DBG2) is the expert opt-in that shows the raw Rust file:line instead of
 // the Jet source; `--dap` speaks the Debug Adapter Protocol for editor wiring.
-use fs :: core.files
+use fs: core.files
 
-fn word_count(text: String) -> Int {
+word_count: fn(text: String) -> Int {
     total := 0
     loop word in text.split(" ") -> total += 1
     return total
 }
 
-fn run() {
-    path :: "/tmp/jet_189_debug_native_notes.txt"
+run: fn() {
+    path: "/tmp/jet_189_debug_native_notes.txt"
     fs.write(path, "jet debug steps the full feature set") ?? return Err("write failed")
-    text :: fs.read(path) ?? ""
-    n :: word_count(text)
+    text: fs.read(path) ?? ""
+    n: word_count(text)
     print("that note has {n} words")
     fs.remove(path) ?? return Err("remove failed")
 }

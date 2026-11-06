@@ -1,20 +1,20 @@
 // core-conformance: app.subscribe
 use {
-    application :: app
+    application: app
     core.reactive.loadable.[Loadable]
 }
 
 #Error
-enum ReadError {
+ReadError: enum {
     Offline
 }
 
-fn reading(sensor: String) -> Int ReadError! {
+reading: fn(sensor: String) -> Int ReadError! {
     if sensor == "" -> return Err(ReadError.Offline)
     sensor.len()
 }
 
-fn shown(state: Loadable<Int, ReadError>) -> String {
+shown: fn(state: Loadable<Int, ReadError>) -> String {
     if state == {
         .Loaded(value) -> "loaded {value}"
         .Failed(_) -> "failed"
@@ -22,7 +22,7 @@ fn shown(state: Loadable<Int, ReadError>) -> String {
     }
 }
 
-fn run() {
-    binding :: application.subscribe(reading, "cpu")
+run: fn() {
+    binding: application.subscribe(reading, "cpu")
     print(shown(application.state(binding)))
 }

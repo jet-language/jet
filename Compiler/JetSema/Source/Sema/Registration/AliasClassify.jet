@@ -1,6 +1,6 @@
-// Owner ruling (#6176; amends D-TYPEALIAS1): `Name :: path` at file or module
-// scope means what its path names. The parser cannot tell `RNG :: random.RNG`
-// from `MAX :: other.MAX`, so it reads every bare-path right-hand side as a
+// Owner ruling (#6176; amends D-TYPEALIAS1): `Name: path` at file or module
+// scope means what its path names. The parser cannot tell `RNG: random.RNG`
+// from `MAX: other.MAX`, so it reads every bare-path right-hand side as a
 // constant binding (parser_path_binding_ahead_at). Before any module
 // registers, each such binding whose path resolves to a type becomes a
 // transparent type alias; every other one stays a constant. The name's casing
@@ -27,7 +27,7 @@ use jet_foundation.[
     import_walk_bindings,
 ]
 
-enum SemaAliasMeaning {
+SemaAliasMeaning: enum {
     Type
     Value
     Module
@@ -35,7 +35,7 @@ enum SemaAliasMeaning {
 }
 
 // What one declaration of a scope means for a path that reaches it.
-struct SemaAliasDeclared {
+SemaAliasDeclared: struct {
     meaning: SemaAliasMeaning
     // A bare-path constant binding: its own path, still to resolve.
     binding: [String]?
@@ -43,17 +43,17 @@ struct SemaAliasDeclared {
 
 // The lookup state of one path: the module input it resolves in, the inline
 // module scope inside that input, and the binding chain depth.
-struct SemaAliasSite {
+SemaAliasSite: struct {
     input: Int
     scope: [String]
     depth: Int
 }
 
-SEMA_ALIAS_MAX_DEPTH :: 32
+SEMA_ALIAS_MAX_DEPTH: 32
 
 // Rewrites, in place, every bare-path binding whose path names a type into a
 // type alias. Modules without such a binding are not walked again.
-fn sema_alias_classify_inputs(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge]) Never! {
+sema_alias_classify_inputs: fn(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge]) Never! {
     rows := [String:Int]{}
     pending := [Int]{}
     loop index in 0..<inputs.len() {
@@ -67,7 +67,7 @@ fn sema_alias_classify_inputs(inputs: &[SemaRegistrationModuleInput], edges: [Se
     }
 }
 
-fn sema_alias_items_bind_paths(items: [Item]) -> Bool Never! {
+sema_alias_items_bind_paths: fn(items: [Item]) -> Bool Never! {
     loop index in 0..<items.len() {
         if items[index] == .Const(definition) {
             if sema_alias_binding_path(definition) != None -> return true
@@ -81,14 +81,14 @@ fn sema_alias_items_bind_paths(items: [Item]) -> Bool Never! {
     false
 }
 
-// The path of a plain `Name :: path` binding: immutable, untyped, unmarked, and
+// The path of a plain `Name: path` binding: immutable, untyped, unmarked, and
 // a right-hand side that is only a dotted name.
-fn sema_alias_binding_path(definition: ConstDef) -> [String]? Never! {
+sema_alias_binding_path: fn(definition: ConstDef) -> [String]? Never! {
     if definition.mutable || definition.is_comptime || definition.is_persist || definition.ty != None || definition.meta != None || definition.ct != None || definition.attrs.len() > 0 -> return None
     sema_alias_expr_path(definition.value)
 }
 
-fn sema_alias_expr_path(value: Expr) -> [String]? Never! {
+sema_alias_expr_path: fn(value: Expr) -> [String]? Never! {
     if value == {
         .Ident(name, _, _) -> Val([String]{name})
         .Field(base, member, _, _) -> {
@@ -106,14 +106,14 @@ fn sema_alias_expr_path(value: Expr) -> [String]? Never! {
     }
 }
 
-fn sema_alias_key(definition: ConstDef) -> String Never! {
+sema_alias_key: fn(definition: ConstDef) -> String Never! {
     "{definition.name_span.start}:{definition.name_span.end}:{definition.name}"
 }
 
-fn sema_alias_collect_types(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], rows: [String:Int], index: Int, items: [Item], scope: [String], keys: &[String]) Never! {
+sema_alias_collect_types: fn(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], rows: [String:Int], index: Int, items: [Item], scope: [String], keys: &[String]) Never! {
     loop item_index in 0..<items.len() {
         if items[item_index] == .Const(definition) {
-            path :: sema_alias_binding_path(definition) ?? next
+            path: sema_alias_binding_path(definition) ?? next
             if sema_alias_path_meaning(inputs, edges, rows, SemaAliasSite{input: index, scope: scope, depth: 0}, path) == .Type -> &keys.push(sema_alias_key(definition))
         }
         if items[item_index] == .CodeModule(code_module) {
@@ -126,14 +126,14 @@ fn sema_alias_collect_types(inputs: [SemaRegistrationModuleInput], edges: [SemaR
     }
 }
 
-fn sema_alias_rewrite_items(items: [Item], keys: [String]) -> [Item] Never! {
+sema_alias_rewrite_items: fn(items: [Item], keys: [String]) -> [Item] Never! {
     rewritten := [Item]{}
     loop item in items {
         value := item
         if item == {
             .Const(definition) -> {
                 if keys.contains(sema_alias_key(definition)) {
-                    path :: sema_alias_binding_path(definition) ?? [String]{}
+                    path: sema_alias_binding_path(definition) ?? [String]{}
                     value = Item.TypeAlias{value: TypeAliasDef{is_pub: definition.is_pub, is_package_pub: definition.is_package_pub, name: definition.name, name_span: definition.name_span, type_params: [TypeParam]{}, target: foundation_named_type(path.join(".")), target_span: expr_span(definition.value), span: definition.span}}
                 }
             }
@@ -151,14 +151,14 @@ fn sema_alias_rewrite_items(items: [Item], keys: [String]) -> [Item] Never! {
 
 // The meaning of `path` written in `site`: each scope from the innermost
 // outward, with its imports, then the global types.
-fn sema_alias_path_meaning(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], rows: [String:Int], site: SemaAliasSite, path: [String]) -> SemaAliasMeaning Never! {
+sema_alias_path_meaning: fn(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], rows: [String:Int], site: SemaAliasSite, path: [String]) -> SemaAliasMeaning Never! {
     if site.depth > SEMA_ALIAS_MAX_DEPTH || path.len() == 0 -> return .Unknown
     level := site.scope.len()
     loop level >= 0 {
-        scope :: site.scope.slice(0, level)
-        declared :: sema_alias_declared_in(inputs[site.input].program.items, scope, 0, path[0])
+        scope: site.scope.slice(0, level)
+        declared: sema_alias_declared_in(inputs[site.input].program.items, scope, 0, path[0])
         if declared.meaning != .Unknown -> return sema_alias_follow(inputs, edges, rows, SemaAliasSite{input: site.input, scope: scope, depth: site.depth}, declared, path)
-        imported :: sema_alias_imported(inputs, edges, rows, SemaAliasSite{input: site.input, scope: scope, depth: site.depth}, path, false)
+        imported: sema_alias_imported(inputs, edges, rows, SemaAliasSite{input: site.input, scope: scope, depth: site.depth}, path, false)
         if imported != .Unknown -> return imported
         level -= 1
     }
@@ -168,21 +168,21 @@ fn sema_alias_path_meaning(inputs: [SemaRegistrationModuleInput], edges: [SemaRe
 
 // The meaning of `path` as a member of the scope `site` names in another
 // module: its declarations, then what it re-exports with `pub use`.
-fn sema_alias_member_meaning(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], rows: [String:Int], site: SemaAliasSite, path: [String]) -> SemaAliasMeaning Never! {
+sema_alias_member_meaning: fn(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], rows: [String:Int], site: SemaAliasSite, path: [String]) -> SemaAliasMeaning Never! {
     if site.depth > SEMA_ALIAS_MAX_DEPTH || path.len() == 0 -> return .Unknown
-    declared :: sema_alias_declared_in(inputs[site.input].program.items, site.scope, 0, path[0])
+    declared: sema_alias_declared_in(inputs[site.input].program.items, site.scope, 0, path[0])
     if declared.meaning != .Unknown -> return sema_alias_follow(inputs, edges, rows, site, declared, path)
     sema_alias_imported(inputs, edges, rows, site, path, true)
 }
 
 // The meaning of `path` whose head names `declared` in `site`.
-fn sema_alias_follow(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], rows: [String:Int], site: SemaAliasSite, declared: SemaAliasDeclared, path: [String]) -> SemaAliasMeaning Never! {
-    rest :: path.slice(1, path.len())
+sema_alias_follow: fn(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], rows: [String:Int], site: SemaAliasSite, declared: SemaAliasDeclared, path: [String]) -> SemaAliasMeaning Never! {
+    rest: path.slice(1, path.len())
     if declared.meaning == {
         .Type -> if rest.len() == 0 -> .Type else -> .Value
         .Value -> {
             if rest.len() > 0 -> return .Value
-            binding :: declared.binding ?? return .Value
+            binding: declared.binding ?? return .Value
             sema_alias_path_meaning(inputs, edges, rows, SemaAliasSite{input: site.input, scope: site.scope, depth: site.depth + 1}, binding)
         }
         .Module -> {
@@ -196,7 +196,7 @@ fn sema_alias_follow(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistra
 }
 
 // The declaration named `name` directly in the scope `scope` of `items`.
-fn sema_alias_declared_in(items: [Item], scope: [String], from: Int, name: String) -> SemaAliasDeclared Never! {
+sema_alias_declared_in: fn(items: [Item], scope: [String], from: Int, name: String) -> SemaAliasDeclared Never! {
     if from < scope.len() {
         loop index in 0..<items.len() {
             if items[index] == .CodeModule(code_module) {
@@ -206,15 +206,15 @@ fn sema_alias_declared_in(items: [Item], scope: [String], from: Int, name: Strin
         return SemaAliasDeclared{meaning: .Unknown, binding: None}
     }
     loop index in 0..<items.len() {
-        declared :: sema_alias_item_declares(items[index], name)
+        declared: sema_alias_item_declares(items[index], name)
         if declared.meaning != .Unknown -> return declared
     }
     SemaAliasDeclared{meaning: .Unknown, binding: None}
 }
 
 // What `item` means when it declares `name`; `.Unknown` otherwise.
-fn sema_alias_item_declares(item: Item, name: String) -> SemaAliasDeclared Never! {
-    meaning :: if item == {
+sema_alias_item_declares: fn(item: Item, name: String) -> SemaAliasDeclared Never! {
+    meaning: if item == {
         .Struct(value) -> sema_alias_meaning_if(value.name == name, .Type)
         .Enum(value) -> sema_alias_meaning_if(value.name == name, .Type)
         .Distinct(value) -> sema_alias_meaning_if(value.name == name, .Type)
@@ -231,27 +231,27 @@ fn sema_alias_item_declares(item: Item, name: String) -> SemaAliasDeclared Never
     SemaAliasDeclared{meaning: meaning, binding: None}
 }
 
-fn sema_alias_meaning_if(matches: Bool, meaning: SemaAliasMeaning) -> SemaAliasMeaning Never! {
+sema_alias_meaning_if: fn(matches: Bool, meaning: SemaAliasMeaning) -> SemaAliasMeaning Never! {
     if matches -> meaning else -> .Unknown
 }
 
 // The meaning of `path` through an import of the scope `site`. A module's
 // member (`exported`) is reached only through its `pub use` re-exports.
-fn sema_alias_imported(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], rows: [String:Int], site: SemaAliasSite, path: [String], exported: Bool) -> SemaAliasMeaning Never! {
-    identity :: inputs[site.input].module_identity
-    source_scope :: site.scope.join(".")
+sema_alias_imported: fn(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], rows: [String:Int], site: SemaAliasSite, path: [String], exported: Bool) -> SemaAliasMeaning Never! {
+    identity: inputs[site.input].module_identity
+    source_scope: site.scope.join(".")
     loop edge in edges {
         if edge.source_module_identity != identity || edge.source_scope != source_scope -> next
         if exported && !edge.declaration.is_pub -> next
-        target :: rows.get(edge.target_module_identity) ?? next
-        meaning :: sema_alias_import_meaning(inputs, edges, rows, SemaAliasSite{input: target, scope: [String]{}, depth: site.depth + 1}, edge.declaration, path)
+        target: rows.get(edge.target_module_identity) ?? next
+        meaning: sema_alias_import_meaning(inputs, edges, rows, SemaAliasSite{input: target, scope: [String]{}, depth: site.depth + 1}, edge.declaration, path)
         if meaning != .Unknown -> return meaning
     }
     SemaAliasMeaning.Unknown
 }
 
-fn sema_alias_import_meaning(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], rows: [String:Int], target: SemaAliasSite, declaration: ImportDecl, path: [String]) -> SemaAliasMeaning Never! {
-    rest :: path.slice(1, path.len())
+sema_alias_import_meaning: fn(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], rows: [String:Int], target: SemaAliasSite, declaration: ImportDecl, path: [String]) -> SemaAliasMeaning Never! {
+    rest: path.slice(1, path.len())
     loop binding in import_walk_bindings(declaration) {
         if binding.original == .Val(original) {
             if binding.local != path[0] -> next
@@ -259,7 +259,7 @@ fn sema_alias_import_meaning(inputs: [SemaRegistrationModuleInput], edges: [Sema
             loop part in rest -> &member.push(part)
             return sema_alias_member_meaning(inputs, edges, rows, target, member)
         }
-        parts :: binding.local.split(".").to_list()
+        parts: binding.local.split(".").to_list()
         if binding.local != path[0] && parts[parts.len() - 1] != path[0] -> next
         if rest.len() == 0 -> return .Unknown
         return sema_alias_member_meaning(inputs, edges, rows, target, rest)
@@ -268,7 +268,7 @@ fn sema_alias_import_meaning(inputs: [SemaRegistrationModuleInput], edges: [Sema
 }
 
 // A bare name every module sees as a type.
-fn sema_alias_global_type(inputs: [SemaRegistrationModuleInput], name: String) -> Bool Never! {
+sema_alias_global_type: fn(inputs: [SemaRegistrationModuleInput], name: String) -> Bool Never! {
     if foundation_named_type(name) != (Type.Named{name: name}) -> return true
     if name == "Unit" || name == "Never" || name == "Err" || sema_registration_core_builtin_is_name(name) || core_root_type(name) -> return true
     loop index in 0..<inputs.len() {

@@ -9,7 +9,7 @@ use {
     jet_foundation.[Variant]
 }
 
-enum LockRecordKind {
+LockRecordKind: enum {
     Package
     SourceRef
     WorkspaceMember
@@ -30,7 +30,7 @@ enum LockRecordKind {
     // A kind this reader does not know, kept verbatim for round trips.
     Future(String)
 
-    fn label(self) -> String Never! {
+    label: fn(self) -> String Never! {
         if self == {
             .Package -> "package"
             .SourceRef -> "source-ref"
@@ -52,7 +52,7 @@ enum LockRecordKind {
         }
     }
 
-    fn parse(raw: String) -> LockRecordKind Never! {
+    parse: fn(raw: String) -> LockRecordKind Never! {
         if raw == {
             "package" -> LockRecordKind.Package
             "source-ref" -> LockRecordKind.SourceRef
@@ -75,7 +75,7 @@ enum LockRecordKind {
     }
 }
 
-struct LockIdentity {
+LockIdentity: struct {
     kind: LockRecordKind
     key: String
     exact: String
@@ -83,18 +83,18 @@ struct LockIdentity {
     platform: String
 
     // `kind:key`: the merge and explain key.
-    fn semantic_key(self) -> String Never! {
+    semantic_key: fn(self) -> String Never! {
         "{self.kind.label()}:{self.key}"
     }
 
     // Every machine fact; two records agree exactly when these agree.
-    fn machine_identity(self) -> String Never! {
+    machine_identity: fn(self) -> String Never! {
         "{self.kind.label()}:{self.key}:{self.exact}:{self.hash}:{self.platform}"
     }
 }
 
 // Why a record exists and who asked for it. Never part of the identity.
-struct LockRationale {
+LockRationale: struct {
     owner_package: String
     reason: String
     source_ref: String
@@ -108,12 +108,12 @@ struct LockRationale {
     cache_provenance: String
     update_command: String
 
-    fn empty() -> LockRationale Never! {
+    empty: fn() -> LockRationale Never! {
         LockRationale{owner_package: "", reason: "", source_ref: "", provider: "", channel_input: "", exact_output: "", policy_fingerprint: "", recipe_id: "", adapter_id: "", signature: "", cache_provenance: "", update_command: ""}
     }
 
     // Set one `.jet/lock` rationale field by its key; unknown keys are ignored.
-    fn set_field(&self, key: String, value: String) Never! {
+    set_field: fn(&self, key: String, value: String) Never! {
         if key == {
             "owner-package" -> self.owner_package = value
             "reason" -> self.reason = value
@@ -132,45 +132,45 @@ struct LockRationale {
     }
 }
 
-struct SemanticRecord {
+SemanticRecord: struct {
     identity: LockIdentity
     rationales: [LockRationale]
     // Fields written by a newer lock, kept by key for round trips.
     future_fields: [String: String]
 
-    fn new(identity: LockIdentity, rationale: LockRationale) -> SemanticRecord Never! {
+    new: fn(identity: LockIdentity, rationale: LockRationale) -> SemanticRecord Never! {
         SemanticRecord{identity, rationales: [LockRationale]{rationale}, future_fields: [String: String]{}}
     }
 }
 
 // One flake-style lock input with an optional `follows` edge (E4-JP13).
-struct LockInput {
+LockInput: struct {
     name: String
     url: String
     follows: String
 }
 
 // Package pattern -> allowed source authorities (dependency-confusion guard).
-struct SourceMapEntry {
+SourceMapEntry: struct {
     pattern: String
     sources: [String]
 }
 
-struct SemanticLockFile {
+SemanticLockFile: struct {
     records: [SemanticRecord]
     inputs: [LockInput]
     source_maps: [SourceMapEntry]
 
-    fn empty() -> SemanticLockFile Never! {
+    empty: fn() -> SemanticLockFile Never! {
         SemanticLockFile{records: [SemanticRecord]{}, inputs: [LockInput]{}, source_maps: [SourceMapEntry]{}}
     }
 
-    fn with_records(records: [SemanticRecord]) -> SemanticLockFile Never! {
+    with_records: fn(records: [SemanticRecord]) -> SemanticLockFile Never! {
         SemanticLockFile{records, inputs: [LockInput]{}, source_maps: [SourceMapEntry]{}}
     }
 
     // Drop every record of `kind` whose key is `key`.
-    fn remove_records(&self, kind: LockRecordKind, key: String) Never! {
+    remove_records: fn(&self, kind: LockRecordKind, key: String) Never! {
         kept := [SemanticRecord]{}
         loop record in self.records {
             if record.identity.kind == kind && record.identity.key == key -> next
@@ -181,8 +181,8 @@ struct SemanticLockFile {
 
     // Selective update: replace one semantic key; unrelated records keep
     // their bytes. Returns the replaced record.
-    fn selective_update(&self, new_record: SemanticRecord) -> SemanticRecord? Never! {
-        key :: new_record.identity.semantic_key()
+    selective_update: fn(&self, new_record: SemanticRecord) -> SemanticRecord? Never! {
+        key: new_record.identity.semantic_key()
         found := -1
         loop index in 0..<self.records.len() {
             if self.records[index].identity.semantic_key() == key {
@@ -194,7 +194,7 @@ struct SemanticLockFile {
             &self.records.push(new_record)
             return None
         }
-        previous :: self.records[found].copy()
+        previous: self.records[found].copy()
         kept := [SemanticRecord]{}
         loop index in 0..<self.records.len() {
             if index != found -> &kept.push(self.records[index])
@@ -206,8 +206,8 @@ struct SemanticLockFile {
 
     // Record a selected typed variant (E4-JP15). `platform` holds the
     // canonical `PackageVariant::identity_key()`.
-    fn record_selected_variant(&self, package: String, variant_identity: String, hash: String, reason: String) Never! {
-        identity :: LockIdentity{kind: LockRecordKind.Variant, key: package, exact: variant_identity, hash, platform: variant_identity}
+    record_selected_variant: fn(&self, package: String, variant_identity: String, hash: String, reason: String) Never! {
+        identity: LockIdentity{kind: LockRecordKind.Variant, key: package, exact: variant_identity, hash, platform: variant_identity}
         rationale := LockRationale.empty()
         rationale.owner_package = package
         rationale.reason = reason
@@ -218,7 +218,7 @@ struct SemanticLockFile {
     }
 
     // Identity keys of every locked variant domain, sorted and unique.
-    fn locked_variant_domains(self) -> [String] Never! {
+    locked_variant_domains: fn(self) -> [String] Never! {
         domains := [String]{}
         loop record in self.records {
             if record.identity.kind == LockRecordKind.Variant -> &domains.push(record.identity.exact)
@@ -227,9 +227,9 @@ struct SemanticLockFile {
     }
 
     // Record a workspace catalog selection (E4-JP13).
-    fn record_catalog_selection(&self, owner: String, logical_name: String, provider_ref: String, hash: String, platform: String, rationale: String) Never! {
-        identity :: LockIdentity{kind: LockRecordKind.Package, key: logical_name, exact: provider_ref, hash, platform}
-        provider :: if trust_text_split_first(provider_ref, TRUST_COLON) == {
+    record_catalog_selection: fn(&self, owner: String, logical_name: String, provider_ref: String, hash: String, platform: String, rationale: String) Never! {
+        identity: LockIdentity{kind: LockRecordKind.Package, key: logical_name, exact: provider_ref, hash, platform}
+        provider: if trust_text_split_first(provider_ref, TRUST_COLON) == {
             .Val(parts) -> parts.before
             .None -> provider_ref.copy()
         }

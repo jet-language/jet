@@ -1,19 +1,19 @@
 
-use time :: core.time
+use time: core.time
 
-fn slow_one() -> Int {
+slow_one: fn() -> Int {
     time.sleep(100ms)
     return 1
 }
 
-fn slow_three() -> Int {
+slow_three: fn() -> Int {
     time.sleep(100ms)
     return 3
 }
 
-fn run() {
+run: fn() {
     task.group workers {
-        nested :: task.all {
+        nested: task.all {
             task.race { slow_one(), 2 } ?? 0,
             task.any { slow_three(), 4 } ?? 0
         } ?? []

@@ -4,43 +4,43 @@
 // the checked `Int` to `Float` widening (#3739).
 // Run with `jet run Examples/features/types/typed_literal_forms.jet`.
 use {
-    math :: core.math
+    math: core.math
     core.time.[DateTime]
 }
 
-fn fetch_rows() -> Int { 7 }
+fetch_rows: fn() -> Int { 7 }
 
-fn run() {
+run: fn() {
     // Scalar type + literal body (range-checked for fixed widths).
-    limit :: U8{250}
+    limit: U8{250}
     print("{limit}")
     // List type + element body.
-    packet :: [U8]{42, 0, 0}
+    packet: [U8]{42, 0, 0}
     print("{packet[0]} {packet[1]} {packet[2]}")
     // Fixed-array type.
-    rgb :: [U8#3]{255, 128, 0}
+    rgb: [U8#3]{255, 128, 0}
     print("{rgb[0]} {rgb[1]} {rgb[2]}")
     // Explicit empty map (amends D-EMPTYLIT1).
     scores := [String:Int]{}
     scores["a"] = 1
     print("{scores["a"]}")
     // One-expression body: already an Int, so it is the whole value.
-    count :: Int{fetch_rows()}
+    count: Int{fetch_rows()}
     print("{count}")
     // A Float is not an Int body. Name the rounding or checked conversion.
-    fraction :: Float{1.5}
+    fraction: Float{1.5}
     print(math.round(fraction))
     print(Int.from_float(fraction) ?? panic("finite conversion"))
     // Nested list: inner bodies may be typed or plain list forms.
-    grid :: [[U8]]{{1, 0}, [0, 1]}
+    grid: [[U8]]{{1, 0}, [0, 1]}
     print("{grid[0][0]} {grid[0][1]} {grid[1][0]} {grid[1][1]}")
 
     // D-BOUND-HEAD1=A: checked boundary values use one shared hole law.
-    service :: "ada lovelace"
-    endpoint :: URL{"https://api.example.com/v2/{service}"}
+    service: "ada lovelace"
+    endpoint: URL{"https://api.example.com/v2/{service}"}
     print(endpoint.to_string())
-    log_path :: Path{"/var/log/{service}.log"}
+    log_path: Path{"/var/log/{service}.log"}
     print(log_path.to_string())
-    stamp :: DateTime{"2026-08-07T12:00:00Z"}
+    stamp: DateTime{"2026-08-07T12:00:00Z"}
     print(stamp.to_string())
 }

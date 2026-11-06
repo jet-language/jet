@@ -3,21 +3,21 @@
 // bodies, root impl items, and test declarations over closed lists.
 derive T.FieldNames {
     comptime loop field in T.$fields {
-        method :: "field_{field.$name}"
-        fn $method(self) -> String { field.$name }
+        method: "field_{field.$name}"
+        $method: fn(self) -> String { field.$name }
     }
 }
 
-struct AddMarkerFields {
+AddMarkerFields: struct {
     impl Marker {
-        sites :: [.Type]
+        sites: [.Type]
 
-        fn expand(self, target: Target) {
-            type_name :: target.$name
+        expand: fn(self, target: Target) {
+            type_name: target.$name
             comptime loop field in target.$fields {
-                method :: "marked_{field.$name}"
+                method: "marked_{field.$name}"
                 impl $type_name {
-                    fn $method(self) -> String { field.$name }
+                    $method: fn(self) -> String { field.$name }
                 }
             }
         }
@@ -25,25 +25,25 @@ struct AddMarkerFields {
 }
 
 #[FieldNames, AddMarkerFields]
-struct Point {
+Point: struct {
     x: Int
     y: Int
 }
 
-struct Size {
+Size: struct {
     width: Int
 }
 
-struct Case {
+Case: struct {
     n: Int
 }
 
-CASES :: comptime { [Case]{Case{n: 1}, Case{n: 2}} }
+CASES: comptime { [Case]{Case{n: 1}, Case{n: 2}} }
 
 // One loop over a closed type list generates a method on each type.
 comptime loop T in [Point, Size] {
     impl T {
-        fn kind(self) -> String { "generated" }
+        kind: fn(self) -> String { "generated" }
     }
 }
 
@@ -53,7 +53,7 @@ comptime loop case in CASES {
     }
 }
 
-fn run() {
+run: fn() {
     point := Point{x: 1, y: 2}
     size := Size{width: 3}
     print(point.field_x())

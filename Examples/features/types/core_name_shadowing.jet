@@ -1,24 +1,24 @@
 // A program's own declarations keep their identity when a loaded Core module
-// declares types with the same names. `core.font` declares `enum FontStyle
-// { Body Title Monospace }` and `struct FontFace { family size style }`; the
+// declares types with the same names. `core.font` declares `FontStyle: enum
+// { Body Title Monospace }` and `FontFace: struct { family size style }`; the
 // declarations below reuse both names with a different variant order and a
 // different field order. Folded `comptime` constants, field reads and matches must
 // all resolve to these declarations, never to Core's (#4003).
 use core.font
 
-enum FontStyle {
+FontStyle: enum {
     Monospace
     Title
     Body
 }
 
-struct FontFace {
+FontFace: struct {
     size: Int
     style: FontStyle?
     family: String
 }
 
-FACES :: comptime {
+FACES: comptime {
     [FontFace]{
         FontFace{family: "Serif", size: 12, style: Val(FontStyle.Body)},
         FontFace{family: "Code", size: 10, style: Val(FontStyle.Monospace)},
@@ -26,9 +26,9 @@ FACES :: comptime {
     }
 }
 
-ORDER :: comptime { [FontStyle]{FontStyle.Title, FontStyle.Body} }
+ORDER: comptime { [FontStyle]{FontStyle.Title, FontStyle.Body} }
 
-fn describe(style: FontStyle) -> String {
+describe: fn(style: FontStyle) -> String {
     if style == {
         .Monospace -> "fixed-width"
         .Title -> "heading"
@@ -36,7 +36,7 @@ fn describe(style: FontStyle) -> String {
     }
 }
 
-fn run() {
+run: fn() {
     loop face in FACES {
         if face.style == {
             .Val(style) -> print("{face.family} {face.size}pt {style} ({describe(style)})")

@@ -1,9 +1,9 @@
 use {
-    core :: core
+    core: core
     core.data.[DataError, DataErrorKind, DataStream]
 }
 
-fn stream_error(kind: DataErrorKind, reason: String, operation: String) -> DataError Never! {
+stream_error: fn(kind: DataErrorKind, reason: String, operation: String) -> DataError Never! {
     DataError{
         kind: kind,
         operation: operation,
@@ -24,23 +24,23 @@ fn stream_error(kind: DataErrorKind, reason: String, operation: String) -> DataE
 // construct DataStream<T> before these operations are called, so this module
 // never coerces a String into T.
 
-fn from_items<T>(items: ^[T]) -> DataStream<T> Never! {
+from_items: fn<T>(items: ^[T]) -> DataStream<T> Never! {
     DataStream<T>{items: items, index: 0, cancelled: false, __source: None}
 }
 
-fn next<T>(stream: &DataStream<T>) -> T? DataError! {
+next: fn<T>(stream: &DataStream<T>) -> T? DataError! {
     core.data.__stream_pull<T>(&stream)
 }
 
-fn collect<T>(stream: &DataStream<T>) -> [T] DataError! {
+collect: fn<T>(stream: &DataStream<T>) -> [T] DataError! {
     core.data.__stream_collect<T>(&stream)
 }
 
-fn cancel<T>(stream: &DataStream<T>) Never! {
+cancel: fn<T>(stream: &DataStream<T>) Never! {
     stream.cancelled = true
 }
 
-fn skip<T>(stream: &DataStream<T>, count: Int) Never! {
+skip: fn<T>(stream: &DataStream<T>, count: Int) Never! {
     remaining := count
     loop remaining > 0 {
         if core.data.__stream_pull<T>(&stream) == {
@@ -55,19 +55,19 @@ fn skip<T>(stream: &DataStream<T>, count: Int) Never! {
     }
 }
 
-fn take_n<T>(stream: &DataStream<T>, count: Int) -> [T] DataError! {
+take_n: fn<T>(stream: &DataStream<T>, count: Int) -> [T] DataError! {
     if stream.cancelled -> return Err(stream_error(DataErrorKind.State, "stream was cancelled", "data.stream"))
     out := [T]{}
     remaining := count
     loop remaining > 0 {
-        item :: core.data.__stream_pull<T>(&stream)
-        row :: item ?? return Ok(out)
+        item: core.data.__stream_pull<T>(&stream)
+        row: item ?? return Ok(out)
         &out.push(row)
         remaining = remaining - 1
     }
     Ok(out)
 }
 
-fn len<T>(stream: DataStream<T>) -> Int Never! { core.data.__stream_remaining<T>(stream) }
+len: fn<T>(stream: DataStream<T>) -> Int Never! { core.data.__stream_remaining<T>(stream) }
 
-fn is_empty<T>(stream: DataStream<T>) -> Bool Never! { len<T>(stream) == 0 }
+is_empty: fn<T>(stream: DataStream<T>) -> Bool Never! { len<T>(stream) == 0 }

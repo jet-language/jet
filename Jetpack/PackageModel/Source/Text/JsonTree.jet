@@ -1,13 +1,13 @@
 // Dyn accessors shared by the PackageModel codecs. Parsing and
 // rendering are Core's (`json`); these only read one shape out of a tree.
-use pkg_json_tree_core :: core.encoding.json
+use pkg_json_tree_core: core.encoding.json
 
 // The Rust `Dyn` accessor failures the reference embeds in its errors.
-PKG_JSON_NOT_OBJECT :: "expected a Dyn object"
-PKG_JSON_NOT_ARRAY :: "expected a Dyn array"
-PKG_JSON_NOT_STRING :: "expected a Dyn string"
+PKG_JSON_NOT_OBJECT: "expected a Dyn object"
+PKG_JSON_NOT_ARRAY: "expected a Dyn array"
+PKG_JSON_NOT_STRING: "expected a Dyn string"
 
-fn pkg_json_object(value: Dyn) -> [String: Dyn]? Never! {
+pkg_json_object: fn(value: Dyn) -> [String: Dyn]? Never! {
     if value == {
         // The object's ordered pairs, indexed by name.
         .Object(fields) -> {
@@ -19,7 +19,7 @@ fn pkg_json_object(value: Dyn) -> [String: Dyn]? Never! {
     }
 }
 
-fn pkg_json_array(value: Dyn) -> [Dyn]? Never! {
+pkg_json_array: fn(value: Dyn) -> [Dyn]? Never! {
     if value == {
         .Array(items) -> Val(items)
         else -> None
@@ -28,24 +28,24 @@ fn pkg_json_array(value: Dyn) -> [Dyn]? Never! {
 
 // serde_json object equality: the same names, each value structurally equal
 // with nested object entries in any order.
-fn pkg_json_objects_equal(left: [String: Dyn], right: [String: Dyn]) -> Bool Never! {
+pkg_json_objects_equal: fn(left: [String: Dyn], right: [String: Dyn]) -> Bool Never! {
     if left.len() != right.len() -> return false
     loop key in left.keys() {
-        mine :: left.get(key) ?? return false
-        theirs :: right.get(key) ?? return false
+        mine: left.get(key) ?? return false
+        theirs: right.get(key) ?? return false
         if !mine.equal_unordered(theirs) -> return false
     }
     true
 }
 
-fn pkg_json_text(value: Dyn) -> String? Never! {
+pkg_json_text: fn(value: Dyn) -> String? Never! {
     if value == {
         .Text(text) -> Val(text)
         else -> None
     }
 }
 
-fn pkg_json_bool(value: Dyn) -> Bool? Never! {
+pkg_json_bool: fn(value: Dyn) -> Bool? Never! {
     if value == {
         .Bool(flag) -> Val(flag)
         else -> None
@@ -55,12 +55,12 @@ fn pkg_json_bool(value: Dyn) -> Bool? Never! {
 // Compact JSON with object keys in insertion order. Parsed file trees and
 // Jetpack-owned facts exclude nonfinite numbers and unsupported native values;
 // an encoding failure here breaches that invariant, not a recoverable document.
-fn pkg_json_render(value: Dyn) -> String Never! {
+pkg_json_render: fn(value: Dyn) -> String Never! {
     pkg_json_tree_core.to_string(value) ?? panic("Jetpack rendered a value JSON can't encode: {err.kind:Debug}")
 }
 
 // A string array of `values`.
-fn pkg_json_texts(values: [String]) -> Dyn Never! {
+pkg_json_texts: fn(values: [String]) -> Dyn Never! {
     items := [Dyn]{}
     loop value in values -> &items.push(Dyn.Text(value))
     Dyn.Array(items)

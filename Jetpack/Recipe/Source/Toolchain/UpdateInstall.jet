@@ -7,32 +7,32 @@
 // (MoveFileExW with MOVEFILE_DELAY_UNTIL_REBOOT). Core has no such call, so
 // the helper copy is left in the temporary directory.
 
-TOOLCHAIN_WINDOWS_HELPER_ENV :: "JET_TOOLCHAIN_UPDATE_HELPER"
-TOOLCHAIN_WINDOWS_HANDOFF_ATTEMPTS :: 600
-TOOLCHAIN_WINDOWS_HANDOFF_WAIT_MS :: 50
+TOOLCHAIN_WINDOWS_HELPER_ENV: "JET_TOOLCHAIN_UPDATE_HELPER"
+TOOLCHAIN_WINDOWS_HANDOFF_ATTEMPTS: 600
+TOOLCHAIN_WINDOWS_HANDOFF_WAIT_MS: 50
 
 // How a verified artifact was installed.
-enum ToolchainInstallOutcome {
+ToolchainInstallOutcome: enum {
     Applied
     Deferred
 }
 
 // Verify the configured channel and, when `apply` is set, install the
 // verified artifact. Without apply this is a complete dry-run verification.
-fn recipe_toolchain_update_run(options: ToolchainUpdateOptions, current_exe: String?) -[FS, Env, Exec, Net, Time, Time.Wait]> ToolchainUpdateResult RecipeError! {
+recipe_toolchain_update_run: fn(options: ToolchainUpdateOptions, current_exe: String?) -[FS, Env, Exec, Net, Time, Time.Wait]> ToolchainUpdateResult RecipeError! {
     recipe_toolchain_update_run_at(options, current_exe, recipe_update_now_seconds())
 }
 
-fn recipe_toolchain_update_run_at(options: ToolchainUpdateOptions, current_exe: String?, now: Int) -[FS, Env, Exec, Net, Time, Time.Wait]> ToolchainUpdateResult RecipeError! {
+recipe_toolchain_update_run_at: fn(options: ToolchainUpdateOptions, current_exe: String?, now: Int) -[FS, Env, Exec, Net, Time, Time.Wait]> ToolchainUpdateResult RecipeError! {
     if options.apply && options.dry_run -> return Err(RecipeError.Update("apply and dry-run cannot be combined"))
-    host_target :: recipe_toolchain_default_target()
+    host_target: recipe_toolchain_default_target()
     if options.apply && options.platform != host_target {
         return Err(RecipeError.Update("apply requires the exact host platform {host_target}; selected {options.platform} is dry-run only"))
     }
-    resolved :: recipe_update_resolve(options, now)
+    resolved: recipe_update_resolve(options, now)
     if !options.apply -> return Ok(ToolchainUpdateResult{plan: resolved.plan, applied: false, deferred: false})
-    exe :: current_exe ?? return Err(RecipeError.Update("self-update installation needs the current executable path"))
-    outcome :: recipe_update_install_verified(exe, resolved.artifact, resolved.plan, options.state_path, options.running_version)
+    exe: current_exe ?? return Err(RecipeError.Update("self-update installation needs the current executable path"))
+    outcome: recipe_update_install_verified(exe, resolved.artifact, resolved.plan, options.state_path, options.running_version)
     if outcome == {
         .Applied -> Ok(ToolchainUpdateResult{plan: resolved.plan, applied: true, deferred: false})
         .Deferred -> Ok(ToolchainUpdateResult{plan: resolved.plan, applied: false, deferred: true})
@@ -40,27 +40,27 @@ fn recipe_toolchain_update_run_at(options: ToolchainUpdateOptions, current_exe: 
 }
 
 // Seconds since the Unix epoch.
-fn recipe_update_now_seconds() -[Time]> Int RecipeError! {
-    ns :: time.unix_ns()
+recipe_update_now_seconds: fn() -[Time]> Int RecipeError! {
+    ns: time.unix_ns()
     if ns < 0 -> return Err(RecipeError.Update("system clock is before the Unix epoch"))
     Ok(ns /% 1000000000)
 }
 
 // A verified plan and the exact artifact bytes it describes.
-struct ToolchainResolved {
+ToolchainResolved: struct {
     plan: ToolchainUpdatePlan
     artifact: [U8]
 }
 
 // Fetch and verify the manifest, its signature, policy and state, then the
 // artifact, its size, digest and signature.
-fn recipe_update_resolve(options: ToolchainUpdateOptions, now: Int) -[FS, Env, Net, Time.Wait]> ToolchainResolved RecipeError! {
+recipe_update_resolve: fn(options: ToolchainUpdateOptions, now: Int) -[FS, Env, Net, Time.Wait]> ToolchainResolved RecipeError! {
     recipe_update_validate_component(options.channel, "channel")
     recipe_update_validate_component(options.platform, "platform")
     SemanticVersion.parse(options.running_version, "running Jet version")
     recipe_update_validate_no_symlink_ancestors(options.state_path, "toolchain update state")
-    endpoint :: recipe_update_parse_endpoint(options.endpoint)
-    is_file_endpoint :: if endpoint == {
+    endpoint: recipe_update_parse_endpoint(options.endpoint)
+    is_file_endpoint: if endpoint == {
         .File(_) -> true
         .HTTP(_) -> false
     }
@@ -69,16 +69,16 @@ fn recipe_update_resolve(options: ToolchainUpdateOptions, now: Int) -[FS, Env, N
     }
     trusted := ToolchainTrustedKey?{None}
     if !options.allow_unofficial -> trusted = Val(recipe_update_read_public_key(options.trust_key))
-    manifest_path :: "v1/{options.channel}/manifest.json"
-    manifest_bytes :: recipe_update_fetch_bytes(endpoint, manifest_path, TOOLCHAIN_MAX_MANIFEST_BYTES, "toolchain channel manifest")
+    manifest_path: "v1/{options.channel}/manifest.json"
+    manifest_bytes: recipe_update_fetch_bytes(endpoint, manifest_path, TOOLCHAIN_MAX_MANIFEST_BYTES, "toolchain channel manifest")
     if trusted == {
         .Val(key) -> {
-            signature :: recipe_update_fetch_bytes(endpoint, "{manifest_path}.sig.json", TOOLCHAIN_MAX_SIGNATURE_BYTES, "toolchain channel manifest signature")
+            signature: recipe_update_fetch_bytes(endpoint, "{manifest_path}.sig.json", TOOLCHAIN_MAX_SIGNATURE_BYTES, "toolchain channel manifest signature")
             recipe_update_verify_signature(key, TOOLCHAIN_MANIFEST_DOMAIN, manifest_bytes, signature, "toolchain channel manifest")
         }
         .None -> {}
     }
-    manifest :: ToolchainChannelManifest.parse(manifest_bytes, options.channel)
+    manifest: ToolchainChannelManifest.parse(manifest_bytes, options.channel)
     recipe_update_validate_manifest_policy(manifest, options, now)
     artifact := ToolchainArtifact?{None}
     loop candidate in manifest.artifacts {
@@ -87,9 +87,9 @@ fn recipe_update_resolve(options: ToolchainUpdateOptions, now: Int) -[FS, Env, N
             break
         }
     }
-    selected :: artifact ?? return Err(RecipeError.Update("toolchain channel has no artifact for {options.platform}"))
-    fetch_limit :: if selected.size < TOOLCHAIN_MAX_ARTIFACT_BYTES -> selected.size else -> TOOLCHAIN_MAX_ARTIFACT_BYTES
-    artifact_bytes :: recipe_update_fetch_bytes(endpoint, selected.path, fetch_limit, "toolchain artifact")
+    selected: artifact ?? return Err(RecipeError.Update("toolchain channel has no artifact for {options.platform}"))
+    fetch_limit: if selected.size < TOOLCHAIN_MAX_ARTIFACT_BYTES -> selected.size else -> TOOLCHAIN_MAX_ARTIFACT_BYTES
+    artifact_bytes: recipe_update_fetch_bytes(endpoint, selected.path, fetch_limit, "toolchain artifact")
     if selected.size > TOOLCHAIN_MAX_ARTIFACT_BYTES || artifact_bytes.len() != selected.size {
         return Err(RecipeError.Update("toolchain artifact size disagrees with the channel manifest"))
     }
@@ -97,13 +97,13 @@ fn recipe_update_resolve(options: ToolchainUpdateOptions, now: Int) -[FS, Env, N
     key_id := String?{None}
     if trusted == {
         .Val(key) -> {
-            signature :: recipe_update_fetch_bytes(endpoint, selected.signature, TOOLCHAIN_MAX_SIGNATURE_BYTES, "toolchain artifact signature")
+            signature: recipe_update_fetch_bytes(endpoint, selected.signature, TOOLCHAIN_MAX_SIGNATURE_BYTES, "toolchain artifact signature")
             recipe_update_verify_signature(key, TOOLCHAIN_ARTIFACT_DOMAIN, artifact_bytes, signature, "toolchain artifact")
             key_id = Val(key.key_id)
         }
         .None -> {}
     }
-    plan :: ToolchainUpdatePlan{
+    plan: ToolchainUpdatePlan{
         endpoint: options.endpoint,
         channel: options.channel,
         version: manifest.version,
@@ -123,33 +123,33 @@ fn recipe_update_resolve(options: ToolchainUpdateOptions, now: Int) -[FS, Env, N
 }
 
 // Release policy plus, when state exists, the monotonic transition rule.
-fn recipe_update_validate_manifest_policy(manifest: ToolchainChannelManifest, options: ToolchainUpdateOptions, now: Int) RecipeError! -[FS, Env]> {
+recipe_update_validate_manifest_policy: fn(manifest: ToolchainChannelManifest, options: ToolchainUpdateOptions, now: Int) RecipeError! -[FS, Env]> {
     recipe_update_validate_release_policy(manifest.version, manifest.min_version, manifest.published_at, manifest.expires_at, options.running_version, now)
-    state :: recipe_update_read_state(options.state_path)
+    state: recipe_update_read_state(options.state_path)
     if state != None -> recipe_update_validate_state_transition(state, options.channel, options.platform, manifest.sequence, manifest.version)
 }
 
 // Re-check the verified bytes and policy, take the update lock, and install
 // for this platform.
-fn recipe_update_install_verified(current_exe: String, bytes: [U8], plan: ToolchainUpdatePlan, state_path: String, running_version: String) -[FS, Env, Exec, Time, Time.Wait]> ToolchainInstallOutcome RecipeError! {
+recipe_update_install_verified: fn(current_exe: String, bytes: [U8], plan: ToolchainUpdatePlan, state_path: String, running_version: String) -[FS, Env, Exec, Time, Time.Wait]> ToolchainInstallOutcome RecipeError! {
     if plan.size == 0 || plan.size > TOOLCHAIN_MAX_ARTIFACT_BYTES || bytes.len() != plan.size || pkg_sha256_hex(bytes) != plan.sha256 {
         return Err(RecipeError.Update("verified toolchain artifact changed before installation"))
     }
     recipe_update_validate_release_policy(plan.version, plan.min_version, plan.published_at, plan.expires_at, running_version, recipe_update_now_seconds())
-    metadata :: files.stat(current_exe) ?? return Err(RecipeError.Update("inspect current Jet executable: {err}"))
+    metadata: files.stat(current_exe) ?? return Err(RecipeError.Update("inspect current Jet executable: {err}"))
     if metadata.is_symlink || !metadata.is_file -> return Err(RecipeError.Update("current Jet executable is not a regular file"))
-    parent :: files.dirname(current_exe)
+    parent: files.dirname(current_exe)
     if parent == "" -> return Err(RecipeError.Update("current Jet executable has no parent"))
     recipe_update_validate_no_symlink_ancestors(current_exe, "current Jet executable")
     recipe_update_validate_no_symlink_ancestors(parent, "current Jet executable directory")
     recipe_update_validate_no_symlink_ancestors(state_path, "toolchain update state")
-    lock_root :: files.dirname(state_path)
+    lock_root: files.dirname(state_path)
     if lock_root == "" -> return Err(RecipeError.Update("toolchain update state has no lock parent"))
-    update_lock :: env_acquire_lock(lock_root, "toolchain-update") ?? return Err(RecipeError.Update("lock toolchain update: {err}"))
+    update_lock: env_acquire_lock(lock_root, "toolchain-update") ?? return Err(RecipeError.Update("lock toolchain update: {err}"))
     if {
         sys.is_windows() -> recipe_update_install_windows_deferred(current_exe, parent, bytes, plan, state_path, running_version)
         sys.is_unix() -> {
-            state_before :: recipe_update_read_state(state_path)
+            state_before: recipe_update_read_state(state_path)
             recipe_update_install_unix(current_exe, parent, metadata.mode, bytes, plan, state_path, state_before, running_version)
         }
         else -> Err(RecipeError.Update("self-update installation is unsupported on this platform"))
@@ -157,7 +157,7 @@ fn recipe_update_install_verified(current_exe: String, bytes: [U8], plan: Toolch
 }
 
 // Refuse to reuse any leftover staging, rollback or helper path.
-fn recipe_update_reject_existing(path: String, label: String) RecipeError! -[FS]> {
+recipe_update_reject_existing: fn(path: String, label: String) RecipeError! -[FS]> {
     if files.stat(path) == {
         .Ok(_) -> Err(RecipeError.Update("a previous {label} is still present"))
         .Err(error) -> {
@@ -168,10 +168,10 @@ fn recipe_update_reject_existing(path: String, label: String) RecipeError! -[FS]
 }
 
 // Exclusively create the staged executable with the current file's mode.
-fn recipe_update_stage_executable(staged: String, bytes: [U8], mode: Int) RecipeError! -[FS, Env]> {
+recipe_update_stage_executable: fn(staged: String, bytes: [U8], mode: Int) RecipeError! -[FS, Env]> {
     recipe_update_reject_existing(staged, "self-update staging file")
     recipe_update_validate_no_symlink_ancestors(staged, "self-update staging file")
-    out :: files.create(staged, if_exists: .Refuse) ?? return Err(RecipeError.Update("stage Jet executable: {err}"))
+    out: files.create(staged, if_exists: .Refuse) ?? return Err(RecipeError.Update("stage Jet executable: {err}"))
     if recipe_update_write_all_synced(out, bytes) == {
         .Ok(_) -> {}
         .Err(error) -> {
@@ -191,10 +191,10 @@ fn recipe_update_stage_executable(staged: String, bytes: [U8], mode: Int) Recipe
 // Stage beside the executable, health-check, keep a hard-linked rollback,
 // rename into place, health-check again, then commit the state. Any failure
 // after activation restores the previous executable and state.
-fn recipe_update_install_unix(current_exe: String, parent: String, mode: Int, bytes: [U8], plan: ToolchainUpdatePlan, state_path: String, state_before: ToolchainUpdateState?, running_version: String) -[FS, Env, Exec, Time, Time.Wait]> ToolchainInstallOutcome RecipeError! {
-    pid :: sys.pid()
-    staged :: files.join(parent, ".jet-update-{pid}.new")
-    rollback :: files.join(parent, ".jet-update-{pid}.old")
+recipe_update_install_unix: fn(current_exe: String, parent: String, mode: Int, bytes: [U8], plan: ToolchainUpdatePlan, state_path: String, state_before: ToolchainUpdateState?, running_version: String) -[FS, Env, Exec, Time, Time.Wait]> ToolchainInstallOutcome RecipeError! {
+    pid: sys.pid()
+    staged: files.join(parent, ".jet-update-{pid}.new")
+    rollback: files.join(parent, ".jet-update-{pid}.old")
     recipe_update_reject_existing(staged, "self-update staging file")
     recipe_update_reject_existing(rollback, "self-update rollback file")
     recipe_update_validate_state_transition(state_before, plan.channel, plan.platform, plan.sequence, plan.version)
@@ -208,7 +208,7 @@ fn recipe_update_install_unix(current_exe: String, parent: String, mode: Int, by
     }
 }
 
-fn recipe_update_activate_unix(current_exe: String, parent: String, staged: String, rollback: String, plan: ToolchainUpdatePlan, state_path: String, state_before: ToolchainUpdateState?, running_version: String) RecipeError! -[FS, Env, Exec, Time, Time.Wait]> {
+recipe_update_activate_unix: fn(current_exe: String, parent: String, staged: String, rollback: String, plan: ToolchainUpdatePlan, state_path: String, state_before: ToolchainUpdateState?, running_version: String) RecipeError! -[FS, Env, Exec, Time, Time.Wait]> {
     recipe_update_validate_release_policy(plan.version, plan.min_version, plan.published_at, plan.expires_at, running_version, recipe_update_now_seconds())
     recipe_update_health_check(staged)
     files.hard_link(current_exe, rollback) ?? return Err(RecipeError.Update("preserve current Jet executable for rollback: {err}"))
@@ -239,15 +239,15 @@ fn recipe_update_activate_unix(current_exe: String, parent: String, staged: Stri
 }
 
 // Restore the previous executable and state after a failed activation.
-fn recipe_update_rollback_unix(current_exe: String, rollback: String, parent: String, state_path: String, state_before: ToolchainUpdateState?, cause: RecipeError) -[FS, Env]> RecipeError Never! {
+recipe_update_rollback_unix: fn(current_exe: String, rollback: String, parent: String, state_path: String, state_before: ToolchainUpdateState?, cause: RecipeError) -[FS, Env]> RecipeError Never! {
     if recipe_update_restore_previous(current_exe, rollback, parent, state_path, state_before) == {
         .Ok(_) -> RecipeError.Update("{cause.message()}; previous Jet executable restored")
         .Err(error) -> RecipeError.Update("{cause.message()}; rollback failed: {error.message()}")
     }
 }
 
-fn recipe_update_restore_previous(current_exe: String, rollback: String, parent: String, state_path: String, state_before: ToolchainUpdateState?) RecipeError! -[FS, Env]> {
-    info :: files.stat(current_exe) ?? return Err(RecipeError.Update("inspect activated Jet executable during rollback: {err}"))
+recipe_update_restore_previous: fn(current_exe: String, rollback: String, parent: String, state_path: String, state_before: ToolchainUpdateState?) RecipeError! -[FS, Env]> {
+    info: files.stat(current_exe) ?? return Err(RecipeError.Update("inspect activated Jet executable during rollback: {err}"))
     if info.is_symlink || !info.is_file -> return Err(RecipeError.Update("activated Jet executable became unsafe during rollback"))
     files.remove(current_exe) ?? return Err(RecipeError.Update("remove failed Jet executable: {err}"))
     files.rename(rollback, current_exe) ?? return Err(RecipeError.Update("restore previous Jet executable: {err}"))
@@ -256,7 +256,7 @@ fn recipe_update_restore_previous(current_exe: String, rollback: String, parent:
 }
 
 // Put back the previous state, or remove a state that did not exist before.
-fn recipe_update_restore_state(path: String, previous: ToolchainUpdateState?) RecipeError! -[FS, Env]> {
+recipe_update_restore_state: fn(path: String, previous: ToolchainUpdateState?) RecipeError! -[FS, Env]> {
     if previous == {
         .Val(state) -> recipe_update_write_state(path, state)
         .None -> {
@@ -264,7 +264,7 @@ fn recipe_update_restore_state(path: String, previous: ToolchainUpdateState?) Re
                 .Ok(info) -> {
                     if info.is_symlink || !info.is_file -> return Err(RecipeError.Update("toolchain update state became unsafe during rollback"))
                     files.remove(path) ?? return Err(RecipeError.Update("remove new toolchain update state: {err}"))
-                    parent :: files.dirname(path)
+                    parent: files.dirname(path)
                     if parent != "" -> recipe_update_sync_parent(parent)
                 }
                 .Err(error) -> {
@@ -278,18 +278,18 @@ fn recipe_update_restore_state(path: String, previous: ToolchainUpdateState?) Re
 
 // `<exe> --version` must exit successfully; the helper marker is removed so
 // the checked binary cannot re-enter the Windows helper.
-fn recipe_update_health_check(path: String) RecipeError! -[Exec, Time.Wait]> {
-    receipt :: process.cmd([String]{path, "--version"}).env_remove(TOOLCHAIN_WINDOWS_HELPER_ENV).stdout(.Capture).stderr(.Capture).run() ?? return Err(RecipeError.Update("health-check staged Jet executable: {err}"))
+recipe_update_health_check: fn(path: String) RecipeError! -[Exec, Time.Wait]> {
+    receipt: process.cmd([String]{path, "--version"}).env_remove(TOOLCHAIN_WINDOWS_HELPER_ENV).stdout(.Capture).stderr(.Capture).run() ?? return Err(RecipeError.Update("health-check staged Jet executable: {err}"))
     if !receipt.success -> return Err(RecipeError.Update("health-check staged Jet executable exited with exit status: {receipt.code}"))
 }
 
 // Whether this process was started as the deferred Windows update helper.
-fn recipe_toolchain_windows_update_helper_requested() -[Env]> Bool Never! {
+recipe_toolchain_windows_update_helper_requested: fn() -[Env]> Bool Never! {
     sys.is_windows() && sys.get(TOOLCHAIN_WINDOWS_HELPER_ENV) != None
 }
 
 // Run the deferred Windows helper; the process exit code.
-fn recipe_toolchain_run_windows_update_helper() -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
+recipe_toolchain_run_windows_update_helper: fn() -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
     if !sys.is_windows() -> return 1
     if recipe_update_windows_helper_run() == {
         .Ok(_) -> 0
@@ -303,11 +303,11 @@ fn recipe_toolchain_run_windows_update_helper() -[IO, FS, Env, Exec, Time, Time.
 // Windows cannot replace a running executable: stage the new image, a
 // rollback copy and a helper copy beside it, and start the helper, which
 // replaces the executable after this process exits.
-fn recipe_update_install_windows_deferred(current_exe: String, parent: String, bytes: [U8], plan: ToolchainUpdatePlan, state_path: String, running_version: String) -[FS, Env, Exec]> ToolchainInstallOutcome RecipeError! {
-    pid :: sys.pid()
-    staged :: files.join(parent, ".jet-update-{pid}.new.exe")
-    rollback :: files.join(parent, ".jet-update-{pid}.old.exe")
-    helper :: files.join(parent, ".jet-update-{pid}.helper.exe")
+recipe_update_install_windows_deferred: fn(current_exe: String, parent: String, bytes: [U8], plan: ToolchainUpdatePlan, state_path: String, running_version: String) -[FS, Env, Exec]> ToolchainInstallOutcome RecipeError! {
+    pid: sys.pid()
+    staged: files.join(parent, ".jet-update-{pid}.new.exe")
+    rollback: files.join(parent, ".jet-update-{pid}.old.exe")
+    helper: files.join(parent, ".jet-update-{pid}.helper.exe")
     recipe_update_reject_existing(staged, "self-update staging file")
     recipe_update_reject_existing(rollback, "self-update rollback file")
     recipe_update_reject_existing(helper, "self-update helper file")
@@ -336,7 +336,7 @@ fn recipe_update_install_windows_deferred(current_exe: String, parent: String, b
         }
         else -> {}
     }
-    spec :: process.cmd([String]{helper})
+    spec: process.cmd([String]{helper})
         .env(TOOLCHAIN_WINDOWS_HELPER_ENV, "1")
         .env("JET_TOOLCHAIN_UPDATE_CURRENT", current_exe)
         .env("JET_TOOLCHAIN_UPDATE_STAGED", staged)
@@ -364,9 +364,9 @@ fn recipe_update_install_windows_deferred(current_exe: String, parent: String, b
     }
 }
 
-fn recipe_update_stage_windows_file(staged: String, bytes: [U8]) RecipeError! -[FS]> {
+recipe_update_stage_windows_file: fn(staged: String, bytes: [U8]) RecipeError! -[FS]> {
     recipe_update_reject_existing(staged, "self-update staging file")
-    out :: files.create(staged, if_exists: .Refuse) ?? return Err(RecipeError.Update("stage Jet executable: {err}"))
+    out: files.create(staged, if_exists: .Refuse) ?? return Err(RecipeError.Update("stage Jet executable: {err}"))
     if recipe_update_write_all_synced(out, bytes) == {
         .Ok(_) -> {}
         .Err(error) -> {
@@ -377,10 +377,10 @@ fn recipe_update_stage_windows_file(staged: String, bytes: [U8]) RecipeError! -[
 }
 
 // Copy a regular file to a new path and flush it.
-fn recipe_update_copy_regular_file(source: String, destination: String, label: String) RecipeError! -[FS, Env]> {
+recipe_update_copy_regular_file: fn(source: String, destination: String, label: String) RecipeError! -[FS, Env]> {
     recipe_update_validate_no_symlink_ancestors(source, label)
     recipe_update_validate_no_symlink_ancestors(destination, label)
-    info :: files.stat(source) ?? return Err(RecipeError.Update("inspect {label}: {err}"))
+    info: files.stat(source) ?? return Err(RecipeError.Update("inspect {label}: {err}"))
     if info.is_symlink || !info.is_file -> return Err(RecipeError.Update("{label} source is not a regular file"))
     recipe_update_reject_existing(destination, label)
     files.copyfile(source, destination) ?? return Err(RecipeError.Update("write {label}: {err}"))
@@ -390,22 +390,22 @@ fn recipe_update_copy_regular_file(source: String, destination: String, label: S
 // The deferred Windows helper: re-verify the staged image against the plan
 // the parent passed, wait for the old executable to be released, replace it,
 // health-check, commit the state, and roll back on failure.
-fn recipe_update_windows_helper_run() RecipeError! -[FS, Env, Exec, Time, Time.Wait]> {
-    current :: recipe_update_helper_path("JET_TOOLCHAIN_UPDATE_CURRENT")
-    staged :: recipe_update_helper_path("JET_TOOLCHAIN_UPDATE_STAGED")
-    rollback :: recipe_update_helper_path("JET_TOOLCHAIN_UPDATE_ROLLBACK")
-    state_path :: recipe_update_helper_path("JET_TOOLCHAIN_UPDATE_STATE")
-    channel :: recipe_update_helper_text("JET_TOOLCHAIN_UPDATE_CHANNEL")
-    platform :: recipe_update_helper_text("JET_TOOLCHAIN_UPDATE_PLATFORM")
-    version :: recipe_update_helper_text("JET_TOOLCHAIN_UPDATE_VERSION")
-    published_at :: recipe_update_helper_timestamp("JET_TOOLCHAIN_UPDATE_PUBLISHED_AT")
-    expires_at :: recipe_update_helper_timestamp("JET_TOOLCHAIN_UPDATE_EXPIRES_AT")
-    min_version :: recipe_update_helper_text("JET_TOOLCHAIN_UPDATE_MIN_VERSION")
-    running_version :: recipe_update_helper_text("JET_TOOLCHAIN_UPDATE_RUNNING_VERSION")
-    size :: recipe_update_helper_size()
-    sha256 :: recipe_update_helper_text("JET_TOOLCHAIN_UPDATE_SHA256")
-    sequence :: recipe_update_helper_sequence()
-    state :: ToolchainUpdateState{schema: 1, channel, platform, sequence, version, sha256}
+recipe_update_windows_helper_run: fn() RecipeError! -[FS, Env, Exec, Time, Time.Wait]> {
+    current: recipe_update_helper_path("JET_TOOLCHAIN_UPDATE_CURRENT")
+    staged: recipe_update_helper_path("JET_TOOLCHAIN_UPDATE_STAGED")
+    rollback: recipe_update_helper_path("JET_TOOLCHAIN_UPDATE_ROLLBACK")
+    state_path: recipe_update_helper_path("JET_TOOLCHAIN_UPDATE_STATE")
+    channel: recipe_update_helper_text("JET_TOOLCHAIN_UPDATE_CHANNEL")
+    platform: recipe_update_helper_text("JET_TOOLCHAIN_UPDATE_PLATFORM")
+    version: recipe_update_helper_text("JET_TOOLCHAIN_UPDATE_VERSION")
+    published_at: recipe_update_helper_timestamp("JET_TOOLCHAIN_UPDATE_PUBLISHED_AT")
+    expires_at: recipe_update_helper_timestamp("JET_TOOLCHAIN_UPDATE_EXPIRES_AT")
+    min_version: recipe_update_helper_text("JET_TOOLCHAIN_UPDATE_MIN_VERSION")
+    running_version: recipe_update_helper_text("JET_TOOLCHAIN_UPDATE_RUNNING_VERSION")
+    size: recipe_update_helper_size()
+    sha256: recipe_update_helper_text("JET_TOOLCHAIN_UPDATE_SHA256")
+    sequence: recipe_update_helper_sequence()
+    state: ToolchainUpdateState{schema: 1, channel, platform, sequence, version, sha256}
     recipe_update_validate_component(state.channel, "Windows self-update channel")
     recipe_update_validate_component(state.platform, "Windows self-update platform")
     SemanticVersion.parse(state.version, "Windows self-update version")
@@ -416,18 +416,18 @@ fn recipe_update_windows_helper_run() RecipeError! -[FS, Env, Exec, Time, Time.W
     recipe_update_validate_no_symlink_ancestors(staged, "Windows self-update staging file")
     recipe_update_validate_no_symlink_ancestors(rollback, "Windows self-update rollback file")
     recipe_update_validate_no_symlink_ancestors(state_path, "Windows self-update state")
-    lock_root :: files.dirname(state_path)
+    lock_root: files.dirname(state_path)
     if lock_root == "" -> return Err(RecipeError.Update("Windows self-update state has no lock parent"))
-    update_lock :: env_acquire_lock(lock_root, "toolchain-update") ?? return Err(RecipeError.Update("lock Windows self-update: {err}"))
+    update_lock: env_acquire_lock(lock_root, "toolchain-update") ?? return Err(RecipeError.Update("lock Windows self-update: {err}"))
     recipe_update_helper_regular(current, "Windows self-update current executable")
-    staged_info :: recipe_update_helper_regular(staged, "Windows self-update staging file")
+    staged_info: recipe_update_helper_regular(staged, "Windows self-update staging file")
     if staged_info.size != size -> return Err(RecipeError.Update("Windows self-update staging file size disagrees with the verified artifact"))
-    staged_bytes :: recipe_update_read_local_file(staged, size, "Windows self-update staging file")
+    staged_bytes: recipe_update_read_local_file(staged, size, "Windows self-update staging file")
     if staged_bytes.len() != size || pkg_sha256_hex(staged_bytes) != state.sha256 {
         return Err(RecipeError.Update("Windows self-update staging file digest disagrees with the verified artifact"))
     }
     recipe_update_helper_regular(rollback, "Windows self-update rollback file")
-    previous_state :: recipe_update_read_state(state_path)
+    previous_state: recipe_update_read_state(state_path)
     recipe_update_validate_state_transition(previous_state, state.channel, state.platform, state.sequence, state.version)
     last_error := "unknown error"
     activated := false
@@ -460,49 +460,49 @@ fn recipe_update_windows_helper_run() RecipeError! -[FS, Env, Exec, Time, Time.W
     // Core cannot schedule a delete at reboot: the helper copy stays behind.
 }
 
-fn recipe_update_windows_commit(current: String, state_path: String, state: ToolchainUpdateState) RecipeError! -[FS, Env, Exec, Time.Wait]> {
+recipe_update_windows_commit: fn(current: String, state_path: String, state: ToolchainUpdateState) RecipeError! -[FS, Env, Exec, Time.Wait]> {
     recipe_update_helper_regular(current, "Windows self-update activated executable")
     recipe_update_health_check(current)
     recipe_update_write_state(state_path, state)
 }
 
-fn recipe_update_windows_rollback(current: String, rollback: String, state_path: String, previous_state: ToolchainUpdateState?) RecipeError! -[FS, Env]> {
+recipe_update_windows_rollback: fn(current: String, rollback: String, state_path: String, previous_state: ToolchainUpdateState?) RecipeError! -[FS, Env]> {
     files.remove(current) ?? return Err(RecipeError.Update("remove failed Windows Jet executable: {err}"))
     files.rename(rollback, current, if_exists: .Replace) ?? return Err(RecipeError.Update("restore previous Windows Jet executable: {err}"))
     recipe_update_restore_state(state_path, previous_state)
 }
 
-fn recipe_update_helper_regular(path: String, label: String) -[FS]> Stat RecipeError! {
-    info :: files.stat(path) ?? return Err(RecipeError.Update("inspect {label}: {err}"))
+recipe_update_helper_regular: fn(path: String, label: String) -[FS]> Stat RecipeError! {
+    info: files.stat(path) ?? return Err(RecipeError.Update("inspect {label}: {err}"))
     if info.is_symlink || !info.is_file -> return Err(RecipeError.Update("{label} is not a regular file"))
     Ok(info)
 }
 
-fn recipe_update_helper_path(name: String) -[Env]> String RecipeError! {
-    value :: sys.get(name) ?? return Err(RecipeError.Update("Windows helper is missing {name}"))
+recipe_update_helper_path: fn(name: String) -[Env]> String RecipeError! {
+    value: sys.get(name) ?? return Err(RecipeError.Update("Windows helper is missing {name}"))
     if !files.is_abs(value) -> return Err(RecipeError.Update("Windows helper path {name} is not absolute"))
     Ok(value)
 }
 
-fn recipe_update_helper_text(name: String) -[Env]> String RecipeError! {
+recipe_update_helper_text: fn(name: String) -[Env]> String RecipeError! {
     sys.get(name) ?? return Err(RecipeError.Update("Windows helper is missing {name}"))
 }
 
-fn recipe_update_helper_sequence() -[Env]> Int RecipeError! {
-    text :: recipe_update_helper_text("JET_TOOLCHAIN_UPDATE_SEQUENCE")
+recipe_update_helper_sequence: fn() -[Env]> Int RecipeError! {
+    text: recipe_update_helper_text("JET_TOOLCHAIN_UPDATE_SEQUENCE")
     recipe_parse_count(text) ?? return Err(RecipeError.Update("Windows helper sequence is invalid"))
 }
 
-fn recipe_update_helper_size() -[Env]> Int RecipeError! {
-    text :: recipe_update_helper_text("JET_TOOLCHAIN_UPDATE_SIZE")
-    size :: recipe_parse_count(text) ?? return Err(RecipeError.Update("Windows helper artifact size is invalid"))
+recipe_update_helper_size: fn() -[Env]> Int RecipeError! {
+    text: recipe_update_helper_text("JET_TOOLCHAIN_UPDATE_SIZE")
+    size: recipe_parse_count(text) ?? return Err(RecipeError.Update("Windows helper artifact size is invalid"))
     if size == 0 || size > TOOLCHAIN_MAX_ARTIFACT_BYTES -> return Err(RecipeError.Update("Windows helper artifact size is outside the channel bound"))
     Ok(size)
 }
 
-fn recipe_update_helper_timestamp(name: String) -[Env]> Int RecipeError! {
-    text :: recipe_update_helper_text(name)
-    timestamp :: recipe_parse_count(text) ?? return Err(RecipeError.Update("Windows helper timestamp {name} is invalid"))
+recipe_update_helper_timestamp: fn(name: String) -[Env]> Int RecipeError! {
+    text: recipe_update_helper_text(name)
+    timestamp: recipe_parse_count(text) ?? return Err(RecipeError.Update("Windows helper timestamp {name} is invalid"))
     if timestamp == 0 -> return Err(RecipeError.Update("Windows helper timestamp {name} must be positive"))
     Ok(timestamp)
 }

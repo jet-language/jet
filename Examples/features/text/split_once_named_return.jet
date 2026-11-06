@@ -1,20 +1,20 @@
 // #3677: the `(before, after)` pair from `split_once` and `cut_last` has the
 // same type as a written `(before: String, after: String)` return type, in
 // either label order.
-fn split_assign(text: String) -> (before: String, after: String)? {
+split_assign: fn(text: String) -> (before: String, after: String)? {
     text.split_once("=")
 }
 
-fn cut_path(path: String) -> (after: String, before: String)? {
+cut_path: fn(path: String) -> (after: String, before: String)? {
     path.cut_last("/")
 }
 
-fn run() {
-    pair :: split_assign("key=value") ?? panic("missing")
+run: fn() {
+    pair: split_assign("key=value") ?? panic("missing")
     print("{pair.before}|{pair.after}")
     print(split_assign("novalue") == None)
-    leaf :: cut_path("root/branch/leaf") ?? panic("missing cut")
+    leaf: cut_path("root/branch/leaf") ?? panic("missing cut")
     print("{leaf.before}|{leaf.after}")
-    direct :: "a:b:c".split_once(":") ?? panic("missing direct")
+    direct: "a:b:c".split_once(":") ?? panic("missing direct")
     print("{direct.before}|{direct.after}")
 }

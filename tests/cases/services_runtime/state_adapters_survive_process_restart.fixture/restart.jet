@@ -1,17 +1,17 @@
 
 use {
-    env :: core.sys
-    services :: core.service
+    env: core.sys
+    services: core.service
 }
 
-fn state_worker() {}
+state_worker: fn() {}
 
-fn run() {
-    store_path :: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
-    phase :: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
-    adapter :: env.get("JET_SERVICE_AUTH_ID") ?? panic("adapter")
+run: fn() {
+    store_path: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
+    phase: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
+    adapter: env.get("JET_SERVICE_AUTH_ID") ?? panic("adapter")
     tree := services.tree("state")
-    store :: services.state_store(store_path) ?? panic("state store")
+    store: services.state_store(store_path) ?? panic("state store")
     if adapter == "snapshot" {
         &tree.set_state_snapshot(store, "app-state", 1, "reversible") ?? panic("snapshot state")
     } else {

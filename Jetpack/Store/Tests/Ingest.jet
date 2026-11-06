@@ -7,9 +7,9 @@
 // identity which Jetpack no longer spells.
 
 #Test("store ingest sharing a tree twice preserves digest and inode separation") {
-    root :: files.tmpdir("jet-ingest-share-") ?? panic("claim root")
-    roots :: HangarRoots.at(root)
-    output :: files.join(files.join(roots.hangar_dir(), "objects"), "share-test")
+    root: files.tmpdir("jet-ingest-share-") ?? panic("claim root")
+    roots: HangarRoots.at(root)
+    output: files.join(files.join(roots.hangar_dir(), "objects"), "share-test")
     files.create_dir_all(output) ?? panic("output")
     files.write(files.join(output, "first"), "same bytes") ?? panic("first")
     files.write(files.join(output, "second"), "same bytes") ?? panic("second")
@@ -17,16 +17,16 @@
     // tree before its first digest), so the baseline is a sealed tree too.
     store_seal_node(output) ?? panic("seal")
 
-    before :: pkg_try_output_hash_of_in_hangar(output, roots.hangar_dir(), false) ?? panic("before")
+    before: pkg_try_output_hash_of_in_hangar(output, roots.hangar_dir(), false) ?? panic("before")
     store_share_tree_files(roots, output, false) ?? panic("first share")
-    after_first :: pkg_try_output_hash_of_in_hangar(output, roots.hangar_dir(), false) ?? panic("after first")
+    after_first: pkg_try_output_hash_of_in_hangar(output, roots.hangar_dir(), false) ?? panic("after first")
     store_share_tree_files(roots, output, false) ?? panic("second share")
-    after_second :: pkg_try_output_hash_of_in_hangar(output, roots.hangar_dir(), false) ?? panic("after second")
+    after_second: pkg_try_output_hash_of_in_hangar(output, roots.hangar_dir(), false) ?? panic("after second")
 
     assert_eq(before, after_first)
     assert_eq(before, after_second)
-    first :: files.stat(files.join(output, "first")) ?? panic("first stat")
-    second :: files.stat(files.join(output, "second")) ?? panic("second stat")
+    first: files.stat(files.join(output, "first")) ?? panic("first stat")
+    second: files.stat(files.join(output, "second")) ?? panic("second stat")
     assert(first.id != second.id)
     store_make_tree_writable_for_removal(root).drop("claim cleanup")
     files.remove_all(root).drop("claim cleanup")

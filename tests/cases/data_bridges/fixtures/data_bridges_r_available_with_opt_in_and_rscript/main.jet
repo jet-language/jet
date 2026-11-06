@@ -1,8 +1,8 @@
 
-use data :: core.data
+use data: core.data
 
-fn show_bridge(step: String) {
-    status :: data.status()
+show_bridge: fn(step: String) {
+    status: data.status()
     loop row in status {
         if row.step == step {
             print("{row.step} path={row.path} copy={row.copy} ownership={row.ownership} trust={row.trust} fallback={row.fallback} replacement={row.replacement}")
@@ -10,7 +10,7 @@ fn show_bridge(step: String) {
     }
 }
 
-fn probe_bridge(name: String) {
+probe_bridge: fn(name: String) {
     asked := data.require_bridge(name)
     if asked == {
         .Ok(_) -> print("{name}: available")
@@ -18,7 +18,7 @@ fn probe_bridge(name: String) {
     }
 }
 
-fn run() {
+run: fn() {
     show_bridge("py.*")
     show_bridge("r.*")
     show_bridge("gpu.*")

@@ -1,12 +1,12 @@
 // #1414 CLI workload: inspect real USTAR bytes with one beginner path and
 // optional expert controls. Invalid headers are rejected without extraction.
 use {
-    archive :: core.archive
-    fs :: core.files
+    archive: core.archive
+    fs: core.files
 }
 
 #CLI
-struct WorkloadArgs {
+WorkloadArgs: struct {
     #Doc("tar or ustar input format") format: String{"tar"}
     #Doc("entry glob; * and ? match path bytes") filter: String{"*.md"}
     #Doc("maximum claimed entry size") max_size: Int{64}
@@ -15,20 +15,20 @@ struct WorkloadArgs {
     #Doc("write the report to this file") output: String?
 }
 
-fn field_text(bytes: [U8], start: Int, width: Int) -> String {
+field_text: fn(bytes: [U8], start: Int, width: Int) -> String {
     value := [U8]{}
     loop i in 0..<width {
-        byte :: bytes.get(start + i) ?? 0
+        byte: bytes.get(start + i) ?? 0
         if byte == 0 -> break
         &value.push(byte)
     }
     return String.from_bytes_lossy(value)
 }
 
-fn valid_field(bytes: [U8], start: Int, width: Int) -> Bool {
+valid_field: fn(bytes: [U8], start: Int, width: Int) -> Bool {
     i := 0
     loop i < width {
-        first :: bytes.get(start + i) ?? return false
+        first: bytes.get(start + i) ?? return false
         if first == 0 -> return true
         count := 0
         code := 0
@@ -47,7 +47,7 @@ fn valid_field(bytes: [U8], start: Int, width: Int) -> Bool {
         } else { return false }
         if i + count > width -> return false
         loop j in 1..<count {
-            next_byte :: bytes.get(start + i + j) ?? return false
+            next_byte: bytes.get(start + i + j) ?? return false
             if next_byte < 128 || next_byte > 191 -> return false
             code = code * 64 + Int.from_u8(next_byte) - 128
         }
@@ -59,12 +59,12 @@ fn valid_field(bytes: [U8], start: Int, width: Int) -> Bool {
     return true
 }
 
-fn number_field(bytes: [U8], start: Int, width: Int) -> Int {
-    first :: bytes.get(start) ?? return -1
+number_field: fn(bytes: [U8], start: Int, width: Int) -> Int {
+    first: bytes.get(start) ?? return -1
     if first >= 128 {
         value := Int.from_u8(first) - 128
         loop i in 1..<width {
-            byte :: bytes.get(start + i) ?? return -1
+            byte: bytes.get(start + i) ?? return -1
             value = value * 256 + Int.from_u8(byte)
         }
         return value
@@ -72,7 +72,7 @@ fn number_field(bytes: [U8], start: Int, width: Int) -> Int {
     value := 0
     seen := false
     loop i in 0..<width {
-        byte :: bytes.get(start + i) ?? return -1
+        byte: bytes.get(start + i) ?? return -1
         if byte == 0 || byte == 32 {
             if seen -> break
             next
@@ -84,54 +84,54 @@ fn number_field(bytes: [U8], start: Int, width: Int) -> Int {
     return value
 }
 
-fn checksum_ok(bytes: [U8], offset: Int) -> Bool {
-    stored :: number_field(bytes, offset + 148, 8)
+checksum_ok: fn(bytes: [U8], offset: Int) -> Bool {
+    stored: number_field(bytes, offset + 148, 8)
     if stored < 0 -> return false
     sum := 0
     loop i in 0..<512 {
-        byte :: bytes.get(offset + i) ?? return false
+        byte: bytes.get(offset + i) ?? return false
         if i >= 148 && i < 156 -> sum += 32 else -> sum += Int.from_u8(byte)
     }
     return stored == sum
 }
 
-fn zero_block(bytes: [U8], offset: Int) -> Bool {
+zero_block: fn(bytes: [U8], offset: Int) -> Bool {
     loop i in 0..<512 {
-        byte :: bytes.get(offset + i) ?? return false
+        byte: bytes.get(offset + i) ?? return false
         if byte != 0 -> return false
     }
     return true
 }
 
-fn zero_tail(bytes: [U8], offset: Int) -> Bool {
+zero_tail: fn(bytes: [U8], offset: Int) -> Bool {
     loop i in offset..<bytes.len() {
-        byte :: bytes.get(i) ?? return false
+        byte: bytes.get(i) ?? return false
         if byte != 0 -> return false
     }
     return true
 }
 
-fn safe_path(path: String) -> Bool {
+safe_path: fn(path: String) -> Bool {
     if path == "" || path.starts_with("/") || path.starts_with("\\") -> return false
-    path_bytes :: path.bytes()
+    path_bytes: path.bytes()
     if path_bytes.len() > 1 && path_bytes[1] == 58 -> return false
-    normalized :: &path.replace("\\", "/")
+    normalized: &path.replace("\\", "/")
     loop component in normalized.split("/") {
         if component == ".." -> return false
     }
     return true
 }
 
-fn glob_match(pattern: String, path: String) -> Bool {
-    p :: pattern.bytes()
-    s :: path.bytes()
+glob_match: fn(pattern: String, path: String) -> Bool {
+    p: pattern.bytes()
+    s: path.bytes()
     pattern_index := 0
     path_index := 0
     star := -1
     star_match := 0
     loop path_index < s.len() {
         if pattern_index < p.len() {
-            pattern_byte :: p[pattern_index]
+            pattern_byte: p[pattern_index]
             if pattern_byte == 63 || pattern_byte == s[path_index] {
                 pattern_index += 1
                 path_index += 1
@@ -156,7 +156,7 @@ fn glob_match(pattern: String, path: String) -> Bool {
     return pattern_index == p.len()
 }
 
-fn entry_kind(tag_byte: U8) -> String {
+entry_kind: fn(tag_byte: U8) -> String {
     if tag_byte == 0 || tag_byte == 48 -> return "file"
     if tag_byte == 49 -> return "hardlink"
     if tag_byte == 50 -> return "symlink"
@@ -168,7 +168,7 @@ fn entry_kind(tag_byte: U8) -> String {
     return ""
 }
 
-fn run(args: WorkloadArgs) {
+run: fn(args: WorkloadArgs) {
     if args.format != "tar" && args.format != "ustar" {
         print("error=unsupported-format")
         return
@@ -177,10 +177,10 @@ fn run(args: WorkloadArgs) {
         print("error=invalid-limit")
         return
     }
-    raw :: fs.read_bytes(args.input) ?? panic("read input")
+    raw: fs.read_bytes(args.input) ?? panic("read input")
     // Keep core.archive on the same byte path as the explicit metadata parser.
     // Its canonical name reader is a cross-check for archives with no rejects.
-    core_names :: archive.tar_names_json(raw)
+    core_names: archive.tar_names_json(raw)
     rows := [String]{}
     seen := [String:Int]{}
     offset := 0
@@ -220,22 +220,22 @@ fn run(args: WorkloadArgs) {
             offset += 512
             next
         }
-        magic :: field_text(raw, offset + 257, 6)
+        magic: field_text(raw, offset + 257, 6)
         if (args.format == "ustar" && !magic.starts_with("ustar")) || (magic != "" && !magic.starts_with("ustar")) {
             malformed += 1
             rejected += 1
             offset += 512
             next
         }
-        size :: number_field(raw, offset + 124, 12)
+        size: number_field(raw, offset + 124, 12)
         if size < 0 {
             malformed += 1
             rejected += 1
             offset += 512
             next
         }
-        padded :: ((size + 511) /% 512) * 512
-        next_offset :: offset + 512 + padded
+        padded: ((size + 511) /% 512) * 512
+        next_offset: offset + 512 + padded
         if next_offset > raw.len() {
             if size > args.max_size {
                 oversize += 1
@@ -258,15 +258,15 @@ fn run(args: WorkloadArgs) {
             offset = next_offset
             next
         }
-        name :: field_text(raw, offset, 100)
-        prefix :: field_text(raw, offset + 345, 155)
+        name: field_text(raw, offset, 100)
+        prefix: field_text(raw, offset + 345, 155)
         if name == "" || (raw.get(offset) ?? 0) == 0 {
             malformed += 1
             rejected += 1
             offset = next_offset
             next
         }
-        path :: if prefix == "" -> name else -> "{prefix}/{name}"
+        path: if prefix == "" -> name else -> "{prefix}/{name}"
         if !safe_path(path) {
             traversal += 1
             rejected += 1
@@ -286,8 +286,8 @@ fn run(args: WorkloadArgs) {
             offset = next_offset
             next
         }
-        type_byte :: raw.get(offset + 156) ?? 0
-        kind :: entry_kind(type_byte)
+        type_byte: raw.get(offset + 156) ?? 0
+        kind: entry_kind(type_byte)
         if kind == "" {
             malformed += 1
             rejected += 1
@@ -328,7 +328,7 @@ fn run(args: WorkloadArgs) {
     if args.output == .None {
         loop line in report -> print(line)
     } else {
-        output :: args.output.copy() ?? ""
+        output: args.output.copy() ?? ""
         fs.write(output, text) ?? panic("write output")
     }
 }

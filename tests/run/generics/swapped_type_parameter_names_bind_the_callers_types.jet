@@ -1,27 +1,27 @@
 // A caller whose type parameters reuse the callee's names in the other
 // order (`swapped<U, T>` calling `pair<T, U>`) binds each callee parameter
 // to the caller's type, not back to the callee's own (#6182).
-fn pair<T, U>(a: T, b: U) -> T {
+pair: fn<T, U>(a: T, b: U) -> T {
     a
 }
 
-fn second<T, U>(a: T, b: U) -> U {
+second: fn<T, U>(a: T, b: U) -> U {
     b
 }
 
-fn swapped<U, T>(a: U, b: T) -> U {
+swapped: fn<U, T>(a: U, b: T) -> U {
     pair(a, b)
 }
 
-fn swapped_second<U, T>(a: U, b: T) -> T {
+swapped_second: fn<U, T>(a: U, b: T) -> T {
     second(a, b)
 }
 
-fn explicit<U, T>(a: U, b: T) -> U {
+explicit: fn<U, T>(a: U, b: T) -> U {
     pair<U, T>(a, b)
 }
 
-fn run() {
+run: fn() {
     print(swapped(1, "x"))
     print(swapped("y", 2))
     print(swapped_second(1, "x"))

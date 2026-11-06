@@ -2,12 +2,12 @@
 // The Int routes are root-free, and the stop edges only drop a String and a
 // List of records holding Strings and Ints (their drop routines only free
 // memory) inside cleanup scopes, so it owns its main.
-struct Row {
+Row: struct {
     name: String
     value: Int
 }
 
-fn grow(n: Int) -> Int {
+grow: fn(n: Int) -> Int {
     x := n
     loop _ in 0..<4 {
         x = x * x + 1
@@ -15,12 +15,12 @@ fn grow(n: Int) -> Int {
     x
 }
 
-fn run() {
-    big :: grow(1000)
+run: fn() {
+    big: grow(1000)
     rows := [Row]{}
     &rows.push(Row{name: "big", value: big})
     print("{rows[0].name} {big}")
-    zero :: big - big
+    zero: big - big
     print("{big /% zero}")
     print("{rows.len()}")
 }

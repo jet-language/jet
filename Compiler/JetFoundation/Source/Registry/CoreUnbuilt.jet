@@ -8,7 +8,7 @@
 // - the Core calls `module_name.member` for each member in `members`;
 // - every method of each handle type in `handles`, and its static `new`.
 // A row goes away when its feature lands.
-struct CoreUnbuiltRow {
+CoreUnbuiltRow: struct {
     feature: String
     card: Int
     module_name: String
@@ -16,7 +16,7 @@ struct CoreUnbuiltRow {
     handles: [String]
 }
 
-CORE_UNBUILT_ROWS :: [CoreUnbuiltRow]{
+CORE_UNBUILT_ROWS: [CoreUnbuiltRow]{
     {
         feature: "the module loader runtime and its grants",
         card: 4599,
@@ -34,7 +34,7 @@ CORE_UNBUILT_ROWS :: [CoreUnbuiltRow]{
 }
 
 // The unbuilt row of the Core call `module_name.member`, if it has one.
-fn core_unbuilt_call(module_name: String, member: String) -> CoreUnbuiltRow? Never! {
+core_unbuilt_call: fn(module_name: String, member: String) -> CoreUnbuiltRow? Never! {
     loop row in CORE_UNBUILT_ROWS {
         if row.module_name != module_name -> next
         loop name in row.members {
@@ -45,7 +45,7 @@ fn core_unbuilt_call(module_name: String, member: String) -> CoreUnbuiltRow? Nev
 }
 
 // The unbuilt row of the handle type `owner`, if it has one.
-fn core_unbuilt_handle(owner: String) -> CoreUnbuiltRow? Never! {
+core_unbuilt_handle: fn(owner: String) -> CoreUnbuiltRow? Never! {
     loop row in CORE_UNBUILT_ROWS {
         loop name in row.handles {
             if name == owner -> return Val(row)

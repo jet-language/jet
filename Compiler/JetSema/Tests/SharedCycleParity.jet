@@ -6,15 +6,15 @@ use {
     jet_foundation.[DIAGNOSTIC_ERROR]
 }
 
-fn shared_cycle_expect(source: String, places: [String]) {
-    parsed :: parse_source(source.bytes())
+shared_cycle_expect: fn(source: String, places: [String]) {
+    parsed: parse_source(source.bytes())
     if parsed.diagnostics.len() != 0 -> panic("shared cycle fixture must parse")
-    checked :: check_program(parsed.program, "shared_cycle_parity", "shared_cycle_parity.jet", [SemaSourceSegment]{})
+    checked: check_program(parsed.program, "shared_cycle_parity", "shared_cycle_parity.jet", [SemaSourceSegment]{})
     found := [String]{}
     loop diagnostic in checked.diagnostics {
         if diagnostic.severity != DIAGNOSTIC_ERROR -> next
         if diagnostic.code != "E0221" -> panic("unexpected shared-cycle checker diagnostic: {diagnostic.code}: {diagnostic.what}")
-        span :: diagnostic.span ?? panic("shared cycle diagnostic has no place span")
+        span: diagnostic.span ?? panic("shared cycle diagnostic has no place span")
         &found.push(source.slice(span.start, span.end))
     }
     &found.sort()
@@ -23,29 +23,29 @@ fn shared_cycle_expect(source: String, places: [String]) {
     if found != wanted -> panic("shared cycle writes differ: found [{found.join(", ")}], wanted [{wanted.join(", ")}]")
 }
 
-SHARED_CYCLE_NODE :: "struct Node {{\nvalue: Int\nnext: Shared<Node>?\n}}\n"
-SHARED_CYCLE_PERSON :: "struct Person {{\nname: String\nparent: Shared.Weak<Person>?\nkids: [Shared<Person>]\n}}\n"
+SHARED_CYCLE_NODE: "Node: struct {{\nvalue: Int\nnext: Shared<Node>?\n}}\n"
+SHARED_CYCLE_PERSON: "Person: struct {{\nname: String\nparent: Shared.Weak<Person>?\nkids: [Shared<Person>]\n}}\n"
 
 #Test("shared_cycle_parity") {
     // Declaring strong self edges is fine; building by construction is too.
     shared_cycle_expect(SHARED_CYCLE_NODE, [String]{})
-    shared_cycle_expect("{SHARED_CYCLE_NODE}fn run() {{\nhead := Shared<Node>?{{None}}\nloop value in 1..<5 {{\nhead = Val(shared Node{{value: value, next: head}})\n}}\n}}", [String]{})
-    shared_cycle_expect("{SHARED_CYCLE_NODE}fn run() {{\na :: shared Node{{value: 1, next: None}}\na.next = Val(shared Node{{value: 2, next: None}})\n}}", [String]{})
-    shared_cycle_expect("{SHARED_CYCLE_PERSON}fn run() {{\nmum :: shared Person{{name: \"Ada\", parent: None, kids: []}}\nkid :: shared Person{{name: \"Byron\", parent: Val(mum.downgrade()), kids: []}}\n&mum.kids.push(kid)\n&mum.kids.push(shared Person{{name: \"Cy\", parent: Val(mum.downgrade()), kids: []}})\n}}", [String]{})
+    shared_cycle_expect("{SHARED_CYCLE_NODE}run: fn() {{\nhead := Shared<Node>?{{None}}\nloop value in 1..<5 {{\nhead = Val(shared Node{{value: value, next: head}})\n}}\n}}", [String]{})
+    shared_cycle_expect("{SHARED_CYCLE_NODE}run: fn() {{\na: shared Node{{value: 1, next: None}}\na.next = Val(shared Node{{value: 2, next: None}})\n}}", [String]{})
+    shared_cycle_expect("{SHARED_CYCLE_PERSON}run: fn() {{\nmum: shared Person{{name: \"Ada\", parent: None, kids: []}}\nkid: shared Person{{name: \"Byron\", parent: Val(mum.downgrade()), kids: []}}\n&mum.kids.push(kid)\n&mum.kids.push(shared Person{{name: \"Cy\", parent: Val(mum.downgrade()), kids: []}})\n}}", [String]{})
     // Storing a cell that already exists can close the loop.
-    shared_cycle_expect("{SHARED_CYCLE_NODE}fn run() {{\na :: shared Node{{value: 1, next: None}}\nb :: shared Node{{value: 2, next: None}}\na.next = Val(b)\nb.next = Val(a)\n}}", [String]{"b.next"})
-    shared_cycle_expect("{SHARED_CYCLE_NODE}fn run() {{\na :: shared Node{{value: 1, next: None}}\na.next = Val(a)\n}}", [String]{"a.next"})
-    shared_cycle_expect("{SHARED_CYCLE_NODE}fn run() {{\na :: shared Node{{value: 1, next: None}}\na.next = Val(shared Node{{value: 2, next: Val(a)}})\n}}", [String]{"a.next"})
-    shared_cycle_expect("{SHARED_CYCLE_NODE}fn link(a: Shared<Node>, b: Shared<Node>) {{\na.next = Val(b)\n}}", [String]{"a.next"})
-    shared_cycle_expect("{SHARED_CYCLE_NODE}fn link(a: Shared<Node>, b: Shared<Node>) {{\nguard :: a.guard_edit()\nguard.value.next = Val(b)\n}}", [String]{"guard.value.next"})
-    shared_cycle_expect("{SHARED_CYCLE_PERSON}fn run() {{\nmum :: shared Person{{name: \"Ada\", parent: None, kids: []}}\nkid :: shared Person{{name: \"Byron\", parent: None, kids: []}}\n&mum.kids.push(kid)\n&kid.kids.push(mum)\n}}", [String]{"kid.kids"})
+    shared_cycle_expect("{SHARED_CYCLE_NODE}run: fn() {{\na: shared Node{{value: 1, next: None}}\nb: shared Node{{value: 2, next: None}}\na.next = Val(b)\nb.next = Val(a)\n}}", [String]{"b.next"})
+    shared_cycle_expect("{SHARED_CYCLE_NODE}run: fn() {{\na: shared Node{{value: 1, next: None}}\na.next = Val(a)\n}}", [String]{"a.next"})
+    shared_cycle_expect("{SHARED_CYCLE_NODE}run: fn() {{\na: shared Node{{value: 1, next: None}}\na.next = Val(shared Node{{value: 2, next: Val(a)}})\n}}", [String]{"a.next"})
+    shared_cycle_expect("{SHARED_CYCLE_NODE}link: fn(a: Shared<Node>, b: Shared<Node>) {{\na.next = Val(b)\n}}", [String]{"a.next"})
+    shared_cycle_expect("{SHARED_CYCLE_NODE}link: fn(a: Shared<Node>, b: Shared<Node>) {{\nguard: a.guard_edit()\nguard.value.next = Val(b)\n}}", [String]{"guard.value.next"})
+    shared_cycle_expect("{SHARED_CYCLE_PERSON}run: fn() {{\nmum: shared Person{{name: \"Ada\", parent: None, kids: []}}\nkid: shared Person{{name: \"Byron\", parent: None, kids: []}}\n&mum.kids.push(kid)\n&kid.kids.push(mum)\n}}", [String]{"kid.kids"})
     // A strong path through another type closes the loop too. The active-cycle
     // cut through Looping must not be memoized as negative: the later branch
     // from Branch reaches Owner.
-    shared_cycle_expect("struct First {{\nsecond: Shared<Second>?\n}}\nstruct Second {{\nfirst: Shared<First>?\n}}\nfn run() {{\nf :: shared First{{second: None}}\ns :: shared Second{{first: Val(f)}}\nf.second = Val(s)\n}}", [String]{"f.second"})
-    shared_cycle_expect("struct Owner {{\nbranch: Shared<Branch>?\n}}\nstruct Branch {{\nlooping: Shared<Looping>?\nowner: Shared<Owner>?\n}}\nstruct Looping {{\nbranch: Shared<Branch>?\n}}\nfn run() {{\no :: shared Owner{{branch: None}}\nb :: shared Branch{{looping: None, owner: Val(o)}}\no.branch = Val(b)\n}}", [String]{"o.branch"})
+    shared_cycle_expect("First: struct {{\nsecond: Shared<Second>?\n}}\nSecond: struct {{\nfirst: Shared<First>?\n}}\nrun: fn() {{\nf: shared First{{second: None}}\ns: shared Second{{first: Val(f)}}\nf.second = Val(s)\n}}", [String]{"f.second"})
+    shared_cycle_expect("Owner: struct {{\nbranch: Shared<Branch>?\n}}\nBranch: struct {{\nlooping: Shared<Looping>?\nowner: Shared<Owner>?\n}}\nLooping: struct {{\nbranch: Shared<Branch>?\n}}\nrun: fn() {{\no: shared Owner{{branch: None}}\nb: shared Branch{{looping: None, owner: Val(o)}}\no.branch = Val(b)\n}}", [String]{"o.branch"})
     // A weak back-edge and an acyclic leaf never close a cycle.
-    shared_cycle_expect("struct Leaf {{\nvalue: Int\n}}\nstruct Holder {{\nleaf: Shared<Leaf>?\n}}\nfn fill(h: Shared<Holder>, l: Shared<Leaf>) {{\nh.leaf = Val(l)\n}}", [String]{})
-    shared_cycle_expect("struct Back {{\nnext: Shared.Weak<Back>?\n}}\nfn link(a: Shared<Back>, b: Shared<Back>) {{\na.next = Val(b.downgrade())\n}}", [String]{})
+    shared_cycle_expect("Leaf: struct {{\nvalue: Int\n}}\nHolder: struct {{\nleaf: Shared<Leaf>?\n}}\nfill: fn(h: Shared<Holder>, l: Shared<Leaf>) {{\nh.leaf = Val(l)\n}}", [String]{})
+    shared_cycle_expect("Back: struct {{\nnext: Shared.Weak<Back>?\n}}\nlink: fn(a: Shared<Back>, b: Shared<Back>) {{\na.next = Val(b.downgrade())\n}}", [String]{})
     print("shared cycle parity: passed")
 }

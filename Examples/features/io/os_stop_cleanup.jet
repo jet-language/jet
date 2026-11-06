@@ -1,25 +1,25 @@
 // D-FAIL-EXIT1: explicit OS termination uses the one cleanup boundary.
-package {
+package: {
     name: "os_stop_cleanup"
     authority: { allow: [Env, Exec, IO] }
 }
 
 use {
-    os :: core.sys
-    scope :: core.mem.scope
+    os: core.sys
+    scope: core.mem.scope
 }
 
-struct Resource {
+Resource: struct {
     name: String
 }
 
 impl Resource.Close {
-    fn close(^self) { print("close {self.name}") }
+    close: fn(^self) { print("close {self.name}") }
 }
 
-fn run() {
-    outer :: scope.guard(() -> print("guard outer"))
-    inner :: scope.guard(() -> print("guard inner"))
+run: fn() {
+    outer: scope.guard(() -> print("guard outer"))
+    inner: scope.guard(() -> print("guard inner"))
     resource := Resource{name: "resource"}
     defer close(^resource)
     print("body")

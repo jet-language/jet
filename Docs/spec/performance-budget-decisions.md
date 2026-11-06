@@ -102,7 +102,7 @@ favorable average from becoming an unsupported language promise.
 Declare budgets as typed facts in a role module:
 
 ```jet
-module perf.<role> {
+perf.<role>: module {
     budgets: [Budget{ ... }]
 }
 ```
@@ -283,7 +283,7 @@ beginner deterministic form and the same typed syntax used by statistical
 facts:
 
 ```jet
-module perf.receipt {
+perf.receipt: module {
     budgets: [Budget]{{name: "binary", scope: .Target("hello"), metric: .BinarySize, provider: .BuildArtifact("hello"), comparison: .Absolute, limit: .AtMost(1MiB), applies: BudgetApplies{
         targets: .Only([.Class(.Native)]),
         profiles: .Only([.Dev])
@@ -929,7 +929,7 @@ loop item in items {
     &out.push(item.view())        // view materialization: L2510 when semantic
     counts[item.key] += 1        // map copy-on-write: L2510 when semantic
     total += item                // exact-Int spill: L2510 when semantic
-    result :: read(item)         // outcome construction: L2510 when semantic
+    result: read(item)         // outcome construction: L2510 when semantic
     value := items[index]        // generic fallback: L2510 when semantic
 }
 ```

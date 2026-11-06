@@ -1,18 +1,18 @@
 use {
-    canvas_html_test_process :: core.process
+    canvas_html_test_process: core.process
     jet_canvas.[canvas_html, canvas_html_for, canvas_html_query]
 }
 
 // Real JavaScript execution of the public Jet-produced HTML, not source-string
 // assertions and not copied bootstrap JS. Node is required: missing Node or a
 // harness failure is a test failure, never a skip or a success fallback.
-fn canvas_html_test_bootstrap(scenario: String, html: String) -[Exec, IO, Time.Wait]> {
-    child :: canvas_html_test_process.cmd([String]{"node", "Compiler/JetCanvas/Tests/CanvasAssets/bootstrap-dom.mjs", scenario})
+canvas_html_test_bootstrap: fn(scenario: String, html: String) -[Exec, IO, Time.Wait]> {
+    child: canvas_html_test_process.cmd([String]{"node", "Compiler/JetCanvas/Tests/CanvasAssets/bootstrap-dom.mjs", scenario})
         .stdin(.Stream).stdout(.Capture).stderr(.Capture)
         .spawn() ?? panic("Canvas bootstrap requires Node and the scenario harness")
     child.stdin.write_text(html) ?? panic("Canvas bootstrap HTML input failed")
     child.stdin.close()
-    receipt :: child.wait() ?? panic("Canvas bootstrap JS evaluation failed to finish")
+    receipt: child.wait() ?? panic("Canvas bootstrap JS evaluation failed to finish")
     if !receipt.success -> panic("Canvas bootstrap {scenario}: {receipt.errors}")
 }
 
@@ -34,8 +34,8 @@ fn canvas_html_test_bootstrap(scenario: String, html: String) -[Exec, IO, Time.W
 }
 
 #Test("canvas_html_hostile_base_uses_json_escaping_in_both_positions") {
-    controls :: String.from_bytes([U8]{127, 194, 133, 0}) ?? panic("control fixture UTF-8")
-    carriage :: String.from_bytes([U8]{13}) ?? panic("CR fixture UTF-8")
+    controls: String.from_bytes([U8]{127, 194, 133, 0}) ?? panic("control fixture UTF-8")
+    carriage: String.from_bytes([U8]{13}) ?? panic("CR fixture UTF-8")
     // #4303: pass the interpolation directly, not a local String-view binding.
     canvas_html_test_bootstrap("hostile", canvas_html_for("/a\"\\\n{carriage}\t<>&'雪{controls}"))
 }

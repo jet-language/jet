@@ -1,0 +1,18 @@
+# D-DECL-COLON1: the retired declaration spellings (`name :: value`, `fn name(`,
+# `struct Name`, `enum Name`, `trait Name`, `module name`, `use a :: b`) are
+# rejected with E0397, each with a safe edit to the colon spelling. Plain
+# `jet fix` applies every edit, and the fixed file checks clean and runs.
+fixture: fixtures/declcolon
+env: NO_COLOR=1
+step: jet check {work}/retired.jet
+exit: 1
+stderr: ~ "E0397"
+stderr: ~ "`::`"
+step: jet fix {work}/retired.jet
+exit: 0
+file: retired.jet = retired-colon-fixed.bytes
+step: jet check {work}/retired.jet
+exit: 0
+step: jet run {work}/retired.jet
+exit: 0
+stdout: = "12\n"

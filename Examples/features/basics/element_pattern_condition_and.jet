@@ -6,36 +6,36 @@
 // legality: place use not dominated by its definition). The if statement, the
 // if expression, and a decision-table row all lower the condition this way,
 // over a read parameter, a stored-field chain below one, and a stable root.
-enum Arg {
+Arg: enum {
     Text(value: String)
     Flag(name: String, on: Bool)
 }
 
-enum Shape {
+Shape: enum {
     Dot
     List(items: [Int], kind: String)
 }
 
-struct Slot {
+Slot: struct {
     shape: Shape
 }
 
-struct Row {
+Row: struct {
     cells: [Slot]
 }
 
-struct Marker {
+Marker: struct {
     labels: [Arg?]
 }
 
 // a read parameter's element, if statement
-fn text(args: [Arg], index: Int) -> String? {
+text: fn(args: [Arg], index: Int) -> String? {
     if index < args.len() && args[index] == .Text(value) -> return Val(value.copy())
     None
 }
 
 // a stored-field chain below a read parameter
-fn label(marker: Marker, index: Int) -> String {
+label: fn(marker: Marker, index: Int) -> String {
     if index < marker.labels.len() && marker.labels[index] == .Val(.Text(value)) {
         return value.copy()
     }
@@ -43,7 +43,7 @@ fn label(marker: Marker, index: Int) -> String {
 }
 
 // a stable root (the loop's row), and a binding read by the next conjunct
-fn list_limit(rows: [Row]) -> Int {
+list_limit: fn(rows: [Row]) -> Int {
     limit := 0
     loop row in rows {
         if row.cells.len() > 0 && row.cells[0].shape == .List(items, kind) && kind == "l" {
@@ -54,18 +54,18 @@ fn list_limit(rows: [Row]) -> Int {
 }
 
 // the if expression and a decision-table row
-fn first_flag(args: [Arg]) -> String {
-    picked :: if args.len() > 0 && args[0] == .Flag(name, on) && on -> name.copy() else -> "off"
+first_flag: fn(args: [Arg]) -> String {
+    picked: if args.len() > 0 && args[0] == .Flag(name, on) && on -> name.copy() else -> "off"
     if {
         args.len() > 1 && args[1] == .Text(value) -> "{picked} {value}"
         else -> picked
     }
 }
 
-fn run() {
-    args :: [Arg]{Arg.Flag{name: "f", on: true}, Arg.Text{value: "t"}}
-    marker :: Marker{labels: [Arg?]{Val(Arg.Text{value: "m"}), None}}
-    rows :: [Row]{Row{cells: [Slot]{Slot{shape: Shape.List{items: [Int]{1, 2, 3}, kind: "l"}}}}, Row{cells: [Slot]{Slot{shape: Shape.Dot}}}}
+run: fn() {
+    args: [Arg]{Arg.Flag{name: "f", on: true}, Arg.Text{value: "t"}}
+    marker: Marker{labels: [Arg?]{Val(Arg.Text{value: "m"}), None}}
+    rows: [Row]{Row{cells: [Slot]{Slot{shape: Shape.List{items: [Int]{1, 2, 3}, kind: "l"}}}}, Row{cells: [Slot]{Slot{shape: Shape.Dot}}}}
     print("{text(args, 1) ?? "-"} {text(args, 5) ?? "-"} {label(marker, 0)} {label(marker, 1)}")
     print("{list_limit(rows)} {first_flag(args)} {first_flag([Arg]{})}")
 }

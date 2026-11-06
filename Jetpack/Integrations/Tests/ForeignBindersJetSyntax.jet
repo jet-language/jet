@@ -13,14 +13,14 @@ use {
 }
 
 // Every lexer and parser error in `source`, one line each.
-fn pkg_test_binder_syntax_errors(source: String) -> [String] Never! {
+pkg_test_binder_syntax_errors: fn(source: String) -> [String] Never! {
     errors := [String]{}
-    lexed :: lex_generated(source.bytes())
+    lexed: lex_generated(source.bytes())
     loop diagnostic in lexed.diagnostics {
         &errors.push("lex {diagnostic.code}: {diagnostic.what}")
     }
     if errors.len() != 0 -> return errors
-    parsed :: parse_lexed(^lexed)
+    parsed: parse_lexed(^lexed)
     loop diagnostic in parsed.diagnostics {
         if diagnostic.severity == 1 -> &errors.push("parse {diagnostic.code}: {diagnostic.what}")
     }
@@ -28,10 +28,10 @@ fn pkg_test_binder_syntax_errors(source: String) -> [String] Never! {
 }
 
 #Test("worker binders render jet that parses under the current grammar") {
-    perl :: pkg_perl_parse_function_names("sub Transform {{ }}\n".bytes()) ?? panic("Perl subs parse")
-    pwsh :: pkg_powershell_parse_function_names("Get-Stateful\n".bytes()) ?? panic("PowerShell names parse")
-    com :: pkg_com_parse_schema("LIB\tOffice Fixture\t{{00000000-0000-0000-0000-000000000001}}\nCLASS\t{{00000000-0000-0000-0000-000000000002}}\tApplication\nMETHOD\tApplication\tWorkbooks\t41\t2\tobject=Workbooks\n".bytes()) ?? panic("COM schema parses")
-    rendered :: [(name: String, source: String)]{
+    perl: pkg_perl_parse_function_names("sub Transform {{ }}\n".bytes()) ?? panic("Perl subs parse")
+    pwsh: pkg_powershell_parse_function_names("Get-Stateful\n".bytes()) ?? panic("PowerShell names parse")
+    com: pkg_com_parse_schema("LIB\tOffice Fixture\t{{00000000-0000-0000-0000-000000000001}}\nCLASS\t{{00000000-0000-0000-0000-000000000002}}\tApplication\nMETHOD\tApplication\tWorkbooks\t41\t2\tobject=Workbooks\n".bytes()) ?? panic("COM schema parses")
+    rendered: [(name: String, source: String)]{
         (name: "lua", source: pkg_lua_render_probe()),
         (name: "octave", source: pkg_octave_render_probe()),
         (name: "perl", source: pkg_perl_render_jet("ops", perl)),
@@ -44,7 +44,7 @@ fn pkg_test_binder_syntax_errors(source: String) -> [String] Never! {
     // Report every binder that fails, not only the first.
     failures := [String]{}
     loop binder in rendered {
-        errors :: pkg_test_binder_syntax_errors(binder.source)
+        errors: pkg_test_binder_syntax_errors(binder.source)
         if errors.len() != 0 -> &failures.push("{binder.name} binder output does not parse:\n{errors.join("\n")}\n{binder.source}")
     }
     if failures.len() != 0 -> panic(failures.join("\n\n"))

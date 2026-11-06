@@ -34,16 +34,16 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">Every tag declares an enforceable policy with a required non-empty `deny` list and optional `from` list.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Write `tag {tag} { deny: [Effect], from: [source.path] }`; omit `from` when it is not needed.</p>
+<p class="diag-copy fix" data-registry-field="fix">Write `{tag}: tag { deny: [Effect], from: [source.path] }`; omit `from` when it is not needed.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0734</code>: <code>tests/ui/tag_missing_policy.stderr</code>.</p>
 <pre class="diag">Error [jet.InvalidTagPolicy]: Tag `Risk` needs a policy body
-  --&gt; tests/ui/tag_missing_policy.jet:1:5
+  --&gt; tests/ui/tag_missing_policy.jet:1:1
     |
-  1 | tag Risk
-    |     ^^^^
+  1 | Risk: tag
+    | ^^^^
  Why: A tag declares a dataflow fact, including where that fact is denied
- Fix: Write `tag Risk { deny: [Effect] }`
+ Fix: Write `Risk: tag { deny: [Effect] }`
 More: jet-lang.dev/e/E0734
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

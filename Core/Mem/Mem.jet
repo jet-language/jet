@@ -1,4 +1,4 @@
-package {
+package: {
     name: "core.mem"
     version: "0.0.1"
     edition: "2026"
@@ -8,13 +8,13 @@ package {
         mem: .Library{ entry: mem }
     }
 }
-module scope
+scope: module
 use {
-    core :: core
-    mem :: core.mem
+    core: core
+    mem: core.mem
 }
 #Error
-struct AllocError {
+AllocError: struct {
     requested_bytes: Int
     allocator: String
 }
@@ -22,26 +22,26 @@ struct AllocError {
 // Allocator and pointer values are compiler-owned nominal surfaces. Their
 // constructors and methods are lowered by the memory CoreLib; source keeps
 // only the canonical type arities, never a fake runtime state carrier.
-struct Arena {}
+Arena: struct {}
 
-struct Bump {}
+Bump: struct {}
 
-struct Fixed {}
+Fixed: struct {}
 
-struct Pool<T> {}
+Pool: struct<T> {}
 
-struct Pin<T> {}
+Pin: struct<T> {}
 
 
-#Unsafe("`addr` is the address of a live, aligned `T` that stays valid for every use of the returned pointer") fn from_addr<T>(addr: Int) -> *T Never! {
+#Unsafe("`addr` is the address of a live, aligned `T` that stays valid for every use of the returned pointer") from_addr: fn<T>(addr: Int) -> *T Never! {
     mem.Ptr<T>.from_addr(addr)
 }
 
-#Unsafe("`pointer` names a live, aligned, readable `T` for the whole access") fn volatile_read<T>(pointer: *T) -> T Never! {
+#Unsafe("`pointer` names a live, aligned, readable `T` for the whole access") volatile_read: fn<T>(pointer: *T) -> T Never! {
     core.mem.volatile_read<T>(pointer)
 }
 
-#Unsafe("`pointer` names a live, aligned, writable `T` for the whole access") fn volatile_write<T>(pointer: *T, value: T) Never! {
+#Unsafe("`pointer` names a live, aligned, writable `T` for the whole access") volatile_write: fn<T>(pointer: *T, value: T) Never! {
     core.mem.volatile_write<T>(pointer, value)
 }
 
@@ -50,7 +50,7 @@ struct Pin<T> {}
 // eight-byte values), else an ordinary store. For a large output written
 // once and not read again soon. The writes are ordered before the next
 // call and the function's return (D-CACHE-CONTROL1).
-fn stream_store<T>(dst: &T, value: T) Never! {
+stream_store: fn<T>(dst: &T, value: T) Never! {
     core.mem.stream_store<T>(&dst, value)
 }
 

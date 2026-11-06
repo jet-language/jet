@@ -1,18 +1,18 @@
 // core.web.devserver — hot-reload wrapper around an App.
-struct DevServer {
+DevServer: struct {
     app_name: String
     url: String
     watching: Bool
 }
 
-fn app() -> DevServer Never! { {app_name: "app", url: "http://127.0.0.1:3000", watching: true} }
+app: fn() -> DevServer Never! { {app_name: "app", url: "http://127.0.0.1:3000", watching: true} }
 
-fn for_app(name: String) -> DevServer Never! {
+for_app: fn(name: String) -> DevServer Never! {
     {app_name: name, url: "http://127.0.0.1:3000", watching: true}
 }
 
-fn url(host: String, port: Int) -> String Never! { "http://{host}:{port}" }
+url: fn(host: String, port: Int) -> String Never! { "http://{host}:{port}" }
 
-fn is_local(host: String) -> Bool Never! {
+is_local: fn(host: String) -> Bool Never! {
     host == "127.0.0.1" || host == "localhost" || host == "::1"
 }

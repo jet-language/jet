@@ -1,92 +1,92 @@
 use {
-    fs :: core.files
-    http_client :: core.http.client
-    http_server :: core.http.server
-    net :: core.net
-    time :: core.time
+    fs: core.files
+    http_client: core.http.client
+    http_server: core.http.server
+    net: core.net
+    time: core.time
 }
 
 #Codable
-struct SumRequest {
+SumRequest: struct {
     numbers: [Int]
 }
 
 #Codable
-struct SumResponse {
+SumResponse: struct {
     sum: Int
 }
 
 #Codable
-struct StatusResponse {
+StatusResponse: struct {
     status: String
 }
 
 #Codable
-struct ErrorResponse {
+ErrorResponse: struct {
     error: String
 }
 
 #CLI
-struct WorkloadArgs {
+WorkloadArgs: struct {
     input: String
 }
 
-fn json_error(status: Int, message: String) -> HTTPResponse HTTPError! {
+json_error: fn(status: Int, message: String) -> HTTPResponse HTTPError! {
     return Ok(http_server.json(status, ErrorResponse{error: message}))
 }
 
-fn handle_sum(req: HTTPRequest, limit: Int) -> HTTPResponse HTTPError! {
+handle_sum: fn(req: HTTPRequest, limit: Int) -> HTTPResponse HTTPError! {
     if !req.under_limit(limit) -> return json_error(413, "body-too-large")
-    request :: req.json<SumRequest>() ?? return json_error(400, "malformed-json")
+    request: req.json<SumRequest>() ?? return json_error(400, "malformed-json")
     total := 0
     loop value in request.numbers -> total += value
     return Ok(http_server.json(200, SumResponse{sum: total}))
 }
 
-fn handle_ready(_req: HTTPRequest, ready_at: Int) -> HTTPResponse HTTPError! {
+handle_ready: fn(_req: HTTPRequest, ready_at: Int) -> HTTPResponse HTTPError! {
     if time.now() < ready_at -> return json_error(503, "not-ready")
     return Ok(http_server.json(200, StatusResponse{status: "ready"}))
 }
 
-fn status_from(response: HTTPResponse) -> Int HTTPError! {
+status_from: fn(response: HTTPResponse) -> Int HTTPError! {
     if {
         response.status() == 200 -> {
-            _ :: response.json<StatusResponse>() ?? panic("invalid status response")
+            _: response.json<StatusResponse>() ?? panic("invalid status response")
         }
         else -> {
-            _ :: response.json<ErrorResponse>() ?? panic("invalid error response")
+            _: response.json<ErrorResponse>() ?? panic("invalid error response")
         }
     }
     return response.status()
 }
 
-fn get_status(url: String) -> Int HTTPError! {
-    response :: http_client.get(url) ?? panic("GET failed")
+get_status: fn(url: String) -> Int HTTPError! {
+    response: http_client.get(url) ?? panic("GET failed")
     return status_from(response)
 }
 
-fn post_sum(url: String, body: String) -> Int HTTPError! {
-    response :: http_client.post(url, body) ?? panic("POST failed")
-    value :: response.json<SumResponse>() ?? panic("invalid sum response")
+post_sum: fn(url: String, body: String) -> Int HTTPError! {
+    response: http_client.post(url, body) ?? panic("POST failed")
+    value: response.json<SumResponse>() ?? panic("invalid sum response")
     return value.sum
 }
 
-fn post_error_status(url: String, body: String) -> Int HTTPError! {
-    response :: http_client.post(url, body) ?? panic("POST failed")
-    _ :: response.json<ErrorResponse>() ?? panic("invalid error response")
+post_error_status: fn(url: String, body: String) -> Int HTTPError! {
+    response: http_client.post(url, body) ?? panic("POST failed")
+    _: response.json<ErrorResponse>() ?? panic("invalid error response")
     return response.status()
 }
 
-fn unknown_status(url: String, body: String) -> Int HTTPError! {
-    request :: http_client.request("PUT", url).body(body)
-    response :: request.send() ?? panic("PUT failed")
-    _ :: response.json<ErrorResponse>() ?? panic("invalid missing response")
+unknown_status: fn(url: String, body: String) -> Int HTTPError! {
+    request: http_client.request("PUT", url).body(body)
+    response: request.send() ?? panic("PUT failed")
+    _: response.json<ErrorResponse>() ?? panic("invalid missing response")
     return response.status()
 }
 
-fn slow_client(address: String, timeout_ms: Int) {
-    stream :: net.tcp_connect(address) ?? panic("slow client connect failed")
-    _ :: net.set_timeout(&stream, timeout_ms) ?? panic("slow client timeout failed")
+slow_client: fn(address: String, timeout_ms: Int) {
+    stream: net.tcp_connect(address) ?? panic("slow client connect failed")
+    _: net.set_timeout(&stream, timeout_ms) ?? panic("slow client timeout failed")
     headers := "".bytes()
     loop line in
         ["POST /sum HTTP/1.1", "Host: loopback", "Content-Type: application/json", "Content-Length: 20", "Connection: close", ""] {
@@ -94,27 +94,27 @@ fn slow_client(address: String, timeout_ms: Int) {
         &headers.push(13)
         &headers.push(10)
     }
-    _ :: stream.write_all(headers) ?? panic("slow client write failed")
-    wait :: Duration.milliseconds(timeout_ms) ?? panic("slow client duration failed")
+    _: stream.write_all(headers) ?? panic("slow client write failed")
+    wait: Duration.milliseconds(timeout_ms) ?? panic("slow client duration failed")
     time.sleep(wait)
-    _ :: stream.close() ?? panic("slow client close failed")
+    _: stream.close() ?? panic("slow client close failed")
 }
 
-fn run_concurrent(url: String, body: String, count: Int, workers: Int) {
+run_concurrent: fn(url: String, body: String, count: Int, workers: Int) {
     task.group bounded(limit: workers) {
         if {
             count == 2 -> {
-                values :: task.all {post_sum(url, body), post_sum(url, body)} ?? panic("concurrent requests failed")
-                first :: values[0] ?? panic("concurrent request failed")
-                second :: values[1] ?? panic("concurrent request failed")
+                values: task.all {post_sum(url, body), post_sum(url, body)} ?? panic("concurrent requests failed")
+                first: values[0] ?? panic("concurrent request failed")
+                second: values[1] ?? panic("concurrent request failed")
                 if first != 6 || second != 6 -> panic("concurrent sum mismatch")
                 print("concurrent=2")
             }
             count == 3 -> {
-                values :: task.all {post_sum(url, body), post_sum(url, body), post_sum(url, body)} ?? panic("concurrent requests failed")
-                first :: values[0] ?? panic("concurrent request failed")
-                second :: values[1] ?? panic("concurrent request failed")
-                third :: values[2] ?? panic("concurrent request failed")
+                values: task.all {post_sum(url, body), post_sum(url, body), post_sum(url, body)} ?? panic("concurrent requests failed")
+                first: values[0] ?? panic("concurrent request failed")
+                second: values[1] ?? panic("concurrent request failed")
+                third: values[2] ?? panic("concurrent request failed")
                 if first != 12 || second != 12 || third != 12 {
                     panic("concurrent sum mismatch")
                 }
@@ -125,9 +125,9 @@ fn run_concurrent(url: String, body: String, count: Int, workers: Int) {
     }
 }
 
-fn run(args: WorkloadArgs) {
-    raw :: fs.read(args.input) ?? panic("read input")
-    lines :: raw.lines()
+run: fn(args: WorkloadArgs) {
+    raw: fs.read(args.input) ?? panic("read input")
+    lines: raw.lines()
     mode := "beginner"
     bind := "127.0.0.1:0"
     workers := 4
@@ -140,7 +140,7 @@ fn run(args: WorkloadArgs) {
     // bounded and loopback-only; expert values expose the same controls.
     loop line in lines {
         if line == "" || line.starts_with("#") -> next
-        fields :: line.split("|").to_list()
+        fields: line.split("|").to_list()
         if fields[0] == "CONFIG" {
             mode = fields[1]
             if fields.len() == 8 {
@@ -159,38 +159,38 @@ fn run(args: WorkloadArgs) {
         panic("service controls out of range")
     }
 
-    mux :: http_server.mux()
-    ready_at :: time.now() + ready_after_ms
+    mux: http_server.mux()
+    ready_at: time.now() + ready_after_ms
     mux.get("/health", (_req: HTTPRequest) -> Ok(http_server.json(200, StatusResponse{status: "ok"})))
     mux.get("/ready", (req: HTTPRequest) -> handle_ready(req, ready_at))
     mux.post("/sum", (req: HTTPRequest) -> handle_sum(req, body_limit))
     mux.put("/unknown", (_req: HTTPRequest) -> json_error(404, "not-found"))
 
-    server :: http_server.bind(bind, mux) ?? panic("bind failed")
-    address :: server.local_addr() ?? panic("local address failed")
-    serving :: task {
+    server: http_server.bind(bind, mux) ?? panic("bind failed")
+    address: server.local_addr() ?? panic("local address failed")
+    serving: task {
         server.serve() ?? panic("serve failed")
     }
-    base :: "http://{address}"
+    base: "http://{address}"
     requests := 0
     stopped := false
 
     loop line in lines {
         if line == "" || line.starts_with("#") -> next
-        fields :: line.split("|").to_list()
-        op :: fields[0]
+        fields: line.split("|").to_list()
+        op: fields[0]
         if op != "CONFIG" {
             if {
                 op == "WAIT" -> {
-                    wait_ms :: Int.parse(fields[1]) ?? panic("invalid wait")
-                    wait :: Duration.milliseconds(wait_ms) ?? panic("invalid wait duration")
+                    wait_ms: Int.parse(fields[1]) ?? panic("invalid wait")
+                    wait: Duration.milliseconds(wait_ms) ?? panic("invalid wait duration")
                     time.sleep(wait)
                 }
                 op == "GET" || op == "POST" || op == "PUT" || op == "PATCH" || op == "DELETE" -> {
-                    url :: "{base}{fields[1]}"
+                    url: "{base}{fields[1]}"
                     if {
                         op == "GET" -> {
-                            status :: get_status(url)
+                            status: get_status(url)
                             if {
                                 fields[1] == "/health" -> { print("health={status}") }
                                 fields[1] == "/ready" -> { print("ready={status}") }
@@ -208,18 +208,18 @@ fn run(args: WorkloadArgs) {
                     requests += 1
                 }
                 op == "CONCURRENT" -> {
-                    count :: Int.parse(fields[3]) ?? panic("invalid concurrent count")
+                    count: Int.parse(fields[3]) ?? panic("invalid concurrent count")
                     run_concurrent("{base}{fields[1]}", fields[2], count, workers)
                     requests += count
                 }
                 op == "MALFORMED" -> {
-                    status :: post_error_status("{base}{fields[1]}", fields[2])
+                    status: post_error_status("{base}{fields[1]}", fields[2])
                     print("malformed={status}")
                     requests += 1
                 }
                 op == "OVERSIZE" -> {
-                    oversized :: "x".repeat(body_limit + 1)
-                    status :: post_error_status("{base}{fields[1]}", oversized)
+                    oversized: "x".repeat(body_limit + 1)
+                    status: post_error_status("{base}{fields[1]}", oversized)
                     print("oversize={status}")
                     requests += 1
                 }
@@ -229,7 +229,7 @@ fn run(args: WorkloadArgs) {
                     requests += 1
                 }
                 op == "SHUTDOWN" -> {
-                    grace :: Duration.milliseconds(shutdown_ms) ?? panic("invalid shutdown duration")
+                    grace: Duration.milliseconds(shutdown_ms) ?? panic("invalid shutdown duration")
                     server.shutdown(grace) ?? panic("shutdown failed")
                     stopped = true
                     print("shutdown=clean")
@@ -239,7 +239,7 @@ fn run(args: WorkloadArgs) {
         }
     }
     if !stopped {
-        grace :: Duration.milliseconds(shutdown_ms) ?? panic("invalid shutdown duration")
+        grace: Duration.milliseconds(shutdown_ms) ?? panic("invalid shutdown duration")
         server.shutdown(grace) ?? panic("shutdown failed")
         print("shutdown=clean")
     }

@@ -1,9 +1,9 @@
 use {
-    disp_files :: core.files
-    disp_process :: core.process
-    disp_parse :: core.text.parse
-    disp_encoding :: core.encoding
-    disp_json :: core.encoding.json
+    disp_files: core.files
+    disp_process: core.process
+    disp_parse: core.text.parse
+    disp_encoding: core.encoding
+    disp_json: core.encoding.json
 }
 
 // The #1705 c2 guard, scripts/agent/check-audit-dispositions.mjs (removed in
@@ -14,13 +14,13 @@ use {
 // program prints every report and row without one; the case compares that
 // list with its golden, so a new report without dispositions changes it.
 // Tower remains Node tooling (NODE-DEBT): the live board comes from its CLI.
-fn disp_slice(text: String, start: Int, end: Int) -> String {
+disp_slice: fn(text: String, start: Int, end: Int) -> String {
     if start == end -> return ""
     String.from_bytes(text.bytes()[start..(end - 1)]) ?? panic("audit report byte slice must end on UTF-8 boundaries")
 }
 
 // markdownCells: strip one leading and one trailing pipe, then split.
-fn disp_cells(raw: String) -> [String] {
+disp_cells: fn(raw: String) -> [String] {
     line := raw.trim()
     if line.starts_with("|") -> line = disp_slice(line, 1, line.bytes().len())
     if line.ends_with("|") -> line = disp_slice(line, 0, line.bytes().len() - 1)
@@ -29,22 +29,22 @@ fn disp_cells(raw: String) -> [String] {
     cells
 }
 
-fn disp_is_digit(byte: U8) -> Bool {
+disp_is_digit: fn(byte: U8) -> Bool {
     byte >= (U8{48}) && byte <= (U8{57})
 }
 
-fn disp_is_upper_or_digit(byte: U8) -> Bool {
+disp_is_upper_or_digit: fn(byte: U8) -> Bool {
     disp_is_digit(byte) || (byte >= (U8{65}) && byte <= (U8{90}))
 }
 
 // `#\d+` card references, in order.
-fn disp_card_refs(text: String) -> [Int] {
-    bytes :: text.bytes()
+disp_card_refs: fn(text: String) -> [Int] {
+    bytes: text.bytes()
     refs := [Int]{}
     index := 0
     loop index < bytes.len() {
         if bytes[index] == (U8{35}) {
-            start :: index + 1
+            start: index + 1
             end := start
             loop end < bytes.len() && disp_is_digit(bytes[end]) -> end += 1
             if end > start {
@@ -59,8 +59,8 @@ fn disp_card_refs(text: String) -> [Int] {
 }
 
 // `D-[A-Z0-9]+(-[A-Z0-9]+)*` decision IDs, without any `=OUTCOME`.
-fn disp_decision_refs(text: String) -> [String] {
-    bytes :: text.bytes()
+disp_decision_refs: fn(text: String) -> [String] {
+    bytes: text.bytes()
     refs := [String]{}
     index := 0
     loop index + 2 < bytes.len() {
@@ -80,7 +80,7 @@ fn disp_decision_refs(text: String) -> [String] {
     refs
 }
 
-fn disp_dashes(cell: String) -> Bool {
+disp_dashes: fn(cell: String) -> Bool {
     if cell.is_empty() -> return false
     loop byte in cell.bytes() {
         if byte != (U8{45}) -> return false
@@ -92,21 +92,21 @@ fn disp_dashes(cell: String) -> Bool {
 // jetpack_truth/truth_matrix_covers_every_done_epoch4_card: TOWER_DATA pins
 // the Tower CLI to it, and the parses choose their own input budget because
 // the board is past `json.parse`'s 16 MiB safe bound.
-fn disp_board_limits() -> disp_encoding.EncodingLimits {
+disp_board_limits: fn() -> disp_encoding.EncodingLimits {
     disp_encoding.EncodingLimits{buffer_bytes: 65536, max_depth: 256, max_item_bytes: 1073741824, max_total_bytes: None, max_expansion_depth: 32, max_expansion_bytes: 8388608}
 }
 
-fn disp_tower_json(root: String, words: [String]) -> Dyn {
-    board :: disp_files.join(root, "Tools/tower/.tower")
+disp_tower_json: fn(root: String, words: [String]) -> Dyn {
+    board: disp_files.join(root, "Tools/tower/.tower")
     command := [String]{"node", "Tools/tower/tower.mjs"}
     loop word in words -> &command.push(word)
-    live :: disp_process.cmd(command).cwd(root).env("TOWER_DATA", disp_files.join(board, "tower.json")).stdout(.Capture).stderr(.Capture).run() ?? panic("run Tower projection")
+    live: disp_process.cmd(command).cwd(root).env("TOWER_DATA", disp_files.join(board, "tower.json")).stdout(.Capture).stderr(.Capture).run() ?? panic("run Tower projection")
     assert(live.success, "Tower projection failed: {live.errors}")
     disp_json.parse_with_limits(live.output, disp_board_limits()) ?? panic("parse live Tower JSON: {err.reason}")
 }
 
-fn disp_card_num(card: Dyn) -> Int {
-    value :: card.field("num") ?? panic("Tower card num is required")
+disp_card_num: fn(card: Dyn) -> Int {
+    value: card.field("num") ?? panic("Tower card num is required")
     if value == {
         .Int(number) -> number
         .Float(number) -> Int.from_float(number) ?? panic("card num is not an integer")
@@ -115,7 +115,7 @@ fn disp_card_num(card: Dyn) -> Int {
     }
 }
 
-fn disp_ingest(board: Dyn, cards: &[Int: Bool], decisions: &[String: String]) {
+disp_ingest: fn(board: Dyn, cards: &[Int: Bool], decisions: &[String: String]) {
     if board.field("cards") == .Ok(field) {
         if field == .Array(entries) {
             loop card in entries -> cards[disp_card_num(card)] = true
@@ -134,21 +134,21 @@ fn disp_ingest(board: Dyn, cards: &[Int: Bool], decisions: &[String: String]) {
     }
 }
 
-struct DispBoard {
+DispBoard: struct {
     cards: [Int: Bool]
     decisions: [String: String]
 }
 
 // Live cards and decisions first, then the retired ones in history.json and
 // its card shards (Tower #6564 c7).
-fn disp_tower(root: String) -> DispBoard {
+disp_tower: fn(root: String) -> DispBoard {
     cards := [Int: Bool]{}
     decisions := [String: String]{}
-    live_cards :: disp_tower_json(root, [String]{"card", "list", "--json"})
+    live_cards: disp_tower_json(root, [String]{"card", "list", "--json"})
     if live_cards == .Array(entries) {
         loop card in entries -> cards[disp_card_num(card)] = true
     }
-    live_decisions :: disp_tower_json(root, [String]{"decision", "list", "--json"})
+    live_decisions: disp_tower_json(root, [String]{"decision", "list", "--json"})
     if live_decisions == .Array(entries) {
         loop decision in entries {
             if decision.field("id") == .Ok(id) {
@@ -158,9 +158,9 @@ fn disp_tower(root: String) -> DispBoard {
             }
         }
     }
-    board :: disp_files.join(root, "Tools/tower/.tower")
+    board: disp_files.join(root, "Tools/tower/.tower")
     if disp_files.read(disp_files.join(board, "history.json")) == .Ok(raw) {
-        history :: disp_json.parse_with_limits(raw, disp_board_limits()) ?? panic("parse Tower history: {err.reason}")
+        history: disp_json.parse_with_limits(raw, disp_board_limits()) ?? panic("parse Tower history: {err.reason}")
         disp_ingest(history, &cards, &decisions)
         if history.field("cards") == .Ok(field) {
             if field.field("shards") == .Ok(shards) {
@@ -168,8 +168,8 @@ fn disp_tower(root: String) -> DispBoard {
                     loop shard in listed {
                         name := ""
                         if shard.field("file") == .Ok(file) -> name = file.text() ?? ""
-                        part_raw :: disp_files.read(disp_files.join(disp_files.join(board, "history"), name)) ?? panic("read Tower history shard {name}")
-                        part :: disp_json.parse_with_limits(part_raw, disp_board_limits()) ?? panic("parse Tower history shard {name}: {err.reason}")
+                        part_raw: disp_files.read(disp_files.join(disp_files.join(board, "history"), name)) ?? panic("read Tower history shard {name}")
+                        part: disp_json.parse_with_limits(part_raw, disp_board_limits()) ?? panic("parse Tower history shard {name}: {err.reason}")
                         disp_ingest(part, &cards, &decisions)
                     }
                 }
@@ -181,20 +181,20 @@ fn disp_tower(root: String) -> DispBoard {
 
 // The problems of one report's table (parseReport); the count of its finding
 // rows, or -1 when it has no table.
-fn disp_report(relative: String, text: String, board: DispBoard, problems: &[String]) -> Int {
-    opened :: disp_parse.split(text, "<!-- audit-dispositions:v1 -->")
+disp_report: fn(relative: String, text: String, board: DispBoard, problems: &[String]) -> Int {
+    opened: disp_parse.split(text, "<!-- audit-dispositions:v1 -->")
     if opened.len() < 2 {
         &problems.push("{relative}: missing audit-dispositions:v1 table")
         return -1
     }
-    closed :: disp_parse.split(opened[1], "<!-- /audit-dispositions -->")
+    closed: disp_parse.split(opened[1], "<!-- /audit-dispositions -->")
     if closed.len() < 2 {
         &problems.push("{relative}: audit-dispositions:v1 table is not closed")
         return -1
     }
     lines := [String]{}
     loop raw in closed[0].lines() {
-        line :: raw.trim()
+        line: raw.trim()
         if line.starts_with("|") -> &lines.push(line)
     }
     if lines.is_empty() {
@@ -203,13 +203,13 @@ fn disp_report(relative: String, text: String, board: DispBoard, problems: &[Str
     }
     header := [String]{}
     loop cell in disp_cells(lines[0]) -> &header.push(disp_parse.lower(cell))
-    expected :: [String]{"finding", "disposition", "target or reason"}
+    expected: [String]{"finding", "disposition", "target or reason"}
     if header != expected -> &problems.push("{relative}: disposition header must be | finding | disposition | target or reason |")
     rows := 0
     ids := [String]{}
     loop index in 1..<lines.len() {
-        line :: lines[index]
-        cells :: disp_cells(line)
+        line: lines[index]
+        cells: disp_cells(line)
         dashes := true
         loop cell in cells {
             if !disp_dashes(cell) -> dashes = false
@@ -219,30 +219,30 @@ fn disp_report(relative: String, text: String, board: DispBoard, problems: &[Str
             &problems.push("{relative}: disposition row must have three columns: {line}")
             next
         }
-        finding :: cells[0]
-        target :: cells[2]
+        finding: cells[0]
+        target: cells[2]
         if finding.is_empty() || ids.contains(finding) {
             &problems.push("{relative}: finding IDs must be non-empty and unique: {if finding.is_empty() -> "<empty>" else -> finding}")
         }
         &ids.push(finding)
-        kind :: disp_parse.lower(cells[1])
+        kind: disp_parse.lower(cells[1])
         if kind != "card" && kind != "decision" && kind != "no-action" {
             &problems.push("{relative}: {finding} has unknown disposition {cells[1]}")
             next
         }
-        lowered :: disp_parse.lower(target)
+        lowered: disp_parse.lower(target)
         if target.is_empty() || lowered == "—" || lowered == "-" || lowered == "none" || lowered == "tbd" || lowered == "todo" {
             &problems.push("{relative}: {finding} needs a target or no-action reason")
             next
         }
         if kind == "card" {
-            found :: disp_card_refs(target)
+            found: disp_card_refs(target)
             if found.is_empty() -> &problems.push("{relative}: {finding} card disposition names no Tower card")
             loop num in found {
                 if !board.cards.has_key(num) -> &problems.push("{relative}: {finding} names missing Tower card #{num}")
             }
         } else if kind == "decision" {
-            found :: disp_decision_refs(target)
+            found: disp_decision_refs(target)
             if found.is_empty() -> &problems.push("{relative}: {finding} decision disposition names no decision")
             loop id in found {
                 if !board.decisions.has_key(id) {
@@ -262,10 +262,10 @@ fn disp_report(relative: String, text: String, board: DispBoard, problems: &[Str
 
 // Arguments: the checkout whose Docs/audits is read in place, then the copy
 // whose Tools/tower the Tower CLI reads.
-fn run() {
-    root :: disp_process.args()[0]
-    board :: disp_tower(disp_process.args()[1])
-    audits :: disp_files.join(root, "Docs/audits")
+run: fn() {
+    root: disp_process.args()[0]
+    board: disp_tower(disp_process.args()[1])
+    audits: disp_files.join(root, "Docs/audits")
     names := disp_files.listdir(audits) ?? panic("list Docs/audits")
     &names.sort()
     reports := [String]{}
@@ -276,9 +276,9 @@ fn run() {
     tabled := 0
     rows := 0
     loop name in reports {
-        relative :: "Docs/audits/{name}"
-        text :: disp_files.read(disp_files.join(audits, name)) ?? panic("read {relative}")
-        count :: disp_report(relative, text, board, &problems)
+        relative: "Docs/audits/{name}"
+        text: disp_files.read(disp_files.join(audits, name)) ?? panic("read {relative}")
+        count: disp_report(relative, text, board, &problems)
         if count >= 0 {
             tabled += 1
             rows += count

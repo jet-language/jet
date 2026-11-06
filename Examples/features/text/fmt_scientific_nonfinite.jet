@@ -1,26 +1,26 @@
 use {
-    math :: core.math
-    fmt :: core.text.fmt
+    math: core.math
+    fmt: core.text.fmt
 }
 
-fn finite(label: String, n: Float, frac: Int, expected: String) {
-    actual :: fmt.sci(n, frac)
+finite: fn(label: String, n: Float, frac: Int, expected: String) {
+    actual: fmt.sci(n, frac)
     if actual != expected -> panic("{label}: expected {expected}, got {actual}")
     print("{label}: {actual}")
 }
 
 // Nonfinite values use ordinary Float display, independent of precision.
-fn nonfinite(label: String, n: Float) {
-    precisions :: [Int]{-2, 0, 2, 6, 9223372036854775807}
+nonfinite: fn(label: String, n: Float) {
+    precisions: [Int]{-2, 0, 2, 6, 9223372036854775807}
     loop frac in precisions {
-        actual :: fmt.sci(n, frac)
-        ordinary :: "{n}"
+        actual: fmt.sci(n, frac)
+        ordinary: "{n}"
         if actual != ordinary -> panic("{label}: expected {ordinary}, got {actual}")
         print("{label}/{frac}: {actual}")
     }
 }
 
-fn run() {
+run: fn() {
     nonfinite("NaN", math.NAN)
     nonfinite("positive infinity", math.INFINITY)
     nonfinite("negative infinity", -math.INFINITY)

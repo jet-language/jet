@@ -1,14 +1,14 @@
-package {
+package: {
     name: "channel-denial"
     authority: { allow: [IO, Time.Wait] }
 }
 
-fn hot(tx: Sender<Int>) -[!Time]> {
+hot: fn(tx: Sender<Int>) -[!Time]> {
     tx.send(1)
 }
 
-fn run() {
-    { sender: tx, receiver: rx } :: channel<Int>(capacity: 1)
+run: fn() {
+    { sender: tx, receiver: rx }: channel<Int>(capacity: 1)
     tx.send(0)
     hot(tx)
     print(rx.receive() ?? 0)

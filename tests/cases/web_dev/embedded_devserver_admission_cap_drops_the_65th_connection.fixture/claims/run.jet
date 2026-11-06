@@ -1,10 +1,10 @@
-use tasks :: core.tasks
+use tasks: core.tasks
 
-fn s5_reset(error: NetError) -> Bool {
+s5_reset: fn(error: NetError) -> Bool {
     if error == { .ConnectionReset(_) -> true else -> false }
 }
-struct S5ReadEnd { bytes: Int, closed: Bool }
-fn s5_read_end(stream: net.TCPStream) -> S5ReadEnd {
+S5ReadEnd: struct { bytes: Int, closed: Bool }
+s5_read_end: fn(stream: net.TCPStream) -> S5ReadEnd {
     count := 0
     loop {
         if net.tcp_read_bytes(stream, 8192) == {
@@ -17,26 +17,26 @@ fn s5_read_end(stream: net.TCPStream) -> S5ReadEnd {
     }
 }
 
-fn s5_probe_write(probe: net.TCPStream) -> Bool {
-    crlf :: s5_web_crlf()
+s5_probe_write: fn(probe: net.TCPStream) -> Bool {
+    crlf: s5_web_crlf()
     net.tcp_write_all_bytes(probe, "GET /__jet_dev_version HTTP/1.1{crlf}{crlf}".bytes()) ?? return false
     true
 }
 
 #Test("original sixty-fifth connection is dropped at admission") {
-    port :: s5_web_port()
+    port: s5_web_port()
     s5_web_wait_up(port, 30000)
     holders := [net.TCPStream]{}
     loop index in 0..<64 {
-        holder :: net.tcp_connect("127.0.0.1:{port}") ?? panic("connect holder")
+        holder: net.tcp_connect("127.0.0.1:{port}") ?? panic("connect holder")
         net.set_write_timeout(holder, 1000) ?? panic("holder timeout")
         net.tcp_write_all_bytes(holder, "G".bytes()) ?? panic("holder write")
         &holders.push(holder)
     }
-    started :: time.start()
+    started: time.start()
     dropped := false
     loop time.elapsed(started).ns < 5000000000 {
-        probe :: net.tcp_connect("127.0.0.1:{port}") ?? { dropped = true
+        probe: net.tcp_connect("127.0.0.1:{port}") ?? { dropped = true
             break }
         net.set_read_timeout(probe, 200) ?? panic("probe timeout")
         if !s5_probe_write(probe) {
@@ -45,7 +45,7 @@ fn s5_probe_write(probe: net.TCPStream) -> Bool {
             break
         }
         net.tcp_shutdown(probe, .Write).drop("original ignores probe half-close failure")
-        read :: s5_read_end(probe)
+        read: s5_read_end(probe)
         net.tcp_close(probe).drop("original probe drop ignores close failure")
         if read.bytes == 0 && read.closed { dropped = true
             break }

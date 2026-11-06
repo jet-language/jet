@@ -3,11 +3,11 @@
 // jetpack::CLI::services_secrets_config. Trust patterns pre-authorize
 // matching projects with no per-hash prompt.
 
-enum ConfigGroup {
+ConfigGroup: enum {
     Trust
     Sandbox
 
-    fn parse(word: String) -> ConfigGroup? Never! {
+    parse: fn(word: String) -> ConfigGroup? Never! {
         if word == {
             CONFIG_VERB_TRUST -> Val(ConfigGroup.Trust)
             CONFIG_VERB_SANDBOX -> Val(ConfigGroup.Sandbox)
@@ -16,35 +16,35 @@ enum ConfigGroup {
     }
 }
 
-fn cli_cmd_config(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
-    group_word :: parsed.positional.get(0) ?? ""
-    group :: ConfigGroup.parse(group_word) ?? {
+cli_cmd_config: fn(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    group_word: parsed.positional.get(0) ?? ""
+    group: ConfigGroup.parse(group_word) ?? {
         theme.error("`jet os config {group_word}` isn't a command", "jet os config manages the env/dev trust store and sandbox substitute-or-refuse policy.", "try `jet os config trust list` or `jet os config sandbox status`.")
         return EXIT_USAGE
     }
-    verb :: parsed.positional.get(1)
+    verb: parsed.positional.get(1)
     if group == {
         .Trust -> cli_config_trust(theme, parsed, verb)
         .Sandbox -> cli_config_sandbox(theme, verb)
     }
 }
 
-fn cli_config_trust(theme: Theme, parsed: CLIParsed, verb: String?) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
-    store :: trust_store_path()
-    word :: verb ?? ""
+cli_config_trust: fn(theme: Theme, parsed: CLIParsed, verb: String?) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
+    store: trust_store_path()
+    word: verb ?? ""
     if word == {
         CONFIG_TRUST_VERB_ADD -> {
-            pattern :: parsed.positional.get(2) ?? {
+            pattern: parsed.positional.get(2) ?? {
                 theme.error("`jet os config trust add` needs a pattern", "a pattern pre-authorizes matching projects by path prefix/glob.", "try `jet os config trust add ~/work/*`.")
                 return EXIT_USAGE
             }
-            added :: trust_add_pattern(store, cli_current_dir(), pattern) ?? return trust_report_gate_failure(theme, err)
-            status :: if added -> "trusted: {pattern}" else -> "already trusted: {pattern}"
+            added: trust_add_pattern(store, cli_current_dir(), pattern) ?? return trust_report_gate_failure(theme, err)
+            status: if added -> "trusted: {pattern}" else -> "already trusted: {pattern}"
             theme.status(status)
             EXIT_OK
         }
         CONFIG_TRUST_VERB_LIST -> {
-            entries :: trust_list_entries(store)
+            entries: trust_list_entries(store)
             if entries.len() == 0 {
                 theme.status("no trust entries yet.")
             } else {
@@ -53,15 +53,15 @@ fn cli_config_trust(theme: Theme, parsed: CLIParsed, verb: String?) -[IO, FS, En
             EXIT_OK
         }
         CONFIG_TRUST_VERB_REMOVE -> {
-            pattern :: parsed.positional.get(2) ?? {
+            pattern: parsed.positional.get(2) ?? {
                 theme.error("`jet os config trust remove` needs a pattern", "removes a previously trusted path pattern.", "try `jet os config trust remove ~/work/*`.")
                 return EXIT_USAGE
             }
-            removed :: trust_remove_pattern(store, pattern) ?? {
+            removed: trust_remove_pattern(store, pattern) ?? {
                 theme.error("couldn't update the trust store", "{err}", "check write permissions on `{store}` and retry.")
                 return EXIT_USER_ERROR
             }
-            status :: if removed -> "removed: {pattern}" else -> "not found: {pattern}"
+            status: if removed -> "removed: {pattern}" else -> "not found: {pattern}"
             theme.status(status)
             EXIT_OK
         }
@@ -72,26 +72,26 @@ fn cli_config_trust(theme: Theme, parsed: CLIParsed, verb: String?) -[IO, FS, En
     }
 }
 
-fn cli_config_sandbox(theme: Theme, verb: String?) -[IO, FS, Env, Exec, Time.Wait]> Int Never! {
-    word :: verb ?? ""
+cli_config_sandbox: fn(theme: Theme, verb: String?) -[IO, FS, Env, Exec, Time.Wait]> Int Never! {
+    word: verb ?? ""
     if word == {
         CONFIG_SANDBOX_VERB_REQUIRE -> {
-            path :: env_write_sandbox_policy(SandboxPolicy.Require) ?? return cli_config_sandbox_write_failed(theme, err)
+            path: env_write_sandbox_policy(SandboxPolicy.Require) ?? return cli_config_sandbox_write_failed(theme, err)
             theme.status("sandbox required: {path}")
             EXIT_OK
         }
         CONFIG_SANDBOX_VERB_ALLOW -> {
-            path :: env_write_sandbox_policy(SandboxPolicy.AllowFallback) ?? return cli_config_sandbox_write_failed(theme, err)
+            path: env_write_sandbox_policy(SandboxPolicy.AllowFallback) ?? return cli_config_sandbox_write_failed(theme, err)
             theme.status("sandbox substitution allowed for non-executable actions; executable actions refuse without the native boundary: {path}")
             EXIT_OK
         }
         CONFIG_SANDBOX_VERB_STATUS -> {
-            status :: env_detect_sandbox()
-            policy_label :: if env_read_sandbox_policy() == {
+            status: env_detect_sandbox()
+            policy_label: if env_read_sandbox_policy() == {
                 .AllowFallback -> "allow"
                 .Require -> "require"
             }
-            level :: if status.level == {
+            level: if status.level == {
                 .Strong -> "Strong"
                 .Fallback -> "Fallback"
             }
@@ -107,7 +107,7 @@ fn cli_config_sandbox(theme: Theme, verb: String?) -[IO, FS, Env, Exec, Time.Wai
     }
 }
 
-fn cli_config_sandbox_write_failed(theme: Theme, error: IOError) -[IO, Time.Wait]> Int Never! {
+cli_config_sandbox_write_failed: fn(theme: Theme, error: IOError) -[IO, Time.Wait]> Int Never! {
     theme.error("couldn't write sandbox policy", "{error}", "check permissions on your ~/.jet directory.")
     EXIT_USER_ERROR
 }

@@ -16,17 +16,17 @@ use {
     core.encoding.[Dyn]
     core.devtools.runtime.kernel_devtools_panel_catalog.[JetDevtoolsPanelCapability]
 }
-BROWSER_PAGE_SCHEMA :: "jet.devtools.browser.v1"
-struct WebLiveValueUpdate { key: String; type_identity: String; rendered_value: String? }
-struct BrowserTools { source: Bool; source_reason: String?; rebuild: Bool; rebuild_reason: String? }
-struct BrowserDevtoolsFrame {
+BROWSER_PAGE_SCHEMA: "jet.devtools.browser.v1"
+WebLiveValueUpdate: struct { key: String; type_identity: String; rendered_value: String? }
+BrowserTools: struct { source: Bool; source_reason: String?; rebuild: Bool; rebuild_reason: String? }
+BrowserDevtoolsFrame: struct {
     placement: BrowserPlacement; route: String; protocol: String; session_id: String
     source_id: String?; build_id: String?; revision: String; world_id: String?
     sequence: U64?; cursor: BrowserReconnectCursor?; state: BrowserSessionState
     status: DevtoolsStatusFact; tools: BrowserTools; receipts: [JetDevtoolsCommandReceipt]
     selection: BrowserSelection?; panels: [BrowserPanelView]; elements: [BrowserHtmlElement]
 }
-struct BrowserWebState {
+BrowserWebState: struct {
     host: BrowserHost; facts: [String:BrowserPanelFact]; panel_order: VecDeque<String>
     source_id: String?; build_id: String?; revision: String; world_id: String?
     status: DevtoolsStatusFact; tools: BrowserTools; receipts: [JetDevtoolsCommandReceipt]
@@ -34,14 +34,14 @@ struct BrowserWebState {
     dom_state: [WebModuleSwapStateFact]
 }
 impl BrowserWebState {
-    fn new(session_id: String) -> BrowserWebState {
+    new: fn(session_id: String) -> BrowserWebState {
         BrowserWebState { host: BrowserHost.new(session_id), facts: {}, panel_order: VecDeque.new(),
             source_id: .None, build_id: .None, revision: "", world_id: .None, status: starting_status(),
             tools: BrowserTools { source: false, source_reason: .None, rebuild: false, rebuild_reason: .None },
             receipts: [], swap: .None, last_swap: .None, swap_error: .None, dom_state: [] }
     }
-    fn host(self) -> BrowserHost { &self.host }
-    fn frame(self, placement: BrowserPlacement) -> BrowserDevtoolsFrame {
+    host: fn(self) -> BrowserHost { &self.host }
+    frame: fn(self, placement: BrowserPlacement) -> BrowserDevtoolsFrame {
         model := self.host.view_model(placement)
         BrowserDevtoolsFrame { placement: model.placement, route: model.route, protocol: model.protocol,
             session_id: model.session_id, source_id: self.source_id.clone(), build_id: self.build_id.clone(),
@@ -50,14 +50,14 @@ impl BrowserWebState {
             tools: self.tools.clone(), receipts: self.receipts.clone(), selection: model.selection,
             panels: model.panels, elements: model.elements }
     }
-    fn reset(&self, session_id: String) {
+    reset: fn(&self, session_id: String) {
         self.host = BrowserHost.new(session_id)
         self.facts.clear(); self.panel_order.clear()
         self.source_id = .None; self.build_id = .None; self.revision.clear(); self.world_id = .None
         self.status = starting_status(); self.receipts.clear()
         self.swap = .None; self.last_swap = .None; self.swap_error = .None; self.dom_state.clear()
     }
-    fn sync(&self, projection: DevtoolsProjection, canonical_panels: [JetDevtoolsPanelProjection]) Err! {
+    sync: fn(&self, projection: DevtoolsProjection, canonical_panels: [JetDevtoolsPanelProjection]) Err! {
         if projection.protocol != JET_DEVTOOLS_PROTOCOL -> return .Err("devtools projection protocol does not match jet.devtools.v1")
         if projection.session_id != self.host.session_id() -> self.reset(projection.session_id.clone())
         if projection.reset {
@@ -77,7 +77,7 @@ impl BrowserWebState {
             fact := panel_from_projection(panel)
             panel_id := fact.panel_id.clone()
             self.panel_order.push_back(panel_id.clone())
-            _ :: self.facts.insert(panel_id, fact)
+            _: self.facts.insert(panel_id, fact)
         }
         sequence := projection.sequence
         should_apply := self.host.sequence().map_or(true, (current) -> sequence > current)
@@ -102,11 +102,11 @@ impl BrowserWebState {
         .Ok(_)
     }
 }
-fn starting_status() -> DevtoolsStatusFact {
+starting_status: fn() -> DevtoolsStatusFact {
     DevtoolsStatusFact { state: .Starting, diagnostic_code: .None, diagnostic: .None, accepted_revision: .None,
         last_good_revision: .None, run_target: .None, run_output: .None, test_state: .None }
 }
-fn normalize_status(status: DevtoolsStatusFact) -> DevtoolsStatusFact {
+normalize_status: fn(status: DevtoolsStatusFact) -> DevtoolsStatusFact {
     status.diagnostic_code = bounded_optional(status.diagnostic_code, MAX_BROWSER_TEXT)
     status.diagnostic = bounded_optional(status.diagnostic, MAX_BROWSER_VALUE)
     status.accepted_revision = bounded_optional(status.accepted_revision, MAX_BROWSER_TEXT)
@@ -116,17 +116,17 @@ fn normalize_status(status: DevtoolsStatusFact) -> DevtoolsStatusFact {
     status.test_state = bounded_optional(status.test_state, MAX_BROWSER_TEXT)
     status
 }
-fn bounded_optional(value: String?, limit: USize) -> String? {
+bounded_optional: fn(value: String?, limit: USize) -> String? {
     value.and_then((value) -> {
         bounded := bounded_text(value, "", limit)
         if bounded.is_empty() -> .None else -> .Val(bounded)
     })
 }
-fn browser_session_state(state: JetDevtoolsLifecycleState) -> BrowserSessionState {
+browser_session_state: fn(state: JetDevtoolsLifecycleState) -> BrowserSessionState {
     if state == { .Starting | .Ready -> .Idle, .Building -> .Building, .Error -> .BuildFailed
         .Unavailable | .Stopped -> .RuntimeFailure }
 }
-fn sync_session(state: &BrowserWebState?, session: &ResidentDevSession) Err! {
+sync_session: fn(state: &BrowserWebState?, session: &ResidentDevSession) Err! {
     cursor := state.as_ref().and_then((state) -> state.host().sequence())
     projection := session.devtools_events_since(cursor)
     canonical_panels := session.devtools_panels(.BrowserInApp, JetDevtoolsPanelCapability.ALL) ?? return .Err("browser panel catalog rejected projection: {err}")
@@ -136,14 +136,14 @@ fn sync_session(state: &BrowserWebState?, session: &ResidentDevSession) Err! {
     resident.tools.source_reason = if resident.tools.source -> .None else -> .Val(SOURCE_TOOLS_OFF_REASON.to_string())
     resident.sync(projection, canonical_panels)
 }
-SOURCE_TOOLS_OFF_REASON :: "This host runs without Canvas, so source is read and edited elsewhere."
-fn object_map(value: Dyn) -> [String:Dyn] Err! {
+SOURCE_TOOLS_OFF_REASON: "This host runs without Canvas, so source is read and edited elsewhere."
+object_map: fn(value: Dyn) -> [String:Dyn] Err! {
     if value == {
         .Object(fields) -> .Ok(fields.iter().cloned().collect())
         else -> .Err("expected a JSON object")
     }
 }
-fn record_dom_snapshot(state: &BrowserWebState?, session_id: String, payload: &[U8]) Err! {
+record_dom_snapshot: fn(state: &BrowserWebState?, session_id: String, payload: &[U8]) Err! {
     text := std.str.from_utf8(payload) ?? return .Err("web DOM snapshot body must be UTF-8 JSON")
     root := parse_json_with_limit(text, MAX_REQUEST_BODY_BYTES) ?? return .Err("web DOM snapshot body is not valid bounded JSON")
     object := object_map(root) ?? return .Err("web DOM snapshot must be a JSON object")
@@ -186,7 +186,7 @@ fn record_dom_snapshot(state: &BrowserWebState?, session_id: String, payload: &[
     resident.dom_state = facts
     .Ok(_)
 }
-fn parse_live_value_update(object: [String:Dyn]) -> WebLiveValueUpdate Err! {
+parse_live_value_update: fn(object: [String:Dyn]) -> WebLiveValueUpdate Err! {
     keys := object.keys().collect(); keys.sort()
     loop field in keys {
         if !["kind", "key", "type_identity", "rendered_value"].contains(field) -> return .Err("web DOM snapshot persist_live_value has unknown field `{field}`")
@@ -201,12 +201,12 @@ fn parse_live_value_update(object: [String:Dyn]) -> WebLiveValueUpdate Err! {
     }
     .Ok(WebLiveValueUpdate { key: key, type_identity: type_identity, rendered_value: rendered_value })
 }
-fn required_json_string(object: [String:Dyn], key: String) -> String Err! {
+required_json_string: fn(object: [String:Dyn], key: String) -> String Err! {
     value := object.get(key).ok_or("web DOM snapshot has no `{key}`")?
     text := value.as_str() ?? return .Err("web DOM snapshot `{key}` must be a string")
     .Ok(text.to_string())
 }
-fn parse_dom_state_value(value: Dyn) -> WebStateValue Err! {
+parse_dom_state_value: fn(value: Dyn) -> WebStateValue Err! {
     object := object_map(value) ?? return .Err("web DOM snapshot state value must be an object")
     kind := required_json_string(object, "kind")?
     if kind == {
@@ -237,8 +237,8 @@ fn parse_dom_state_value(value: Dyn) -> WebStateValue Err! {
         else -> .Err("web DOM state value has unknown kind `{kind}`")
     }
 }
-fn view_json(state: BrowserWebState, placement: BrowserPlacement) -> String { frame_json(state.frame(placement)) }
-fn swap_json(state: BrowserWebState) -> String {
+view_json: fn(state: BrowserWebState, placement: BrowserPlacement) -> String { frame_json(state.frame(placement)) }
+swap_json: fn(state: BrowserWebState) -> String {
     output := String.with_capacity(2048)
     output.push('{')
     field_string(&output, "protocol", JET_DEVTOOLS_PROTOCOL, true)
@@ -270,7 +270,7 @@ fn swap_json(state: BrowserWebState) -> String {
     }
     output.push('}'); output
 }
-fn release_json(projection: DevtoolsProjection, panels: [JetDevtoolsPanelProjection]) -> String {
+release_json: fn(projection: DevtoolsProjection, panels: [JetDevtoolsPanelProjection]) -> String {
     output := String.with_capacity(2048)
     output.push('{')
     field_string(&output, "protocol", projection.protocol, true)
@@ -299,7 +299,7 @@ fn release_json(projection: DevtoolsProjection, panels: [JetDevtoolsPanelProject
     }
     output.push_str("]}}"); output
 }
-fn write_swap_snapshot(output: &String, snapshot: &WebModuleSwapSnapshot) {
+write_swap_snapshot: fn(output: &String, snapshot: &WebModuleSwapSnapshot) {
     output.push_str("{{\"identity\":{{")
     field_string(output, "module", snapshot.identity.module_ref, true)
     field_string(output, "page", snapshot.identity.page, false)
@@ -322,7 +322,7 @@ fn write_swap_snapshot(output: &String, snapshot: &WebModuleSwapSnapshot) {
     field_u64(output, "state_count", U64{snapshot.state.len()}, false)
     output.push('}')
 }
-fn write_swap_receipt(output: &String, receipt: &WebModuleSwapReceipt) {
+write_swap_receipt: fn(output: &String, receipt: &WebModuleSwapReceipt) {
     output.push('{')
     field_string(output, "operation", receipt.operation.as_str(), true)
     field_string(output, "status", receipt.status.as_str(), false)
@@ -368,7 +368,7 @@ fn write_swap_receipt(output: &String, receipt: &WebModuleSwapReceipt) {
     field_string(output, "artifact", receipt.active_page.artifact, false)
     output.push_str("}}")
 }
-fn write_string_array(output: &String, key: String, values: &[String]) {
+write_string_array: fn(output: &String, key: String, values: &[String]) {
     output.push(','); quoted(key, output); output.push_str(":[")
     loop (index, value) in values.iter().enumerate() {
         if index != 0 -> output.push(',')
@@ -377,7 +377,7 @@ fn write_string_array(output: &String, key: String, values: &[String]) {
     output.push(']')
 }
 
-PAGE_CSS :: """
+PAGE_CSS: """
 :root{color-scheme:dark;--bg:#0F1013;--raised:#17191D;--raised-2:#1D2026;--well:#0A0B0D;--line:#30343C;--ink:#F6F5F2;--dim:#9B9EA8;--red:#E8232A;--ok:#56C271;--amber:#E3A43B;--sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",system-ui,sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 *{box-sizing:border-box}html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.45 var(--sans);-webkit-font-smoothing:antialiased}
@@ -464,7 +464,7 @@ li[data-selected=true]>.node{background:var(--raised);box-shadow:inset 2px 0 0 v
 @media(max-width:560px){.bar,.attention,.source header,.source footer{padding-left:14px;padding-right:14px}.selected,.group,.fold{margin-left:14px;margin-right:14px}.group>summary{padding-left:11px;padding-right:11px}.group-meta{font-size:10px}}
 @media(prefers-reduced-motion:no-preference){.chev,.group>summary::before{transition:transform .12s}.selected,.source{animation:in .18s ease}@keyframes in{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}}
 """
-PAGE_JS :: """
+PAGE_JS: """
 const session=new URL(location.href).searchParams.get('session')||'';const params=new URL(location.href).searchParams;const q=(p)=>p+'?session='+encodeURIComponent(session);const key='jet-devtools:'+S.placement;const DRAFT='jet-devtools:draft';const OPEN='jet-devtools:source';const $=(s)=>document.querySelector(s);const note=$('.note');const embedded=window.parent!==window;$('main').classList.toggle('embedded',embedded);document.querySelectorAll('a[data-route]').forEach((a)=>{a.href=q(a.dataset.route);a.hidden=embedded});
 const store={get(k){try{return JSON.parse(sessionStorage.getItem(k)||'null')}catch(_){return null}},set(k,v){try{if(v==null)sessionStorage.removeItem(k);else sessionStorage.setItem(k,JSON.stringify(v))}catch(_){}}};
 const intentKey='jet-devtools:intents:'+S.placement;const restoreIntentGroups=()=>{const saved=store.get(intentKey)||{};document.querySelectorAll('details[data-intent]').forEach((group)=>{if(group.dataset.active!=='true'&&Object.prototype.hasOwnProperty.call(saved,group.dataset.intent))group.open=!!saved[group.dataset.intent];group.addEventListener('toggle',()=>{const next=store.get(intentKey)||{};next[group.dataset.intent]=group.open;store.set(intentKey,next)})})};restoreIntentGroups();
@@ -510,27 +510,27 @@ const sel=S.selection&&S.panels.find((p)=>p.panel_id===S.selection.panel_id);if(
 addEventListener('keydown',(ev)=>{if(ev.key==='Escape'&&document.activeElement===src.text){src.text.blur();ev.preventDefault();return}if(!embedded)return;const alt=ev.altKey&&!ev.ctrlKey&&!ev.metaKey&&ev.key.toLowerCase()==='j';if(ev.key==='Escape'||alt){ev.preventDefault();parent.postMessage({jet:'devtools',key:ev.key,altKey:ev.altKey},location.origin)}});
 """
 
-INTENT_GROUPS :: [(String, [String])]{[
+INTENT_GROUPS: [(String, [String])]{[
     ("Build & source", ["build", "gates", "structure", "tests", "jobs"]),
     ("Data & requests", ["routes", "queries", "mutations", "forms", "table", "store", "database"]),
     ("Runtime & interface", ["traces", "cost", "profiler", "ui-tree", "topology", "game", "world"])
 ]}
-fn intent_group(panel_id: String) -> USize { INTENT_GROUPS.iter().position((group) -> group.1.contains(panel_id)).unwrap_or(INTENT_GROUPS.len() - 1) }
-fn panel_available(panel: BrowserPanelView) -> Bool { !panel.status.starts_with("unavailable") }
-fn unavailable_reason_text(status: String) -> String {
+intent_group: fn(panel_id: String) -> USize { INTENT_GROUPS.iter().position((group) -> group.1.contains(panel_id)).unwrap_or(INTENT_GROUPS.len() - 1) }
+panel_available: fn(panel: BrowserPanelView) -> Bool { !panel.status.starts_with("unavailable") }
+unavailable_reason_text: fn(status: String) -> String {
     status.trim_start_matches("unavailable:").split(',').map((reason) -> if reason == {
         "unsupported-host" | "host-kind" -> "not offered by this host".to_string()
         "missing-capability" -> "needs a grant this session does not hold".to_string()
         other -> other.to_string()
     }).collect().join(", ")
 }
-fn diagnostic_file(diagnostic: String) -> String? {
+diagnostic_file: fn(diagnostic: String) -> String? {
     rest := diagnostic.split("-->").nth(1)?.trim_start() // #4303
     token := rest.split_whitespace().next()?
     file := token.split(':').next()?
     if file.ends_with(".jet") -> .Val(file) else -> .None
 }
-fn render_page(state: BrowserWebState, placement: BrowserPlacement) -> String {
+render_page: fn(state: BrowserWebState, placement: BrowserPlacement) -> String {
     frame := state.frame(placement)
     state_json := frame_json(frame)
     workbench := placement == .Workbench
@@ -597,7 +597,7 @@ fn render_page(state: BrowserWebState, placement: BrowserPlacement) -> String {
     html
 }
 
-fn render_attention(html: &String, frame: &BrowserDevtoolsFrame) {
+render_attention: fn(html: &String, frame: &BrowserDevtoolsFrame) {
     status := frame.status
     failing_file := status.diagnostic.as_deref().and_then(diagnostic_file)
     html.push_str("<section class=\"attention\" aria-label=\"Attention\"><h2><i class=\"status-mark\" aria-hidden=\"true\"></i>")
@@ -637,11 +637,11 @@ fn render_attention(html: &String, frame: &BrowserDevtoolsFrame) {
     }
     html.push_str("</div></section>")
 }
-fn render_source_tool(html: &String, frame: &BrowserDevtoolsFrame) {
+render_source_tool: fn(html: &String, frame: &BrowserDevtoolsFrame) {
     if !frame.tools.source -> return
     html.push_str("<section class=\"source\" aria-label=\"Source\" hidden><header><select aria-label=\"Source file\"></select><span class=\"rev\"></span><span class=\"grow\"></span><button class=\"btn quiet\" type=\"button\" data-refresh hidden>Facts changed — refresh</button><button class=\"btn quiet\" type=\"button\" data-src=\"close\">Close</button></header><textarea spellcheck=\"false\" autocapitalize=\"off\" autocomplete=\"off\" aria-label=\"Source text\" data-focus=\"tool:source-text\"></textarea><footer><button class=\"btn\" type=\"button\" data-src=\"check\">Check</button><button class=\"btn primary\" type=\"button\" data-src=\"apply\" disabled>Apply</button><button class=\"btn quiet\" type=\"button\" data-src=\"discard\" hidden>Discard draft</button><span class=\"result\" role=\"status\"></span></footer><pre class=\"out\" hidden></pre></section>")
 }
-fn render_panel(html: &String, panel: &BrowserPanelView, selection: &BrowserSelection?) {
+render_panel: fn(html: &String, panel: &BrowserPanelView, selection: &BrowserSelection?) {
     node_id := selection.filter((selection) -> selection.panel_id == panel.panel_id).and_then((selection) -> selection.node_id.as_deref())
     html.push_str("<article class=\"panel\" data-panel-id=\""); html.push_str(html_escape(panel.panel_id))
     html.push_str("\" data-open=\""); html.push_str(if panel.open -> "true" else -> "false")
@@ -656,7 +656,7 @@ fn render_panel(html: &String, panel: &BrowserPanelView, selection: &BrowserSele
     }
     html.push_str("</article>")
 }
-fn render_selected(html: &String, frame: &BrowserDevtoolsFrame) {
+render_selected: fn(html: &String, frame: &BrowserDevtoolsFrame) {
     selection := frame.selection.as_ref() ?? return
     panel := frame.panels.iter().find((panel) -> panel.panel_id == selection.panel_id) ?? return
     path := [&BrowserNode]{}
@@ -667,7 +667,7 @@ fn render_selected(html: &String, frame: &BrowserDevtoolsFrame) {
         .None -> { html.push_str("<h3>"); html.push_str(html_escape(panel.title)); html.push_str("</h3>") } }
     html.push_str("</section>")
 }
-fn render_crumbs(html: &String, panel: &BrowserPanelView, path: &[&BrowserNode]) {
+render_crumbs: fn(html: &String, panel: &BrowserPanelView, path: &[&BrowserNode]) {
     html.push_str("<div class=\"crumbs\"><span>"); html.push_str(html_escape(panel.title)); html.push_str("</span>")
     loop ancestor in path.iter().take(path.len().saturating_sub(1)) {
         html.push_str("<span>›</span><button data-select=\"1\" data-panel=\""); html.push_str(html_escape(panel.panel_id))
@@ -676,7 +676,7 @@ fn render_crumbs(html: &String, panel: &BrowserPanelView, path: &[&BrowserNode])
     }
     html.push_str("<span class=\"grow\"></span><button class=\"btn quiet\" type=\"button\" data-clear=\"1\" data-focus=\"clear\">Clear</button></div>")
 }
-fn render_node_detail(html: &String, panel_id: String, node: &BrowserNode) {
+render_node_detail: fn(html: &String, panel_id: String, node: &BrowserNode) {
     html.push_str("<h3>"); html.push_str(html_escape(node.label))
     if node.status == .Val(status) { html.push_str(" <small class=\"mono\">"); html.push_str(html_escape(status)); html.push_str("</small>") }
     html.push_str("</h3>")
@@ -697,7 +697,7 @@ fn render_node_detail(html: &String, panel_id: String, node: &BrowserNode) {
         html.push_str("</ul>")
     }
 }
-fn render_inspector(html: &String, frame: &BrowserDevtoolsFrame) {
+render_inspector: fn(html: &String, frame: &BrowserDevtoolsFrame) {
     html.push_str("<aside class=\"inspector\" data-scroll aria-label=\"Inspector\">")
     selection := frame.selection.as_ref() ?? { html.push_str("<p class=\"empty\">Select a fact to inspect it.</p></aside>"); return }
     panel := frame.panels.iter().find((panel) -> panel.panel_id == selection.panel_id) ?? {
@@ -716,15 +716,15 @@ fn render_inspector(html: &String, frame: &BrowserDevtoolsFrame) {
     }
     html.push_str("</aside>")
 }
-fn find_path(nodes: [BrowserNode], node_id: String, path: [&BrowserNode]) -> Bool {
+find_path: fn(nodes: [BrowserNode], node_id: String, path: [&BrowserNode]) -> Bool {
     loop node in nodes {
         path.push(node)
         if node.id == node_id || find_path(node.children, node_id, path) -> return true
-        _ :: path.pop()
+        _: path.pop()
     }
     false
 }
-fn panel_from_projection(panel: JetDevtoolsPanelProjection) -> BrowserPanelFact {
+panel_from_projection: fn(panel: JetDevtoolsPanelProjection) -> BrowserPanelFact {
     descriptor := panel.availability.descriptor
     status := if {
         panel.availability.is_available() -> {
@@ -752,8 +752,8 @@ fn panel_from_projection(panel: JetDevtoolsPanelProjection) -> BrowserPanelFact 
     if nodes.is_empty() -> nodes.push(BrowserNode.new("availability", .Status, "availability").with_status(status.clone()))
     BrowserPanelFact.new(descriptor.id.as_str(), descriptor.title, 0, status, nodes).with_cursor(panel.cursor)
 }
-fn parse_revision(value: String) -> U64? { value.parse<U64>().ok() }
-fn bounded_text(value: String, fallback: String, limit: USize) -> String {
+parse_revision: fn(value: String) -> U64? { value.parse<U64>().ok() }
+bounded_text: fn(value: String, fallback: String, limit: USize) -> String {
     source := if value.is_empty() -> fallback else -> value
     output := String.new()
     loop raw_character in source.chars() {
@@ -763,9 +763,9 @@ fn bounded_text(value: String, fallback: String, limit: USize) -> String {
     }
     if output.is_empty() -> fallback.to_string() else -> output
 }
-fn bounded_value(value: String) -> String { bounded_text(value, "(none)", MAX_BROWSER_VALUE) }
+bounded_value: fn(value: String) -> String { bounded_text(value, "(none)", MAX_BROWSER_VALUE) }
 
-fn frame_json(frame: BrowserDevtoolsFrame) -> String {
+frame_json: fn(frame: BrowserDevtoolsFrame) -> String {
     output := String.with_capacity(4096)
     output.push('{')
     field_string(&output, "schema", BROWSER_PAGE_SCHEMA, true)
@@ -834,7 +834,7 @@ fn frame_json(frame: BrowserDevtoolsFrame) -> String {
     }
     output.push_str("]}}"); output
 }
-fn status_json(output: &String, status: &DevtoolsStatusFact) {
+status_json: fn(output: &String, status: &DevtoolsStatusFact) {
     output.push('{')
     field_string(output, "state", devtools_state_as_str(status.state), true)
     field_optional_string(output, "diagnostic_code", status.diagnostic_code.as_deref())
@@ -846,7 +846,7 @@ fn status_json(output: &String, status: &DevtoolsStatusFact) {
     field_optional_string(output, "test_state", status.test_state.as_deref())
     output.push('}')
 }
-fn devtools_state_as_str(state: JetDevtoolsLifecycleState) -> String {
+devtools_state_as_str: fn(state: JetDevtoolsLifecycleState) -> String {
     if state == {
         .Starting -> "starting"
         .Building -> "building"
@@ -856,7 +856,7 @@ fn devtools_state_as_str(state: JetDevtoolsLifecycleState) -> String {
         .Stopped -> "stopped"
     }
 }
-fn write_nodes_json(output: &String, nodes: &[BrowserNode]) {
+write_nodes_json: fn(output: &String, nodes: &[BrowserNode]) {
     loop (index, node) in nodes.iter().enumerate() {
         if index != 0 -> output.push(',')
         output.push('{')
@@ -868,34 +868,34 @@ fn write_nodes_json(output: &String, nodes: &[BrowserNode]) {
         output.push_str(",\"children\":["); write_nodes_json(output, node.children); output.push_str("]}}")
     }
 }
-fn field_string(output: &String, key: String, value: String, first: Bool) {
+field_string: fn(output: &String, key: String, value: String, first: Bool) {
     if !first -> output.push(',')
     quoted(key, output); output.push(':'); quoted(value, output)
 }
-fn field_optional_string(output: &String, key: String, value: String?) {
+field_optional_string: fn(output: &String, key: String, value: String?) {
     output.push(','); quoted(key, output); output.push(':')
     if value == {
         .Val(value) -> quoted(value, output)
         .None -> output.push_str("null")
     }
 }
-fn field_u64_option(output: &String, key: String, value: U64?) {
+field_u64_option: fn(output: &String, key: String, value: U64?) {
     output.push(','); quoted(key, output); output.push(':')
     if value == {
         .Val(value) -> output.push_str(value.to_string())
         .None -> output.push_str("null")
     }
 }
-fn field_u64(output: &String, key: String, value: U64, first: Bool) {
+field_u64: fn(output: &String, key: String, value: U64, first: Bool) {
     if !first -> output.push(',')
     quoted(key, output); output.push(':'); output.push_str(value.to_string())
 }
-fn field_bool(output: &String, key: String, value: Bool, first: Bool) {
+field_bool: fn(output: &String, key: String, value: Bool, first: Bool) {
     if !first -> output.push(',')
     quoted(key, output); output.push(':'); output.push_str(if value -> "true" else -> "false")
 }
-fn quoted(value: String, output: &String) { output.push('"'); output.push_str(foundation_json_escape(value)); output.push('"') }
-fn reconnect_json(state: BrowserWebState, from: U64?, reset: Bool, truncation: Bool) -> String Err! {
+quoted: fn(value: String, output: &String) { output.push('"'); output.push_str(foundation_json_escape(value)); output.push('"') }
+reconnect_json: fn(state: BrowserWebState, from: U64?, reset: Bool, truncation: Bool) -> String Err! {
     output := String.with_capacity(4096)
     output.push('{')
     field_string(&output, "schema", BROWSER_PAGE_SCHEMA, true)
@@ -917,7 +917,7 @@ fn reconnect_json(state: BrowserWebState, from: U64?, reset: Bool, truncation: B
     output.push_str("],\"view\":"); output.push_str(view_json(state, .Workbench)); output.push('}')
     .Ok(output)
 }
-fn event_json(output: &String, event: &BrowserHostEvent) {
+event_json: fn(output: &String, event: &BrowserHostEvent) {
     output.push('{')
     field_string(output, "protocol", event.protocol, true)
     field_string(output, "session_id", event.session_id, false)
@@ -931,7 +931,7 @@ fn event_json(output: &String, event: &BrowserHostEvent) {
     }
     output.push_str("]}}")
 }
-fn panel_json(output: &String, panel: &BrowserPanelFact) {
+panel_json: fn(output: &String, panel: &BrowserPanelFact) {
     output.push('{')
     field_string(output, "panel_id", panel.panel_id, true)
     field_string(output, "title", panel.title, false)
@@ -940,7 +940,7 @@ fn panel_json(output: &String, panel: &BrowserPanelFact) {
     field_u64_option(output, "cursor", panel.cursor)
     output.push_str(",\"nodes\":["); write_nodes_json(output, panel.nodes); output.push_str("]}}")
 }
-fn parse_selection(payload: [U8]) -> (String, String?)? Err! {
+parse_selection: fn(payload: [U8]) -> (String, String?)? Err! {
     text := std.str.from_utf8(payload) ?? return .Err("browser selection body must be UTF-8 JSON")
     root := parse_json_with_limit(text, MAX_REQUEST_BODY_BYTES) ?? return .Err("browser selection body is not valid bounded JSON")
     object := object_map(root) ?? return .Err("browser selection body must be an object")
@@ -959,7 +959,7 @@ fn parse_selection(payload: [U8]) -> (String, String?)? Err! {
     }
     .Val((panel_id.to_string(), item_key))
 }
-fn parse_action(payload: [U8], default_placement: BrowserPlacement) -> BrowserHostAction Err! {
+parse_action: fn(payload: [U8], default_placement: BrowserPlacement) -> BrowserHostAction Err! {
     text := std.str.from_utf8(payload) ?? return .Err("browser action body must be UTF-8 JSON")
     root := parse_json_with_limit(text, MAX_REQUEST_BODY_BYTES) ?? return .Err("browser action body is not valid bounded JSON")
     object := object_map(root) ?? return .Err("browser action body must be an object")
@@ -977,41 +977,41 @@ fn parse_action(payload: [U8], default_placement: BrowserPlacement) -> BrowserHo
         else -> .Err("unknown browser action `{name}`")
     }
 }
-fn parse_source_grant(object: [String:Dyn]) -> BrowserSourceGrant Err! {
+parse_source_grant: fn(object: [String:Dyn]) -> BrowserSourceGrant Err! {
     grant := nested_object(object, "grant")?
     source := nested_object(grant, "source")?
     function := optional_string(source, "function")
     location := BrowserSourceLocation.new(required_string(source, "source_id")?, required_u32(source, "line")?, optional_u32(source, "column").unwrap_or(0), function.map((s) -> s.to_string()))
     .Ok(BrowserSourceGrant.new(required_string(grant, "session_id")?, required_u64(grant, "revision")?, required_string(grant, "panel_id")?, required_string(grant, "node_id")?, location))
 }
-fn parse_action_grant(object: [String:Dyn]) -> BrowserActionGrant Err! {
+parse_action_grant: fn(object: [String:Dyn]) -> BrowserActionGrant Err! {
     grant := nested_object(object, "grant")?
     .Ok(BrowserActionGrant.new(required_string(grant, "session_id")?, required_u64(grant, "revision")?, required_string(grant, "panel_id")?, required_string(grant, "node_id")?, required_string(grant, "action_id")?))
 }
-fn nested_object(object: [String:Dyn], key: String) -> [String:Dyn] Err! {
+nested_object: fn(object: [String:Dyn], key: String) -> [String:Dyn] Err! {
     value := object.get(key).ok_or("browser action is missing `{key}`")?
     object_map(value).map_err((_) -> "browser action `{key}` must be an object")
 }
-fn required_string(object: [String:Dyn], key: String) -> String Err! {
+required_string: fn(object: [String:Dyn], key: String) -> String Err! {
     value := object.get(key).ok_or("browser action is missing `{key}`")?
     value.as_str().map_err((_) -> "browser action `{key}` must be a string")
 }
-fn optional_string(object: [String:Dyn], key: String) -> String? { object.get(key).and_then((value) -> value.as_str().ok()) }
-fn required_u64(object: [String:Dyn], key: String) -> U64 Err! {
+optional_string: fn(object: [String:Dyn], key: String) -> String? { object.get(key).and_then((value) -> value.as_str().ok()) }
+required_u64: fn(object: [String:Dyn], key: String) -> U64 Err! {
     if object.get(key) == {
         .Val(.Int(value)) if value >= 0 -> U64.try_from(value).map_err((_) -> "browser action `{key}` is out of range") else -> .Err("browser action `{key}` must be a non-negative integer")
     }
 }
-fn required_u32(object: [String:Dyn], key: String) -> U32 Err! {
+required_u32: fn(object: [String:Dyn], key: String) -> U32 Err! {
     required_u64(object, key).and_then((value) -> U32.try_from(value).map_err((_) -> "browser action `{key}` is out of range"))
 }
-fn optional_u32(object: [String:Dyn], key: String) -> U32? {
+optional_u32: fn(object: [String:Dyn], key: String) -> U32? {
     object.get(key).and_then((value) -> if value == {
         .Int(n) && n >= 0 -> U32.try_from(n).ok()
         else -> .None
     })
 }
-fn parse_placement(value: Dyn) -> BrowserPlacement Err! {
+parse_placement: fn(value: Dyn) -> BrowserPlacement Err! {
     text := value.as_str() ?? return .Err("browser action placement must be a string")
     if text == {
         "in-app" | "in_app" -> .Ok(.InApp)
@@ -1019,7 +1019,7 @@ fn parse_placement(value: Dyn) -> BrowserPlacement Err! {
         else -> .Err("unknown browser placement `{text}`")
     }
 }
-fn parse_dock(value: String) -> BrowserDock Err! {
+parse_dock: fn(value: String) -> BrowserDock Err! {
     if value == {
         "left" -> .Ok(.Left)
         "right" -> .Ok(.Right)
@@ -1029,7 +1029,7 @@ fn parse_dock(value: String) -> BrowserDock Err! {
     }
 }
 
-fn effect_json(effect_ref: BrowserHostEffect) -> String {
+effect_json: fn(effect_ref: BrowserHostEffect) -> String {
     output := String.from("{{\"schema\":\"")
     output.push_str(BROWSER_PAGE_SCHEMA); output.push_str("\",\"effect\":")
     if effect_ref == {
@@ -1063,10 +1063,10 @@ fn effect_json(effect_ref: BrowserHostEffect) -> String {
     }
     output.push_str("}}"); output
 }
-fn dispatch_action(state: BrowserWebState, action: BrowserHostAction) -> String BrowserHostError! {
+dispatch_action: fn(state: BrowserWebState, action: BrowserHostAction) -> String BrowserHostError! {
     state.host.dispatch(action).map((effect_ref) -> effect_json(effect_ref))
 }
-fn render_nodes_html(output: &String, panel_id: String, nodes: &[BrowserNode], selected: String?) {
+render_nodes_html: fn(output: &String, panel_id: String, nodes: &[BrowserNode], selected: String?) {
     loop node in nodes {
         is_selected := selected == .Val(node.id.as_str())
         holds := contains_node(node.children, selected)
@@ -1081,11 +1081,11 @@ fn render_nodes_html(output: &String, panel_id: String, nodes: &[BrowserNode], s
         output.push_str("</button></li>")
     }
 }
-fn contains_node(nodes: [BrowserNode], node_id: String?) -> Bool {
+contains_node: fn(nodes: [BrowserNode], node_id: String?) -> Bool {
     id := node_id ?? return false
     nodes.iter().any((node) -> node.id == id || contains_node(node.children, .Val(id)))
 }
-fn html_escape(value: String) -> String {
+html_escape: fn(value: String) -> String {
     output := String.with_capacity(value.len())
     loop character in value.chars() {
         if character == {
@@ -1096,7 +1096,7 @@ fn html_escape(value: String) -> String {
     }
     output
 }
-fn js_string(value: String) -> String {
+js_string: fn(value: String) -> String {
     output := String.with_capacity(value.len())
     loop character in value.chars() {
         if character == {

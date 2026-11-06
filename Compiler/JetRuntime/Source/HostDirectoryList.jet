@@ -1,8 +1,8 @@
 // A fresh held-directory stream, raw name bytes, no link following, and
 // readdir's EOF/error termination convention. Result<List<List<U8>>, IOError>:
 // return tag, data/length/error out words.
-fn fs_directory_row(fd: I64, entry: I64, length: I64) -> I64 {
-    kind :: rt_text_byte(wrapping(entry + I64{18}))
+fs_directory_row: fn(fd: I64, entry: I64, length: I64) -> I64 {
+    kind: rt_text_byte(wrapping(entry + I64{18}))
     directory := kind == I64{4}
     if (kind == I64{0}) {
         probe := I64{0}
@@ -10,7 +10,7 @@ fn fs_directory_row(fd: I64, entry: I64, length: I64) -> I64 {
             probe = os_syscall_i64(I64{257}, fd, entry + I64{19}, I64{2752512}, I64{0}, I64{0}, I64{0})
         }
         if (probe >= I64{0}) {
-            stat :: jet_rt_alloc(I64{144}, I64{8})
+            stat: jet_rt_alloc(I64{144}, I64{8})
             status := I64{0}
             #Unsafe("the owned descriptor and full Linux stat buffer live through fstat and close") {
                 status = os_syscall_i64(I64{5}, probe, stat, I64{0}, I64{0}, I64{0}, I64{0})
@@ -20,7 +20,7 @@ fn fs_directory_row(fd: I64, entry: I64, length: I64) -> I64 {
             jet_rt_free(stat, I64{144}, I64{8})
         }
     }
-    data :: jet_rt_alloc((length + I64{1}) * RT_HOST_U8_STRIDE, I64{8})
+    data: jet_rt_alloc((length + I64{1}) * RT_HOST_U8_STRIDE, I64{8})
     host_u8_put(data, I64{0}, if directory -> I64{1} else -> I64{0})
     at := I64{0}
     loop at < length {
@@ -29,15 +29,15 @@ fn fs_directory_row(fd: I64, entry: I64, length: I64) -> I64 {
     }
     data
 }
-#Export(c) fn jet_fs_directory_list(handle: I64, output: I64, length: I64, error: I64) -> I64 {
-    key :: host_native_int(handle)
+#Export(c) jet_fs_directory_list: fn(handle: I64, output: I64, length: I64, error: I64) -> I64 {
+    key: host_native_int(handle)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
-    base :: fs_held_shown(key)
+    base: fs_held_shown(key)
     if (base == I64{0}) -> return fs_held_closed(HOST_IO_OP_READ, error)
-    fd :: fs_open_at(key, rt_static_text("."), I64{3}, I64{0}, I64{-1}, I64{0}, error)
+    fd: fs_open_at(key, rt_static_text("."), I64{3}, I64{0}, I64{-1}, I64{0}, error)
     jet_rt_string_drop(base)
     if (fd < I64{0}) -> return I64{0}
-    scratch :: jet_rt_alloc(I64{8192}, I64{8})
+    scratch: jet_rt_alloc(I64{8192}, I64{8})
     data := I64{0}
     count := I64{0}
     capacity := I64{0}
@@ -51,23 +51,23 @@ fn fs_directory_row(fd: I64, entry: I64, length: I64) -> I64 {
         if (got <= I64{0}) -> break
         at := I64{0}
         loop at < got {
-            entry :: wrapping(scratch + at)
-            record_length :: (rt_text_word(wrapping(entry + I64{16}))).bit_and(I64{65535})
+            entry: wrapping(scratch + at)
+            record_length: (rt_text_word(wrapping(entry + I64{16}))).bit_and(I64{65535})
             bytes := I64{0}
             loop rt_text_byte(wrapping(wrapping(entry + I64{19}) + bytes)) != (I64{0}) -> bytes += I64{1}
-            dot :: bytes == I64{1} && rt_text_byte(wrapping(entry + I64{19})) == I64{46}
-            parent :: bytes == I64{2} && rt_text_byte(wrapping(entry + I64{19})) == I64{46} && rt_text_byte(wrapping(entry + I64{20})) == I64{46}
+            dot: bytes == I64{1} && rt_text_byte(wrapping(entry + I64{19})) == I64{46}
+            parent: bytes == I64{2} && rt_text_byte(wrapping(entry + I64{19})) == I64{46} && rt_text_byte(wrapping(entry + I64{20})) == I64{46}
             if !dot && !parent {
                 if (count == capacity) {
-                    next_capacity :: if (capacity == I64{0}) -> I64{16} else -> capacity * I64{2}
-                    next_data :: jet_rt_alloc(next_capacity * I64{24}, I64{8})
+                    next_capacity: if (capacity == I64{0}) -> I64{16} else -> capacity * I64{2}
+                    next_data: jet_rt_alloc(next_capacity * I64{24}, I64{8})
                     if (count != I64{0}) -> coll_copy(data, next_data, count * I64{24})
                     jet_rt_free(data, capacity * I64{24}, I64{8})
                     data = next_data
                     capacity = next_capacity
                 }
-                row :: fs_directory_row(fd, entry, bytes)
-                header :: wrapping(data + count * I64{24})
+                row: fs_directory_row(fd, entry, bytes)
+                header: wrapping(data + count * I64{24})
                 rt_text_store(header, bytes + I64{1})
                 rt_text_store(wrapping(header + I64{8}), bytes + I64{1})
                 rt_text_store(wrapping(header + I64{16}), row)

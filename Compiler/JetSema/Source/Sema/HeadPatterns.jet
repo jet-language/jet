@@ -18,29 +18,29 @@ use jet_foundation.[
     type_name,
 ]
 
-struct SemaHeadPatternVariant {
+SemaHeadPatternVariant: struct {
     name: String
     enum_name: String
     payload: VariantPayload
 }
 
-struct SemaHeadPatternGroup {
+SemaHeadPatternGroup: struct {
     name: String
     heads: [Func]
 }
 
-enum SemaHeadPatternOrderedItem {
+SemaHeadPatternOrderedItem: enum {
     Item(item: Item)
     Heads(group_index: Int)
 }
 
-fn sema_head_pattern_pattern_span(pattern: Pattern) -> Span {
+sema_head_pattern_pattern_span: fn(pattern: Pattern) -> Span {
     if pattern == {
         .Variant(_, _, _, span) | .Present(_, _, _, span) | .Absent(span) | .Ok(_, _, _, span) | .Err(_, _, _, span) | .Range(_, _, span) | .Or(_, span) | .Struct(_, _, span, _) | .List(_, _, span) | .Map(_, _, span) | .StrMatch(_, span) | .BinMatch(_, span) -> span
     }
 }
 
-fn sema_head_pattern_payload_types(payload: VariantPayload) -> [Type] Never! {
+sema_head_pattern_payload_types: fn(payload: VariantPayload) -> [Type] Never! {
     types := [Type]{}
     if payload == {
         .Unit -> {}
@@ -50,14 +50,14 @@ fn sema_head_pattern_payload_types(payload: VariantPayload) -> [Type] Never! {
     types
 }
 
-fn sema_head_pattern_fold_function(heads: [Func], variants: [SemaHeadPatternVariant], diagnostics: &[Diagnostic]) -> Func {
+sema_head_pattern_fold_function: fn(heads: [Func], variants: [SemaHeadPatternVariant], diagnostics: &[Diagnostic]) -> Func {
     folded := heads[0]
     enum_name := String?{None}
     invalid := false
     arms := [SwitchArm]{}
 
     loop head in heads {
-        pattern :: head.head_pattern ?? {
+        pattern: head.head_pattern ?? {
             invalid = true
             next
         }
@@ -72,7 +72,7 @@ fn sema_head_pattern_fold_function(heads: [Func], variants: [SemaHeadPatternVari
             invalid = true
             next
         }
-        variant :: variant_name ?? ""
+        variant: variant_name ?? ""
 
         candidate := SemaHeadPatternVariant?{None}
         candidate_enum := ""
@@ -106,7 +106,7 @@ fn sema_head_pattern_fold_function(heads: [Func], variants: [SemaHeadPatternVari
                 enum_name = Val(candidate_enum)
             }
             else -> {
-                previous :: enum_name ?? candidate_enum
+                previous: enum_name ?? candidate_enum
                 if previous != candidate_enum {
                     &diagnostics.push(sema_error("E0305", pattern_span, "multi-head variants `{previous}` and `{variant}` belong to different enums", "one function has one argument type and one coverage table", "put heads for one enum under one function name"))
                     invalid = true
@@ -138,7 +138,7 @@ fn sema_head_pattern_fold_function(heads: [Func], variants: [SemaHeadPatternVari
         folded.head_pattern = None
         return folded
     }
-    enum_name_value :: enum_name ?? ""
+    enum_name_value: enum_name ?? ""
     last_head := heads[heads.len() - 1]
     full_span := Span{start: folded.span.start, end: last_head.span.end}
     subject_name := "__jet_multi_head_subject"
@@ -170,7 +170,7 @@ fn sema_head_pattern_fold_function(heads: [Func], variants: [SemaHeadPatternVari
 // into one function over the enum its heads name, at the first head's
 // position. Variants come from the module's enums. Items without a head
 // pattern are left in place, uncopied.
-fn sema_head_patterns_fold_items(items: &[Item], diagnostics: &[Diagnostic]) Never! {
+sema_head_patterns_fold_items: fn(items: &[Item], diagnostics: &[Diagnostic]) Never! {
     has_heads := false
     variants := [SemaHeadPatternVariant]{}
     loop item in items {

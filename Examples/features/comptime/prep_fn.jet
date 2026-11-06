@@ -2,35 +2,35 @@
 // hook, a method that runs while building to turn a written number into a
 // value. Literal.Int hooks receive the Int; Literal.Float hooks receive the
 // source digits as text, so no Float rounding happens on the way in.
-struct Rational {
+Rational: struct {
     numerator: Int
     denominator: Int
 }
 
 impl Rational.Literal.Int {
-    comptime fn from_literal(value: Int) -> Rational { Rational{numerator: value, denominator: 1} }
+    comptime from_literal: fn(value: Int) -> Rational { Rational{numerator: value, denominator: 1} }
 }
 
-struct Cents {
+Cents: struct {
     amount: Int
 }
 
 impl Cents.Literal.Float {
-    comptime fn from_literal(digits: String) -> Cents {
-        parts :: digits.split(".").to_list()
-        whole :: Int.parse(parts[0]) ?? 0
-        fraction_text :: if parts.len() > 1 -> parts[1] else -> "0"
-        padded :: if fraction_text.len() == 1 -> "{fraction_text}0" else -> fraction_text
-        fraction :: Int.parse(padded) ?? 0
+    comptime from_literal: fn(digits: String) -> Cents {
+        parts: digits.split(".").to_list()
+        whole: Int.parse(parts[0]) ?? 0
+        fraction_text: if parts.len() > 1 -> parts[1] else -> "0"
+        padded: if fraction_text.len() == 1 -> "{fraction_text}0" else -> fraction_text
+        fraction: Int.parse(padded) ?? 0
         Cents{amount: whole * 100 + fraction}
     }
 }
 
-fn describe_rational(value: Rational) -> String { "{value.numerator}/{value.denominator}" }
+describe_rational: fn(value: Rational) -> String { "{value.numerator}/{value.denominator}" }
 
-fn amount_of(value: Cents) -> Int { value.amount }
+amount_of: fn(value: Cents) -> Int { value.amount }
 
-fn run() {
+run: fn() {
     // The expected parameter type selects the hook; no suffix is written.
     print("rational {describe_rational(6)}")
     print("cents {amount_of(12.5)}")

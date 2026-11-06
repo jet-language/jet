@@ -1,4 +1,4 @@
-package {
+package: {
     name: "memory_shared_field_write"
     version: "0.1.0"
     authority: { allow: [IO, Mem.Alloc, Mem.Rc, Time.Wait] }
@@ -8,17 +8,17 @@ package {
 // the cell: every write below must be visible to the next read, whether it
 // assigns, compounds, runs through another handle to the same cell, repeats
 // in a loop, or reads a second shared cell on its right-hand side.
-struct Counter {
+Counter: struct {
     hits: Int
     label: String
 }
 
-fn bump(counter: Shared<Counter>, by: Int) {
+bump: fn(counter: Shared<Counter>, by: Int) {
     counter.hits += by
 }
 
-fn run() {
-    counter :: shared Counter{hits: 0, label: "start"}
+run: fn() {
+    counter: shared Counter{hits: 0, label: "start"}
     counter.hits = 5
     print("assign: {counter.hits}")
     counter.hits += 2
@@ -31,7 +31,7 @@ fn run() {
         counter.hits += i
     }
     print("loop: {counter.hits}")
-    step :: shared Counter{hits: 100, label: "step"}
+    step: shared Counter{hits: 100, label: "step"}
     counter.hits += step.hits
     print("reads another cell: {counter.hits}")
 }

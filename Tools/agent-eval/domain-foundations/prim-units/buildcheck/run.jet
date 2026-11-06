@@ -1,19 +1,19 @@
 
-fn run() {
-    target :: meter(10.0)
-    elapsed :: second(0.5)
-    acceleration :: meters_per_second_squared(target, elapsed)
+run: fn() {
+    target: meter(10.0)
+    elapsed: second(0.5)
+    acceleration: meters_per_second_squared(target, elapsed)
     position := meter(0.0)
     tick := 0
     loop tick < 4 {
-        speed :: acceleration_step(acceleration, elapsed)
-        increment :: speed_per_second(speed, elapsed)
+        speed: acceleration_step(acceleration, elapsed)
+        increment: speed_per_second(speed, elapsed)
         position = checked_meters_add(position, increment) ?? panic("control sum failed")
         tick += 1
     }
-    converted :: meter_to_centimeter(position)
-    back :: centimeters_to_meter(converted)
-    frequency :: hertz(2.0)
+    converted: meter_to_centimeter(position)
+    back: centimeters_to_meter(converted)
+    frequency: hertz(2.0)
     print(format_meter(back))
     print(format_centimeter(converted))
     print(format_speed(meters_per_second(target, elapsed)))

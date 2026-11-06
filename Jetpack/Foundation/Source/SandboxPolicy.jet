@@ -5,27 +5,27 @@
 // Foundation where Store, Provider and Environment can all reach them; the
 // rest of RuntimePolicy reuses these names.
 use {
-    sys :: core.sys
-    files :: core.files
-    crypto :: core.crypto
+    sys: core.sys
+    files: core.files
+    crypto: core.crypto
 }
 
 
-SANDBOX_POLICY_FILE :: "sandbox-policy"
+SANDBOX_POLICY_FILE: "sandbox-policy"
 
-enum SandboxPolicy {
+SandboxPolicy: enum {
     AllowFallback
     Require
 
     // The persisted spelling (`jet config sandbox <verb>`).
-    fn verb(self) -> String Never! {
+    verb: fn(self) -> String Never! {
         if self == {
             .AllowFallback -> CONFIG_SANDBOX_VERB_ALLOW
             .Require -> CONFIG_SANDBOX_VERB_REQUIRE
         }
     }
 
-    fn fingerprint_label(self) -> String Never! {
+    fingerprint_label: fn(self) -> String Never! {
         if self == {
             .AllowFallback -> "sandbox=fallback"
             .Require -> "sandbox=require"
@@ -34,7 +34,7 @@ enum SandboxPolicy {
 }
 
 // The native child-isolation backend this build targets.
-fn env_sandbox_backend_name() -[Env]> String Never! {
+env_sandbox_backend_name: fn() -[Env]> String Never! {
     if {
         sys.is_windows() -> "windows-appcontainer"
         sys.is_macos() -> "macos-seatbelt"
@@ -45,23 +45,23 @@ fn env_sandbox_backend_name() -[Env]> String Never! {
 
 // `~/.jet/sandbox-policy` (`HOME`, else `USERPROFILE`, else the current
 // directory).
-fn env_sandbox_policy_path() -[Env]> String Never! {
-    home :: sys.get("HOME") ?? (sys.get("USERPROFILE") ?? ".")
+env_sandbox_policy_path: fn() -[Env]> String Never! {
+    home: sys.get("HOME") ?? (sys.get("USERPROFILE") ?? ".")
     files.join(files.join(home, CONFIG_DEFAULT_DIR), SANDBOX_POLICY_FILE)
 }
 
 // `Require` only when the policy file says exactly `require`; anything else,
 // including a missing or unreadable file, allows the fallback.
-fn env_read_sandbox_policy() -[FS, Env]> SandboxPolicy Never! {
-    text :: files.read(env_sandbox_policy_path()) ?? return SandboxPolicy.AllowFallback
+env_read_sandbox_policy: fn() -[FS, Env]> SandboxPolicy Never! {
+    text: files.read(env_sandbox_policy_path()) ?? return SandboxPolicy.AllowFallback
     if text.trim() == CONFIG_SANDBOX_VERB_REQUIRE -> return SandboxPolicy.Require
     SandboxPolicy.AllowFallback
 }
 
 // Persist `policy` and return the policy file path.
-fn env_write_sandbox_policy(policy: SandboxPolicy) -[FS, Env]> String IOError! {
-    path :: env_sandbox_policy_path()
-    parent :: files.dirname(path)
+env_write_sandbox_policy: fn(policy: SandboxPolicy) -[FS, Env]> String IOError! {
+    path: env_sandbox_policy_path()
+    parent: files.dirname(path)
     if parent != "" -> files.create_dir_all(parent)
     files.write(path, "{policy.verb()}\n")
     Ok(path)
@@ -71,7 +71,7 @@ fn env_write_sandbox_policy(policy: SandboxPolicy) -[FS, Env]> String IOError! {
 // transport (`--offline`) is deliberately excluded: consuming identical local
 // bytes offline must not invalidate them; a policy change makes prior records
 // miss instead of silently crossing an authority boundary.
-fn env_cache_policy_fingerprint(offline: Bool) -[FS, Env]> String Never! {
-    sandbox :: env_read_sandbox_policy().fingerprint_label()
+env_cache_policy_fingerprint: fn(offline: Bool) -[FS, Env]> String Never! {
+    sandbox: env_read_sandbox_policy().fingerprint_label()
     crypto.sha256("jp0-policy-v3\n{sandbox}\nbackend={env_sandbox_backend_name()}\n".bytes()).hex()
 }

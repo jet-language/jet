@@ -12,83 +12,83 @@
 // file there, `tar` extracts it, the tar file is removed, the manifest is
 // written and checked, and one rename publishes the directory.
 use {
-    crypto :: core.crypto
-    files :: core.files
-    json :: core.encoding.json
-    process :: core.process
-    sys :: core.sys
-    term :: core.term
-    time :: core.time
+    crypto: core.crypto
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+    sys: core.sys
+    term: core.term
+    time: core.time
 }
 
-SOURCE_SCHEMA :: "jet-proof-source/v1"
+SOURCE_SCHEMA: "jet-proof-source/v1"
 
-struct Tracked {
+Tracked: struct {
     path: String
     mode: String
     blob: String
 }
 
-fn run() {
-    args :: process.args()
+run: fn() {
+    args: process.args()
     if args.len() == 3 && args[0] == "check" {
-        problem :: pinned_source_problem(args[1], args[2]) ?? {
+        problem: pinned_source_problem(args[1], args[2]) ?? {
             print(args[2])
             return
         }
         return abort("proof-source: {problem}")
     }
     if args.len() < 1 || args.len() > 2 || args[0].starts_with("-") -> return abort("usage: jet Tools/agent/ProofSource.jet SHA [REPOSITORY] | check SOURCE SHA")
-    repository :: files.absolute(if args.len() == 2 -> args[1] else -> ".") ?? return abort("proof-source: the repository cannot be resolved: {err}")
-    candidates :: "{scratch_root()}/candidates"
+    repository: files.absolute(if args.len() == 2 -> args[1] else -> ".") ?? return abort("proof-source: the repository cannot be resolved: {err}")
+    candidates: "{scratch_root()}/candidates"
     files.create_dir_all(candidates) ?? return abort("proof-source: `{candidates}` cannot be created: {err}")
-    _held :: files.lock("{candidates}/.source-export.lock") ?? return abort("proof-source: the export lock cannot be taken: {err}")
-    source :: export_source(repository, args[0], candidates) ?? return abort("proof-source: {args[0]} cannot be exported from {repository}")
+    _held: files.lock("{candidates}/.source-export.lock") ?? return abort("proof-source: the export lock cannot be taken: {err}")
+    source: export_source(repository, args[0], candidates) ?? return abort("proof-source: {args[0]} cannot be exported from {repository}")
     print(source)
 }
 
-fn abort(text: String) -[Exec, IO]> Never {
+abort: fn(text: String) -[Exec, IO]> Never {
     term.eprint(text)
     process.exit(1)
 }
 
-fn env_or(name: String, fallback: String) -[Env]> String Never! {
-    value :: process.env_get(name) ?? return fallback.copy()
+env_or: fn(name: String, fallback: String) -[Env]> String Never! {
+    value: process.env_get(name) ?? return fallback.copy()
     if value == "" -> return fallback.copy()
     value
 }
 
 // The shared scratch root of Tools/agent/roots.sh.
-fn scratch_root() -[Env]> String Never! {
-    cache :: env_or("XDG_CACHE_HOME", "{env_or("HOME", "")}/.cache")
+scratch_root: fn() -[Env]> String Never! {
+    cache: env_or("XDG_CACHE_HOME", "{env_or("HOME", "")}/.cache")
     env_or("JET_SCRATCH_ROOT", env_or("JET_STATE_ROOT", "{cache}/jet-dev"))
 }
 
-fn is_full_sha(text: String) -> Bool Never! {
+is_full_sha: fn(text: String) -> Bool Never! {
     text.len() == 40 && text.bytes().all(byte -> (byte >= U8{48} && byte <= U8{57}) || (byte >= U8{97} && byte <= U8{102}))
 }
 
-fn git(repository: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> String? Never! {
+git: fn(repository: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> String? Never! {
     argv := [String]{"git", "-C", repository}
     loop arg in args -> &argv.push(arg.copy())
-    ran :: process.cmd(argv).output_limit(67108864).run() ?? return None
+    ran: process.cmd(argv).output_limit(67108864).run() ?? return None
     if ran.code != 0 || ran.signal != None -> return None
     Val(ran.output)
 }
 
-fn tool(argv: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> String? Never! {
-    ran :: process.cmd(argv).run() ?? return Val("{argv[0]} failed: {err}")
+tool: fn(argv: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> String? Never! {
+    ran: process.cmd(argv).run() ?? return Val("{argv[0]} failed: {err}")
     if ran.code != 0 || ran.signal != None -> return Val("{argv[0]} failed: {ran.code}{ran.errors.trim_end()}")
     None
 }
 
 // The export of `expected`, made once: an existing export is checked and reused.
-fn export_source(repository: String, expected: String, candidates: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String? Never! {
-    resolved :: git(repository, [String]{"rev-parse", "{expected}^{{commit}}"}) ?? return None
-    commit :: resolved.trim()
+export_source: fn(repository: String, expected: String, candidates: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String? Never! {
+    resolved: git(repository, [String]{"rev-parse", "{expected}^{{commit}}"}) ?? return None
+    commit: resolved.trim()
     if !is_full_sha(expected) || commit != expected -> return None
-    destination :: "{candidates}/source-{commit}"
-    source :: "{destination}/source"
+    destination: "{candidates}/source-{commit}"
+    source: "{destination}/source"
     if files.exists(destination) {
         if pinned_source_problem(source, commit) == .Val(problem) {
             term.eprint("proof-source: {problem}")
@@ -96,39 +96,39 @@ fn export_source(repository: String, expected: String, candidates: String) -[Env
         }
         return Val(source)
     }
-    temporary :: "{destination}.tmp-{sys.pid()}-{time.unix_ns()}"
+    temporary: "{destination}.tmp-{sys.pid()}-{time.unix_ns()}"
     files.create_dir_all("{temporary}/source") ?? return None
-    published :: publish(repository, commit, temporary, destination)
+    published: publish(repository, commit, temporary, destination)
     if files.exists(temporary) -> files.remove_all(temporary) ?? return None
     if !published -> return None
     Val(source)
 }
 
-fn publish(repository: String, commit: String, temporary: String, destination: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Bool Never! {
-    listing :: git(repository, [String]{"ls-tree", "-r", "-z", "--full-tree", commit}) ?? return false
+publish: fn(repository: String, commit: String, temporary: String, destination: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Bool Never! {
+    listing: git(repository, [String]{"ls-tree", "-r", "-z", "--full-tree", commit}) ?? return false
     tracked := [Dyn]{}
     loop row in listing.split(String.from_bytes([U8]{U8{0}}) ?? "") {
         if row == "" -> next
         if !row.contains("\t") -> return false
-        split :: row.partition("\t")
-        fields :: split.head.split(" ").to_list()
-        path :: split.tail.copy()
+        split: row.partition("\t")
+        fields: split.head.split(" ").to_list()
+        path: split.tail.copy()
         if fields.len() != 3 || fields[1] != "blob" || !([String]{"100644", "100755", "120000"}).contains(fields[0]) {
             term.eprint("proof-source: unsupported proof source entry {path}: {fields.join(" ")}")
             return false
         }
         &tracked.push(Dyn.Object([String: Dyn]{"path": Dyn.Text(path), "mode": Dyn.Text(fields[0].copy()), "blob": Dyn.Text(fields[2].copy())}))
     }
-    archive :: "{temporary}/source.tar"
-    failed :: tool([String]{"git", "-C", repository, "archive", "--format=tar", "--output={archive}", commit}) ?? tool([String]{"tar", "-xf", archive, "-C", "{temporary}/source"}) ?? ""
+    archive: "{temporary}/source.tar"
+    failed: tool([String]{"git", "-C", repository, "archive", "--format=tar", "--output={archive}", commit}) ?? tool([String]{"tar", "-xf", archive, "-C", "{temporary}/source"}) ?? ""
     if failed != "" {
         term.eprint("proof-source: {failed}")
         return false
     }
     files.remove(archive) ?? return false
-    tree :: git(repository, [String]{"rev-parse", "{commit}^{{tree}}"}) ?? return false
-    manifest :: Dyn.Object([String: Dyn]{"schema": Dyn.Text(SOURCE_SCHEMA), "commit": Dyn.Text(commit.copy()), "tree": Dyn.Text(tree.trim().copy()), "files": Dyn.Array(tracked.copy())})
-    text :: json.dumps(manifest) ?? return false
+    tree: git(repository, [String]{"rev-parse", "{commit}^{{tree}}"}) ?? return false
+    manifest: Dyn.Object([String: Dyn]{"schema": Dyn.Text(SOURCE_SCHEMA), "commit": Dyn.Text(commit.copy()), "tree": Dyn.Text(tree.trim().copy()), "files": Dyn.Array(tracked.copy())})
+    text: json.dumps(manifest) ?? return false
     files.write("{temporary}/source.manifest.json", "{text}\n") ?? return false
     if pinned_source_problem("{temporary}/source", commit) == .Val(problem) {
         term.eprint("proof-source: {problem}")
@@ -141,43 +141,43 @@ fn publish(repository: String, commit: String, temporary: String, destination: S
 // Why `source` is not the export its sibling source.manifest.json pins to
 // `expected`: a tracked file's bytes, symlink target or executable bit
 // differs, or the manifest names another commit. None when it is.
-fn pinned_source_problem(source: String, expected: String) -[FS]> String? Never! {
-    manifest :: "{files.dirname(source)}/source.manifest.json"
-    text :: files.read(manifest) ?? return Val("proof source manifest `{manifest}` cannot be read: {err}")
-    tree :: json.parse(text) ?? return Val("proof source manifest `{manifest}` is not JSON: {err}")
-    entries :: array_field(tree, "files")
+pinned_source_problem: fn(source: String, expected: String) -[FS]> String? Never! {
+    manifest: "{files.dirname(source)}/source.manifest.json"
+    text: files.read(manifest) ?? return Val("proof source manifest `{manifest}` cannot be read: {err}")
+    tree: json.parse(text) ?? return Val("proof source manifest `{manifest}` is not JSON: {err}")
+    entries: array_field(tree, "files")
     if expected == "" || text_field(tree, "commit") != expected || text_field(tree, "schema") != SOURCE_SCHEMA || entries.len() == 0 {
         return Val("proof source manifest is not pinned to {expected}")
     }
     loop entry in entries {
-        path :: text_field(entry, "path")
-        mode :: text_field(entry, "mode")
+        path: text_field(entry, "path")
+        mode: text_field(entry, "mode")
         if path == "" || path.starts_with("/") || path.split("/").to_list().contains("..") -> return Val("invalid proof source path {path}")
-        file :: "{source}/{path}"
-        changed :: "pinned proof source changed: {path}"
-        meta :: files.stat(file) ?? return Val("{changed} ({err})")
-        link :: mode == "120000"
+        file: "{source}/{path}"
+        changed: "pinned proof source changed: {path}"
+        meta: files.stat(file) ?? return Val("{changed} ({err})")
+        link: mode == "120000"
         if link && !meta.is_symlink -> return Val(changed)
         if !link && (!meta.is_file || executable(meta.mode) != (mode == "100755")) -> return Val(changed)
-        bytes :: if link -> (files.read_link(file) ?? return Val(changed)).bytes() else -> files.read_bytes(file) ?? return Val(changed)
+        bytes: if link -> (files.read_link(file) ?? return Val(changed)).bytes() else -> files.read_bytes(file) ?? return Val(changed)
         if blob_hash(bytes) != text_field(entry, "blob") -> return Val(changed)
     }
     None
 }
 
-fn executable(mode: Int) -> Bool Never! {
+executable: fn(mode: Int) -> Bool Never! {
     mode % 2 == 1 || (mode /% 8) % 2 == 1 || (mode /% 64) % 2 == 1
 }
 
 // Git's blob id: sha1 of `blob <length>\0<bytes>`.
-fn blob_hash(bytes: [U8]) -> String Never! {
+blob_hash: fn(bytes: [U8]) -> String Never! {
     framed := "blob {bytes.len()}".bytes()
     &framed.push(U8{0})
     &framed.extend(bytes)
     crypto.sha1(framed)
 }
 
-fn field(tree: Dyn, name: String) -> Dyn Never! {
+field: fn(tree: Dyn, name: String) -> Dyn Never! {
     if tree == .Object(entries) {
         loop entry in entries {
             if entry.key == name -> return entry.value.copy()
@@ -186,61 +186,61 @@ fn field(tree: Dyn, name: String) -> Dyn Never! {
     Dyn.Null
 }
 
-fn text_field(tree: Dyn, name: String) -> String Never! {
+text_field: fn(tree: Dyn, name: String) -> String Never! {
     if field(tree, name) == .Text(value) -> return value.copy()
     ""
 }
 
-fn array_field(tree: Dyn, name: String) -> [Dyn] Never! {
+array_field: fn(tree: Dyn, name: String) -> [Dyn] Never! {
     if field(tree, name) == .Array(items) -> return items.copy()
     [Dyn]{}
 }
 
 // --- tests ------------------------------------------------------------------
 
-fn fixture_dir(name: String) -[Env, FS, Time]> String {
-    base :: env_or("JET_TEST_SCRATCH_DIR", scratch_root())
-    dir :: "{base}/proof-source-{name}-{sys.pid()}-{time.unix_ns()}"
+fixture_dir: fn(name: String) -[Env, FS, Time]> String {
+    base: env_or("JET_TEST_SCRATCH_DIR", scratch_root())
+    dir: "{base}/proof-source-{name}-{sys.pid()}-{time.unix_ns()}"
     files.create_dir_all("{dir}/source") ?? panic("fixture {dir}: {err}")
     dir
 }
 
 // A pinned export: entry.jet (0644) and alias.jet -> entry.jet.
-fn guard_fixture(name: String) -[Env, FS, Time]> String {
-    dir :: fixture_dir(name)
-    text :: "source bytes\n"
+guard_fixture: fn(name: String) -[Env, FS, Time]> String {
+    dir: fixture_dir(name)
+    text: "source bytes\n"
     files.write("{dir}/source/entry.jet", text) ?? panic("entry: {err}")
     files.set_mode("{dir}/source/entry.jet", 0o644) ?? panic("mode: {err}")
     files.symlink("entry.jet", "{dir}/source/alias.jet") ?? panic("alias: {err}")
-    listed :: [Dyn]{
+    listed: [Dyn]{
         Dyn.Object([String: Dyn]{"path": Dyn.Text("entry.jet"), "mode": Dyn.Text("100644"), "blob": Dyn.Text(blob_hash(text.bytes()))}),
         Dyn.Object([String: Dyn]{"path": Dyn.Text("alias.jet"), "mode": Dyn.Text("120000"), "blob": Dyn.Text(blob_hash("entry.jet".bytes()))}),
     }
-    manifest :: Dyn.Object([String: Dyn]{"schema": Dyn.Text(SOURCE_SCHEMA), "commit": Dyn.Text("a".repeat(40)), "files": Dyn.Array(listed)})
+    manifest: Dyn.Object([String: Dyn]{"schema": Dyn.Text(SOURCE_SCHEMA), "commit": Dyn.Text("a".repeat(40)), "files": Dyn.Array(listed)})
     files.write("{dir}/source.manifest.json", json.dumps(manifest) ?? panic("manifest")) ?? panic("manifest: {err}")
     dir
 }
 
 #Test("the manifest guard accepts unchanged tracked bytes and symlink targets and rejects another pin") {
-    dir :: guard_fixture("accept")
+    dir: guard_fixture("accept")
     assert_eq(pinned_source_problem("{dir}/source", "a".repeat(40)), None)
     assert_eq(pinned_source_problem("{dir}/source", "b".repeat(40)), Val("proof source manifest is not pinned to {"b".repeat(40)}"))
     files.remove_all(dir) ?? panic("cleanup: {err}")
 }
 
 #Test("the manifest guard rejects changed bytes, modes, symlink targets and missing files") {
-    commit :: "a".repeat(40)
-    bytes :: guard_fixture("bytes")
+    commit: "a".repeat(40)
+    bytes: guard_fixture("bytes")
     files.write("{bytes}/source/entry.jet", "changed\n") ?? panic("write: {err}")
     assert_eq(pinned_source_problem("{bytes}/source", commit), Val("pinned proof source changed: entry.jet"))
-    mode :: guard_fixture("mode")
+    mode: guard_fixture("mode")
     files.set_mode("{mode}/source/entry.jet", 0o755) ?? panic("mode: {err}")
     assert_eq(pinned_source_problem("{mode}/source", commit), Val("pinned proof source changed: entry.jet"))
-    link :: guard_fixture("link")
+    link: guard_fixture("link")
     files.remove("{link}/source/alias.jet") ?? panic("unlink: {err}")
     files.symlink("elsewhere.jet", "{link}/source/alias.jet") ?? panic("relink: {err}")
     assert_eq(pinned_source_problem("{link}/source", commit), Val("pinned proof source changed: alias.jet"))
-    missing :: guard_fixture("missing")
+    missing: guard_fixture("missing")
     files.remove("{missing}/source/entry.jet") ?? panic("remove: {err}")
     assert((pinned_source_problem("{missing}/source", commit) ?? "").starts_with("pinned proof source changed: entry.jet ("))
     loop dir in ([String]{bytes, mode, link, missing}) -> files.remove_all(dir) ?? panic("cleanup: {err}")
@@ -253,47 +253,47 @@ fn guard_fixture(name: String) -[Env, FS, Time]> String {
         if checkout == "/" || checkout == "" -> panic("run the test from inside the Jet checkout")
         checkout = files.dirname(checkout)
     }
-    jet :: env_or("JET", process.which("jet") ?? panic("a jet on PATH or in JET runs the exporter"))
-    dir :: fixture_dir("export")
-    scratch :: "{dir}/scratch"
-    commit :: crypto.sha1("{sys.pid()}-{time.unix_ns()}".bytes())
-    tree :: "c".repeat(40)
-    input :: "{dir}/input"
-    bin :: "{dir}/bin"
-    log :: "{dir}/commands.log"
+    jet: env_or("JET", process.which("jet") ?? panic("a jet on PATH or in JET runs the exporter"))
+    dir: fixture_dir("export")
+    scratch: "{dir}/scratch"
+    commit: crypto.sha1("{sys.pid()}-{time.unix_ns()}".bytes())
+    tree: "c".repeat(40)
+    input: "{dir}/input"
+    bin: "{dir}/bin"
+    log: "{dir}/commands.log"
     files.create_dir_all(input) ?? panic("input: {err}")
     files.create_dir_all(bin) ?? panic("bin: {err}")
-    text :: "archive payload\n".repeat(65537)
+    text: "archive payload\n".repeat(65537)
     files.write("{input}/entry.jet", text) ?? panic("entry: {err}")
     files.set_mode("{input}/entry.jet", 0o755) ?? panic("mode: {err}")
     files.symlink("entry.jet", "{input}/alias.jet") ?? panic("alias: {err}")
     // A command fixture: no Git branch or ref is created for this proof.
-    rows :: "'100755 blob {blob_hash(text.bytes())}\\tentry.jet' '120000 blob {blob_hash("entry.jet".bytes())}\\talias.jet'"
+    rows: "'100755 blob {blob_hash(text.bytes())}\\tentry.jet' '120000 blob {blob_hash("entry.jet".bytes())}\\talias.jet'"
     fake := "#!/usr/bin/env bash\nset -eu\nprintf '%s\\n' \"$3\" >> '{log}'\n"
     fake = "{fake}case \"$3\" in\n  rev-parse) case \"$4\" in *'^{{tree}}') echo {tree} ;; *) echo {commit} ;; esac ;;\n"
     fake = "{fake}  ls-tree) printf '%b\\0' {rows} ;;\n"
     fake = "{fake}  archive) [ \"$4\" = --format=tar ] || exit 9; tar -cf \"${{5#--output=}}\" -C '{input}' entry.jet alias.jet ;;\n  *) exit 9 ;;\nesac\n"
     files.write("{bin}/git", fake) ?? panic("git: {err}")
     files.set_mode("{bin}/git", 0o755) ?? panic("git mode: {err}")
-    first :: run_export(jet, checkout, commit, dir, bin, scratch)
+    first: run_export(jet, checkout, commit, dir, bin, scratch)
     if first.code != 0 -> panic("exporter exit {first.code}\n{first.output}{first.errors}")
-    source :: first.output.trim()
-    destination :: "{scratch}/candidates/source-{commit}"
+    source: first.output.trim()
+    destination: "{scratch}/candidates/source-{commit}"
     assert_eq(source, "{destination}/source")
     assert_eq(pinned_source_problem(source, commit), None)
-    written :: json.parse(files.read("{destination}/source.manifest.json") ?? panic("manifest: {err}")) ?? panic("manifest JSON: {err}")
+    written: json.parse(files.read("{destination}/source.manifest.json") ?? panic("manifest: {err}")) ?? panic("manifest JSON: {err}")
     assert_eq(text_field(written, "tree"), tree)
     assert_eq(files.read("{source}/entry.jet") ?? panic("entry: {err}"), text)
     assert(!files.exists("{destination}/source.tar"))
-    second :: run_export(jet, checkout, commit, dir, bin, scratch)
+    second: run_export(jet, checkout, commit, dir, bin, scratch)
     assert_eq(second.code, 0)
     assert_eq(second.output.trim(), source)
-    archives :: (files.read(log) ?? panic("log: {err}")).split("\n").to_list().filter(line -> line == "archive")
+    archives: (files.read(log) ?? panic("log: {err}")).split("\n").to_list().filter(line -> line == "archive")
     assert_eq(archives.len(), 1)
     files.remove_all(dir) ?? panic("cleanup: {err}")
 }
 
-fn run_export(jet: String, checkout: String, commit: String, repository: String, bin: String, scratch: String) -[Env, Exec, FS, IO, Time, Time.Wait]> ProcessReceipt {
+run_export: fn(jet: String, checkout: String, commit: String, repository: String, bin: String, scratch: String) -[Env, Exec, FS, IO, Time, Time.Wait]> ProcessReceipt {
     process.cmd([String]{jet, "run", "-A", "{checkout}/Tools/agent/ProofSource.jet", commit, repository}).env("PATH", "{bin}:{env_or("PATH", "/usr/bin:/bin")}")
         .env("JET_SCRATCH_ROOT", scratch).env("JET_TOOLCHAIN_ROOT", checkout).timeout(300s).run() ?? panic("exporter: {err}")
 }

@@ -1,26 +1,26 @@
-struct LibraryNote {
+LibraryNote: struct {
     value: Int
 
     impl Marker {
-        sites :: [.Function]
+        sites: [.Function]
     }
 }
-module outer {
-struct LibraryNote {
+outer: module {
+LibraryNote: struct {
     value: String
 
     impl Marker {
-        sites :: [.Function]
+        sites: [.Function]
     }
 }
-struct Fast {
+Fast: struct {
     impl Marker {
-        group :: #[LibraryNote("outer"), Inline]
+        group: #[LibraryNote("outer"), Inline]
     }
 }
-#Fast fn direct() {}
-module inner {
-#Fast fn inherited() {}
+#Fast direct: fn() {}
+inner: module {
+#Fast inherited: fn() {}
 }
 }
-fn run() {}
+run: fn() {}

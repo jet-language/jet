@@ -1,14 +1,14 @@
 // Environment lifecycle facts: dotenv sources, unset names, enter hooks and
 // checks, the formatter package, the Git hook directory, and reload policy.
 
-enum HookAction {
+HookAction: enum {
     // The normal lifecycle spelling names one checked `#Job fn`.
     Task(String)
     // The explicit expert escape remains a trust-gated command record.
     Command(String)
 }
 
-struct HookSpec {
+HookSpec: struct {
     name: String
     action: HookAction
     cwd: String?{None}
@@ -19,29 +19,29 @@ struct HookSpec {
 // beginner default: load the file's ordinary variables. The record form adds
 // an explicit allowlist and names which allowed variables are secrets. Secret
 // names are facts only; values never enter plan fingerprints or dossiers.
-struct DotenvSpec {
+DotenvSpec: struct {
     file: String{""}
     allow: [String]{[String]{}}
     secrets: [String]{[String]{}}
 
-    fn fingerprint(self) -> String Never! {
+    fingerprint: fn(self) -> String Never! {
         "{self.file}\t{self.allow.join(",")}\t{self.secrets.join(",")}"
     }
 }
 
 // One typed package ref used by `jet fmt --lang`. The formatter is
 // a package fact, not a shell command or a second process supervisor.
-struct FormatterSpec {
+FormatterSpec: struct {
     package: String
 }
 
-enum ReloadPolicy {
+ReloadPolicy: enum {
     Never
     Prompt
     Watch(paths: [String], debounce_ms: Int)
 }
 
-struct EnvironmentLifecycle {
+EnvironmentLifecycle: struct {
     dotenv: [DotenvSpec]{[DotenvSpec]{}}
     unset: [String]{[String]{}}
     on_enter: [HookSpec]{[HookSpec]{}}
@@ -55,7 +55,7 @@ struct EnvironmentLifecycle {
     // several imported modules are merged.
     reload_explicit: Bool{false}
 
-    fn fingerprint(self) -> String Never! {
+    fingerprint: fn(self) -> String Never! {
         lines := [String]{}
         if self.formatter == .Val(formatter) -> &lines.push("formatter\t{formatter.package}\n")
         loop dotenv in self.dotenv -> &lines.push("dotenv\t{dotenv.fingerprint()}\n")
@@ -64,22 +64,22 @@ struct EnvironmentLifecycle {
         &hooks.extend(self.on_enter)
         &hooks.extend(self.checks)
         loop hook in hooks {
-            action :: if hook.action == {
+            action: if hook.action == {
                 .Task(job) -> "task:{job}"
                 .Command(command) -> "command:{command}"
             }
-            cwd :: hook.cwd ?? ""
-            trust :: if hook.trusted -> "trusted" else -> "untrusted"
+            cwd: hook.cwd ?? ""
+            trust: if hook.trusted -> "trusted" else -> "untrusted"
             &lines.push("hook\t{hook.name}\t{action}\t{cwd}\t{trust}\n")
         }
         if self.git_hooks_path == .Val(path) -> &lines.push("git-hooks-path\t{path}\n")
-        reload :: if self.reload == {
+        reload: if self.reload == {
             .Never -> "reload\tnever\n"
             .Prompt -> "reload\tprompt\n"
             .Watch(paths, debounce_ms) -> "reload\twatch\t{paths.join(",")}\t{debounce_ms}\n"
         }
         &lines.push(reload)
-        explicit :: if self.reload_explicit -> "reload-explicit=true\n" else -> "reload-explicit=false\n"
+        explicit: if self.reload_explicit -> "reload-explicit=true\n" else -> "reload-explicit=false\n"
         &lines.push(explicit)
         lines.join("")
     }

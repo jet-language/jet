@@ -10,13 +10,13 @@
 // subsumes both the `FS.Read` and `FS.Write` leaves reached through `load`/
 // `archive`, exactly as `-[FS]>` already covered a bare `FS` callee before
 // this decision (no migration break for existing flat code).
-fn load(path: String) -[FS.Read]> String { return "contents of {path}" }
+load: fn(path: String) -[FS.Read]> String { return "contents of {path}" }
 
-fn archive(path: String) -[FS.Write]> String { return "archived {path}" }
+archive: fn(path: String) -[FS.Write]> String { return "archived {path}" }
 
-fn boot() -[FS, IO]> {
+boot: fn() -[FS, IO]> {
     print(load("app.conf"))
     print(archive("out.tar"))
 }
 
-fn run() { boot() }
+run: fn() { boot() }

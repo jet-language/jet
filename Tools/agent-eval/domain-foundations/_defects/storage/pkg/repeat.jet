@@ -1,19 +1,19 @@
-package {
+package: {
     name: "repeat"
     authority: { allow: [FS.Write, IO, Mem.Alloc] }
 }
 
-use fs :: core.files
+use fs: core.files
 
-fn append_ok(path: Path, text: String) -> Bool {
+append_ok: fn(path: Path, text: String) -> Bool {
     fs.append_all(path, text) ?? return false
     fs.fsync(path) ?? return false
     return true
 }
 
-fn run() {
-    p :: Path.from("$HOME/.cache/jet-luna/dx3/prim-storage/repeat.txt")
-    a :: append_ok(p.copy(), "a") ?? false
-    b :: append_ok(p.copy(), "b") ?? false
+run: fn() {
+    p: Path.from("$HOME/.cache/jet-luna/dx3/prim-storage/repeat.txt")
+    a: append_ok(p.copy(), "a") ?? false
+    b: append_ok(p.copy(), "b") ?? false
     print("{a} {b}")
 }

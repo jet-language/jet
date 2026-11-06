@@ -1,19 +1,19 @@
 // #4906: the paired Foundation classifier consumes checked typed facts,
 // never a diagnostic rendering's byte equality.
 use {
-    math :: core.math
-    json :: core.encoding.json
+    math: core.math
+    json: core.encoding.json
     jet_foundation.[
         ComparisonIdentity, ComparisonObservation, ComparisonSample, ComparisonStatus,
         ObservationRelation, testing_compare_samples_with_discarded,
     ]
 }
 
-fn comparison_equality_observation(value: Dyn) -> ComparisonObservation Never! {
+comparison_equality_observation: fn(value: Dyn) -> ComparisonObservation Never! {
     ComparisonObservation{raw: "{value}", typed_failure: None, mutation: None, ordered_effects: [String]{}, cleanup: [String]{}}
 }
 
-fn comparison_equality_sample(reference: Dyn, candidate: Dyn) -> ComparisonSample Never! {
+comparison_equality_sample: fn(reference: Dyn, candidate: Dyn) -> ComparisonSample Never! {
     ComparisonSample{
         identity: ComparisonIdentity{case_id: "checked", input_id: "input-checked", seed: None, source: "fixture", tool: "test", target: "host"},
         reference: comparison_equality_observation(reference),
@@ -24,26 +24,26 @@ fn comparison_equality_sample(reference: Dyn, candidate: Dyn) -> ComparisonSampl
     }
 }
 
-fn comparison_equality_require(ok: Bool, reason: String) Never! {
+comparison_equality_require: fn(ok: Bool, reason: String) Never! {
     if !ok -> panic("comparison equality: {reason}")
 }
 
-fn comparison_equality_status(reference: Dyn, candidate: Dyn) -> ComparisonStatus Never! {
-    sample :: comparison_equality_sample(reference, candidate)
+comparison_equality_status: fn(reference: Dyn, candidate: Dyn) -> ComparisonStatus Never! {
+    sample: comparison_equality_sample(reference, candidate)
     testing_compare_samples_with_discarded(ObservationRelation.TypedEquality, [ComparisonSample]{sample}, 0).status
 }
 
 #Test("comparison_equality") {
     comparison_equality_require(comparison_equality_status(Dyn.Float(math.NAN), Dyn.Float(math.NAN)) == ComparisonStatus.Mismatch, "NaN never equals NaN")
     comparison_equality_require(comparison_equality_status(Dyn.Float(-0.0), Dyn.Float(0.0)) == ComparisonStatus.Matched, "signed zeros compare equal")
-    left :: json.parse("{{\"a\":1,\"b\":2}}") ?? panic("left object")
-    right :: json.parse("{{\"b\":2,\"a\":1}}") ?? panic("right object")
+    left: json.parse("{{\"a\":1,\"b\":2}}") ?? panic("left object")
+    right: json.parse("{{\"b\":2,\"a\":1}}") ?? panic("right object")
     comparison_equality_require(comparison_equality_status(left, right) == ComparisonStatus.Matched, "objects ignore insertion order")
     comparison_equality_require(comparison_equality_status(Dyn.Int(1), Dyn.Float(1.0)) == ComparisonStatus.Mismatch, "numeric variants remain distinct")
     missing := comparison_equality_sample(Dyn.Int(1), Dyn.Int(1))
     missing.declared_equal = None
-    missing_record :: testing_compare_samples_with_discarded(ObservationRelation.TypedEquality, [ComparisonSample]{missing}, 0)
+    missing_record: testing_compare_samples_with_discarded(ObservationRelation.TypedEquality, [ComparisonSample]{missing}, 0)
     comparison_equality_require(missing_record.status == ComparisonStatus.InvalidOracle, "missing fact cannot pass")
-    custom_record :: testing_compare_samples_with_discarded(ObservationRelation.Custom{name: "domain"}, [ComparisonSample]{missing}, 0)
+    custom_record: testing_compare_samples_with_discarded(ObservationRelation.Custom{name: "domain"}, [ComparisonSample]{missing}, 0)
     comparison_equality_require(custom_record.status == ComparisonStatus.InvalidOracle, "custom oracle remains explicit")
 }

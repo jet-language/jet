@@ -4,18 +4,18 @@
 // not establish a borrowed String supplier.
 use jet_foundation.[foundation_read_bytes_scalar_at, foundation_append_read_bytes]
 
-JET_CLI_TABLE_MAX_CELL_BYTES :: 4096
-JET_CLI_TABLE_MAX_RENDER_WIDTH :: 256
+JET_CLI_TABLE_MAX_CELL_BYTES: 4096
+JET_CLI_TABLE_MAX_RENDER_WIDTH: 256
 
-fn jet_cli_table_min(a: Int, b: Int) -> Int Never! { if a < b -> a else -> b }
-fn jet_cli_table_max(a: Int, b: Int) -> Int Never! { if a > b -> a else -> b }
-fn jet_cli_table_sub(a: Int, b: Int) -> Int Never! { if a > b -> a - b else -> 0 }
-fn jet_cli_table_control(code: Int) -> Bool Never! { code < 32 || (code >= 127 && code <= 159) }
-fn jet_cli_table_regional(code: Int) -> Bool Never! { code >= 0x1f1e6 && code <= 0x1f1ff }
+jet_cli_table_min: fn(a: Int, b: Int) -> Int Never! { if a < b -> a else -> b }
+jet_cli_table_max: fn(a: Int, b: Int) -> Int Never! { if a > b -> a else -> b }
+jet_cli_table_sub: fn(a: Int, b: Int) -> Int Never! { if a > b -> a - b else -> 0 }
+jet_cli_table_control: fn(code: Int) -> Bool Never! { code < 32 || (code >= 127 && code <= 159) }
+jet_cli_table_regional: fn(code: Int) -> Bool Never! { code >= 0x1f1e6 && code <= 0x1f1ff }
 
 // Preserve the reference ranges literally, including its supplementary
 // 1dc00..1dfff range. Changing Unicode policy is not part of this port.
-fn jet_cli_table_extend(code: Int) -> Bool Never! {
+jet_cli_table_extend: fn(code: Int) -> Bool Never! {
     if {
         code >= 0x0300 && code <= 0x036f -> true
         code >= 0x0483 && code <= 0x0489 -> true
@@ -186,7 +186,7 @@ fn jet_cli_table_extend(code: Int) -> Bool Never! {
     }
 }
 
-fn jet_cli_table_wide(code: Int) -> Bool Never! {
+jet_cli_table_wide: fn(code: Int) -> Bool Never! {
     if {
         code >= 0x1100 && code <= 0x115f -> true
         code >= 0x231a && code <= 0x231b -> true
@@ -231,23 +231,23 @@ fn jet_cli_table_wide(code: Int) -> Bool Never! {
     }
 }
 
-fn jet_cli_table_scalar_width(code: Int) -> Int Never! {
+jet_cli_table_scalar_width: fn(code: Int) -> Int Never! {
     if jet_cli_table_control(code) || jet_cli_table_extend(code) || code == 0x200d -> return 0
     if jet_cli_table_wide(code) -> 2 else -> 1
 }
 
-struct JetCLITableCluster { end: Int, width: Int }
+JetCLITableCluster: struct { end: Int, width: Int }
 
 // start and limit are scalar boundaries of an unchanged READ input. Unlike
 // UAX segmentation, a regional indicator absorbs only a second indicator;
 // other starts absorb Extend* and repeated ZWJ + next scalar, taking max width.
-fn jet_cli_table_cluster(source: [U8], start: Int, limit: Int) -> JetCLITableCluster Never! {
-    first :: foundation_read_bytes_scalar_at(source, start)
+jet_cli_table_cluster: fn(source: [U8], start: Int, limit: Int) -> JetCLITableCluster Never! {
+    first: foundation_read_bytes_scalar_at(source, start)
     end := first.next_byte
     width := jet_cli_table_scalar_width(first.codepoint)
     if jet_cli_table_regional(first.codepoint) {
         if end < limit {
-            next_scalar :: foundation_read_bytes_scalar_at(source, end)
+            next_scalar: foundation_read_bytes_scalar_at(source, end)
             if jet_cli_table_regional(next_scalar.codepoint) {
                 end = next_scalar.next_byte
                 width = 2
@@ -256,16 +256,16 @@ fn jet_cli_table_cluster(source: [U8], start: Int, limit: Int) -> JetCLITableClu
     } else {
         loop {
             loop end < limit {
-                extension :: foundation_read_bytes_scalar_at(source, end)
+                extension: foundation_read_bytes_scalar_at(source, end)
                 if !jet_cli_table_extend(extension.codepoint) -> break
                 end = extension.next_byte
             }
             if end >= limit -> break
-            joiner :: foundation_read_bytes_scalar_at(source, end)
+            joiner: foundation_read_bytes_scalar_at(source, end)
             if joiner.codepoint != 0x200d -> break
             end = joiner.next_byte
             if end >= limit -> break
-            joined :: foundation_read_bytes_scalar_at(source, end)
+            joined: foundation_read_bytes_scalar_at(source, end)
             end = joined.next_byte
             width = jet_cli_table_max(width, jet_cli_table_scalar_width(joined.codepoint))
         }
@@ -276,13 +276,13 @@ fn jet_cli_table_cluster(source: [U8], start: Int, limit: Int) -> JetCLITableClu
 // Only ANSI ESC sequences are removed. Other controls (and newlines) remain
 // literal facts. Scan scalars, so an ESC followed by non-ASCII consumes the
 // whole scalar just as the Rust char iterator does.
-fn jet_cli_table_strip_ansi(source: [U8]) -> [U8] Never! {
+jet_cli_table_strip_ansi: fn(source: [U8]) -> [U8] Never! {
     out := [U8]{}
     state := 0
     index := 0
     loop index < source.len() {
-        scalar :: foundation_read_bytes_scalar_at(source, index)
-        code :: scalar.codepoint
+        scalar: foundation_read_bytes_scalar_at(source, index)
+        code: scalar.codepoint
         if state == {
             0 -> {
                 if code == 27 -> state = 1
@@ -303,7 +303,7 @@ fn jet_cli_table_strip_ansi(source: [U8]) -> [U8] Never! {
 // scans never materialize a scalar/substring/list from a String. Oversized
 // clusters are skipped, and later fitting clusters are retained (not prefix
 // truncation). Text truncation does not set the table's structural flag.
-fn jet_cli_table_bound_text(input: ^[U8]) -> [U8] Never! {
+jet_cli_table_bound_text: fn(input: ^[U8]) -> [U8] Never! {
     text := ^input
     ansi := false
     loop byte in text {
@@ -317,7 +317,7 @@ fn jet_cli_table_bound_text(input: ^[U8]) -> [U8] Never! {
     out := [U8]{}
     index := 0
     loop index < text.len() {
-        cluster :: jet_cli_table_cluster(text, index, text.len())
+        cluster: jet_cli_table_cluster(text, index, text.len())
         if out.len() + cluster.end - index <= JET_CLI_TABLE_MAX_CELL_BYTES -> foundation_append_read_bytes(&out, text, index, cluster.end)
         index = cluster.end
     }
@@ -326,7 +326,7 @@ fn jet_cli_table_bound_text(input: ^[U8]) -> [U8] Never! {
 
 // Normalized table facts have already had ANSI removed and the byte bound
 // applied. Width is the maximum logical line, not the sum across newlines.
-fn jet_cli_table_text_width(text: [U8]) -> Int Never! {
+jet_cli_table_text_width: fn(text: [U8]) -> Int Never! {
     maximum := 0
     start := 0
     loop start <= text.len() {
@@ -335,7 +335,7 @@ fn jet_cli_table_text_width(text: [U8]) -> Int Never! {
         width := 0
         index := start
         loop index < end {
-            cluster :: jet_cli_table_cluster(text, index, end)
+            cluster: jet_cli_table_cluster(text, index, end)
             width += cluster.width
             index = cluster.end
         }
@@ -346,7 +346,7 @@ fn jet_cli_table_text_width(text: [U8]) -> Int Never! {
     maximum
 }
 
-fn jet_cli_table_wrap_span(lines: &[[U8]], text: [U8], start: Int, stop: Int, width: Int) Never! {
+jet_cli_table_wrap_span: fn(lines: &[[U8]], text: [U8], start: Int, stop: Int, width: Int) Never! {
     end := stop
     if end > start && text[end - 1] == (U8{13}) -> end -= 1
     if start == end {
@@ -358,7 +358,7 @@ fn jet_cli_table_wrap_span(lines: &[[U8]], text: [U8], start: Int, stop: Int, wi
     emitted := false
     index := start
     loop index < end {
-        cluster :: jet_cli_table_cluster(text, index, end)
+        cluster: jet_cli_table_cluster(text, index, end)
         if {
             cluster.width == 0 -> {
                 if line_width < width -> foundation_append_read_bytes(&line, text, index, cluster.end)
@@ -387,8 +387,8 @@ fn jet_cli_table_wrap_span(lines: &[[U8]], text: [U8], start: Int, stop: Int, wi
     if line.len() > 0 || !emitted -> &lines.push(^line)
 }
 
-fn jet_cli_table_wrap(text: [U8], budget: Int) -> [[U8]] Never! {
-    width :: jet_cli_table_max(budget, 1)
+jet_cli_table_wrap: fn(text: [U8], budget: Int) -> [[U8]] Never! {
+    width: jet_cli_table_max(budget, 1)
     lines := [[U8]]{}
     start := 0
     loop start <= text.len() {
@@ -401,29 +401,29 @@ fn jet_cli_table_wrap(text: [U8], budget: Int) -> [[U8]] Never! {
     lines
 }
 
-fn jet_cli_table_clip(text: [U8], width: Int, unicode: Bool) -> [U8] Never! {
+jet_cli_table_clip: fn(text: [U8], width: Int, unicode: Bool) -> [U8] Never! {
     if width == 0 -> return [U8]{}
     if text.len() > JET_CLI_TABLE_MAX_CELL_BYTES {
         // copy: `text` stays with the caller (`text` is a read parameter: no move out of it, E0201)
         // and the argument of `jet_cli_table_bound_text` owns its own.
-        bounded :: jet_cli_table_bound_text(text.copy())
+        bounded: jet_cli_table_bound_text(text.copy())
         return jet_cli_table_clip(bounded, width, unicode)
     }
     // copy: `text` stays with the caller (`text` is a read parameter: no move out of it, E0201) and
     // the new value owns its own.
     if jet_cli_table_text_width(text) <= width -> return text.copy()
     out := [U8]{}
-    suffix_width :: if unicode -> 1 else -> 3
+    suffix_width: if unicode -> 1 else -> 3
     if width <= suffix_width {
         if unicode -> return [U8]{226, 128, 166}
         loop _ in 0..<width -> &out.push(U8{46})
         return out
     }
-    keep :: width - suffix_width
+    keep: width - suffix_width
     used := 0
     index := 0
     loop index < text.len() && used < keep {
-        cluster :: jet_cli_table_cluster(text, index, text.len())
+        cluster: jet_cli_table_cluster(text, index, text.len())
         if cluster.width > keep - used -> break
         foundation_append_read_bytes(&out, text, index, cluster.end)
         used += cluster.width
@@ -439,26 +439,26 @@ fn jet_cli_table_clip(text: [U8], width: Int, unicode: Bool) -> [U8] Never! {
     out
 }
 
-fn jet_cli_table_repeat(out: &[U8], byte: U8, count: Int) Never! {
+jet_cli_table_repeat: fn(out: &[U8], byte: U8, count: Int) Never! {
     loop _ in 0..<count -> &out.push(byte)
 }
 
-fn jet_cli_table_append_pad(out: &[U8], value: [U8], width: Int, alignment: JetCLITableAlignment) Never! {
+jet_cli_table_append_pad: fn(out: &[U8], value: [U8], width: Int, alignment: JetCLITableAlignment) Never! {
     if value.len() > JET_CLI_TABLE_MAX_CELL_BYTES {
         // copy: `value` stays with the caller (`value` is a read parameter: no move out of it,
         // E0201) and the argument of `jet_cli_table_bound_text` owns its own.
-        bounded :: jet_cli_table_bound_text(value.copy())
+        bounded: jet_cli_table_bound_text(value.copy())
         jet_cli_table_append_pad(&out, bounded, width, alignment)
         return
     }
-    visible :: jet_cli_table_text_width(value)
+    visible: jet_cli_table_text_width(value)
     if visible > width {
-        clipped :: jet_cli_table_clip(value, width, true)
+        clipped: jet_cli_table_clip(value, width, true)
         jet_cli_table_append_pad(&out, clipped, width, alignment)
         return
     }
-    gap :: jet_cli_table_sub(width, visible)
-    left :: if alignment == {
+    gap: jet_cli_table_sub(width, visible)
+    left: if alignment == {
         .Left -> 0
         .Right -> gap
         .Center -> gap /% 2

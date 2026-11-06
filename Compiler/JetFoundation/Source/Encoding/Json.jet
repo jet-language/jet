@@ -2,15 +2,15 @@
 // Rust `JSON::json_escape`: `"`, `\`, LF, CR and TAB use short escapes; every
 // other Unicode control scalar (Cc: U+0000-U+001F, U+007F-U+009F) becomes
 // `\u00xx`; all other scalars are copied verbatim.
-fn foundation_json_escape(value: String) -> String Never! {
-    bytes :: value.bytes()
-    hex :: "0123456789abcdef".bytes()
+foundation_json_escape: fn(value: String) -> String Never! {
+    bytes: value.bytes()
+    hex: "0123456789abcdef".bytes()
     out := [U8]{}
     index := 0
     loop index < bytes.len() {
-        byte :: Int.from_u8(bytes[index])
+        byte: Int.from_u8(bytes[index])
         // U+0080-U+009F encode as C2 80 .. C2 9F.
-        control :: if {
+        control: if {
             byte < 32 || byte == 127 -> byte
             byte == 194 && index + 1 < bytes.len() && Int.from_u8(bytes[index + 1]) <= 159 -> Int.from_u8(bytes[index + 1])
             else -> -1
@@ -35,11 +35,11 @@ fn foundation_json_escape(value: String) -> String Never! {
 }
 
 // Rust `JSON::quote`.
-fn foundation_json_quote(value: String) -> String Never! {
+foundation_json_quote: fn(value: String) -> String Never! {
     "\"{foundation_json_escape(value)}\""
 }
 
-fn foundation_json_append(out: &[U8], text: String) Never! {
+foundation_json_append: fn(out: &[U8], text: String) Never! {
     loop byte in text.bytes() -> &out.push(byte)
 }
 
@@ -47,9 +47,9 @@ fn foundation_json_append(out: &[U8], text: String) Never! {
 // never in exponent form, with no `.0` on integral values. Jet Float
 // interpolation is Rust `{:?}`, which carries the same digits; only the
 // layout differs.
-fn foundation_float_display(value: Float) -> String Never! {
-    debug :: "{value}"
-    bytes :: debug.bytes()
+foundation_float_display: fn(value: Float) -> String Never! {
+    debug: "{value}"
+    bytes: debug.bytes()
     exponent_at := -1
     loop index in 0..<bytes.len() {
         if bytes[index] == (U8{101}) {
@@ -61,8 +61,8 @@ fn foundation_float_display(value: Float) -> String Never! {
         if bytes.len() < 2 || bytes[bytes.len() - 2] != (U8{46}) || bytes[bytes.len() - 1] != (U8{48}) -> return debug
         return String.from_bytes_lossy(bytes[0..<bytes.len() - 2])
     }
-    negative :: bytes[0] == (U8{45})
-    mantissa_start :: if negative -> 1 else -> 0
+    negative: bytes[0] == (U8{45})
+    mantissa_start: if negative -> 1 else -> 0
     digits := [U8]{}
     point := -1
     loop index in mantissa_start..<exponent_at {
@@ -73,8 +73,8 @@ fn foundation_float_display(value: Float) -> String Never! {
         &digits.push(bytes[index])
     }
     if point < 0 -> point = digits.len()
-    exponent_negative :: bytes[exponent_at + 1] == (U8{45})
-    exponent_start :: if exponent_negative -> exponent_at + 2 else -> exponent_at + 1
+    exponent_negative: bytes[exponent_at + 1] == (U8{45})
+    exponent_start: if exponent_negative -> exponent_at + 2 else -> exponent_at + 1
     exponent := 0
     loop index in exponent_start..<bytes.len() {
         exponent = exponent * 10 + Int.from_u8(bytes[index]) - 48
@@ -107,11 +107,11 @@ fn foundation_float_display(value: Float) -> String Never! {
 }
 
 // Shared structural Debug quoting (formerly JetEval's value formatter).
-fn foundation_debug_quoted(text: String, quote: Int) -> String Never! {
+foundation_debug_quoted: fn(text: String, quote: Int) -> String Never! {
     out := [U8]{}
     &out.push(U8{quote})
     loop byte in text.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if {
             code == 92 -> foundation_json_append(&out, "\\\\")
             code == quote -> {

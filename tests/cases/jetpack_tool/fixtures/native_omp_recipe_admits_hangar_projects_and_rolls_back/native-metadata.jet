@@ -3,16 +3,16 @@ use {
     core.files
     core.sys
 }
-fn native_metadata_check() {
-    store :: sys.get("TOOL_STORE") ?? panic("TOOL_STORE")
-    entries :: files.list_dir(store + "/hangar")
+native_metadata_check: fn() {
+    store: sys.get("TOOL_STORE") ?? panic("TOOL_STORE")
+    entries: files.list_dir(store + "/hangar")
     found_any := false
     matched := false
     loop entry in entries {
-        path :: entry.path + "/meta.json"
+        path: entry.path + "/meta.json"
         if files.is_file(path.copy()) {
             found_any = true
-            metadata :: files.read(path)
+            metadata: files.read(path)
             if metadata.contains("omp@releases") && !metadata.contains("/nix/store/") -> matched = true
         }
     }

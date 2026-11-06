@@ -10,13 +10,13 @@ use {
 }
 
 // The `boundaries:` field's value, read by the canonical Package reader.
-fn jet_driver_read_package_boundaries(value: String) -> [ImportBoundary] PackageParseError! {
+jet_driver_read_package_boundaries: fn(value: String) -> [ImportBoundary] PackageParseError! {
     if pkg_retired_record_head_spans(value).len() > 0 -> return Err(PackageParseError.RetiredRecordHead)
-    boundaries :: pkg_parse_boundaries(pkg_record_body(value, "boundaries"))
+    boundaries: pkg_parse_boundaries(pkg_record_body(value, "boundaries"))
     Ok(boundaries)
 }
 
-fn jet_driver_check_import_boundaries(packages: [JetDriverPackageInfo], source_units: [JetDriverSourceUnit], modules: [JetDriverLoadedModule], imports: [SemaRegistrationImportEdge], diagnostics: &[Diagnostic]) {
+jet_driver_check_import_boundaries: fn(packages: [JetDriverPackageInfo], source_units: [JetDriverSourceUnit], modules: [JetDriverLoadedModule], imports: [SemaRegistrationImportEdge], diagnostics: &[Diagnostic]) {
     hits := [[Bool]]{}
     any_rule := false
     loop package in packages {
@@ -30,21 +30,21 @@ fn jet_driver_check_import_boundaries(packages: [JetDriverPackageInfo], source_u
     loop loaded in modules -> unit_of_module[loaded.module_identity] = loaded.source_unit_index
     loop edge in imports {
         if !jet_driver_import_is_module_edge(edge.declaration.kind) -> next
-        from_index :: unit_of_module.get(edge.source_module_identity) ?? next
-        to_index :: unit_of_module.get(edge.target_module_identity) ?? next
-        from_unit :: source_units[from_index]
-        to_unit :: source_units[to_index]
+        from_index: unit_of_module.get(edge.source_module_identity) ?? next
+        to_index: unit_of_module.get(edge.target_module_identity) ?? next
+        from_unit: source_units[from_index]
+        to_unit: source_units[to_index]
         if from_unit.root_index < 0 || from_unit.root_index >= packages.len() || to_unit.root_index < 0 || to_unit.root_index >= packages.len() -> next
-        from_package :: packages[from_unit.root_index]
+        from_package: packages[from_unit.root_index]
         if from_package.boundaries.len() == 0 -> next
-        to_package :: packages[to_unit.root_index]
+        to_package: packages[to_unit.root_index]
         if to_package.name == "" -> next
-        from_name :: jet_driver_boundary_module_name(from_package.name, from_unit.relative_path)
-        to_name :: jet_driver_boundary_module_name(to_package.name, to_unit.relative_path)
+        from_name: jet_driver_boundary_module_name(from_package.name, from_unit.relative_path)
+        to_name: jet_driver_boundary_module_name(to_package.name, to_unit.relative_path)
         loop (rule_index, rule) in from_package.boundaries {
             if !rule.matches(from_name, to_name) -> next
             hits[from_unit.root_index][rule_index] = true
-            denied :: pkg_manifest_diagnostic_from_row("E0619", [ManifestEntry]{
+            denied: pkg_manifest_diagnostic_from_row("E0619", [ManifestEntry]{
                 ManifestEntry{key: "from", value: from_name},
                 ManifestEntry{key: "to", value: to_name},
                 ManifestEntry{key: "rule", value: "{rule.from} -> {rule.to}"},
@@ -56,7 +56,7 @@ fn jet_driver_check_import_boundaries(packages: [JetDriverPackageInfo], source_u
     loop (package_index, package) in packages {
         loop (rule_index, rule) in package.boundaries {
             if hits[package_index][rule_index] -> next
-            unused :: pkg_manifest_diagnostic_from_row("L0619", [ManifestEntry]{ManifestEntry{key: "rule", value: "{rule.from} -> {rule.to}"}}, None)
+            unused: pkg_manifest_diagnostic_from_row("L0619", [ManifestEntry]{ManifestEntry{key: "rule", value: "{rule.from} -> {rule.to}"}}, None)
             &diagnostics.push(diagnostic_with_source_path(^unused, package.manifest_path ?? "package.jet", 0))
         }
     }
@@ -65,7 +65,7 @@ fn jet_driver_check_import_boundaries(packages: [JetDriverPackageInfo], source_u
 // A module's boundary name: its package name, then its path under the package
 // root without the `.jet` suffix (`app` + `ui/forms.jet` is `app.ui.forms`).
 // A nested `main.jet` or `module.jet` names its directory.
-fn jet_driver_boundary_module_name(package: String, relative_path: String) -> String Never! {
+jet_driver_boundary_module_name: fn(package: String, relative_path: String) -> String Never! {
     parts := [String]{}
     loop part in relative_path.split("/") {
         if part == "" || part == "." -> next

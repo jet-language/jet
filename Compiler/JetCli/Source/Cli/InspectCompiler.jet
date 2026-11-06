@@ -1,7 +1,7 @@
 // A check is a source query, not check_file: its filename is metadata and
 // imports use the eval source root.
 use {
-    cli_files :: core.files
+    cli_files: core.files
     jet_foundation.[
         TComptimeValue,
         TComptimeKey,
@@ -18,7 +18,7 @@ use {
     ]
 }
 
-fn jet_cli_compiler_key_value(key: TComptimeKey) -> TComptimeValue Never! {
+jet_cli_compiler_key_value: fn(key: TComptimeKey) -> TComptimeValue Never! {
     if key == {
         .Int(number) -> TComptimeValue.Int{value: number}
         .BigInt(decimal) -> TComptimeValue.BigInt{decimal: decimal}
@@ -31,7 +31,7 @@ fn jet_cli_compiler_key_value(key: TComptimeKey) -> TComptimeValue Never! {
     }
 }
 
-fn jet_cli_compiler_key_text(key: TComptimeKey) -> String Never! {
+jet_cli_compiler_key_text: fn(key: TComptimeKey) -> String Never! {
     if key == {
         .Int(number) -> "{number}"
         .BigInt(decimal) -> decimal
@@ -42,7 +42,7 @@ fn jet_cli_compiler_key_text(key: TComptimeKey) -> String Never! {
     }
 }
 
-fn jet_cli_compiler_checked_value(value: TComptimeValue) -> JetCLIStatusValue Never! {
+jet_cli_compiler_checked_value: fn(value: TComptimeValue) -> JetCLIStatusValue Never! {
     if value == {
         .Int(number) -> jet_cli_status_int(number)
         .Float(number, _) -> JetCLIStatusValue.Float{text: "{number}"}
@@ -67,7 +67,7 @@ fn jet_cli_compiler_checked_value(value: TComptimeValue) -> JetCLIStatusValue Ne
             loop arg in args {
                 if arg.name == .None -> named = false
             }
-            body :: if named -> jet_cli_status_object(loop arg in args -> jet_cli_status_field(arg.name ?? "", jet_cli_compiler_checked_value(arg.value))) else -> jet_cli_status_array(loop arg in args -> jet_cli_compiler_checked_value(arg.value))
+            body: if named -> jet_cli_status_object(loop arg in args -> jet_cli_status_field(arg.name ?? "", jet_cli_compiler_checked_value(arg.value))) else -> jet_cli_status_array(loop arg in args -> jet_cli_compiler_checked_value(arg.value))
             jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field(variant, body)})
         }
         .Present(inner) -> jet_cli_compiler_checked_value(inner)
@@ -79,17 +79,17 @@ fn jet_cli_compiler_checked_value(value: TComptimeValue) -> JetCLIStatusValue Ne
     }
 }
 
-fn jet_cli_inspect_compiler_check(file: String, source: String) -> JetDriverVerbOutput Never! {
-    core_sources :: if jet_cli_core_sources(file, false) == {
+jet_cli_inspect_compiler_check: fn(file: String, source: String) -> JetDriverVerbOutput Never! {
+    core_sources: if jet_cli_core_sources(file, false) == {
         .Loaded(sources) -> sources
         .Missing(what, fix) -> {
             return jet_cli_report_output("", "E2105", what, jet_cli_why("E2105"), fix, false, 1)
 
         }
     }
-    parsed :: jet_eval_compiler_services_parse(jet_driver_compiler_source_input(source)) ?? return jet_cli_ice("the compiler source query could not parse its source input")
-    snapshot :: jet_driver_compiler_source_snapshot(cli_files.cwd() ?? ".", source)
-    result :: jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed, request: jet_cli_driver_request(snapshot, core_sources, None, JetDriverCompileMode.Doc), sema_session: None, retain_projection: false}) ?? return jet_cli_ice("the compiler check query failed before returning its diagnostics")
+    parsed: jet_eval_compiler_services_parse(jet_driver_compiler_source_input(source)) ?? return jet_cli_ice("the compiler source query could not parse its source input")
+    snapshot: jet_driver_compiler_source_snapshot(cli_files.cwd() ?? ".", source)
+    result: jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed, request: jet_cli_driver_request(snapshot, core_sources, None, JetDriverCompileMode.Doc), sema_session: None, retain_projection: false}) ?? return jet_cli_ice("the compiler check query failed before returning its diagnostics")
     if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
     value := JetCLIStatusValue.Null
     if result.product == {
@@ -130,7 +130,7 @@ fn jet_cli_inspect_compiler_check(file: String, source: String) -> JetDriverVerb
             )
         }
     }
-    payload :: jet_cli_status_object(
+    payload: jet_cli_status_object(
     [JetCLIStatusField]{
         jet_cli_status_field("schema_version", jet_cli_status_int(1)),
         jet_cli_status_field("api_version", jet_cli_status_int(1)),

@@ -4,46 +4,46 @@
 // the seed files SHA256SUMS lists. Nothing here judges the facts; Gate.jet does.
 
 use {
-    crypto :: core.crypto
-    files :: core.files
-    json :: core.encoding.json
+    crypto: core.crypto
+    files: core.files
+    json: core.encoding.json
 }
 
 // What a seed directory ships (release-compiler.mjs SEED_FILES); jetpack is
 // absent from some, and a missing name is skipped as there. RELEASE names the
 // release, so jet can download its own C toolchain pack.
-SEED_FILES :: [String]{"jet", "jet-cc", "jet-cxx", "jet-c++", "jetpack", "jet-runtime", "IDENTITY", "RELEASE"}
+SEED_FILES: [String]{"jet", "jet-cc", "jet-cxx", "jet-c++", "jetpack", "jet-runtime", "IDENTITY", "RELEASE"}
 
 // The kinds of problem that block a release. Each blocked run records its
 // problems under these names in the audit trail.
-MISSING_RUNNER :: "missing-runner"
-FLAKY :: "flaky"
-SKIPPED :: "skipped"
-FAILED :: "failed"
-STALE :: "stale"
-SIGNING :: "signing"
-NONDETERMINISM :: "nondeterminism"
-PARTIAL :: "partial-publication"
-MISMATCH :: "record-mismatch"
-MATRIX :: "support-matrix"
-ADMISSION :: "admission"
-REMOTE :: "remote"
-PERSONAL :: "personal-information"
-INPUT :: "input"
+MISSING_RUNNER: "missing-runner"
+FLAKY: "flaky"
+SKIPPED: "skipped"
+FAILED: "failed"
+STALE: "stale"
+SIGNING: "signing"
+NONDETERMINISM: "nondeterminism"
+PARTIAL: "partial-publication"
+MISMATCH: "record-mismatch"
+MATRIX: "support-matrix"
+ADMISSION: "admission"
+REMOTE: "remote"
+PERSONAL: "personal-information"
+INPUT: "input"
 
 #Error
-struct Problem {
+Problem: struct {
     class: String
     text: String
 }
 
-struct Artifact {
+Artifact: struct {
     path: String
     sha256: String
     size: Int
 }
 
-struct Release {
+Release: struct {
     dir: String
     // "build" or "admitted".
     kind: String
@@ -65,13 +65,13 @@ struct Release {
     problems: [Problem]
 }
 
-fn problem(class: String, text: String) -> Problem Never! {
+problem: fn(class: String, text: String) -> Problem Never! {
     Problem{class: class.copy(), text: text.copy()}
 }
 
-fn sha256_hex(bytes: [U8]) -> String Never! { crypto.sha256(bytes).hex() }
+sha256_hex: fn(bytes: [U8]) -> String Never! { crypto.sha256(bytes).hex() }
 
-fn field(tree: Dyn, name: String) -> Dyn Never! {
+field: fn(tree: Dyn, name: String) -> Dyn Never! {
     if tree == .Object(entries) {
         loop entry in entries {
             if entry.key == name -> return entry.value.copy()
@@ -80,14 +80,14 @@ fn field(tree: Dyn, name: String) -> Dyn Never! {
     Dyn.Null
 }
 
-fn text_field(tree: Dyn, name: String) -> String Never! {
+text_field: fn(tree: Dyn, name: String) -> String Never! {
     if field(tree, name) == .Text(value) -> return value.copy()
     ""
 }
 
 // Strict JSON keeps each number as its lexeme (`Dyn.Number`), so a whole
 // number is read back from either form.
-fn int_field(tree: Dyn, name: String) -> Int? Never! {
+int_field: fn(tree: Dyn, name: String) -> Int? Never! {
     if field(tree, name) == {
         .Int(value) -> Val(value)
         .Number(lexeme) -> Val(Int.parse(lexeme) ?? return None)
@@ -95,56 +95,56 @@ fn int_field(tree: Dyn, name: String) -> Int? Never! {
     }
 }
 
-fn array_field(tree: Dyn, name: String) -> [Dyn] Never! {
+array_field: fn(tree: Dyn, name: String) -> [Dyn] Never! {
     if field(tree, name) == .Array(items) -> return items.copy()
     [Dyn]{}
 }
 
-fn is_object(tree: Dyn) -> Bool Never! {
+is_object: fn(tree: Dyn) -> Bool Never! {
     if tree == .Object(_) -> return true
     false
 }
 
-fn is_hex(text: String, length: Int) -> Bool Never! {
+is_hex: fn(text: String, length: Int) -> Bool Never! {
     if text.len() != length -> return false
     loop byte in text.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return false
     }
     true
 }
 
 // The part of `identity` (`jet@VERSION#SHA256`) after the `#`.
-fn identity_sha(identity: String) -> String Never! {
+identity_sha: fn(identity: String) -> String Never! {
     identity.partition("#").tail.copy()
 }
 
-fn read_text(path: String) -[FS]> String? Never! {
-    text :: files.read(path) ?? return None
+read_text: fn(path: String) -[FS]> String? Never! {
+    text: files.read(path) ?? return None
     Val(text)
 }
 
-fn read_json(path: String) -[FS]> Dyn Problem! {
-    text :: files.read(path) ?? return Err(problem(INPUT, "cannot read {path}: {err}"))
-    parsed :: json.parse(text) ?? return Err(problem(INPUT, "{path} is not JSON: {err}"))
+read_json: fn(path: String) -[FS]> Dyn Problem! {
+    text: files.read(path) ?? return Err(problem(INPUT, "cannot read {path}: {err}"))
+    parsed: json.parse(text) ?? return Err(problem(INPUT, "{path} is not JSON: {err}"))
     Ok(parsed)
 }
 
-fn file_artifact(path: String, shown: String) -[FS]> Artifact Problem! {
-    bytes :: files.read_bytes(path) ?? return Err(problem(STALE, "cannot read {shown}: {err}"))
+file_artifact: fn(path: String, shown: String) -[FS]> Artifact Problem! {
+    bytes: files.read_bytes(path) ?? return Err(problem(STALE, "cannot read {shown}: {err}"))
     Ok(Artifact{path: shown.copy(), sha256: sha256_hex(bytes), size: bytes.len()})
 }
 
 // Every regular file under `root`, by relative path, each level sorted by
 // name; symbolic links are skipped (release-compiler.mjs fileHashes).
-fn tree_artifacts(root: String, prefix: String, out: &[Artifact]) Never! -[FS]> {
-    entries :: files.list_dir(root) ?? return
+tree_artifacts: fn(root: String, prefix: String, out: &[Artifact]) Never! -[FS]> {
+    entries: files.list_dir(root) ?? return
     names := [String]{}
     loop entry in entries -> &names.push(entry.name.copy())
     &names.sort_by((left: String, right: String) -> left <=> right)
     loop name in names {
-        path :: files.join(root, name)
-        shown :: "{prefix}/{name}"
+        path: files.join(root, name)
+        shown: "{prefix}/{name}"
         if files.is_symlink(path) -> next
         if {
             files.is_dir(path) -> tree_artifacts(path, shown, &out)
@@ -156,10 +156,10 @@ fn tree_artifacts(root: String, prefix: String, out: &[Artifact]) Never! -[FS]> 
 }
 
 // The shipped files of `dir` in SHA256SUMS order.
-fn shipped_artifacts(dir: String) -[FS]> [Artifact] Never! {
+shipped_artifacts: fn(dir: String) -[FS]> [Artifact] Never! {
     out := [Artifact]{}
     loop name in SEED_FILES {
-        path :: files.join(dir, name)
+        path: files.join(dir, name)
         if !files.exists(path) -> next
         if {
             files.is_dir(path) -> tree_artifacts(path, name, &out)
@@ -172,21 +172,21 @@ fn shipped_artifacts(dir: String) -[FS]> [Artifact] Never! {
 }
 
 // SHA256SUMS text of `artifacts`: `<sha256>  <path>` lines.
-fn sums_text(artifacts: [Artifact]) -> String Never! {
+sums_text: fn(artifacts: [Artifact]) -> String Never! {
     lines := [String]{}
     loop artifact in artifacts -> &lines.push("{artifact.sha256}  {artifact.path}")
     "{lines.join("\n")}\n"
 }
 
-fn first_line(text: String) -> String Never! {
+first_line: fn(text: String) -> String Never! {
     text.partition("\n").head.trim().copy()
 }
 
 // Reads `dir`. Missing or malformed inputs become problems, so one run
 // reports all of them.
-fn read_release(dir: String) -[FS]> Release Never! {
+read_release: fn(dir: String) -[FS]> Release Never! {
     release := Release{dir: dir.copy(), kind: "build", identity: "", jet_sha256: "", commit: "", seed: "", name: "", target: "", s2: "", s3: "", shipped: [Artifact]{}, sums: "", runtime_key: "", runtime_provenance_sha256: "", runtime_compiler_sha256: "", admission: Dyn.Null, problems: [Problem]{}}
-    admitted :: files.exists(files.join(dir, "RELEASE.json"))
+    admitted: files.exists(files.join(dir, "RELEASE.json"))
     release.kind = if admitted -> "admitted" else -> "build"
     required := [String]{"jet", "jet-runtime", "IDENTITY", "SHA256SUMS"}
     if !admitted -> &required.extend([String]{"COMMIT", "SEED", "BUILD.json"})
@@ -195,18 +195,18 @@ fn read_release(dir: String) -[FS]> Release Never! {
     }
     if release.problems.len() > 0 -> return release
     release.identity = first_line(read_text(files.join(dir, "IDENTITY")) ?? "")
-    jet :: files.read_bytes(files.join(dir, "jet")) ?? [U8]{}
+    jet: files.read_bytes(files.join(dir, "jet")) ?? [U8]{}
     release.jet_sha256 = sha256_hex(jet)
     release.shipped = shipped_artifacts(dir)
     release.sums = read_text(files.join(dir, "SHA256SUMS")) ?? ""
     release.runtime_key = first_line(read_text(files.join(dir, "jet-runtime/native.key")) ?? "")
-    provenance_path :: files.join(dir, "jet-runtime/provenance.json")
+    provenance_path: files.join(dir, "jet-runtime/provenance.json")
     if files.read_bytes(provenance_path) == .Ok(bytes) {
         release.runtime_provenance_sha256 = sha256_hex(bytes)
         if read_json(provenance_path) == .Ok(provenance) -> release.runtime_compiler_sha256 = text_field(provenance, "compilerSha256")
     }
     if admitted {
-        record :: read_json(files.join(dir, "RELEASE.json")) ?? {
+        record: read_json(files.join(dir, "RELEASE.json")) ?? {
             &release.problems.push(problem(ADMISSION, err.text))
             return release
         }
@@ -214,7 +214,7 @@ fn read_release(dir: String) -[FS]> Release Never! {
         release.name = text_field(record, "name")
         release.seed = text_field(field(record, "seed"), "identity")
         release.target = text_field(record, "target")
-        chain :: field(record, "chain")
+        chain: field(record, "chain")
         release.s2 = text_field(chain, "s2")
         release.s3 = text_field(chain, "s3")
         release.admission = record
@@ -222,12 +222,12 @@ fn read_release(dir: String) -[FS]> Release Never! {
     }
     release.commit = first_line(read_text(files.join(dir, "COMMIT")) ?? "")
     release.seed = first_line(read_text(files.join(dir, "SEED")) ?? "")
-    built :: read_json(files.join(dir, "BUILD.json")) ?? {
+    built: read_json(files.join(dir, "BUILD.json")) ?? {
         &release.problems.push(err)
         return release
     }
     release.target = text_field(built, "target")
-    chain :: field(built, "chain")
+    chain: field(built, "chain")
     release.s2 = text_field(chain, "s2")
     release.s3 = text_field(chain, "s3")
     release

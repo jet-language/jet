@@ -1,32 +1,32 @@
 // D-MEM1: method receivers — &self (write), ^self (consume), self (read).
-struct Buffer {
+Buffer: struct {
     data: String
     size: Int
 }
 
 impl Buffer {
-    fn peek(self) -> Int { self.size }
+    peek: fn(self) -> Int { self.size }
 
-    fn describe(self) {
+    describe: fn(self) {
         // plain self — read only
         print("buf[{self.size}]: {self.data}")
     }
 
-    fn append(&self, chunk: String) {
+    append: fn(&self, chunk: String) {
         // &self — mutate the receiver in place
         self.data = "{self.data}{chunk}"
         self.size += 1
     }
 
-    fn seal(^self) -> String { "[sealed: {self.data}]" }
+    seal: fn(^self) -> String { "[sealed: {self.data}]" }
 }
 
-fn run() {
+run: fn() {
     buf := Buffer{data: "hello", size: 1}
     print(buf.peek())  // plain read
     buf.describe()  // plain self, read
     &buf.append(" world")  // &self write
     buf.describe()
-    result :: ^buf.seal()  // ^self consume; buf gone after this
+    result: ^buf.seal()  // ^self consume; buf gone after this
     print(result)
 }

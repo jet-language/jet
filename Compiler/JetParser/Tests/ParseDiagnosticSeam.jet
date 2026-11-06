@@ -1,12 +1,12 @@
 // 01e12017: malformed source reports E0003 through the parse seam; assemble with Compiler and run.
 use jet_parser.[parse_source]
 
-fn parse_seam_require(ok: Bool, name: String) Never! {
+parse_seam_require: fn(ok: Bool, name: String) Never! {
     if !ok -> panic("parse seam contract: {name}")
 }
 
 #Test("parse_diagnostic_seam") {
-    parsed :: parse_source("fn run( {{\n".bytes())
+    parsed: parse_source("run: fn( {{\n".bytes())
     seen := false
     loop diagnostic in parsed.diagnostics {
         if diagnostic.code == "E0003" -> seen = true

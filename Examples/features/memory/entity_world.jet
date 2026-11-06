@@ -4,32 +4,32 @@
 // write, including a nested `pool[id].field = v`; `.ids()` walks every live
 // entry; a stale `Id<T>` (removed slot, generation bumped) panics rather than
 // silently reading garbage.
-struct Player {
+Player: struct {
     name: String
     hp: Int
     attack: Int
     target: ID<Player>?
 }
 
-fn tick(world: &Pool<Player>) {
+tick: fn(world: &Pool<Player>) {
     loop id in world.ids() {
-        target :: world[id].target.copy()
+        target: world[id].target.copy()
         if target == .Val(t) {
-            dmg :: world[id].attack
+            dmg: world[id].attack
             world[t].hp -= dmg
         }
     }
 }
 
-fn run() {
+run: fn() {
     world := Pool<Player>.new()
-    kai :: world.add(Player{name: "Kai", hp: 100, attack: 15, target: None})
-    rem_id :: world.add(Player{name: "Rem", hp: 100, attack: 10, target: None})
+    kai: world.add(Player{name: "Kai", hp: 100, attack: 15, target: None})
+    rem_id: world.add(Player{name: "Rem", hp: 100, attack: 10, target: None})
     world[kai].target = Val(rem_id.copy())
     world[rem_id].target = Val(kai.copy())
     tick(&world)
     print("kai hp={world[kai].hp}")
     print("rem hp={world[rem_id].hp}")
-    fallen :: world.remove(kai)
+    fallen: world.remove(kai)
     if fallen == .Val(f) -> print("removed {f.name}")
 }

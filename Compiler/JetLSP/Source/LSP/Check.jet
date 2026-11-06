@@ -4,7 +4,7 @@
 // from port-compiler. Build graph names below are Rust names, pending canonical
 // Driver build-plan ABI publication (no local graph model).
 use {
-    lsp_check_path :: core.files.runtime.kernel_path_components
+    lsp_check_path: core.files.runtime.kernel_path_components
     core.files.runtime.kernel_path_components.[OSPath]
     jet_driver.[JetDriverCompilerQueries, JetDriverCompilerCheckResult]
     jet_foundation.[Diagnostic, TextEdit, ApplicationAuthority]
@@ -15,29 +15,29 @@ use {
 
 // Caller-held native cwd is the sole Server/Driver snapshot's actual cwd. The
 // host owns current_dir's failure-to-"." policy; never round-trip native bytes.
-fn lsp_canonical_path(cwd: OSPath, path: OSPath) -> OSPath Never! {
+lsp_canonical_path: fn(cwd: OSPath, path: OSPath) -> OSPath Never! {
     if lsp_check_path.is_absolute(path) -> return names_normalize_path(path)
     joined := cwd.copy()
     lsp_check_path.push(&joined, path)
     names_normalize_path(joined)
 }
 
-fn lsp_check_document_with_bundle(queries: JetDriverCompilerQueries, snapshot: JetDriverQuerySnapshot, path: OSPath, text: String) -> Shared<JetDriverCheckedQuery> {
-    canonical :: lsp_canonical_path(snapshot.cwd, path)
+lsp_check_document_with_bundle: fn(queries: JetDriverCompilerQueries, snapshot: JetDriverQuerySnapshot, path: OSPath, text: String) -> Shared<JetDriverCheckedQuery> {
+    canonical: lsp_canonical_path(snapshot.cwd, path)
     &queries.check_text_lsp(snapshot, canonical, text)
 }
 
-fn lsp_check_document(queries: JetDriverCompilerQueries, snapshot: JetDriverQuerySnapshot, path: OSPath, text: String) -> [Diagnostic] {
-    checked :: lsp_check_document_with_bundle(&queries, snapshot, path, text)
-    permit :: checked.guard_read()
+lsp_check_document: fn(queries: JetDriverCompilerQueries, snapshot: JetDriverQuerySnapshot, path: OSPath, text: String) -> [Diagnostic] {
+    checked: lsp_check_document_with_bundle(&queries, snapshot, path, text)
+    permit: checked.guard_read()
     jet_driver_present_checked_diagnostics(permit.value.result)
 }
 
 // Gate: Driver must publish its actual overlay build-plan request ABI and
 // diagnostic-list error carrier. This is the complete Rust projection body;
 // Do not wire until the authorized native Driver seam is published.
-fn lsp_build_graph_json(snapshot: JetDriverQuerySnapshot, path: OSPath, text: String) -> String? [Diagnostic]! {
-    plan :: query_build_plan_with_overlay(snapshot, path, text) ?? return Err(err)
+lsp_build_graph_json: fn(snapshot: JetDriverQuerySnapshot, path: OSPath, text: String) -> String? [Diagnostic]! {
+    plan: query_build_plan_with_overlay(snapshot, path, text) ?? return Err(err)
     if plan == .Val(value) -> return Ok(Val(build_plan_json(value, None)))
     Ok(None)
 }
@@ -45,38 +45,38 @@ fn lsp_build_graph_json(snapshot: JetDriverQuerySnapshot, path: OSPath, text: St
 // ApplicationAuthority is the checked bundle's real package guarantee, not a
 // flag inferred from source or missing manifests. Driver must retain/publish
 // this canonical fact to supply the parameter; None/default is not a fallback.
-fn lsp_script_authority_repair(path: OSPath, text: String, checked: JetDriverCompilerCheckResult, authority: ApplicationAuthority) -> Diagnostic? Never! {
+lsp_script_authority_repair: fn(path: OSPath, text: String, checked: JetDriverCompilerCheckResult, authority: ApplicationAuthority) -> Diagnostic? Never! {
     if checked.graph == None || checked.registration == None -> return None
     if !authority.is_application_default() -> return None
     if pkg_extract_inline_package(text) != .None -> return None
-    program :: checked.effect_budget_program ?? return None
-    summaries :: checked.effect_budget_summaries ?? return None
-    projection :: pkg_project_program_effects(program, summaries, "run", None)
+    program: checked.effect_budget_program ?? return None
+    summaries: checked.effect_budget_summaries ?? return None
+    projection: pkg_project_program_effects(program, summaries, "run", None)
     if projection.undecided().len() == 0 -> return None
     Val(pkg_application_policy_diagnostic(projection, [String]{}, Val(ScriptEntry{path: lsp_check_path.display(path), source: text, command: "run"})))
 }
 
-fn lsp_collect_fixes(queries: JetDriverCompilerQueries, snapshot: JetDriverQuerySnapshot, path: OSPath, text: String, authority: ApplicationAuthority) -> [Fix] {
-    checked :: lsp_check_document_with_bundle(&queries, snapshot, path, text)
-    permit :: checked.guard_read()
+lsp_collect_fixes: fn(queries: JetDriverCompilerQueries, snapshot: JetDriverQuerySnapshot, path: OSPath, text: String, authority: ApplicationAuthority) -> [Fix] {
+    checked: lsp_check_document_with_bundle(&queries, snapshot, path, text)
+    permit: checked.guard_read()
     diagnostics := lsp_retain_document_diagnostics(jet_driver_present_checked_diagnostics(permit.value.result), snapshot.cwd, path, text)
     if lsp_script_authority_repair(path, text, permit.value.result, authority) == .Val(repair) -> &diagnostics.push(repair)
     lsp_collect_fixes_from_diagnostics(^diagnostics, text)
 }
 
-struct Fix {
+Fix: struct {
     title: String
     edit: TextEdit
     applicability: FixApplicability
     safety: FixSafety
 }
 
-fn lsp_apply_fix_edit(source: String, edit: TextEdit) -> String Never! {
-    edits :: [TextEdit]{edit}
+lsp_apply_fix_edit: fn(source: String, edit: TextEdit) -> String Never! {
+    edits: [TextEdit]{edit}
     apply_edits(source, edits.view(0..<edits.len())) ?? source.copy()
 }
 
-fn lsp_safe_fixes(fixes: [Fix]) -> [Fix] Never! {
+lsp_safe_fixes: fn(fixes: [Fix]) -> [Fix] Never! {
     kept := [Fix]{}
     loop fix in fixes {
         if fix.applicability == FixApplicability.Safe && fix.safety.auto_apply() -> &kept.push(fix.copy())
@@ -84,11 +84,11 @@ fn lsp_safe_fixes(fixes: [Fix]) -> [Fix] Never! {
     kept
 }
 
-fn lsp_fixes_from_diagnostics(diagnostics: ^[Diagnostic]) -> [Fix] Never! {
+lsp_fixes_from_diagnostics: fn(diagnostics: ^[Diagnostic]) -> [Fix] Never! {
     fixes := [Fix]{}
     loop diagnostic in diagnostics {
-        applicability :: diagnostic.applicability ?? next
-        safety :: diagnostic.safety ?? next
+        applicability: diagnostic.applicability ?? next
+        safety: diagnostic.safety ?? next
         // Rust Diagnostic::all_edits order, without an intermediate edit vector.
         if diagnostic.edit == .Val(edit) -> &fixes.push(Fix{title: diagnostic.fix.copy(), edit: edit.copy(), applicability: applicability, safety: safety})
         if diagnostic.structured == .Val(structured) {
@@ -100,23 +100,23 @@ fn lsp_fixes_from_diagnostics(diagnostics: ^[Diagnostic]) -> [Fix] Never! {
     fixes
 }
 
-fn lsp_collect_fixes_from_diagnostics(diagnostics: ^[Diagnostic], text: String) -> [Fix] Never! {
+lsp_collect_fixes_from_diagnostics: fn(diagnostics: ^[Diagnostic], text: String) -> [Fix] Never! {
     fixes := lsp_fixes_from_diagnostics(^diagnostics)
     fixes
 }
 
-fn lsp_apply_all(source: String, fixes: [Fix]) -> String Never! {
+lsp_apply_all: fn(source: String, fixes: [Fix]) -> String Never! {
     lsp_apply_non_overlapping(source, fixes).0
 }
 
-fn lsp_apply_non_overlapping(source: String, fixes: [Fix]) -> (String, Int, Int) Never! {
+lsp_apply_non_overlapping: fn(source: String, fixes: [Fix]) -> (String, Int, Int) Never! {
     // Sort indices, not owned replacement text. Explicit original-index ties
     // retain Rust stable sort ordering for distinct same-span replacements.
     order := [Int]{}
     loop index in 0..<fixes.len() -> &order.push(index)
     &order.sort_by((left: Int, right: Int) -> {
-        a :: fixes[left].edit.span
-        b :: fixes[right].edit.span
+        a: fixes[left].edit.span
+        b: fixes[right].edit.span
         if a.start != b.start -> return a.start <=> b.start
         if a.end != b.end -> return b.end <=> a.end
         left <=> right
@@ -125,11 +125,11 @@ fn lsp_apply_non_overlapping(source: String, fixes: [Fix]) -> (String, Int, Int)
     previous := Int?{None}
     deferred := 0
     loop index in order {
-        edit :: fixes[index].edit
+        edit: fixes[index].edit
         // Rust Vec::dedup removes adjacent EXACT edits before overlap counting;
         // same-span edits with different replacements are not duplicates.
         if previous == .Val(last_index) {
-            last :: fixes[last_index].edit
+            last: fixes[last_index].edit
             if edit.span.start == last.span.start && edit.span.end == last.span.end && edit.new_text == last.new_text -> next
         }
         previous = Val(index)
@@ -139,7 +139,7 @@ fn lsp_apply_non_overlapping(source: String, fixes: [Fix]) -> (String, Int, Int)
         }
         &kept.push(edit.copy())
     }
-    applied :: kept.len()
-    text :: apply_edits(source, kept.view(0..<kept.len())) ?? source.copy()
+    applied: kept.len()
+    text: apply_edits(source, kept.view(0..<kept.len())) ?? source.copy()
     (text, applied, deferred)
 }

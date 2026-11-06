@@ -9,7 +9,7 @@
 // and the standing native safety gate checks admitted native outputs of them.
 //
 // The generator draws from the syntax the feature goldens and the memory
-// corpus use: Int and Bool bindings (`::`, `:=` only when the program mutates
+// corpus use: Int and Bool bindings (`:`, `:=` only when the program mutates
 // them), every Int operator at Jet's precedence with minimal parentheses,
 // compound assignment, `if` statements, arm tables and `if` values, counted,
 // conditional and list loops with `break` and `next`, lists (literal, push,
@@ -155,7 +155,7 @@ class Gen {
     return { k: "ifx", arms, otherwise: this.intExpr(2) };
   }
   // String values: literals, interpolations of the bindings in scope, and
-  // explicit copies (`s.copy()`). Moves (`t :: s`) are generated as bindings.
+  // explicit copies (`s.copy()`). Moves (`t: s`) are generated as bindings.
   text() {
     const letters = "abcdefghij klm-:.,";
     return { k: "str", v: Array.from({ length: this.int(6) }, () => letters[this.int(letters.length)]).join("") };
@@ -209,7 +209,7 @@ class Gen {
     switch (kind) {
       case "int": {
         const init = this.chance(0.1) ? this.ifValue() : this.intExpr(2);
-        // `v :: xs[i]` and `v :: p.f` bind a read view that blocks later writes
+        // `v: xs[i]` and `v: p.f` bind a read view that blocks later writes
         // to the owner (E0212); `:=` binds an owned copy.
         const copy = init.k === "index" || init.k === "field";
         return [{ k: "decl", v: this.declare({ name: this.fresh("v"), type: "Int", mutable: true, mutated: copy }), init }];
@@ -452,7 +452,7 @@ function lines(stmts, depth) {
     }
     switch (s.k) {
       case "decl": {
-        const bind = `${pad}${s.v.name} ${s.v.mutated ? ":=" : "::"} `;
+        const bind = `${pad}${s.v.name}${s.v.mutated ? " :=" : ":"} `;
         const init = s.init;
         if (init.k === "list") out.push(`${bind}[${init.elems.map(expr).join(", ")}]`);
         else if (init.k === "struct") out.push(`${bind}${init.sname}{${init.fields.map(([f, e]) => `${f}: ${expr(e)}`).join(", ")}}`);
@@ -488,12 +488,12 @@ function lines(stmts, depth) {
 const TYPE_NAMES = { Int: "Int", List: "[Int]", Str: "String" };
 function source(program, header) {
   const out = [...header.map((line) => `// ${line}`)];
-  if (program.struct) out.push("", `struct ${program.struct.name} {`, ...program.struct.fields.map((f) => `    ${f}: Int`), "}");
+  if (program.struct) out.push("", `${program.struct.name}: struct {`, ...program.struct.fields.map((f) => `    ${f}: Int`), "}");
   for (const fn of program.fns) {
     const params = fn.params.map((p) => `${p.name}: ${TYPE_NAMES[p.type] ?? program.struct.name}`).join(", ");
-    out.push("", `fn ${fn.name}(${params}) -> Int {`, ...lines(fn.body, 1), "}");
+    out.push("", `${fn.name}: fn(${params}) -> Int {`, ...lines(fn.body, 1), "}");
   }
-  out.push("", "fn run() {", ...lines(program.run, 1), "}");
+  out.push("", "run: fn() {", ...lines(program.run, 1), "}");
   return out.join("\n") + "\n";
 }
 
@@ -747,7 +747,7 @@ export function generateCoreCase(seed, index) {
         map.delete(key);
         break;
       case 3:
-        statements.push(`saved${step} :: xs.copy()`, `&xs.push(${value})`, `print(saved${step}.len())`, "print(xs.len())");
+        statements.push(`saved${step}: xs.copy()`, `&xs.push(${value})`, `print(saved${step}.len())`, "print(xs.len())");
         output.push(list.length, list.length + 1);
         list.push(value);
         break;
@@ -761,7 +761,7 @@ export function generateCoreCase(seed, index) {
     output.push("invalid");
   }
   return {
-    source: `// Core API fuzz: seed ${seed}, case ${index}\nfn run() {\n${statements.map((line) => `    ${line}`).join("\n")}\n}\n`,
+    source: `// Core API fuzz: seed ${seed}, case ${index}\nrun: fn() {\n${statements.map((line) => `    ${line}`).join("\n")}\n}\n`,
     stdout: output.map((value) => `${value}\n`).join(""),
   };
 }

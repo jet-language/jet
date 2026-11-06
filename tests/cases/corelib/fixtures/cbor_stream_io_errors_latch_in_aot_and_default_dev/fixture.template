@@ -1,11 +1,11 @@
 
 use {
-    encoding :: core.encoding
-    cbor :: core.encoding.cbor
-    files :: core.files
+    encoding: core.encoding
+    cbor: core.encoding.cbor
+    files: core.files
 }
 
-fn reader_terminal(reader: &cbor.CBORReader, reason: String) -> Bool {
+reader_terminal: fn(reader: &cbor.CBORReader, reason: String) -> Bool {
     if &reader.next() == {
         .Err(error) -> return error.reason == reason
         .Val(_) | .None -> return false
@@ -13,7 +13,7 @@ fn reader_terminal(reader: &cbor.CBORReader, reason: String) -> Bool {
     return false
 }
 
-fn writer_terminal(writer: &cbor.CBORWriter, reason: String) -> Bool {
+writer_terminal: fn(writer: &cbor.CBORWriter, reason: String) -> Bool {
     if &writer.flush() == {
         .Err(error) -> return error.reason == reason
         .Ok(_) -> return false
@@ -21,14 +21,14 @@ fn writer_terminal(writer: &cbor.CBORWriter, reason: String) -> Bool {
     return false
 }
 
-fn run() {
-    directory_input :: files.open("{work}") ?? panic("directory open")
+run: fn() {
+    directory_input: files.open("{work}") ?? panic("directory open")
     directory_reader := cbor.reader(^directory_input) ?? panic("directory reader")
     if &directory_reader.next() == {
         .Err(first) -> print(reader_terminal(&directory_reader, first.reason.copy()))
         .Ok(_) -> print(false)
     }
-    full_output :: files.create("/dev/full") ?? panic("full open")
+    full_output: files.create("/dev/full") ?? panic("full open")
     full_writer := cbor.writer(^full_output) ?? panic("full writer")
     &full_writer.write(encoding.DataEvent.Null) ?? panic("full buffered write")
     if &full_writer.flush() == {

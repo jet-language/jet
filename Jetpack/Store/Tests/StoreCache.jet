@@ -4,10 +4,10 @@
 
 #Test("store cache candidate preflight does not read closure graph") {
     verification := StoreVerification.new()
-    roots :: store_test_temp_roots()
-    ingested :: store_test_ingest_fixture(&verification, roots, "candidate-preflight", [String: String]{"out": "trusted"}, [String]{})
-    expectation :: store_test_expectation(ingested.entry.out)
-    closure_db :: files.join(roots.hangar_dir(), "closure-db")
+    roots: store_test_temp_roots()
+    ingested: store_test_ingest_fixture(&verification, roots, "candidate-preflight", [String: String]{"out": "trusted"}, [String]{})
+    expectation: store_test_expectation(ingested.entry.out)
+    closure_db: files.join(roots.hangar_dir(), "closure-db")
     files.remove_all(closure_db) ?? panic("remove closure db")
     assert(store_cache_candidate_matches(roots, ingested.entry.reference, expectation))
     assert(!files.exists(closure_db))
@@ -16,8 +16,8 @@
 
 #Test("store verified cache rejects wrong platform and incomplete proof") {
     verification := StoreVerification.new()
-    roots :: store_test_temp_roots()
-    out :: files.join(roots.root, "owned-output")
+    roots: store_test_temp_roots()
+    out: files.join(roots.root, "owned-output")
     files.create_dir_all(out) ?? panic("fixture dir")
     files.write(files.join(out, "payload"), "trusted") ?? panic("fixture payload")
     envelope := Envelope.for_output(out, "demo@mine", "core-source")
@@ -45,16 +45,16 @@
 
 #Test("store closure rejects parent traversal to sibling") {
     verification := StoreVerification.new()
-    roots :: store_test_temp_roots()
-    out :: files.join(roots.root, "owned-output")
-    sibling :: files.join(roots.root, "other")
+    roots: store_test_temp_roots()
+    out: files.join(roots.root, "owned-output")
+    sibling: files.join(roots.root, "other")
     files.create_dir_all(out) ?? panic("fixture dir")
     files.create_dir_all(sibling) ?? panic("fixture sibling")
     files.write(files.join(sibling, "tool"), "outside") ?? panic("fixture tool")
-    envelope :: Envelope.for_output(out, "escape@mine", "core-source")
+    envelope: Envelope.for_output(out, "escape@mine", "core-source")
     entry := store_record_verified(&verification, roots, "escape", "1", "escape@mine", out, "", "", envelope, store_test_identity()) ?? panic("record")
     entry.bin = "{out}/../other"
-    proof :: store_verify_cache_entry(&verification, roots, entry, "escape@mine", store_test_expectation(out))
+    proof: store_verify_cache_entry(&verification, roots, entry, "escape@mine", store_test_expectation(out))
     assert(!proof.closure)
     assert(!proof.trusted())
     store_test_drop_roots(roots)
@@ -62,27 +62,27 @@
 
 #Test("store nix multi output lease projects binary from non primary output") {
     verification := StoreVerification.new()
-    roots :: store_test_temp_roots()
-    snapshot :: files.join(roots.root, "lease-snapshot")
+    roots: store_test_temp_roots()
+    snapshot: files.join(roots.root, "lease-snapshot")
     files.create_dir_all(files.join(snapshot, "bin")) ?? panic("fixture dir")
     files.write(files.join(snapshot, "bin/tool"), "out") ?? panic("fixture tool")
     store_seal_local_output(snapshot) ?? panic("seal snapshot")
-    out_digest :: pkg_try_output_hash_of(snapshot) ?? panic("hash snapshot")
-    dev :: files.join(roots.root, "external-dev-output")
+    out_digest: pkg_try_output_hash_of(snapshot) ?? panic("hash snapshot")
+    dev: files.join(roots.root, "external-dev-output")
     files.create_dir_all(files.join(dev, "bin")) ?? panic("fixture dir")
     files.write(files.join(dev, "bin/tool"), "dev") ?? panic("fixture tool")
     store_seal_local_output(dev) ?? panic("seal dev")
-    dev_digest :: pkg_try_output_hash_of(dev) ?? panic("hash dev")
-    dev_object :: store_project_external_output_unlocked(&verification, roots, dev, dev_digest) ?? panic("project dev")
+    dev_digest: pkg_try_output_hash_of(dev) ?? panic("hash dev")
+    dev_object: store_project_external_output_unlocked(&verification, roots, dev, dev_digest) ?? panic("project dev")
 
-    drv :: "/nix/store/projection.drv"
+    drv: "/nix/store/projection.drv"
     producer_facts := provider_nix_build_facts_record()
     producer_facts["nix.drv_path"] = drv
     producer_facts["nix.output.out"] = "/nix/store/projection-out"
     producer_facts["nix.output.dev"] = "/nix/store/projection-dev"
-    plan :: ProviderPlanFacts.from_facts([String: String]{"nix.drv_path": drv, "nix.output.out": "/nix/store/projection-out", "nix.output.dev": "/nix/store/projection-dev"}) ?? panic("plan")
-    producer :: ProducerRecord.new("nix", drv, store_sha256_hex(drv.bytes()), plan, "nix-derivation:projection", "policy=test\nplatform=test", producer_facts) ?? panic("producer")
-    entry :: StoreEntry{
+    plan: ProviderPlanFacts.from_facts([String: String]{"nix.drv_path": drv, "nix.output.out": "/nix/store/projection-out", "nix.output.dev": "/nix/store/projection-dev"}) ?? panic("plan")
+    producer: ProducerRecord.new("nix", drv, store_sha256_hex(drv.bytes()), plan, "nix-derivation:projection", "policy=test\nplatform=test", producer_facts) ?? panic("producer")
+    entry: StoreEntry{
         id: "projection",
         name: "projection",
         version: "1",
@@ -107,9 +107,9 @@
     loop item in projection -> assert(!store_path_starts_with(item.value, "/nix/store"))
 
     lease := store_snapshot_lease(&verification, roots, entry) ?? panic("lease")
-    tool :: lease.executable_for(files.join(entry.bin, "tool")) ?? panic("leased tool")
+    tool: lease.executable_for(files.join(entry.bin, "tool")) ?? panic("leased tool")
     if sys.is_linux() {
-        read :: store_test_run_leased(&lease, [LeaseText]{LeaseText.plain("/bin/sh"), LeaseText.plain("-c"), LeaseText.plain("cat \"$0\""), tool}, None)
+        read: store_test_run_leased(&lease, [LeaseText]{LeaseText.plain("/bin/sh"), LeaseText.plain("-c"), LeaseText.plain("cat \"$0\""), tool}, None)
         assert_eq(read.output, "out")
     }
     assert(lease.executable_for_command(files.join(dev_object, "unrecorded")) == .Err(_))
@@ -124,18 +124,18 @@
 
 #Test("store nix output outside the nix store projects nothing") {
     verification := StoreVerification.new()
-    roots :: store_test_temp_roots()
-    out :: files.join(roots.hangar_dir(), "provider-fixture-greet")
+    roots: store_test_temp_roots()
+    out: files.join(roots.hangar_dir(), "provider-fixture-greet")
     files.create_dir_all(files.join(out, "bin")) ?? panic("fixture dir")
     files.write(files.join(out, "bin/greet"), "greet") ?? panic("fixture tool")
     store_seal_local_output(out) ?? panic("seal output")
-    drv :: "/nix/store/fixture-greet.drv"
+    drv: "/nix/store/fixture-greet.drv"
     producer_facts := provider_nix_build_facts_record()
     producer_facts["nix.drv_path"] = drv
     producer_facts["nix.output.out"] = out
-    plan :: ProviderPlanFacts.from_facts([String: String]{"nix.drv_path": drv, "nix.output.out": out}) ?? panic("plan")
-    producer :: ProducerRecord.new("nix", drv, store_sha256_hex(drv.bytes()), plan, "nix-derivation:fixture-greet", "policy=test\nplatform=test", producer_facts) ?? panic("producer")
-    entry :: StoreEntry{
+    plan: ProviderPlanFacts.from_facts([String: String]{"nix.drv_path": drv, "nix.output.out": out}) ?? panic("plan")
+    producer: ProducerRecord.new("nix", drv, store_sha256_hex(drv.bytes()), plan, "nix-derivation:fixture-greet", "policy=test\nplatform=test", producer_facts) ?? panic("producer")
+    entry: StoreEntry{
         id: "fixture-greet",
         name: "greet",
         version: "",
@@ -160,17 +160,17 @@
 
 #Test("store hostile out pointer never quarantines another object") {
     verification := StoreVerification.new()
-    roots :: store_test_temp_roots()
-    survivor :: files.join(roots.hangar_dir(), "survivor-output")
-    expected :: files.join(roots.hangar_dir(), "expected-output")
+    roots: store_test_temp_roots()
+    survivor: files.join(roots.hangar_dir(), "survivor-output")
+    expected: files.join(roots.hangar_dir(), "expected-output")
     files.create_dir_all(survivor) ?? panic("fixture dir")
     files.create_dir_all(expected) ?? panic("fixture dir")
     files.write(files.join(survivor, "keep"), "survivor") ?? panic("fixture keep")
     store_seal_node(survivor) ?? panic("seal survivor")
     files.write(files.join(expected, "bad"), "candidate") ?? panic("fixture bad")
-    envelope :: Envelope.for_output(survivor, "hostile@mine", "core-source")
-    entry :: store_record_verified(&verification, roots, "hostile", "1.0", "hostile@mine", survivor, "", "", envelope, store_test_identity()) ?? panic("record")
-    expectation :: CacheExpectation{identity: store_test_identity(), owned_output: Val(expected), allow_unsigned_local: true}
+    envelope: Envelope.for_output(survivor, "hostile@mine", "core-source")
+    entry: store_record_verified(&verification, roots, "hostile", "1.0", "hostile@mine", survivor, "", "", envelope, store_test_identity()) ?? panic("record")
+    expectation: CacheExpectation{identity: store_test_identity(), owned_output: Val(expected), allow_unsigned_local: true}
     store_quarantine_invalid_entry(&verification, roots, entry, expectation) ?? panic("quarantine")
     assert_eq(files.read(files.join(survivor, "keep")) ?? panic("read keep"), "survivor")
     assert_eq(files.read(files.join(expected, "bad")) ?? panic("read bad"), "candidate")
@@ -179,11 +179,11 @@
 
 #Test("store proven digest mismatch still quarantines object") {
     verification := StoreVerification.new()
-    roots :: store_test_temp_roots()
-    ingested :: store_test_ingest_fixture(&verification, roots, "sealed", [String: String]{"out": "tampered"}, [String]{})
-    entry :: ingested.entry
-    out :: entry.out
-    payload :: files.join(out, "payload")
+    roots: store_test_temp_roots()
+    ingested: store_test_ingest_fixture(&verification, roots, "sealed", [String: String]{"out": "tampered"}, [String]{})
+    entry: ingested.entry
+    out: entry.out
+    payload: files.join(out, "payload")
     files.set_mode(payload, 420) ?? panic("chmod")
     files.write(payload, "corrupt") ?? panic("corrupt")
     store_quarantine_invalid_entry(&verification, roots, entry, store_test_expectation(out)) ?? panic("quarantine")
@@ -194,23 +194,23 @@
         if name.starts_with("output-{entry.envelope.output_hash}-") -> quarantined = true
     }
     assert(quarantined)
-    _ :: store_test_ingest_fixture(&verification, roots, "sealed", [String: String]{"out": "tampered"}, [String]{})
+    _: store_test_ingest_fixture(&verification, roots, "sealed", [String: String]{"out": "tampered"}, [String]{})
     store_test_drop_roots(roots)
 }
 
 #Test("store identity only quarantine preserves shared cas object") {
     verification := StoreVerification.new()
-    roots :: store_test_temp_roots()
-    stale :: store_test_ingest_fixture(&verification, roots, "shared-stale", [String: String]{"out": "same"}, [String]{})
-    survivor :: store_test_ingest_fixture(&verification, roots, "shared-survivor", [String: String]{"out": "same"}, [String]{})
+    roots: store_test_temp_roots()
+    stale: store_test_ingest_fixture(&verification, roots, "shared-stale", [String: String]{"out": "same"}, [String]{})
+    survivor: store_test_ingest_fixture(&verification, roots, "shared-survivor", [String: String]{"out": "same"}, [String]{})
     assert_eq(stale.entry.out, survivor.entry.out)
     mismatch := store_test_expectation(stale.entry.out)
     mismatch.identity.source_fingerprint = "wrong-source"
     store_quarantine_invalid_entry(&verification, roots, stale.entry, mismatch) ?? panic("quarantine")
     assert(files.exists(survivor.entry.out))
     assert(store_find_by_reference(&verification, roots, stale.entry.reference) == None)
-    hit :: store_find_verified_by_reference(&verification, roots, survivor.entry.reference, store_test_expectation(survivor.entry.out)) ? found -> found ! error -> panic("lookup")
-    verified :: hit ?? panic("survivor must verify")
+    hit: store_find_verified_by_reference(&verification, roots, survivor.entry.reference, store_test_expectation(survivor.entry.out)) ? found -> found ! error -> panic("lookup")
+    verified: hit ?? panic("survivor must verify")
     verified.lease.validate() ?? panic("validate")
     ^verified.lease.release()
     store_test_drop_roots(roots)
@@ -218,13 +218,13 @@
 
 #Test("store unreadable shared cas object survives quarantine") {
     verification := StoreVerification.new()
-    roots :: store_test_temp_roots()
-    stale :: store_test_ingest_fixture(&verification, roots, "unreadable-stale", [String: String]{"out": "same"}, [String]{})
-    survivor :: store_test_ingest_fixture(&verification, roots, "unreadable-survivor", [String: String]{"out": "same"}, [String]{})
+    roots: store_test_temp_roots()
+    stale: store_test_ingest_fixture(&verification, roots, "unreadable-stale", [String: String]{"out": "same"}, [String]{})
+    survivor: store_test_ingest_fixture(&verification, roots, "unreadable-survivor", [String: String]{"out": "same"}, [String]{})
     assert_eq(stale.entry.out, survivor.entry.out)
-    object :: stale.entry.out
-    payload :: files.join(object, "payload")
-    original_mode :: (files.stat(payload) ?? panic("stat")).mode
+    object: stale.entry.out
+    payload: files.join(object, "payload")
+    original_mode: (files.stat(payload) ?? panic("stat")).mode
     files.set_mode(payload, 0) ?? panic("chmod")
     // The sealed stat manifest trusts unchanged tuples without reading
     // bytes; the full audit path still fails on the unreadable payload.
@@ -235,11 +235,11 @@
     assert(files.exists(object))
     assert(store_find_by_reference(&verification, roots, stale.entry.reference) == None)
     files.set_mode(payload, original_mode) ?? panic("chmod back")
-    graph :: store_closure_graph(&verification, roots) ?? panic("graph")
+    graph: store_closure_graph(&verification, roots) ?? panic("graph")
     assert(!graph.records.has_key(stale.entry.id))
     assert(graph.deleted_records.contains(stale.entry.id))
-    hit :: store_find_verified_by_reference(&verification, roots, survivor.entry.reference, store_test_expectation(object)) ? found -> found ! error -> panic("lookup")
-    verified :: hit ?? panic("survivor must verify")
+    hit: store_find_verified_by_reference(&verification, roots, survivor.entry.reference, store_test_expectation(object)) ? found -> found ! error -> panic("lookup")
+    verified: hit ?? panic("survivor must verify")
     verified.lease.validate() ?? panic("validate")
     ^verified.lease.release()
     store_test_drop_roots(roots)
@@ -247,41 +247,41 @@
 
 #Test("store quarantine skips concurrently refreshed record") {
     verification := StoreVerification.new()
-    roots :: store_test_temp_roots()
-    out :: files.join(roots.root, "refreshed-output")
+    roots: store_test_temp_roots()
+    out: files.join(roots.root, "refreshed-output")
     files.create_dir_all(out) ?? panic("fixture dir")
     files.write(files.join(out, "payload"), "trusted") ?? panic("fixture payload")
-    envelope :: Envelope.for_output(out, "refreshed@mine", "core-source")
-    stale :: store_record_verified(&verification, roots, "refreshed", "1.0", "refreshed@mine", out, "", "", envelope, store_test_identity()) ?? panic("stale record")
+    envelope: Envelope.for_output(out, "refreshed@mine", "core-source")
+    stale: store_record_verified(&verification, roots, "refreshed", "1.0", "refreshed@mine", out, "", "", envelope, store_test_identity()) ?? panic("stale record")
     fresh_identity := store_test_identity()
     fresh_identity.source_fingerprint = "source-v2"
-    fresh :: store_record_verified(&verification, roots, "refreshed", "1.0", "refreshed@mine", out, "", "", envelope, fresh_identity) ?? panic("fresh record")
+    fresh: store_record_verified(&verification, roots, "refreshed", "1.0", "refreshed@mine", out, "", "", envelope, fresh_identity) ?? panic("fresh record")
     assert_eq(stale.id, fresh.id)
     assert(store_entry_action_key(stale) != store_entry_action_key(fresh))
     store_quarantine_invalid_entry(&verification, roots, stale, store_test_expectation(out)) ?? panic("quarantine")
-    current :: store_find_by_reference(&verification, roots, "refreshed@mine") ?? panic("current record")
+    current: store_find_by_reference(&verification, roots, "refreshed@mine") ?? panic("current record")
     assert_eq(current.cache_identity, fresh_identity)
-    expectation :: CacheExpectation{identity: fresh_identity, owned_output: Val(out), allow_unsigned_local: true}
+    expectation: CacheExpectation{identity: fresh_identity, owned_output: Val(out), allow_unsigned_local: true}
     assert(store_test_verified(&verification, roots, "refreshed@mine", expectation))
     store_test_drop_roots(roots)
 }
 
 #Test("store quarantine skips same action record repaired before lock") {
     verification := StoreVerification.new()
-    roots :: store_test_temp_roots()
-    out :: files.join(roots.root, "repaired-output")
+    roots: store_test_temp_roots()
+    out: files.join(roots.root, "repaired-output")
     files.create_dir_all(out) ?? panic("fixture dir")
     files.write(files.join(out, "payload"), "trusted") ?? panic("fixture payload")
     stale_envelope := Envelope.for_output(out, "repaired@mine", "core-source")
     stale_envelope.provenance = ""
-    stale :: store_record_verified(&verification, roots, "repaired", "1.0", "repaired@mine", out, "", "", stale_envelope, store_test_identity()) ?? panic("stale record")
+    stale: store_record_verified(&verification, roots, "repaired", "1.0", "repaired@mine", out, "", "", stale_envelope, store_test_identity()) ?? panic("stale record")
     repaired_envelope := stale_envelope
     repaired_envelope.provenance = "repaired provenance"
-    repaired :: store_record_verified(&verification, roots, "repaired", "1.0", "repaired@mine", out, "", "", repaired_envelope, store_test_identity()) ?? panic("repaired record")
+    repaired: store_record_verified(&verification, roots, "repaired", "1.0", "repaired@mine", out, "", "", repaired_envelope, store_test_identity()) ?? panic("repaired record")
     assert_eq(stale.envelope.output_hash, repaired.envelope.output_hash)
     assert_eq(store_entry_action_key(stale), store_entry_action_key(repaired))
     store_quarantine_invalid_entry(&verification, roots, stale, store_test_expectation(out)) ?? panic("quarantine")
-    current :: store_find_by_reference(&verification, roots, "repaired@mine") ?? panic("current record")
+    current: store_find_by_reference(&verification, roots, "repaired@mine") ?? panic("current record")
     assert_eq(current.envelope.provenance, "repaired provenance")
     assert(store_test_verified(&verification, roots, "repaired@mine", store_test_expectation(out)))
     store_test_drop_roots(roots)
@@ -289,9 +289,9 @@
 
 #Test("store quarantine failure restores permissions without tombstone") {
     verification := StoreVerification.new()
-    roots :: store_test_temp_roots()
-    ingested :: store_test_ingest_fixture(&verification, roots, "restore", [String: String]{"out": "same"}, [String]{})
-    hangar :: roots.hangar_dir()
+    roots: store_test_temp_roots()
+    ingested: store_test_ingest_fixture(&verification, roots, "restore", [String: String]{"out": "same"}, [String]{})
+    hangar: roots.hangar_dir()
     files.write(files.join(hangar, "quarantine"), "blocks directory creation") ?? panic("block quarantine")
     files.set_mode(hangar, 365) ?? panic("chmod 0555")
     mismatch := store_test_expectation(ingested.entry.out)
@@ -309,15 +309,15 @@
 
 #Test("store cache lease is private snapshot without long object lock") {
     verification := StoreVerification.new()
-    roots :: store_test_temp_roots()
-    out :: files.join(roots.root, "leased-output")
+    roots: store_test_temp_roots()
+    out: files.join(roots.root, "leased-output")
     files.create_dir_all(out) ?? panic("fixture dir")
     files.write(files.join(out, "payload"), "trusted") ?? panic("fixture payload")
-    envelope :: Envelope.for_output(out, "leased@mine", "core-source")
+    envelope: Envelope.for_output(out, "leased@mine", "core-source")
     store_record_verified(&verification, roots, "leased", "1.0", "leased@mine", out, "", "", envelope, store_test_identity()) ?? panic("record")
-    hit :: store_find_verified_by_reference(&verification, roots, "leased@mine", store_test_expectation(out)) ? found -> found ! error -> panic("lookup")
-    verified :: hit ?? panic("record must verify")
-    lease_root :: files.dirname(verified.lease.snapshot_root)
+    hit: store_find_verified_by_reference(&verification, roots, "leased@mine", store_test_expectation(out)) ? found -> found ! error -> panic("lookup")
+    verified: hit ?? panic("record must verify")
+    lease_root: files.dirname(verified.lease.snapshot_root)
     files.write(files.join(out, "payload"), "mutated outside cooperative lock") ?? panic("mutate")
     verified.lease.validate() ?? panic("validate")
     assert_eq(verified.lease.read_output("payload") ?? panic("read leased payload"), "trusted")
@@ -328,7 +328,7 @@
 
 // Run `argv` in a child that `lease` is passed to, rendering each argument
 // and the optional PATH for exactly that child.
-fn store_test_run_leased(lease: &CacheLease, argv: [LeaseText], path: LeaseText?) -[FS, Env, Exec]> ProcessReceipt {
+store_test_run_leased: fn(lease: &CacheLease, argv: [LeaseText], path: LeaseText?) -[FS, Env, Exec]> ProcessReceipt {
     planned := LeaseBinding.empty()
     lease.plan_binding(&planned)
     rendered := [String]{}
@@ -342,20 +342,20 @@ fn store_test_run_leased(lease: &CacheLease, argv: [LeaseText], path: LeaseText?
 #Test("store leased child path renders only for a child the lease is passed to") {
     if !sys.is_linux() -> return
     verification := StoreVerification.new()
-    roots :: store_test_temp_roots()
-    out :: files.join(roots.root, "child-path-output")
+    roots: store_test_temp_roots()
+    out: files.join(roots.root, "child-path-output")
     files.create_dir_all(out) ?? panic("fixture dir")
     files.write(files.join(out, "payload"), "trusted") ?? panic("fixture payload")
-    envelope :: Envelope.for_output(out, "child-path@mine", "core-source")
-    entry :: store_record_verified(&verification, roots, "child-path", "1", "child-path@mine", out, "", "", envelope, store_test_identity()) ?? panic("record")
+    envelope: Envelope.for_output(out, "child-path@mine", "core-source")
+    entry: store_record_verified(&verification, roots, "child-path", "1", "child-path@mine", out, "", "", envelope, store_test_identity()) ?? panic("record")
     lease := store_snapshot_lease(&verification, roots, entry) ?? panic("lease")
-    payload :: lease.child_path(files.join(out, "payload")) ?? panic("child path")
+    payload: lease.child_path(files.join(out, "payload")) ?? panic("child path")
     if payload.render(LeaseBinding.empty()) == {
         .Err(error) -> assert(error == .Unbound(_))
         .Ok(_) -> panic("lease text rendered for a child that holds no lease")
     }
     files.write(files.join(out, "payload"), "mutated after leasing") ?? panic("mutate")
-    read :: store_test_run_leased(&lease, [LeaseText]{LeaseText.plain("/bin/sh"), LeaseText.plain("-c"), LeaseText.plain("cat \"$0\""), payload}, None)
+    read: store_test_run_leased(&lease, [LeaseText]{LeaseText.plain("/bin/sh"), LeaseText.plain("-c"), LeaseText.plain("cat \"$0\""), payload}, None)
     assert(read.success)
     assert_eq(read.output, "trusted")
     lease.release()
@@ -364,13 +364,13 @@ fn store_test_run_leased(lease: &CacheLease, argv: [LeaseText], path: LeaseText?
 
 #Test("store lease recovery waits for descendant then reclaims idle container") {
     verification := StoreVerification.new()
-    roots :: store_test_temp_roots()
-    ingested :: store_test_ingest_fixture(&verification, roots, "lease-tree", [String: String]{"out": "trusted"}, [String]{})
-    hit :: store_find_verified_by_reference(&verification, roots, ingested.entry.reference, store_test_expectation(ingested.entry.out)) ? found -> found ! error -> panic("lookup")
+    roots: store_test_temp_roots()
+    ingested: store_test_ingest_fixture(&verification, roots, "lease-tree", [String: String]{"out": "trusted"}, [String]{})
+    hit: store_find_verified_by_reference(&verification, roots, ingested.entry.reference, store_test_expectation(ingested.entry.out)) ? found -> found ! error -> panic("lookup")
     verified := hit ?? panic("record must verify")
-    lease_root :: files.dirname(verified.lease.snapshot_root)
+    lease_root: files.dirname(verified.lease.snapshot_root)
     &verified.lease.mark_process_handoff()
-    child :: process.cmd([String]{"/bin/sh", "-c", "/bin/sleep 2 >/dev/null 2>&1 &"}).run() ?? panic("spawn")
+    child: process.cmd([String]{"/bin/sh", "-c", "/bin/sleep 2 >/dev/null 2>&1 &"}).run() ?? panic("spawn")
     assert(child.success)
     ^verified.lease.release()
     assert(files.exists(lease_root))
@@ -386,12 +386,12 @@ fn store_test_run_leased(lease: &CacheLease, argv: [LeaseText], path: LeaseText?
 // #3594, #4303 remain provider/compiler gates rather than fake lease fixtures.
 #Test("store realization type distinguishes fresh cached and missing outputs") {
     verification := StoreVerification.new()
-    roots :: store_test_temp_roots()
-    out :: files.join(roots.root, "typed-output")
+    roots: store_test_temp_roots()
+    out: files.join(roots.root, "typed-output")
     files.create_dir_all(out) ?? panic("fixture dir")
     files.write(files.join(out, "payload"), "trusted") ?? panic("fixture payload")
-    envelope :: Envelope.for_output(out, "typed@mine", "core-source")
-    entry :: store_record_verified(&verification, roots, "typed", "1", "typed@mine", out, "", "", envelope, store_test_identity()) ?? panic("record")
+    envelope: Envelope.for_output(out, "typed@mine", "core-source")
+    entry: store_record_verified(&verification, roots, "typed", "1", "typed@mine", out, "", "", envelope, store_test_identity()) ?? panic("record")
     fresh := VerifiedRealization{lease: store_snapshot_lease(&verification, roots, entry) ?? panic("lease"), entry: entry, source_state_value: SourceState.Built}
     assert(fresh.consumption_status() == ConsumptionStatus.Consumable)
     assert_eq(fresh.source_state(), SourceState.Built)
@@ -407,14 +407,14 @@ fn store_test_run_leased(lease: &CacheLease, argv: [LeaseText], path: LeaseText?
         .Err(error) -> store_test_assert_other_read_error(error, "verified receipt lost executable member")
         .Ok(_) -> panic("missing member produced a profile copy")
     }
-    hit :: store_find_verified_by_reference(&verification, roots, "typed@mine", store_test_expectation(out)) ? found -> found ! error -> panic("lookup")
-    verified :: hit ?? panic("record must verify")
-    cached :: VerifiedRealization{entry: verified.entry, source_state_value: SourceState.Cached, lease: ^verified.lease}
+    hit: store_find_verified_by_reference(&verification, roots, "typed@mine", store_test_expectation(out)) ? found -> found ! error -> panic("lookup")
+    verified: hit ?? panic("record must verify")
+    cached: VerifiedRealization{entry: verified.entry, source_state_value: SourceState.Cached, lease: ^verified.lease}
     assert(cached.consumption_status() == ConsumptionStatus.Consumable)
     assert_eq(cached.source_state(), SourceState.Cached)
 
-    missing_out :: files.join(roots.root, "missing-output")
-    missing_entry :: StoreEntry{
+    missing_out: files.join(roots.root, "missing-output")
+    missing_entry: StoreEntry{
         id: "missing-1-test",
         name: "missing",
         version: "1",
@@ -440,7 +440,7 @@ fn store_test_run_leased(lease: &CacheLease, argv: [LeaseText], path: LeaseText?
     assert(missing.lease.child_path(missing_out) == .Err(_))
     // The non-consumable Other kind and reason survive the consumer handoff
     // rather than collapsing into a domain wrapper.
-    reason :: if missing.consumption_status() == {
+    reason: if missing.consumption_status() == {
         .NonConsumable(reason) -> reason
         .Consumable -> panic("missing output became consumable")
     }
@@ -469,28 +469,28 @@ fn store_test_run_leased(lease: &CacheLease, argv: [LeaseText], path: LeaseText?
 #Test("store leased fd view executes original after rename symlink swap") {
     verification := StoreVerification.new()
     if !sys.is_linux() -> return
-    roots :: store_test_temp_roots()
-    out :: files.join(roots.root, "fd-view-output")
-    tool :: files.join(out, "bin/tool")
+    roots: store_test_temp_roots()
+    out: files.join(roots.root, "fd-view-output")
+    tool: files.join(out, "bin/tool")
     files.create_dir_all(files.dirname(tool)) ?? panic("fixture dir")
     files.write(files.join(out, "bin/tool-real"), "#!/bin/sh\nprintf trusted") ?? panic("fixture tool")
     files.set_mode(files.join(out, "bin/tool-real"), 365) ?? panic("chmod")
     files.symlink("tool-real", tool) ?? panic("symlink")
-    envelope :: Envelope.for_output(out, "fd-view@mine", "core-source")
+    envelope: Envelope.for_output(out, "fd-view@mine", "core-source")
     store_record_verified(&verification, roots, "fd-view", "1", "fd-view@mine", out, files.join(out, "bin"), "", envelope, store_test_identity()) ?? panic("record")
-    hit :: store_find_verified_by_reference(&verification, roots, "fd-view@mine", store_test_expectation(out)) ? found -> found ! error -> panic("lookup")
+    hit: store_find_verified_by_reference(&verification, roots, "fd-view@mine", store_test_expectation(out)) ? found -> found ! error -> panic("lookup")
     verified := hit ?? panic("record must verify")
-    bin :: verified.lease.child_bin_dir() ?? panic("leased bin")
+    bin: verified.lease.child_bin_dir() ?? panic("leased bin")
     // The leased bin is named by a descriptor, so only a child it was passed
     // to can resolve it.
     assert(bin.render(LeaseBinding.empty()) == .Err(_))
-    explicit_tool :: verified.lease.executable_for(tool) ?? panic("executable")
+    explicit_tool: verified.lease.executable_for(tool) ?? panic("executable")
     assert_eq(store_test_run_leased(&verified.lease, [LeaseText]{explicit_tool}, None).output, "trusted")
     assert(verified.lease.executable_for(files.join(out, "bin/other-tool")) == None)
     assert(verified.lease.executable_for_command(files.join(out, "bin/other-tool")) == .Err(_))
 
-    moved :: files.join(roots.root, "fd-view-original")
-    attacker :: files.join(roots.root, "fd-view-attacker")
+    moved: files.join(roots.root, "fd-view-original")
+    attacker: files.join(roots.root, "fd-view-attacker")
     files.rename(out, moved) ?? panic("move original")
     files.create_dir_all(files.join(attacker, "bin")) ?? panic("attacker dir")
     files.write(files.join(attacker, "bin/tool"), "#!/bin/sh\nprintf attacker") ?? panic("attacker tool")
@@ -498,10 +498,10 @@ fn store_test_run_leased(lease: &CacheLease, argv: [LeaseText], path: LeaseText?
     files.symlink(attacker, out) ?? panic("swap link")
 
     verified.lease.validate() ?? panic("validate")
-    confined_tool :: verified.lease.executable_for(tool) ?? panic("confined executable")
+    confined_tool: verified.lease.executable_for(tool) ?? panic("confined executable")
     assert_eq(store_test_run_leased(&verified.lease, [LeaseText]{confined_tool}, None).output, "trusted")
     assert(verified.lease.executable_for(files.join(attacker, "bin/tool")) == None)
-    nested :: store_test_run_leased(&verified.lease, [LeaseText]{LeaseText.plain("/bin/sh"), LeaseText.plain("-c"), LeaseText.plain("exec tool")}, Val(bin.append(":/usr/bin:/bin")))
+    nested: store_test_run_leased(&verified.lease, [LeaseText]{LeaseText.plain("/bin/sh"), LeaseText.plain("-c"), LeaseText.plain("exec tool")}, Val(bin.append(":/usr/bin:/bin")))
     assert(nested.success)
     assert_eq(nested.output, "trusted")
     assert_eq(files.read(files.join(out, "bin/tool")) ?? panic("read attacker"), "#!/bin/sh\nprintf attacker")
@@ -509,7 +509,7 @@ fn store_test_run_leased(lease: &CacheLease, argv: [LeaseText], path: LeaseText?
     // Tampering with the private snapshot itself is caught before any
     // further consumer receives the lease.
     store_make_tree_writable_for_removal(verified.lease.snapshot_root) ?? panic("chmod snapshot")
-    snapshot_tool :: files.join(verified.lease.snapshot_root, "bin/tool")
+    snapshot_tool: files.join(verified.lease.snapshot_root, "bin/tool")
     files.remove(snapshot_tool) ?? panic("remove snapshot tool")
     files.write(snapshot_tool, "#!/bin/sh\nprintf snapshot-attacker") ?? panic("snapshot attacker")
     files.set_mode(snapshot_tool, 493) ?? panic("chmod")
@@ -522,9 +522,9 @@ fn store_test_run_leased(lease: &CacheLease, argv: [LeaseText], path: LeaseText?
 // Native filesystem/handle gates remain #3593/#3594; no provider substitutes.
 #Test("store profile receipt copy and proof preserve native io errors") {
     verification := StoreVerification.new()
-    roots :: store_test_temp_roots()
-    out :: files.join(roots.root, "profile-output")
-    bin :: files.join(out, "bin")
+    roots: store_test_temp_roots()
+    out: files.join(roots.root, "profile-output")
+    bin: files.join(out, "bin")
     files.create_dir_all(bin) ?? panic("fixture bin")
     files.write(files.join(bin, "z-tool"), "abc") ?? panic("fixture z-tool")
     files.write(files.join(bin, "a-tool"), "second") ?? panic("fixture a-tool")
@@ -532,21 +532,21 @@ fn store_test_run_leased(lease: &CacheLease, argv: [LeaseText], path: LeaseText?
         files.set_mode(files.join(bin, "z-tool"), 365) ?? panic("fixture executable mode")
         files.set_mode(files.join(bin, "a-tool"), 365) ?? panic("fixture executable mode")
     }
-    envelope :: Envelope.for_output(out, "profile@mine", "core-source")
-    entry :: store_record_verified(&verification, roots, "profile", "1", "profile@mine", out, bin, "", envelope, store_test_identity()) ?? panic("record")
+    envelope: Envelope.for_output(out, "profile@mine", "core-source")
+    entry: store_record_verified(&verification, roots, "profile", "1", "profile@mine", out, bin, "", envelope, store_test_identity()) ?? panic("record")
     lease := store_snapshot_lease(&verification, roots, entry) ?? panic("lease")
-    receipt :: lease.profile_install_receipt() ?? panic("profile receipt")
+    receipt: lease.profile_install_receipt() ?? panic("profile receipt")
     assert_eq(receipt.store_root, roots.root)
     assert_eq(receipt.package, "profile")
     assert_eq(receipt.version, "1")
     assert_eq(receipt.reference, "profile@mine")
     assert_eq(receipt.output_hash, entry.envelope.output_hash)
     assert_eq(receipt.executable_members, [String]{"a-tool", "z-tool"})
-    destination :: files.join(roots.root, "profile-tool")
-    copied :: &lease.copy_profile_executable("z-tool", destination) ?? panic("profile copy")
+    destination: files.join(roots.root, "profile-tool")
+    copied: &lease.copy_profile_executable("z-tool", destination) ?? panic("profile copy")
     assert_eq(files.read(destination) ?? panic("read copy"), "abc")
     assert_eq(copied.digest, "sha256-ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
-    proved :: store_profile_file_proof(destination) ?? panic("profile proof")
+    proved: store_profile_file_proof(destination) ?? panic("profile proof")
     assert_eq(proved.digest, copied.digest)
     assert_eq(proved.mode, copied.mode)
     if sys.is_unix() -> assert(((copied.mode).bit_and(0o111)) != 0)
@@ -568,7 +568,7 @@ fn store_test_run_leased(lease: &CacheLease, argv: [LeaseText], path: LeaseText?
         .Ok(_) -> panic("directory acquired a profile proof")
     }
     if sys.is_unix() {
-        link :: files.join(roots.root, "profile-link")
+        link: files.join(roots.root, "profile-link")
         files.symlink(destination, link) ?? panic("fixture profile symlink")
         if store_profile_file_proof(link) == {
             .Err(error) -> store_test_assert_other_read_error(error, "profile projection is not a no-follow file")
@@ -580,7 +580,7 @@ fn store_test_run_leased(lease: &CacheLease, argv: [LeaseText], path: LeaseText?
 }
 
 // The `IOError.Other` read refusal a lease or profile proof reports for `cause`.
-fn store_test_assert_other_read_error(error: IOError, cause: String) {
+store_test_assert_other_read_error: fn(error: IOError, cause: String) {
     if error == {
         .Other(context) -> {
             assert(context.operation == .Read)

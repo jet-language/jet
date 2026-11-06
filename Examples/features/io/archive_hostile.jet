@@ -8,14 +8,14 @@
 // 64 MiB (fixed-Huffman and RLE bombs) are exercised on every tier by
 // `cargo test --test archive`, because materializing 64 MiB is too slow here.
 use {
-    ar :: core.archive
-    gz :: core.archive.gzip
-    zs :: core.archive.zstd
+    ar: core.archive
+    gz: core.archive.gzip
+    zs: core.archive.zstd
 }
 
-fn archive_case(label: String, data: [U8]) {
-    body :: ar.inflate(data) ?? {
-        kind :: if err == {
+archive_case: fn(label: String, data: [U8]) {
+    body: ar.inflate(data) ?? {
+        kind: if err == {
             .Malformed -> "Malformed"
             .Unsupported -> "Unsupported"
             .Checksum -> "Checksum"
@@ -27,9 +27,9 @@ fn archive_case(label: String, data: [U8]) {
     print("deflate {label}: ok {body.len()} bytes")
 }
 
-fn gzip_case(label: String, data: [U8]) {
-    body :: gz.decompress(data) ?? {
-        kind :: if err == {
+gzip_case: fn(label: String, data: [U8]) {
+    body: gz.decompress(data) ?? {
+        kind: if err == {
             .Read -> "Read"
             .Write -> "Write"
             .Malformed -> "Malformed"
@@ -42,9 +42,9 @@ fn gzip_case(label: String, data: [U8]) {
     print("gzip {label}: ok {body.len()} bytes")
 }
 
-fn zstd_case(label: String, data: [U8]) {
-    body :: zs.decompress(data) ?? {
-        kind :: if err == {
+zstd_case: fn(label: String, data: [U8]) {
+    body: zs.decompress(data) ?? {
+        kind: if err == {
             .Read -> "Read"
             .Write -> "Write"
             .Malformed -> "Malformed"
@@ -57,9 +57,9 @@ fn zstd_case(label: String, data: [U8]) {
     print("zstd {label}: ok {body.len()} bytes")
 }
 
-fn zip_case(label: String, data: [U8]) {
-    names :: ar.list(data) ?? {
-        kind :: if err == {
+zip_case: fn(label: String, data: [U8]) {
+    names: ar.list(data) ?? {
+        kind: if err == {
             .Malformed -> "Malformed"
             .Unsupported -> "Unsupported"
             .Checksum -> "Checksum"
@@ -71,9 +71,9 @@ fn zip_case(label: String, data: [U8]) {
     print("zip {label}: ok {names.len()} entries")
 }
 
-fn tar_case(label: String, data: [U8], name: String) {
-    body :: ar.tar_get(data, name) ?? {
-        kind :: if err == {
+tar_case: fn(label: String, data: [U8], name: String) {
+    body: ar.tar_get(data, name) ?? {
+        kind: if err == {
             .Malformed -> "Malformed"
             .Unsupported -> "Unsupported"
             .Checksum -> "Checksum"
@@ -85,9 +85,9 @@ fn tar_case(label: String, data: [U8], name: String) {
     print("tar {label}: ok {body.len()} bytes")
 }
 
-fn zip_create_case(label: String, name: String, data: [U8]) {
-    written :: ar.create(name, data) ?? {
-        kind :: if err == {
+zip_create_case: fn(label: String, name: String, data: [U8]) {
+    written: ar.create(name, data) ?? {
+        kind: if err == {
             .Malformed -> "Malformed"
             .Unsupported -> "Unsupported"
             .Checksum -> "Checksum"
@@ -99,9 +99,9 @@ fn zip_create_case(label: String, name: String, data: [U8]) {
     print("zip create {label}: ok {written.len()} bytes")
 }
 
-fn tar_add_case(label: String, archive: [U8], name: String, data: [U8]) {
-    written :: ar.tar_add(archive, name, data) ?? {
-        kind :: if err == {
+tar_add_case: fn(label: String, archive: [U8], name: String, data: [U8]) {
+    written: ar.tar_add(archive, name, data) ?? {
+        kind: if err == {
             .Malformed -> "Malformed"
             .Unsupported -> "Unsupported"
             .Checksum -> "Checksum"
@@ -114,14 +114,14 @@ fn tar_add_case(label: String, archive: [U8], name: String, data: [U8]) {
 }
 
 // LSB-first bit packer for hand-built deflate streams.
-struct BitPacker {
+BitPacker: struct {
     out: [U8]
     acc: Int
     n: Int
 }
 
 impl BitPacker {
-    fn put(&self, value: Int, count: Int) {
+    put: fn(&self, value: Int, count: Int) {
         loop k in 0..<count {
             self.acc = (self.acc).bit_or(((((value >> k)).bit_and(1)) << self.n))
             self.n += 1
@@ -134,11 +134,11 @@ impl BitPacker {
     }
 
     // Huffman codes are packed most-significant bit first.
-    fn code(&self, value: Int, count: Int) {
+    code: fn(&self, value: Int, count: Int) {
         loop k in 0..<count -> &self.put(((value >> (count - 1 - k))).bit_and(1), 1)
     }
 
-    fn finish(&self) {
+    finish: fn(&self) {
         if self.n > 0 {
             &self.out.push(byte(self.acc))
         }
@@ -147,7 +147,7 @@ impl BitPacker {
 
 // Fixed-Huffman deflate: an optional literal "x", then `matches` copies of
 // 258 bytes at distance 1, about 13 bits of input per 258 bytes of output.
-fn deflate_repeat(literal: Bool, matches: Int) -> [U8] {
+deflate_repeat: fn(literal: Bool, matches: Int) -> [U8] {
     bits := BitPacker{out: [U8]{}, acc: 0, n: 0}
     &bits.put(1, 1)
     &bits.put(1, 2)
@@ -161,26 +161,26 @@ fn deflate_repeat(literal: Bool, matches: Int) -> [U8] {
     bits.out
 }
 
-fn byte(n: Int) -> U8 {
-    v :: (n).bit_and(255)
+byte: fn(n: Int) -> U8 {
+    v: (n).bit_and(255)
     U8{v}
 }
 
-fn push16(out: &[U8], n: Int) {
+push16: fn(out: &[U8], n: Int) {
     &out.push(byte(n))
     &out.push(byte(n >> 8))
 }
 
-fn push32(out: &[U8], n: Int) {
+push32: fn(out: &[U8], n: Int) {
     loop k in 0..<4 -> &out.push(byte(n >> (8 * k)))
 }
 
 // A stored ZIP with `count` empty entries named "x" (CRC-32 of [] is 0).
-fn zip_entries(count: Int) -> [U8] {
+zip_entries: fn(count: Int) -> [U8] {
     local := [U8]{}
     central := [U8]{}
     loop _ in 0..<count {
-        offset :: local.len()
+        offset: local.len()
         // Local header: version, flags, method, time, date, CRC, sizes, name.
         push32(&local, 0x04034b50)
         loop v in ([Int]{20, 0, 0, 0, 0}) -> push16(&local, v)
@@ -208,7 +208,7 @@ fn zip_entries(count: Int) -> [U8] {
 }
 
 // Replace every occurrence of `from` with `to` (same length).
-fn patch_all(data: [U8], from: [U8], to: [U8]) -> [U8] {
+patch_all: fn(data: [U8], from: [U8], to: [U8]) -> [U8] {
     out := data
     i := 0
     loop i + from.len() <= out.len() {
@@ -228,7 +228,7 @@ fn patch_all(data: [U8], from: [U8], to: [U8]) -> [U8] {
 }
 
 // Recompute a ustar header checksum so a patched name reaches name checks.
-fn fix_tar_checksum(data: [U8]) -> [U8] {
+fix_tar_checksum: fn(data: [U8]) -> [U8] {
     out := data
     sum := 0
     loop k in 0..<512 {
@@ -240,12 +240,12 @@ fn fix_tar_checksum(data: [U8]) -> [U8] {
     out
 }
 
-fn run() {
-    hello :: "Hello, archive".bytes()
+run: fn() {
+    hello: "Hello, archive".bytes()
 
     // deflate: truncated stored block, a fixed-Huffman copy that points
     // before the start of the output, and a small valid expansion.
-    good_deflate :: ar.deflate(hello) ?? panic("deflate")
+    good_deflate: ar.deflate(hello) ?? panic("deflate")
     archive_case("roundtrip", good_deflate)
     archive_case("truncated", good_deflate[0..<(good_deflate.len() - 4)])
     archive_case("copy before start", deflate_repeat(false, 1))
@@ -253,7 +253,7 @@ fn run() {
 
     // gzip: truncated member, bad CRC, a wrong ISIZE trailer, and a member
     // whose deflate payload copies before the start of its output.
-    good_gz :: gz.compress(hello) ?? panic("gzip compress")
+    good_gz: gz.compress(hello) ?? panic("gzip compress")
     gzip_case("roundtrip", good_gz)
     gzip_case("truncated", good_gz[0..<(good_gz.len() - 5)])
     bad_crc := good_gz.copy()
@@ -269,7 +269,7 @@ fn run() {
 
     // zstd: truncated frame, bad content checksum, dictionary frame, and a
     // frame declaring 64 MiB + 1 bytes of content.
-    good_zs :: zs.compress(hello) ?? panic("zstd compress")
+    good_zs: zs.compress(hello) ?? panic("zstd compress")
     zstd_case("roundtrip", good_zs)
     zstd_case("truncated", good_zs[0..<(good_zs.len() - 3)])
     // FHD 0x24: single segment, 1-byte content size, content checksum.
@@ -285,7 +285,7 @@ fn run() {
 
     // zip: truncated archive, bad CRC, a declared size over 64 MiB, traversal
     // and absolute names on read, and one entry over the 4,096-entry cap.
-    good_zip :: ar.create("entry.txt", hello) ?? panic("zip create")
+    good_zip: ar.create("entry.txt", hello) ?? panic("zip create")
     zip_case("roundtrip", good_zip)
     zip_case("truncated", good_zip[0..<(good_zip.len() - 10)])
     bad_zip_crc := good_zip.copy()
@@ -294,24 +294,24 @@ fn run() {
     zip_bomb := good_zip.copy()
     loop k in 0..<4 -> zip_bomb[22 + k] = byte(0x04000001 >> (8 * k))
     zip_case("declared output bomb", zip_bomb)
-    dotted :: ar.create("..xevil", hello) ?? panic("zip create")
+    dotted: ar.create("..xevil", hello) ?? panic("zip create")
     zip_case("../ name", patch_all(dotted, "..xevil".bytes(), "../evil".bytes()))
-    rooted :: ar.create("xetc", hello) ?? panic("zip create")
+    rooted: ar.create("xetc", hello) ?? panic("zip create")
     zip_case("absolute name", patch_all(rooted, "xetc".bytes(), "/etc".bytes()))
     zip_case("4096 entries", zip_entries(4096))
     zip_case("4097 entries", zip_entries(4097))
 
     // tar: bad header checksum, missing end marker, traversal name on read,
     // and one entry over the 4,096-entry cap.
-    good_tar :: ar.tar_add([U8]{}, "entry.txt", hello) ?? panic("tar add")
+    good_tar: ar.tar_add([U8]{}, "entry.txt", hello) ?? panic("tar add")
     tar_case("roundtrip", good_tar, "entry.txt")
     bad_tar_sum := good_tar.copy()
     bad_tar_sum[0] = U8{69}
     tar_case("bad checksum", bad_tar_sum, "entry.txt")
     tar_case("missing end", good_tar[0..<(good_tar.len() - 1024)], "entry.txt")
-    tar_dotted :: ar.tar_add([U8]{}, "xx/evil", hello) ?? panic("tar add")
+    tar_dotted: ar.tar_add([U8]{}, "xx/evil", hello) ?? panic("tar add")
     tar_case("../ name", fix_tar_checksum(patch_all(tar_dotted, "xx/evil".bytes(), "../evil".bytes())), "../evil")
-    one :: ar.tar_add([U8]{}, "e", [U8]{}) ?? panic("tar add")
+    one: ar.tar_add([U8]{}, "e", [U8]{}) ?? panic("tar add")
     many := [U8]{}
     loop _ in 0..<4097 {
         loop k in 0..<512 -> &many.push(one[k])

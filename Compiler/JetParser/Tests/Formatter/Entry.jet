@@ -5,59 +5,59 @@ use {
     jet_foundation.[AST_NODE_GENERATED, Expr, Item, Stmt, TryConvert, expr_span]
 }
 
-fn fmt_core_ok(source: String) -> String { parser_test_format(source) }
-fn fmt_core_stable(source: String) -> String {
-    formatted :: fmt_core_ok(source)
+fmt_core_ok: fn(source: String) -> String { parser_test_format(source) }
+fmt_core_stable: fn(source: String) -> String {
+    formatted: fmt_core_ok(source)
     assert(fmt_core_ok(formatted) == formatted)
     formatted
 }
 #Test("trailing_transaction_comment_stays_inside_transaction_block") {
-    source :: `fn transfer(from: Shared<Account>, amount: Int) {
+    source: `transfer: fn(from: Shared<Account>, amount: Int) {
     #Transact(tx) {
         from.balance -= amount  // both land, or neither
     }
 }
 `
-    formatted :: fmt_core_stable(source)
-    comment :: parser_test_find(formatted, "// both land, or neither")
-    close :: parser_test_rfind(formatted, "}}")
+    formatted: fmt_core_stable(source)
+    comment: parser_test_find(formatted, "// both land, or neither")
+    close: parser_test_rfind(formatted, "}}")
     assert(comment < close)
 }
 #Test("inner_comment_stays_before_enclosing_block_close") {
-    formatted :: fmt_core_stable("fn run() {{\n    if ready {{ launch() /* go */ }}\n}}\n")
+    formatted: fmt_core_stable("run: fn() {{\n    if ready {{ launch() /* go */ }}\n}}\n")
     assert(parser_test_find(formatted, "/* go */") < parser_test_find(formatted, "}}"))
 }
 #Test("inferred_braces_and_blocks_round_trip") {
-    source :: `struct Point {
+    source: `Point: struct {
     x: Int
     y: Int
 }
 
-fn make() -> Point { {x: 1, y: 2} }
+make: fn() -> Point { {x: 1, y: 2} }
 
-fn accepts(values: [String]) {}
+accepts: fn(values: [String]) {}
 
-fn block() {
+block: fn() {
     print("block")
 }
 
-fn run() {
+run: fn() {
     accepts({"needle"})
-    p :: make()
+    p: make()
     block()
 }
 `
-    formatted :: fmt_core_stable(source)
+    formatted: fmt_core_stable(source)
     assert(formatted.contains("{{x: 1, y: 2}}"))
     assert(formatted.contains("accepts({{\"needle\"}})"))
-    assert(formatted.contains("fn block() {{"))
+    assert(formatted.contains("block: fn() {{"))
 }
 #Test("repeated_struct_list_heads_preserve_explicit_heads") {
-    source :: `struct Point {
+    source: `Point: struct {
     x: Int
 }
 
-fn run() {
+run: fn() {
     compact := [Point{x: 1}, Point{x: 2}]
     spread := [
         Point{x: 3},
@@ -65,23 +65,23 @@ fn run() {
     ]
 }
 `
-    plain :: fmt_core_ok(source)
-    fragment :: "compact := [Point{{x: 1}}, Point{{x: 2}}]"
+    plain: fmt_core_ok(source)
+    fragment: "compact := [Point{{x: 1}}, Point{{x: 2}}]"
     assert(plain.contains(fragment))
     assert(!plain.contains("compact := [Point]"))
-    simplified_result :: jet_format_source(source, true)
+    simplified_result: jet_format_source(source, true)
     assert(simplified_result.ok)
-    simplified :: simplified_result.text
+    simplified: simplified_result.text
     assert(simplified.contains(fragment))
     assert(!simplified.contains("compact := [Point]"))
     assert_eq(jet_format_source(simplified, true).text, simplified)
 }
 #Test("failure_formatter_keeps_prefix_and_contextual_roles") {
-    formatted :: fmt_core_stable("fn load() -> Int? IOError! {{ read()?(\n    \"loading\"\n) }}\n")
-    assert(formatted.contains("fn load() -> Int? IOError!"))
+    formatted: fmt_core_stable("load: fn() -> Int? IOError! {{ read()?(\n    \"loading\"\n) }}\n")
+    assert(formatted.contains("load: fn() -> Int? IOError!"))
     assert(formatted.contains("read()?(\"loading\")"))
-    source :: "fn load() -> Int IOError! {{ read() }}\n"
-    lexed :: lex(source.bytes())
+    source: "load: fn() -> Int IOError! {{ read() }}\n"
+    lexed: lex(source.bytes())
     assert(lexed.diagnostics.len() == 0)
     program := parse_source(source.bytes()).program
     if program.items[0] == .Func(function) {
@@ -91,7 +91,7 @@ fn run() {
         } else { panic("expected expression body") }
         program.items[0] = Item.Func{value: updated}
     } else { panic("expected load function") }
-    rendered :: jfmt_format_program_with_tokens(program, source, [Token]{}, false)
+    rendered: jfmt_format_program_with_tokens(program, source, [Token]{}, false)
     assert(rendered.contains("read()"))
     assert(!rendered.contains("read()?"))
     assert(fmt_core_ok(rendered) == rendered)
@@ -101,8 +101,8 @@ fn run() {
 // however often `jet fmt` runs.
 #Test("field_markers_format_to_themselves") {
     loop source in [
-        "struct Login {{\n    user: String\n    #Redact password: String\n}}\n",
-        "struct Login {{\n    #[Redact, Rename(\"pw\")] password: String\n}}\n",
-        "struct Login {{\n    #[Rename(\"pw\"), Redact] password: String\n}}\n",
+        "Login: struct {{\n    user: String\n    #Redact password: String\n}}\n",
+        "Login: struct {{\n    #[Redact, Rename(\"pw\")] password: String\n}}\n",
+        "Login: struct {{\n    #[Rename(\"pw\"), Redact] password: String\n}}\n",
     ] -> assert_eq(fmt_core_stable(source), source)
 }

@@ -26,7 +26,11 @@ export function codeOnly(text) {
 export function functionsIn(text, path) {
   const code = codeOnly(text);
   const functions = [];
-  for (const match of code.matchAll(/\bfn\s+([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)\s*(?:<[^;\n()]*>)?\s*\(/g)) {
+  // A declaration `name: fn(…) … {` or `Type.name: fn<T>(…) … {` starts its
+  // line; a nested local function stays `fn name(…) {`. A head without a
+  // body brace on its line is a field or a bodiless declaration.
+  for (const match of code.matchAll(/^[ \t]*(?:(?:pub|priv)(?:\([^)\n]*\))?\s+)?(?:#[A-Za-z_]\w*(?:\([^)\n]*\))?\s+)*([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?):\s*fn\s*(?:<[^;\n()]*>)?\s*\(|\bfn\s+([A-Za-z_]\w*)\s*(?:<[^;\n()]*>)?\s*\(/gm)) {
+    match[1] ??= match[2];
     let cursor = match.index + match[0].length, depth = 1;
     while (cursor < code.length && depth) {
       if (code[cursor] === "(") depth++;
@@ -34,8 +38,8 @@ export function functionsIn(text, path) {
       cursor++;
     }
     const open = code.indexOf("{", cursor);
-    const nextFn = code.indexOf("\nfn ", cursor);
-    if (open < 0 || (nextFn >= 0 && nextFn < open)) continue;
+    const lineEnd = code.indexOf("\n", cursor);
+    if (open < 0 || (lineEnd >= 0 && lineEnd < open)) continue;
     cursor = open + 1; depth = 1;
     while (cursor < code.length && depth) {
       if (code[cursor] === "{") depth++;

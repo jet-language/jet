@@ -3,25 +3,25 @@
 // it never needs `^` and never trips E0209 (unlike passing `x` itself to a
 // move param when `x` is used again). `.clone()` is not user-typable Jet syntax — `x.copy()` is the only
 // spelling.
-struct Ticket {
+Ticket: struct {
     id: Int
     label: String
 }
 
-fn archive(t: ^Ticket) -> String { t.label }
+archive: fn(t: ^Ticket) -> String { t.label }
 
-fn run() {
-    name :: "vault"
-    saved :: name.copy()
+run: fn() {
+    name: "vault"
+    saved: name.copy()
     print(name)
     print(saved)
 
     n := 5
-    m :: n.copy()
+    m: n.copy()
     print(n)
     print(m)
 
-    t :: Ticket{id: 1, label: "root"}
+    t: Ticket{id: 1, label: "root"}
     print(archive(t.copy()))
     print(t.label)
 }

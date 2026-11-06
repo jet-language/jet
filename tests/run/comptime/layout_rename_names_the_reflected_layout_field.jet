@@ -2,22 +2,22 @@
 // selection finds it under that name, and the reflected layout row carries the
 // same name, while its byte facts stay those of the declared field.
 derive T.LayoutName {
-    info :: T.$layout
-    selected :: info[.port_slot]
-    selected_name :: selected.name
-    selected_offset :: selected.offset
-    reflected_name :: T.reflect().layout.fields[0].name
-    plain_name :: T.reflect().layout.fields[1].name
-    fn layout_name(self) -> String Never! { "{$selected_name}:{$selected_offset}:{$reflected_name}:{$plain_name}" }
+    info: T.$layout
+    selected: info[.port_slot]
+    selected_name: selected.name
+    selected_offset: selected.offset
+    reflected_name: T.reflect().layout.fields[0].name
+    plain_name: T.reflect().layout.fields[1].name
+    layout_name: fn(self) -> String Never! { "{$selected_name}:{$selected_offset}:{$reflected_name}:{$plain_name}" }
 }
 
 #[Layout(c), LayoutName]
-struct Endpoint {
+Endpoint: struct {
     #Rename(name: "port", layout: "port_slot") port: U32
     host: U8
 }
 
-fn run() {
-    endpoint :: Endpoint{port: 80, host: 1}
+run: fn() {
+    endpoint: Endpoint{port: 80, host: 1}
     print(endpoint.layout_name())
 }

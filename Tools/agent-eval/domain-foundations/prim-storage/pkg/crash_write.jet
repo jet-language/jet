@@ -1,18 +1,18 @@
-package {
+package: {
     name: "crash_write"
     authority: { allow: [FS.Read, FS.Write, IO, Time.Wait] }
 }
 
 use {
-    fs :: core.files
-    time :: core.time
+    fs: core.files
+    time: core.time
 }
 
-fn run() {
-    root :: "$JET_STATE_ROOT/dx3/prim-storage/crash-runtime"
+run: fn() {
+    root: "$JET_STATE_ROOT/dx3/prim-storage/crash-runtime"
     if fs.exists(root) -> fs.remove_all(root) ?? panic("cleanup")
     fs.create_dir_all(root) ?? panic("create")
-    path :: Path.from(root).join("events.log")
+    path: Path.from(root).join("events.log")
     fs.append_all(path.copy(), "event|1|committed\n") ?? panic("commit")
     fs.fsync(path.copy()) ?? panic("sync commit")
     fs.append_all(path.copy(), "event|2|") ?? panic("partial")

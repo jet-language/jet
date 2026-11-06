@@ -1,9 +1,9 @@
 
-fn build(b: Build) -[Exec, FS]> {
+build: fn(b: Build) -[Exec, FS]> {
     #Impure("write declared cached output") {
-        emit :: b.action("emit", [], ["artifact"], ["sh", "-c", "printf fresh > artifact"], ["Exec", "FS"])
-        app :: b.add_executable("app", ["main.jet"], [emit])
+        emit: b.action("emit", [], ["artifact"], ["sh", "-c", "printf fresh > artifact"], ["Exec", "FS"])
+        app: b.add_executable("app", ["main.jet"], [emit])
         b.default(app)
     }
 }
-fn run() {}
+run: fn() {}

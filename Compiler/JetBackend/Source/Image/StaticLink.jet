@@ -51,98 +51,98 @@
 
 use jet_foundation.[CompilerThreads, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, sha256_bytes]
 
-LINK_BASE :: 0x400000
-LINK_RUN_BASE :: 0x200000000000
+LINK_BASE: 0x400000
+LINK_RUN_BASE: 0x200000000000
 // 1 GiB: below 2 GiB, so a sign-extended 32-bit address reaches an image of
 // up to 1 GiB, and clear of a running jet: its image sits at LINK_BASE, and
 // its heap is mapped top-down from the stack, so only its brk heap (musl's)
 // lies below. The loader maps without replacing, so a range that is taken
 // falls back to a file.
-LINK_RUN_LOW_BASE :: 0x40000000
-LINK_PAGE :: 0x1000
-LINK_EHDR_SIZE :: 64
-LINK_PHDR_SIZE :: 56
+LINK_RUN_LOW_BASE: 0x40000000
+LINK_PAGE: 0x1000
+LINK_EHDR_SIZE: 64
+LINK_PHDR_SIZE: 56
 // The GNU build-id note: name size, descriptor size, type
 // (NT_GNU_BUILD_ID), "GNU\0", then the 20-byte id.
-LINK_BUILD_ID_SIZE :: 20
-LINK_BUILD_ID_NOTE_SIZE :: 36
+LINK_BUILD_ID_SIZE: 20
+LINK_BUILD_ID_NOTE_SIZE: 36
 
 // Output classes, in image order. LINK_DROP sections never reach the image;
 // LINK_DISCARD sections belong to a COMDAT group loaded earlier.
-LINK_DISCARD :: -2
-LINK_DROP :: -1
-LINK_RODATA :: 0
-LINK_EH :: 1
-LINK_TEXT :: 2
-LINK_TDATA :: 3
-LINK_TBSS :: 4
-LINK_PREINIT :: 5
-LINK_INIT :: 6
-LINK_FINI :: 7
-LINK_RELRO :: 8
-LINK_DATA :: 9
-LINK_BSS :: 10
-LINK_CLASSES :: 11
+LINK_DISCARD: -2
+LINK_DROP: -1
+LINK_RODATA: 0
+LINK_EH: 1
+LINK_TEXT: 2
+LINK_TDATA: 3
+LINK_TBSS: 4
+LINK_PREINIT: 5
+LINK_INIT: 6
+LINK_FINI: 7
+LINK_RELRO: 8
+LINK_DATA: 9
+LINK_BSS: 10
+LINK_CLASSES: 11
 
 // Where a symbol is defined, when not in a section.
-LINK_UNDEF :: -1
-LINK_ABS :: -2
-LINK_COMMON :: -3
+LINK_UNDEF: -1
+LINK_ABS: -2
+LINK_COMMON: -3
 
 // How a global symbol is defined.
-LINK_G_NONE :: 0
-LINK_G_FILE :: 1
-LINK_G_COMMON :: 2
-LINK_G_LINKER :: 3
+LINK_G_NONE: 0
+LINK_G_FILE: 1
+LINK_G_COMMON: 2
+LINK_G_LINKER: 3
 
 // ELF section types.
-LINK_SHT_PROGBITS :: 1
-LINK_SHT_SYMTAB :: 2
-LINK_SHT_RELA :: 4
-LINK_SHT_NOTE :: 7
-LINK_SHT_NOBITS :: 8
-LINK_SHT_INIT_ARRAY :: 14
-LINK_SHT_FINI_ARRAY :: 15
-LINK_SHT_PREINIT_ARRAY :: 16
-LINK_SHT_GROUP :: 17
-LINK_SHT_SYMTAB_SHNDX :: 18
-LINK_SHT_X86_64_UNWIND :: 0x70000001
+LINK_SHT_PROGBITS: 1
+LINK_SHT_SYMTAB: 2
+LINK_SHT_RELA: 4
+LINK_SHT_NOTE: 7
+LINK_SHT_NOBITS: 8
+LINK_SHT_INIT_ARRAY: 14
+LINK_SHT_FINI_ARRAY: 15
+LINK_SHT_PREINIT_ARRAY: 16
+LINK_SHT_GROUP: 17
+LINK_SHT_SYMTAB_SHNDX: 18
+LINK_SHT_X86_64_UNWIND: 0x70000001
 // SHF_INFO_LINK: the section's sh_info names a section. On an init/fini
 // array it names the guard section the hook is conditional on (cond_roots).
-LINK_SHF_INFO_LINK :: 0x40
+LINK_SHF_INFO_LINK: 0x40
 
 // x86-64 relocation types (psABI).
-LINK_R_NONE :: 0
-LINK_R_64 :: 1
-LINK_R_PC32 :: 2
-LINK_R_PLT32 :: 4
-LINK_R_GOTPCREL :: 9
-LINK_R_32 :: 10
-LINK_R_32S :: 11
-LINK_R_DTPOFF64 :: 17
-LINK_R_TPOFF64 :: 18
-LINK_R_TLSGD :: 19
-LINK_R_TLSLD :: 20
-LINK_R_DTPOFF32 :: 21
-LINK_R_GOTTPOFF :: 22
-LINK_R_TPOFF32 :: 23
-LINK_R_PC64 :: 24
-LINK_R_GOTOFF64 :: 25
-LINK_R_GOTPC32 :: 26
-LINK_R_SIZE32 :: 32
-LINK_R_SIZE64 :: 33
-LINK_R_GOTPCRELX :: 41
-LINK_R_REX_GOTPCRELX :: 42
+LINK_R_NONE: 0
+LINK_R_64: 1
+LINK_R_PC32: 2
+LINK_R_PLT32: 4
+LINK_R_GOTPCREL: 9
+LINK_R_32: 10
+LINK_R_32S: 11
+LINK_R_DTPOFF64: 17
+LINK_R_TPOFF64: 18
+LINK_R_TLSGD: 19
+LINK_R_TLSLD: 20
+LINK_R_DTPOFF32: 21
+LINK_R_GOTTPOFF: 22
+LINK_R_TPOFF32: 23
+LINK_R_PC64: 24
+LINK_R_GOTOFF64: 25
+LINK_R_GOTPC32: 26
+LINK_R_SIZE32: 32
+LINK_R_SIZE64: 33
+LINK_R_GOTPCRELX: 41
+LINK_R_REX_GOTPCRELX: 42
 
-LINK_MEMBER_SCALE :: 16777216
+LINK_MEMBER_SCALE: 16777216
 
 // The runtime's fault report (JetIR BuildLibrary.jet ir_fault_report_call),
 // which each image link writes (link_fault_report) as the object below.
-LINK_FAULT_REPORT :: "jet_rt_fault_report"
-LINK_FAULT_REPORT_OBJECT :: "<linker fault report>"
+LINK_FAULT_REPORT: "jet_rt_fault_report"
+LINK_FAULT_REPORT_OBJECT: "<linker fault report>"
 
 // Which fault report a link writes.
-enum LinkFaultReport {
+LinkFaultReport: enum {
     // The report naming Jet frames from the image's own .debug_jetline
     // (JetRuntime Assets/FaultReport/report.S).
     Full
@@ -154,7 +154,7 @@ enum LinkFaultReport {
     Import
 }
 
-struct LinkContext {
+LinkContext: struct {
     bufs: [[U8]]
     archives: [LinkArchive]
     // archive_buffer[i] is the buffer of archives[i].
@@ -274,7 +274,7 @@ struct LinkContext {
     errors: [String]
 }
 
-fn link_context(bufs: ^[[U8]], base: Int) -> LinkContext Never! {
+link_context: fn(bufs: ^[[U8]], base: Int) -> LinkContext Never! {
     LinkContext{
         bufs: ^bufs, archives: [LinkArchive]{}, archive_buffer: [Int]{}, lookup: [String:Int]{}, pulled: [Int:Bool]{},
         obj_name: [String]{}, obj_buffer: [Int]{}, obj_base: [Int]{}, obj_shoff: [Int]{}, obj_names: [Int]{},
@@ -296,32 +296,32 @@ fn link_context(bufs: ^[[U8]], base: Int) -> LinkContext Never! {
 // Little-endian reads from input buffers. 64-bit fields are read as two
 // halves so ordinary values stay small integers.
 
-fn link_u8(bufs: [[U8]], b: Int, at: Int) -> Int Never! {
+link_u8: fn(bufs: [[U8]], b: Int, at: Int) -> Int Never! {
     Int.from_u8(bufs[b][at])
 }
 
-fn link_u16(bufs: [[U8]], b: Int, at: Int) -> Int Never! {
-    row :: bufs[b]
+link_u16: fn(bufs: [[U8]], b: Int, at: Int) -> Int Never! {
+    row: bufs[b]
     Int.from_u8(row[at]).bit_or((Int.from_u8(row[at + 1]) << 8))
 }
 
-fn link_u32(bufs: [[U8]], b: Int, at: Int) -> Int Never! {
-    row :: bufs[b]
+link_u32: fn(bufs: [[U8]], b: Int, at: Int) -> Int Never! {
+    row: bufs[b]
     Int.from_u8(row[at]).bit_or((Int.from_u8(row[at + 1]) << 8)).bit_or((Int.from_u8(row[at + 2]) << 16)).bit_or((Int.from_u8(row[at + 3]) << 24))
 }
 
-fn link_u64(bufs: [[U8]], b: Int, at: Int) -> Int Never! {
+link_u64: fn(bufs: [[U8]], b: Int, at: Int) -> Int Never! {
     link_u32(bufs, b, at) + link_u32(bufs, b, at + 4) * 0x100000000
 }
 
-fn link_s64(bufs: [[U8]], b: Int, at: Int) -> Int Never! {
+link_s64: fn(bufs: [[U8]], b: Int, at: Int) -> Int Never! {
     high := link_u32(bufs, b, at + 4)
     if high >= 0x80000000 -> high = high - 0x100000000
     link_u32(bufs, b, at) + high * 0x100000000
 }
 
-fn link_cstr(bufs: [[U8]], b: Int, at: Int) -> String Never! {
-    row :: bufs[b]
+link_cstr: fn(bufs: [[U8]], b: Int, at: Int) -> String Never! {
+    row: bufs[b]
     end := at
     loop end < row.len() && Int.from_u8(row[end]) != 0 -> end += 1
     String.from_bytes(row[at..<end]) ?? ""
@@ -329,38 +329,38 @@ fn link_cstr(bufs: [[U8]], b: Int, at: Int) -> String Never! {
 
 // Whether the NUL-terminated name at `at` starts with `prefix` (and, when
 // `whole`, is exactly `prefix`).
-fn link_name_has(bufs: [[U8]], b: Int, at: Int, prefix: String, whole: Bool) -> Bool Never! {
-    row :: bufs[b]
+link_name_has: fn(bufs: [[U8]], b: Int, at: Int, prefix: String, whole: Bool) -> Bool Never! {
+    row: bufs[b]
     loop (k, byte) in prefix.bytes() {
         if at + k >= row.len() || row[at + k] != byte -> return false
     }
     if !whole -> return true
-    end :: at + prefix.len()
+    end: at + prefix.len()
     end < row.len() && Int.from_u8(row[end]) == 0
 }
 
 // Little-endian words without a loop (ELF.jet elf64_u16).
-fn link_put16(out: &[U8], at: Int, value: Int) Never! {
+link_put16: fn(out: &[U8], at: Int, value: Int) Never! {
     out[at] = U8{value.bit_and(255)}
     out[at + 1] = U8{(value >> 8).bit_and(255)}
 }
 
-fn link_put32(out: &[U8], at: Int, value: Int) Never! {
+link_put32: fn(out: &[U8], at: Int, value: Int) Never! {
     link_put16(&out, at, value)
     link_put16(&out, at + 2, value >> 16)
 }
 
-fn link_put64(out: &[U8], at: Int, value: Int) Never! {
+link_put64: fn(out: &[U8], at: Int, value: Int) Never! {
     link_put32(&out, at, value)
     link_put32(&out, at + 4, value >> 32)
 }
 
-fn link_align(value: Int, align: Int) -> Int Never! {
+link_align: fn(value: Int, align: Int) -> Int Never! {
     if align <= 1 -> return value
     (value + align - 1).div_euclid(align) * align
 }
 
-fn link_error(c: &LinkContext, message: String) Never! {
+link_error: fn(c: &LinkContext, message: String) Never! {
     &c.errors.push(message)
 }
 
@@ -368,11 +368,11 @@ fn link_error(c: &LinkContext, message: String) Never! {
 // Sections, read from their headers.
 
 // The object owning section `s` (objects own contiguous id ranges).
-fn link_obj_of(c: LinkContext, s: Int) -> Int Never! {
+link_obj_of: fn(c: LinkContext, s: Int) -> Int Never! {
     low := 0
     high := c.obj_first_section.len() - 1
     loop low < high {
-        mid :: (low + high + 1).div_euclid(2)
+        mid: (low + high + 1).div_euclid(2)
         if c.obj_first_section[mid] <= s {
             low = mid
         } else {
@@ -382,50 +382,50 @@ fn link_obj_of(c: LinkContext, s: Int) -> Int Never! {
     low
 }
 
-fn link_hdr(c: LinkContext, obj: Int, s: Int) -> Int Never! {
+link_hdr: fn(c: LinkContext, obj: Int, s: Int) -> Int Never! {
     c.obj_shoff[obj] + 64 * (s - c.obj_first_section[obj])
 }
 
-fn link_sec_type(c: LinkContext, obj: Int, s: Int) -> Int Never! {
+link_sec_type: fn(c: LinkContext, obj: Int, s: Int) -> Int Never! {
     link_u32(c.bufs, c.obj_buffer[obj], link_hdr(c, obj, s) + 4)
 }
 
-fn link_sec_flags(c: LinkContext, obj: Int, s: Int) -> Int Never! {
+link_sec_flags: fn(c: LinkContext, obj: Int, s: Int) -> Int Never! {
     link_u64(c.bufs, c.obj_buffer[obj], link_hdr(c, obj, s) + 8)
 }
 
 // Absolute offset of the section's bytes in its buffer.
-fn link_sec_offset(c: LinkContext, obj: Int, s: Int) -> Int Never! {
+link_sec_offset: fn(c: LinkContext, obj: Int, s: Int) -> Int Never! {
     c.obj_base[obj] + link_u64(c.bufs, c.obj_buffer[obj], link_hdr(c, obj, s) + 24)
 }
 
-fn link_sec_size(c: LinkContext, obj: Int, s: Int) -> Int Never! {
+link_sec_size: fn(c: LinkContext, obj: Int, s: Int) -> Int Never! {
     link_u64(c.bufs, c.obj_buffer[obj], link_hdr(c, obj, s) + 32)
 }
 
-fn link_sec_align(c: LinkContext, obj: Int, s: Int) -> Int Never! {
-    align :: link_u64(c.bufs, c.obj_buffer[obj], link_hdr(c, obj, s) + 48)
+link_sec_align: fn(c: LinkContext, obj: Int, s: Int) -> Int Never! {
+    align: link_u64(c.bufs, c.obj_buffer[obj], link_hdr(c, obj, s) + 48)
     if align < 1 -> return 1
     align
 }
 
 // Absolute offset of the section's name.
-fn link_sec_name(c: LinkContext, obj: Int, s: Int) -> Int Never! {
+link_sec_name: fn(c: LinkContext, obj: Int, s: Int) -> Int Never! {
     c.obj_names[obj] + link_u32(c.bufs, c.obj_buffer[obj], link_hdr(c, obj, s))
 }
 
-fn link_section_label(c: LinkContext, s: Int) -> String Never! {
-    obj :: link_obj_of(c, s)
+link_section_label: fn(c: LinkContext, s: Int) -> String Never! {
+    obj: link_obj_of(c, s)
     "{c.obj_name[obj]}({link_cstr(c.bufs, c.obj_buffer[obj], link_sec_name(c, obj, s))})"
 }
 
-fn link_class(c: LinkContext, obj: Int, s: Int) -> Int Never! {
+link_class: fn(c: LinkContext, obj: Int, s: Int) -> Int Never! {
     if c.discarded.len() > 0 && c.discarded.get(s) != None -> return LINK_DISCARD
-    b :: c.obj_buffer[obj]
-    h :: link_hdr(c, obj, s)
-    kind :: link_u32(c.bufs, b, h + 4)
-    flags :: link_u64(c.bufs, b, h + 8)
-    name :: c.obj_names[obj] + link_u32(c.bufs, b, h)
+    b: c.obj_buffer[obj]
+    h: link_hdr(c, obj, s)
+    kind: link_u32(c.bufs, b, h + 4)
+    flags: link_u64(c.bufs, b, h + 8)
+    name: c.obj_names[obj] + link_u32(c.bufs, b, h)
     if (flags.bit_and(2)) == 0 || kind == LINK_SHT_NOTE || kind == LINK_SHT_RELA -> return LINK_DROP
     if kind == LINK_SHT_X86_64_UNWIND || link_name_has(c.bufs, b, name, ".eh_frame", true) -> return LINK_EH
     if (flags.bit_and(0x400)) != 0 -> return if kind == LINK_SHT_NOBITS -> LINK_TBSS else -> LINK_TDATA
@@ -442,11 +442,11 @@ fn link_class(c: LinkContext, obj: Int, s: Int) -> Int Never! {
 }
 
 // The RELA section of section `s` (in object `obj`), or -1.
-fn link_rela_of(c: LinkContext, obj: Int, s: Int) -> Int Never! {
-    next_s :: s + 1
+link_rela_of: fn(c: LinkContext, obj: Int, s: Int) -> Int Never! {
+    next_s: s + 1
     if next_s - c.obj_first_section[obj] < c.obj_count[obj] {
-        h :: link_hdr(c, obj, next_s)
-        b :: c.obj_buffer[obj]
+        h: link_hdr(c, obj, next_s)
+        b: c.obj_buffer[obj]
         if link_u32(c.bufs, b, h + 4) == LINK_SHT_RELA && c.obj_first_section[obj] + link_u32(c.bufs, b, h + 44) == s -> return next_s
     }
     if c.rela.len() == 0 -> return -1
@@ -454,13 +454,13 @@ fn link_rela_of(c: LinkContext, obj: Int, s: Int) -> Int Never! {
 }
 
 // The live row of section `s`, or -1.
-fn link_live_row(c: LinkContext, s: Int) -> Int Never! {
+link_live_row: fn(c: LinkContext, s: Int) -> Int Never! {
     if s < 0 || s >= c.live.len() -> return -1
     c.live[s]
 }
 
-fn link_sec_addr(c: LinkContext, s: Int) -> Int Never! {
-    row :: link_live_row(c, s)
+link_sec_addr: fn(c: LinkContext, s: Int) -> Int Never! {
+    row: link_live_row(c, s)
     if row < 0 -> return 0
     c.live_addr[row]
 }
@@ -468,9 +468,9 @@ fn link_sec_addr(c: LinkContext, s: Int) -> Int Never! {
 // ---------------------------------------------------------------------------
 // Symbols. Locals are read from the symbol table; globals have rows.
 
-fn link_intern(c: &LinkContext, name: String) -> Int Never! {
+link_intern: fn(c: &LinkContext, name: String) -> Int Never! {
     if c.g_index.get(name) == .Val(found) -> return found
-    id :: c.g_name.len()
+    id: c.g_name.len()
     &c.g_index.add(name, id).drop("checked absent above")
     &c.g_name.push(name)
     &c.g_kind.push(LINK_G_NONE)
@@ -487,19 +487,19 @@ fn link_intern(c: &LinkContext, name: String) -> Int Never! {
     id
 }
 
-fn link_final(c: LinkContext, g: Int) -> Int Never! {
+link_final: fn(c: LinkContext, g: Int) -> Int Never! {
     at := g
     loop c.g_alias[at] >= 0 -> at = c.g_alias[at]
     at
 }
 
-fn link_defined(c: LinkContext, g: Int) -> Bool Never! {
+link_defined: fn(c: LinkContext, g: Int) -> Bool Never! {
     c.g_kind[link_final(c, g)] != LINK_G_NONE
 }
 
 // Note a reference to global `g`; a strong reference to an undefined symbol
 // queues it for archive resolution.
-fn link_reference(c: &LinkContext, g: Int, weak: Bool) Never! {
+link_reference: fn(c: &LinkContext, g: Int, weak: Bool) Never! {
     if weak -> return
     if !c.g_strong_ref[g] {
         c.g_strong_ref[g] = true
@@ -507,14 +507,14 @@ fn link_reference(c: &LinkContext, g: Int, weak: Bool) Never! {
     }
 }
 
-fn link_sym_at(c: LinkContext, obj: Int, k: Int) -> Int Never! {
+link_sym_at: fn(c: LinkContext, obj: Int, k: Int) -> Int Never! {
     c.obj_symtab[obj] + 24 * k
 }
 
 // Where symbol `k` of `obj` is defined: a section id, LINK_ABS, LINK_COMMON
 // or LINK_UNDEF (also for a section of a discarded COMDAT group).
-fn link_sym_shndx(c: LinkContext, obj: Int, k: Int) -> Int Never! {
-    b :: c.obj_buffer[obj]
+link_sym_shndx: fn(c: LinkContext, obj: Int, k: Int) -> Int Never! {
+    b: c.obj_buffer[obj]
     index := link_u16(c.bufs, b, link_sym_at(c, obj, k) + 6)
     if index == 0xffff {
         if c.obj_shndx[obj] < 0 -> return LINK_UNDEF
@@ -526,32 +526,32 @@ fn link_sym_shndx(c: LinkContext, obj: Int, k: Int) -> Int Never! {
         if index == 0xfff2 -> return LINK_COMMON
     }
     if index <= 0 || index >= c.obj_count[obj] -> return LINK_UNDEF
-    s :: c.obj_first_section[obj] + index
+    s: c.obj_first_section[obj] + index
     if c.discarded.len() > 0 && c.discarded.get(s) != None -> return LINK_UNDEF
     s
 }
 
-fn link_global_of(c: LinkContext, obj: Int, k: Int) -> Int Never! {
+link_global_of: fn(c: LinkContext, obj: Int, k: Int) -> Int Never! {
     if k < c.obj_first_global[obj] -> return -1
-    index :: c.obj_first_symbol[obj] + k
+    index: c.obj_first_symbol[obj] + k
     if index >= c.sym_global.len() -> return -1
     c.sym_global[index]
 }
 
 // The section a relocation target resolves to, or -1.
-fn link_target_section(c: LinkContext, obj: Int, k: Int) -> Int Never! {
-    g :: link_global_of(c, obj, k)
+link_target_section: fn(c: LinkContext, obj: Int, k: Int) -> Int Never! {
+    g: link_global_of(c, obj, k)
     if g < 0 -> return link_sym_shndx(c, obj, k)
-    f :: link_final(c, g)
+    f: link_final(c, g)
     if c.g_kind[f] == LINK_G_FILE -> return c.g_section[f]
     return -1
 }
 
-fn link_global_addr(c: LinkContext, g: Int) -> Int Never! {
-    f :: link_final(c, g)
-    kind :: c.g_kind[f]
+link_global_addr: fn(c: LinkContext, g: Int) -> Int Never! {
+    f: link_final(c, g)
+    kind: c.g_kind[f]
     if kind == LINK_G_FILE {
-        s :: c.g_section[f]
+        s: c.g_section[f]
         if s >= 0 -> return link_sec_addr(c, s) + c.g_value[f]
         if s == LINK_ABS -> return c.g_value[f]
         return 0
@@ -560,37 +560,37 @@ fn link_global_addr(c: LinkContext, g: Int) -> Int Never! {
     0
 }
 
-fn link_target_addr(c: LinkContext, obj: Int, k: Int) -> Int Never! {
-    g :: link_global_of(c, obj, k)
+link_target_addr: fn(c: LinkContext, obj: Int, k: Int) -> Int Never! {
+    g: link_global_of(c, obj, k)
     if g >= 0 -> return link_global_addr(c, g)
-    s :: link_sym_shndx(c, obj, k)
+    s: link_sym_shndx(c, obj, k)
     // A defined local's value is an offset in its section: 32 bits.
     if s >= 0 -> return link_sec_addr(c, s) + link_u32(c.bufs, c.obj_buffer[obj], link_sym_at(c, obj, k) + 8)
     if s == LINK_ABS -> return link_u64(c.bufs, c.obj_buffer[obj], link_sym_at(c, obj, k) + 8)
     0
 }
 
-fn link_target_absolute(c: LinkContext, obj: Int, k: Int) -> Bool Never! {
-    g :: link_global_of(c, obj, k)
+link_target_absolute: fn(c: LinkContext, obj: Int, k: Int) -> Bool Never! {
+    g: link_global_of(c, obj, k)
     if g < 0 -> return link_sym_shndx(c, obj, k) == LINK_ABS
-    f :: link_final(c, g)
+    f: link_final(c, g)
     // Linker-defined names are image addresses (defined after the GOT scan),
     // so they relax like section symbols.
     c.g_kind[f] == LINK_G_FILE && c.g_section[f] == LINK_ABS
 }
 
-fn link_target_size(c: LinkContext, obj: Int, k: Int) -> Int Never! {
-    g :: link_global_of(c, obj, k)
+link_target_size: fn(c: LinkContext, obj: Int, k: Int) -> Int Never! {
+    g: link_global_of(c, obj, k)
     if g < 0 -> return link_u64(c.bufs, c.obj_buffer[obj], link_sym_at(c, obj, k) + 16)
-    f :: link_final(c, g)
+    f: link_final(c, g)
     if c.g_kind[f] == LINK_G_FILE -> return c.g_size[f]
     if c.g_kind[f] == LINK_G_COMMON -> return c.g_common_size[f]
     0
 }
 
 // The GOT key of a relocation target: its global id, or -1 - file symbol.
-fn link_got_key(c: LinkContext, obj: Int, k: Int) -> Int Never! {
-    g :: link_global_of(c, obj, k)
+link_got_key: fn(c: LinkContext, obj: Int, k: Int) -> Int Never! {
+    g: link_global_of(c, obj, k)
     if g >= 0 -> return link_final(c, g)
     return -1 - (c.obj_first_symbol[obj] + k)
 }
@@ -600,7 +600,7 @@ fn link_got_key(c: LinkContext, obj: Int, k: Int) -> Int Never! {
 
 // Load the relocatable object at `base` in buffer `b`. Returns false (with
 // a report) when it is not an x86-64 ELF relocatable object.
-fn link_load_object(c: &LinkContext, b: Int, base: Int, size: Int, name: String) -> Bool Never! {
+link_load_object: fn(c: &LinkContext, b: Int, base: Int, size: Int, name: String) -> Bool Never! {
     if size < LINK_EHDR_SIZE || link_u32(c.bufs, b, base) != 0x464c457f || link_u8(c.bufs, b, base + 4) != 2 || link_u8(c.bufs, b, base + 5) != 1 {
         link_error(&c, "{name}: not a 64-bit little-endian ELF object")
         return false
@@ -609,16 +609,16 @@ fn link_load_object(c: &LinkContext, b: Int, base: Int, size: Int, name: String)
         link_error(&c, "{name}: not an x86-64 relocatable object")
         return false
     }
-    obj :: c.obj_name.len()
-    shoff :: base + link_u64(c.bufs, b, base + 40)
+    obj: c.obj_name.len()
+    shoff: base + link_u64(c.bufs, b, base + 40)
     count := link_u16(c.bufs, b, base + 60)
     names := link_u16(c.bufs, b, base + 62)
     // Extended numbering: the real count and name table index live in
     // section header 0.
     if count == 0 -> count = link_u64(c.bufs, b, shoff + 32)
     if names == 0xffff -> names = link_u32(c.bufs, b, shoff + 40)
-    first :: if obj == 0 -> 0 else -> c.obj_first_section[obj - 1] + c.obj_count[obj - 1]
-    names_at :: base + link_u64(c.bufs, b, shoff + 64 * names + 24)
+    first: if obj == 0 -> 0 else -> c.obj_first_section[obj - 1] + c.obj_count[obj - 1]
+    names_at: base + link_u64(c.bufs, b, shoff + 64 * names + 24)
     // One pass over the headers finds the symbol tables, the out-of-order
     // RELA sections, the COMDAT groups and the unwind tables.
     symtab := -1
@@ -626,14 +626,14 @@ fn link_load_object(c: &LinkContext, b: Int, base: Int, size: Int, name: String)
     groups := [Int]{}
     eh := [Int]{}
     loop k in 1..<count {
-        h :: shoff + 64 * k
-        kind :: link_u32(c.bufs, b, h + 4)
+        h: shoff + 64 * k
+        kind: link_u32(c.bufs, b, h + 4)
         if kind == LINK_SHT_SYMTAB {
             symtab = k
         } else if kind == LINK_SHT_SYMTAB_SHNDX {
             shndx = base + link_u64(c.bufs, b, h + 24)
         } else if kind == LINK_SHT_RELA {
-            target :: link_u32(c.bufs, b, h + 44)
+            target: link_u32(c.bufs, b, h + 44)
             if target + 1 != k && target > 0 && target < count -> &c.rela.add(first + target, first + k).drop("one RELA section per section")
         } else if kind == LINK_SHT_GROUP {
             &groups.push(k)
@@ -641,13 +641,13 @@ fn link_load_object(c: &LinkContext, b: Int, base: Int, size: Int, name: String)
             // `.e...`: an `.eh_frame` an assembler typed PROGBITS.
             &eh.push(k)
         }
-        name_at :: names_at + link_u32(c.bufs, b, h)
+        name_at: names_at + link_u32(c.bufs, b, h)
         if link_name_has(c.bufs, b, name_at, ".init", true) || link_name_has(c.bufs, b, name_at, ".fini", true) {
             &c.init_code.add(first + k, if link_name_has(c.bufs, b, name_at, ".init", true) -> 0 else -> 1).drop("one row per section")
             &c.roots.push(first + k)
         }
         if kind == LINK_SHT_INIT_ARRAY || kind == LINK_SHT_FINI_ARRAY || kind == LINK_SHT_PREINIT_ARRAY || (link_u32(c.bufs, b, h + 8).bit_and(0x200000)) != 0 {
-            guard :: link_u32(c.bufs, b, h + 44)
+            guard: link_u32(c.bufs, b, h + 44)
             if kind != LINK_SHT_PREINIT_ARRAY && link_u32(c.bufs, b, h + 8).bit_and(LINK_SHF_INFO_LINK) != 0 && guard > 0 && guard < count {
                 &c.cond_roots.push(first + k)
                 &c.cond_guards.push(first + guard)
@@ -656,12 +656,12 @@ fn link_load_object(c: &LinkContext, b: Int, base: Int, size: Int, name: String)
             }
         }
     }
-    symtab_header :: shoff + 64 * symtab
-    symtab_at :: if symtab < 0 -> 0 else -> base + link_u64(c.bufs, b, symtab_header + 24)
-    sym_count :: if symtab < 0 -> 0 else -> link_u64(c.bufs, b, symtab_header + 32).div_euclid(24)
-    strtab :: if symtab < 0 -> 0 else -> base + link_u64(c.bufs, b, shoff + 64 * link_u32(c.bufs, b, symtab_header + 40) + 24)
-    first_global :: if symtab < 0 -> 0 else -> link_u32(c.bufs, b, symtab_header + 44)
-    first_symbol :: if obj == 0 -> 0 else -> c.obj_first_symbol[obj - 1] + c.obj_sym_count[obj - 1]
+    symtab_header: shoff + 64 * symtab
+    symtab_at: if symtab < 0 -> 0 else -> base + link_u64(c.bufs, b, symtab_header + 24)
+    sym_count: if symtab < 0 -> 0 else -> link_u64(c.bufs, b, symtab_header + 32).div_euclid(24)
+    strtab: if symtab < 0 -> 0 else -> base + link_u64(c.bufs, b, shoff + 64 * link_u32(c.bufs, b, symtab_header + 40) + 24)
+    first_global: if symtab < 0 -> 0 else -> link_u32(c.bufs, b, symtab_header + 44)
+    first_symbol: if obj == 0 -> 0 else -> c.obj_first_symbol[obj - 1] + c.obj_sym_count[obj - 1]
     &c.obj_name.push(name)
     &c.obj_buffer.push(b)
     &c.obj_base.push(base)
@@ -679,33 +679,33 @@ fn link_load_object(c: &LinkContext, b: Int, base: Int, size: Int, name: String)
     // COMDAT groups: a group whose signature was already loaded discards its
     // member sections; their symbols then read as undefined references.
     loop k in groups {
-        h :: shoff + 64 * k
-        at :: base + link_u64(c.bufs, b, h + 24)
+        h: shoff + 64 * k
+        at: base + link_u64(c.bufs, b, h + 24)
         if (link_u32(c.bufs, b, at).bit_and(1)) == 0 -> next
-        signature :: link_cstr(c.bufs, b, strtab + link_u32(c.bufs, b, symtab_at + 24 * link_u32(c.bufs, b, h + 44)))
+        signature: link_cstr(c.bufs, b, strtab + link_u32(c.bufs, b, symtab_at + 24 * link_u32(c.bufs, b, h + 44)))
         if c.comdats.get(signature) == None {
             &c.comdats.add(signature, true).drop("checked absent above")
             next
         }
-        members :: link_u64(c.bufs, b, h + 32).div_euclid(4)
+        members: link_u64(c.bufs, b, h + 32).div_euclid(4)
         loop m in 1..<members {
-            member :: link_u32(c.bufs, b, at + 4 * m)
+            member: link_u32(c.bufs, b, at + 4 * m)
             if member > 0 && member < count -> &c.discarded.add(first + member, true).drop("a section is in one group")
         }
     }
     loop k in first_global..<sym_count {
-        at :: symtab_at + 24 * k
-        info :: link_u8(c.bufs, b, at + 4)
-        bind :: info >> 4
+        at: symtab_at + 24 * k
+        info: link_u8(c.bufs, b, at + 4)
+        bind: info >> 4
         if bind == 0 -> next
-        section :: link_sym_shndx(c, obj, k)
-        symbol_name :: link_cstr(c.bufs, b, strtab + link_u32(c.bufs, b, at))
-        g :: link_intern(&c, symbol_name)
+        section: link_sym_shndx(c, obj, k)
+        symbol_name: link_cstr(c.bufs, b, strtab + link_u32(c.bufs, b, at))
+        g: link_intern(&c, symbol_name)
         c.sym_global[first_symbol + k] = g
-        weak :: bind == 2
-        value :: link_u64(c.bufs, b, at + 8)
-        symbol_size :: link_u64(c.bufs, b, at + 16)
-        kind :: c.g_kind[g].copy()
+        weak: bind == 2
+        value: link_u64(c.bufs, b, at + 8)
+        symbol_size: link_u64(c.bufs, b, at + 16)
+        kind: c.g_kind[g].copy()
         if section == LINK_UNDEF {
             link_reference(&c, g, weak)
         } else if section == LINK_COMMON {
@@ -722,14 +722,14 @@ fn link_load_object(c: &LinkContext, b: Int, base: Int, size: Int, name: String)
             c.g_obj[g] = obj
             c.g_weak_def[g] = weak
         } else if !weak && !c.g_weak_def[g] && kind == LINK_G_FILE {
-            earlier :: c.g_obj[g].copy()
-            seen_in :: if earlier >= 0 -> c.obj_name[earlier] else -> "the linker"
-            message :: "duplicate symbol `{symbol_name}`: defined in {seen_in} and {name}"
+            earlier: c.g_obj[g].copy()
+            seen_in: if earlier >= 0 -> c.obj_name[earlier] else -> "the linker"
+            message: "duplicate symbol `{symbol_name}`: defined in {seen_in} and {name}"
             link_error(&c, message)
         }
     }
     loop k in eh {
-        s :: first + k
+        s: first + k
         if link_class(c, obj, s) == LINK_EH -> link_parse_eh(&c, obj, s)
     }
     true
@@ -738,61 +738,61 @@ fn link_load_object(c: &LinkContext, b: Int, base: Int, size: Int, name: String)
 // ---------------------------------------------------------------------------
 // Relocation entries.
 
-fn link_rel_count(c: LinkContext, obj: Int, s: Int) -> Int Never! {
-    r :: link_rela_of(c, obj, s)
+link_rel_count: fn(c: LinkContext, obj: Int, s: Int) -> Int Never! {
+    r: link_rela_of(c, obj, s)
     if r < 0 -> return 0
     link_sec_size(c, obj, r).div_euclid(24)
 }
 
 // Absolute offset of the RELA table of `s` (0 when it has none).
-fn link_rel_table(c: LinkContext, obj: Int, s: Int) -> Int Never! {
-    r :: link_rela_of(c, obj, s)
+link_rel_table: fn(c: LinkContext, obj: Int, s: Int) -> Int Never! {
+    r: link_rela_of(c, obj, s)
     if r < 0 -> return 0
     link_sec_offset(c, obj, r)
 }
 
-fn link_reloc_error(c: &LinkContext, s: Int, off: Int, message: String) Never! {
+link_reloc_error: fn(c: &LinkContext, s: Int, off: Int, message: String) Never! {
     &c.errors.push(link_reloc_text(c, s, off, message))
 }
 
 // A relocation report: the section's label, the offset and `message`.
-fn link_reloc_text(c: LinkContext, s: Int, off: Int, message: String) -> String Never! {
-    site :: link_section_label(c, s)
+link_reloc_text: fn(c: LinkContext, s: Int, off: Int, message: String) -> String Never! {
+    site: link_section_label(c, s)
     "{site}+{off}: {message}"
 }
 
 // ---------------------------------------------------------------------------
 // Unwind tables: split each `.eh_frame` into its CIE and FDE records.
 
-fn link_parse_eh(c: &LinkContext, obj: Int, s: Int) Never! {
-    b :: c.obj_buffer[obj].copy()
-    base :: link_sec_offset(c, obj, s)
-    size :: link_sec_size(c, obj, s)
-    count :: link_rel_count(c, obj, s)
-    table :: link_rel_table(c, obj, s)
+link_parse_eh: fn(c: &LinkContext, obj: Int, s: Int) Never! {
+    b: c.obj_buffer[obj].copy()
+    base: link_sec_offset(c, obj, s)
+    size: link_sec_size(c, obj, s)
+    count: link_rel_count(c, obj, s)
+    table: link_rel_table(c, obj, s)
     starts := [Int:Int]{}
     k := 0
     off := 0
     loop off + 4 <= size {
-        length :: link_u32(c.bufs, b, base + off)
+        length: link_u32(c.bufs, b, base + off)
         if length == 0 -> break
         if length == 0xffffffff {
             link_reloc_error(&c, s, off, "64-bit .eh_frame records are not supported")
             return
         }
-        total :: length + 4
-        id :: link_u32(c.bufs, b, base + off + 4)
-        piece :: c.ep_sec.len()
+        total: length + 4
+        id: link_u32(c.bufs, b, base + off + 4)
+        piece: c.ep_sec.len()
         cie := -1
         if id != 0 {
             cie = starts.get(off + 4 - id) ?? -1
             if cie < 0 -> link_reloc_error(&c, s, off, "the FDE names no CIE")
         }
-        first :: k
+        first: k
         target := -1
         loop k < count {
-            at :: table + 24 * k
-            rel_off :: link_u64(c.bufs, b, at)
+            at: table + 24 * k
+            rel_off: link_u64(c.bufs, b, at)
             if rel_off >= off + total -> break
             if rel_off < off {
                 link_reloc_error(&c, s, rel_off, "relocations are not sorted by offset")
@@ -820,31 +820,31 @@ fn link_parse_eh(c: &LinkContext, obj: Int, s: Int) Never! {
 // ---------------------------------------------------------------------------
 // Resolution against the archives.
 
-fn link_pull(c: &LinkContext, key: Int) Never! {
+link_pull: fn(c: &LinkContext, key: Int) Never! {
     if c.pulled.get(key) != None -> return
     &c.pulled.add(key, true).drop("checked absent above")
-    index :: key.div_euclid(LINK_MEMBER_SCALE)
-    member :: key % LINK_MEMBER_SCALE
-    name :: "{c.archives[index].path}({c.archives[index].names[member]})"
-    b :: c.archive_buffer[index].copy()
-    start :: c.archives[index].starts[member].copy()
-    size :: c.archives[index].sizes[member].copy()
+    index: key.div_euclid(LINK_MEMBER_SCALE)
+    member: key % LINK_MEMBER_SCALE
+    name: "{c.archives[index].path}({c.archives[index].names[member]})"
+    b: c.archive_buffer[index].copy()
+    start: c.archives[index].starts[member].copy()
+    size: c.archives[index].sizes[member].copy()
     _ := link_load_object(&c, b, start, size, name)
 }
 
 // Pull members until no queued strong reference can be satisfied.
-fn link_resolve(c: &LinkContext) Never! {
+link_resolve: fn(c: &LinkContext) Never! {
     loop c.pending_head < c.pending.len() {
-        g :: c.pending[c.pending_head].copy()
+        g: c.pending[c.pending_head].copy()
         c.pending_head += 1
-        f :: link_final(c, g)
+        f: link_final(c, g)
         if c.g_kind[f] != LINK_G_NONE -> next
-        key :: c.lookup.get(c.g_name[f]) ?? -1
+        key: c.lookup.get(c.g_name[f]) ?? -1
         if key >= 0 -> link_pull(&c, key)
     }
 }
 
-fn link_resolvable(c: LinkContext, name: String) -> Bool Never! {
+link_resolvable: fn(c: LinkContext, name: String) -> Bool Never! {
     if c.g_index.get(name) == .Val(g) {
         if c.g_kind[link_final(c, g)] != LINK_G_NONE -> return true
     }
@@ -853,8 +853,8 @@ fn link_resolvable(c: LinkContext, name: String) -> Bool Never! {
 
 // glibc's large-file names with the same x86-64 ABI as their base names,
 // which musl no longer exports.
-fn link_lfs64_base(name: String) -> String? Never! {
-    names :: [String]{
+link_lfs64_base: fn(name: String) -> String? Never! {
+    names: [String]{
         "open64", "openat64", "creat64", "lseek64", "pread64", "pwrite64", "preadv64", "pwritev64",
         "truncate64", "ftruncate64", "stat64", "fstat64", "lstat64", "fstatat64", "statfs64", "fstatfs64",
         "statvfs64", "fstatvfs64", "mmap64", "readdir64", "posix_fadvise64", "posix_fallocate64",
@@ -866,7 +866,7 @@ fn link_lfs64_base(name: String) -> String? Never! {
     if name == "readdir64_r" -> return Val("readdir_r")
     loop candidate in names {
         if candidate == name {
-            bytes :: name.bytes()
+            bytes: name.bytes()
             return Val(String.from_bytes(bytes[0..<bytes.len() - 2]) ?? name)
         }
     }
@@ -878,24 +878,24 @@ fn link_lfs64_base(name: String) -> String? Never! {
 // crate (v0: `_RNvCs<hash>_7___rustc<len>_<name>`, the `_` separating a
 // length from an identifier that starts with `_`). Returns the target name,
 // "" for the no-op `__rust_no_alloc_shim_is_unstable_v2`, or None.
-fn link_alloc_shim_target(name: String) -> String? Never! {
-    operations :: [String]{"alloc", "dealloc", "realloc", "alloc_zeroed"}
+link_alloc_shim_target: fn(name: String) -> String? Never! {
+    operations: [String]{"alloc", "dealloc", "realloc", "alloc_zeroed"}
     if name == "__rust_no_alloc_shim_is_unstable_v2" -> return Val("")
     loop operation in operations {
-        plain :: "__rust_{operation}"
+        plain: "__rust_{operation}"
         if name == plain -> return Val("__rdl_{operation}")
     }
     if !name.starts_with("_RNvCs") -> return None
-    parts :: name.split("_7___rustc").to_list()
+    parts: name.split("_7___rustc").to_list()
     if parts.len() != 2 -> return None
-    prefix :: "{parts[0]}_7___rustc"
-    rest :: parts[1]
+    prefix: "{parts[0]}_7___rustc"
+    rest: parts[1]
     if rest == "35___rust_no_alloc_shim_is_unstable_v2" -> return Val("")
     loop op in operations {
-        source :: "__rust_{op}"
-        expected :: "{source.len()}_{source}"
+        source: "__rust_{op}"
+        expected: "{source.len()}_{source}"
         if rest == expected {
-            target :: "__rdl_{op}"
+            target: "__rdl_{op}"
             return Val("{prefix}{target.len()}_{target}")
         }
     }
@@ -906,7 +906,7 @@ fn link_alloc_shim_target(name: String) -> String? Never! {
 // Synthetic objects: code the linker writes as an ELF relocatable object
 // and loads like any input, so one path resolves and relocates it.
 
-struct LinkSynth {
+LinkSynth: struct {
     text: [U8]
     data: [U8]
     bss: Int
@@ -921,17 +921,17 @@ struct LinkSynth {
     names: [String:Bool]
 }
 
-fn link_synth() -> LinkSynth Never! {
+link_synth: fn() -> LinkSynth Never! {
     LinkSynth{text: [U8]{}, data: [U8]{}, bss: 0, def_names: [String]{}, def_sections: [Int]{}, def_values: [Int]{}, rel_at: [Int]{}, rel_names: [String]{}, rel_types: [Int]{}, rel_addends: [Int]{}, names: [String:Bool]{}}
 }
 
-fn link_synth_code(s: &LinkSynth, bytes: [Int]) Never! {
+link_synth_code: fn(s: &LinkSynth, bytes: [Int]) Never! {
     loop byte in bytes -> &s.text.push(U8{byte.bit_and(255)})
 }
 
 // A rel32 field naming `name` at the end of the text so far.
-fn link_synth_rel32(s: &LinkSynth, name: String, kind: Int) Never! {
-    at :: s.text.len()
+link_synth_rel32: fn(s: &LinkSynth, name: String, kind: Int) Never! {
+    at: s.text.len()
     &s.rel_at.push(at)
     &s.rel_names.push(name)
     &s.rel_types.push(kind)
@@ -941,7 +941,7 @@ fn link_synth_rel32(s: &LinkSynth, name: String, kind: Int) Never! {
 
 // A 32-bit field holding the distance from itself to `name` (data, not an
 // instruction's operand), at the end of the text so far.
-fn link_synth_pcrel_field(s: &LinkSynth, name: String) Never! {
+link_synth_pcrel_field: fn(s: &LinkSynth, name: String) Never! {
     &s.rel_at.push(s.text.len())
     &s.rel_names.push(name)
     &s.rel_types.push(LINK_R_PC32)
@@ -949,23 +949,23 @@ fn link_synth_pcrel_field(s: &LinkSynth, name: String) Never! {
     link_synth_code(&s, [Int]{0, 0, 0, 0})
 }
 
-fn link_synth_define(s: &LinkSynth, name: String, section: Int, value: Int) Never! {
+link_synth_define: fn(s: &LinkSynth, name: String, section: Int, value: Int) Never! {
     &s.def_names.push(name)
     &s.def_sections.push(section)
     &s.def_values.push(value)
     &s.names.add(name, true).drop("a synthetic object defines each name once")
 }
 
-fn link_synth_function(s: &LinkSynth, name: String) Never! {
+link_synth_function: fn(s: &LinkSynth, name: String) Never! {
     loop s.text.len() % 16 != 0 -> &s.text.push(U8{0xcc})
-    at :: s.text.len()
+    at: s.text.len()
     link_synth_define(&s, name, 1, at)
 }
 
 // The ELF relocatable object for `s`: .text, .data, .bss, .rela.text,
 // .symtab, .strtab, .shstrtab. Every defined name is global; every other
 // relocation name is an undefined global.
-fn link_synth_object(s: LinkSynth) -> [U8] Never! {
+link_synth_object: fn(s: LinkSynth) -> [U8] Never! {
     strtab := [U8]{U8{0}}
     symtab := [U8]{}
     loop _ in 0..<24 -> &symtab.push(U8{0})
@@ -996,18 +996,18 @@ fn link_synth_object(s: LinkSynth) -> [U8] Never! {
         elf64_u64(&rela, s.rel_addends[k])
     }
     shstrtab := [U8]{U8{0}}
-    section_names :: [String]{".text", ".data", ".bss", ".rela.text", ".symtab", ".strtab", ".shstrtab"}
+    section_names: [String]{".text", ".data", ".bss", ".rela.text", ".symtab", ".strtab", ".shstrtab"}
     name_at := [Int]{0}
     loop name in section_names -> &name_at.push(elf64_string(&shstrtab, name))
     bytes := [U8]{}
-    ident :: [Int]{0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    ident: [Int]{0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0}
     loop byte in ident -> &bytes.push(U8{byte})
     elf64_u16(&bytes, 1)
     elf64_u16(&bytes, 62)
     elf64_u32(&bytes, 1)
     elf64_u64(&bytes, 0)
     elf64_u64(&bytes, 0)
-    shoff_at :: bytes.len()
+    shoff_at: bytes.len()
     elf64_u64(&bytes, 0)
     elf64_u32(&bytes, 0)
     elf64_u16(&bytes, LINK_EHDR_SIZE)
@@ -1016,7 +1016,7 @@ fn link_synth_object(s: LinkSynth) -> [U8] Never! {
     elf64_u16(&bytes, 64)
     elf64_u16(&bytes, 8)
     elf64_u16(&bytes, 7)
-    contents :: [[U8]]{s.text, s.data, rela, symtab, strtab, shstrtab}
+    contents: [[U8]]{s.text, s.data, rela, symtab, strtab, shstrtab}
     offsets := [Int]{}
     loop content in contents {
         elf64_pad(&bytes, 16)
@@ -1024,7 +1024,7 @@ fn link_synth_object(s: LinkSynth) -> [U8] Never! {
         loop byte in content -> &bytes.push(byte)
     }
     elf64_pad(&bytes, 8)
-    shoff :: bytes.len()
+    shoff: bytes.len()
     loop shift in 0..<8 -> bytes[shoff_at + shift] = U8{(shoff >> (8 * shift)).bit_and(255)}
     elf64_section_header(&bytes, 0, 0, 0, 0, 0, 0, 0, 0, 0)
     elf64_section_header(&bytes, name_at[1], 1, 6, offsets[0], s.text.len(), 0, 0, 16, 0)
@@ -1037,10 +1037,10 @@ fn link_synth_object(s: LinkSynth) -> [U8] Never! {
     bytes
 }
 
-fn link_load_synth(c: &LinkContext, s: LinkSynth, name: String) Never! {
-    bytes :: link_synth_object(s)
-    b :: c.bufs.len()
-    size :: bytes.len()
+link_load_synth: fn(c: &LinkContext, s: LinkSynth, name: String) Never! {
+    bytes: link_synth_object(s)
+    b: c.bufs.len()
+    size: bytes.len()
     &c.bufs.push(bytes)
     _ := link_load_object(&c, b, 0, size, name)
 }
@@ -1052,7 +1052,7 @@ fn link_load_synth(c: &LinkContext, s: LinkSynth, name: String) Never! {
 // those three arguments (glibc's convention; musl's own init loop sees an
 // empty array), and tail-calls the program's `main`. It also defines
 // `__dso_handle`, which crtbegin.o defines in gcc links.
-fn link_startup(register_frames: Bool) -> LinkSynth Never! {
+link_startup: fn(register_frames: Bool) -> LinkSynth Never! {
     s := link_synth()
     link_synth_function(&s, "_start")
     // xor ebp, ebp; mov rsi, [rsp]; lea rdx, [rsp + 8]; and rsp, -16; lea rdi, [rip + __jet_link_main]
@@ -1088,7 +1088,7 @@ fn link_startup(register_frames: Bool) -> LinkSynth Never! {
     link_synth_rel32(&s, "main", LINK_R_PLT32)
     link_synth_define(&s, "__dso_handle", 2, 0)
     loop _ in 0..<8 -> &s.data.push(U8{0})
-    // libgcc's `struct object` for the registered tables (at most 8 words),
+    // libgcc's `object: struct` for the registered tables (at most 8 words),
     // then the registration state the lazy `_dl_find_object` keeps
     // (link_eh_shims): 0 none, 1 registering, 2 registered.
     link_synth_define(&s, "__jet_eh_object", 3, 0)
@@ -1103,7 +1103,7 @@ fn link_startup(register_frames: Bool) -> LinkSynth Never! {
 // `.fini_array` entries last to first and exits with `main`'s status. That
 // is what musl's `__libc_start_main` and `exit` do for such a program; its
 // TLS, environment, stack guard and stdio setup have no reader there.
-fn link_owned_startup() -> LinkSynth Never! {
+link_owned_startup: fn() -> LinkSynth Never! {
     s := link_synth()
     link_synth_function(&s, LINK_OWNED_START)
     // xor ebp, ebp; mov r12, [rsp]; lea r13, [rsp + 8]; lea r14, [r13 + r12 * 8 + 8]; and rsp, -16
@@ -1134,12 +1134,12 @@ fn link_owned_startup() -> LinkSynth Never! {
     s
 }
 
-LINK_OWNED_START :: "__jet_start"
+LINK_OWNED_START: "__jet_start"
 
 // The suffix a runtime pack gives the name of each section that runs without
 // libc's startup (Image/RuntimePack.jet link_pack_nolibc): the Jet runtime's
 // own code and data, and C's freestanding memory functions.
-LINK_NOLIBC_SUFFIX :: ".nolibc"
+LINK_NOLIBC_SUFFIX: ".nolibc"
 
 // Whether a program the pack starts (`start_g` is the pack's `_start`) can
 // start at its own startup instead: whether everything that startup keeps
@@ -1150,16 +1150,16 @@ LINK_NOLIBC_SUFFIX :: ".nolibc"
 // section kept must be the program object's (the one defining `main`), a
 // pack section marked LINK_NOLIBC_SUFFIX, or an init or fini array. Thread
 // data (musl sets up TLS) and a preinit array fail.
-fn link_owned_fits(c: LinkContext, start_g: Int) -> Bool Never! {
-    main_g :: c.g_index.get("main") ?? return false
-    pack_g :: c.g_index.get("__jet_link_main") ?? return false
-    main_final :: link_final(c, main_g)
-    pack_final :: link_final(c, pack_g)
-    start_final :: link_final(c, start_g)
+link_owned_fits: fn(c: LinkContext, start_g: Int) -> Bool Never! {
+    main_g: c.g_index.get("main") ?? return false
+    pack_g: c.g_index.get("__jet_link_main") ?? return false
+    main_final: link_final(c, main_g)
+    pack_final: link_final(c, pack_g)
+    start_final: link_final(c, start_g)
     if c.g_kind[main_final] != LINK_G_FILE || c.g_kind[pack_final] != LINK_G_FILE || c.g_kind[start_final] != LINK_G_FILE -> return false
-    pack :: c.g_obj[pack_final]
+    pack: c.g_obj[pack_final]
     if c.g_obj[start_final] != pack || c.g_section[main_final] < 0 -> return false
-    program :: c.g_obj[main_final]
+    program: c.g_obj[main_final]
     // The first FDE describing each section and the next FDE describing the
     // same one (link_collect's index; until then `ep_target` is a symbol).
     fde_first := [Int:Int]{}
@@ -1167,7 +1167,7 @@ fn link_owned_fits(c: LinkContext, start_g: Int) -> Bool Never! {
     loop piece in 0..<c.ep_sec.len() {
         &fde_next.push(-1)
         if c.ep_target[piece] < 0 -> next
-        t :: link_target_section(c, c.ep_obj[piece], c.ep_target[piece])
+        t: link_target_section(c, c.ep_obj[piece], c.ep_target[piece])
         if t < 0 -> next
         fde_next[piece] = fde_first.get(t) ?? -1
         fde_first[t] = piece
@@ -1182,21 +1182,21 @@ fn link_owned_fits(c: LinkContext, start_g: Int) -> Bool Never! {
     head := 0
     loop {
         loop head < work.len() {
-            s :: work[head]
+            s: work[head]
             head += 1
             if s < 0 || kept.get(s) != None -> next
-            obj :: link_obj_of(c, s)
-            class :: link_class(c, obj, s)
+            obj: link_obj_of(c, s)
+            class: link_class(c, obj, s)
             &kept.add(s, class >= 0 && class != LINK_EH).drop("checked absent above")
             if class < 0 || class == LINK_EH -> next
             if class == LINK_TDATA || class == LINK_TBSS || class == LINK_PREINIT -> return false
-            b :: c.obj_buffer[obj]
+            b: c.obj_buffer[obj]
             if obj != program && class != LINK_INIT && class != LINK_FINI && c.obj_name[obj] != LINK_FAULT_REPORT_OBJECT {
                 if obj != pack || !link_cstr(c.bufs, b, link_sec_name(c, obj, s)).ends_with(LINK_NOLIBC_SUFFIX) -> return false
             }
-            r :: link_rela_of(c, obj, s)
+            r: link_rela_of(c, obj, s)
             if r >= 0 {
-                table :: link_sec_offset(c, obj, r)
+                table: link_sec_offset(c, obj, r)
                 loop k in 0..<link_sec_size(c, obj, r).div_euclid(24) {
                     &work.push(link_target_section(c, obj, link_u32(c.bufs, b, table + 24 * k + 12)))
                 }
@@ -1215,13 +1215,13 @@ fn link_owned_fits(c: LinkContext, start_g: Int) -> Bool Never! {
 }
 
 // Queue the targets of the relocations in `piece` (link_mark_piece's).
-fn link_owned_piece(c: LinkContext, work: &[Int], piece: Int, skip_pc: Bool) Never! {
-    obj :: c.ep_obj[piece]
-    b :: c.obj_buffer[obj]
-    table :: link_rel_table(c, obj, c.ep_sec[piece])
-    pc :: c.ep_start[piece] + 8
+link_owned_piece: fn(c: LinkContext, work: &[Int], piece: Int, skip_pc: Bool) Never! {
+    obj: c.ep_obj[piece]
+    b: c.obj_buffer[obj]
+    table: link_rel_table(c, obj, c.ep_sec[piece])
+    pc: c.ep_start[piece] + 8
     loop k in c.ep_first_reloc[piece]..<c.ep_first_reloc[piece] + c.ep_reloc_count[piece] {
-        at :: table + 24 * k
+        at: table + 24 * k
         if skip_pc && link_u64(c.bufs, b, at) == pc -> next
         &work.push(link_target_section(c, obj, link_u32(c.bufs, b, at + 12)))
     }
@@ -1233,17 +1233,17 @@ fn link_owned_piece(c: LinkContext, work: &[Int], piece: Int, skip_pc: Bool) Nev
 // (link_fault_report), and once no other shim is wanted,
 // `__jet_eh_startup` and `_dl_find_object` (link_eh_shims). Returns whether
 // anything was added.
-fn link_shims(c: &LinkContext) -> Bool Never! {
+link_shims: fn(c: &LinkContext) -> Bool Never! {
     s := link_synth()
     report := link_synth()
     changed := false
-    count :: c.g_name.len()
+    count: c.g_name.len()
     loop g in 0..<count {
         if !c.g_strong_ref[g] || c.g_alias[g] >= 0 || c.g_kind[g] != LINK_G_NONE -> next
-        name :: c.g_name[g].copy()
+        name: c.g_name[g].copy()
         if link_lfs64_base(name) == .Val(base) {
             if link_resolvable(c, base) {
-                target :: link_intern(&c, base)
+                target: link_intern(&c, base)
                 c.g_alias[g] = target
                 link_reference(&c, target, false)
                 changed = true
@@ -1279,7 +1279,7 @@ fn link_shims(c: &LinkContext) -> Bool Never! {
             link_synth_code(&s, [Int]{0x48, 0x8d, 0x05})
             link_synth_rel32(&s, "__jet_libc_version", LINK_R_PC32)
             link_synth_code(&s, [Int]{0xc3})
-            version_at :: s.data.len()
+            version_at: s.data.len()
             link_synth_define(&s, "__jet_libc_version", 2, version_at)
             loop byte in "2.26".bytes() -> &s.data.push(byte)
             &s.data.push(U8{0})
@@ -1305,7 +1305,7 @@ fn link_shims(c: &LinkContext) -> Bool Never! {
 // keeps doing so (link_owned_fits). The image places it right after the
 // section calling it (link_rows_in_order), so the handler and its report
 // share one run of code as they would in one function.
-fn link_fault_report(s: &LinkSynth, report: LinkFaultReport) Never! {
+link_fault_report: fn(s: &LinkSynth, report: LinkFaultReport) Never! {
     link_synth_function(&s, LINK_FAULT_REPORT)
     if report == .Addresses {
         &s.text.extend(X64_FAULT_REPORT_ADDRESSES)
@@ -1331,11 +1331,11 @@ fn link_fault_report(s: &LinkSynth, report: LinkFaultReport) Never! {
 //   registered, libgcc finds every pc in them before it asks again.
 // - Otherwise `__jet_eh_startup` registers at startup and `_dl_find_object`
 //   finds nothing.
-fn link_eh_shims(c: LinkContext, s: &LinkSynth) Never! {
-    startup :: link_shim_wanted(c, "__jet_eh_startup")
-    find :: link_shim_wanted(c, "_dl_find_object")
-    unwinder :: link_defined_name(c, "_Unwind_Find_FDE")
-    lazy :: startup && find && unwinder
+link_eh_shims: fn(c: LinkContext, s: &LinkSynth) Never! {
+    startup: link_shim_wanted(c, "__jet_eh_startup")
+    find: link_shim_wanted(c, "_dl_find_object")
+    unwinder: link_defined_name(c, "_Unwind_Find_FDE")
+    lazy: startup && find && unwinder
     if startup {
         link_synth_function(&s, "__jet_eh_startup")
         if lazy || !unwinder {
@@ -1392,18 +1392,18 @@ fn link_eh_shims(c: LinkContext, s: &LinkSynth) Never! {
 
 // Whether `name` is strongly referenced and still undefined: a shim would
 // be written for it this round.
-fn link_shim_wanted(c: LinkContext, name: String) -> Bool Never! {
-    g :: c.g_index.get(name) ?? return false
+link_shim_wanted: fn(c: LinkContext, name: String) -> Bool Never! {
+    g: c.g_index.get(name) ?? return false
     c.g_strong_ref[g] && c.g_alias[g] < 0 && c.g_kind[g] == LINK_G_NONE
 }
 
-fn link_defined_name(c: LinkContext, name: String) -> Bool Never! {
-    g :: c.g_index.get(name) ?? return false
+link_defined_name: fn(c: LinkContext, name: String) -> Bool Never! {
+    g: c.g_index.get(name) ?? return false
     link_defined(c, g)
 }
 
 // Symbols the linker defines from the layout when inputs reference them.
-fn link_linker_names() -> [String] Never! {
+link_linker_names: fn() -> [String] Never! {
     [String]{
         "__jet_init_array_start", "__jet_init_array_end", "__init_array_start", "__init_array_end",
         "__fini_array_start", "__fini_array_end", "__preinit_array_start", "__preinit_array_end",
@@ -1417,10 +1417,10 @@ fn link_linker_names() -> [String] Never! {
 
 // Mark section `s` live (queueing it on `work`) unless it already is or
 // never reaches the image (then remembered as -2).
-fn link_mark(c: &LinkContext, work: &[Int], s: Int) Never! {
+link_mark: fn(c: &LinkContext, work: &[Int], s: Int) Never! {
     if s < 0 || c.live[s] != -1 -> return
-    obj :: link_obj_of(c, s)
-    class :: link_class(c, obj, s)
+    obj: link_obj_of(c, s)
+    class: link_class(c, obj, s)
     if class < 0 || class == LINK_EH {
         c.live[s] = -2
         return
@@ -1433,18 +1433,18 @@ fn link_mark(c: &LinkContext, work: &[Int], s: Int) Never! {
 }
 
 // Mark the targets of the relocations in `piece`, except its pc_begin.
-fn link_mark_piece(c: &LinkContext, work: &[Int], piece: Int, skip_pc: Bool) Never! {
-    s :: c.ep_sec[piece].copy()
-    obj :: c.ep_obj[piece].copy()
-    b :: c.obj_buffer[obj].copy()
-    table :: link_rel_table(c, obj, s)
-    first :: c.ep_first_reloc[piece].copy()
-    end :: first + c.ep_reloc_count[piece]
-    pc :: c.ep_start[piece] + 8
+link_mark_piece: fn(c: &LinkContext, work: &[Int], piece: Int, skip_pc: Bool) Never! {
+    s: c.ep_sec[piece].copy()
+    obj: c.ep_obj[piece].copy()
+    b: c.obj_buffer[obj].copy()
+    table: link_rel_table(c, obj, s)
+    first: c.ep_first_reloc[piece].copy()
+    end: first + c.ep_reloc_count[piece]
+    pc: c.ep_start[piece] + 8
     loop k in first..<end {
-        at :: table + 24 * k
+        at: table + 24 * k
         if skip_pc && link_u64(c.bufs, b, at) == pc -> next
-        t :: link_target_section(c, obj, link_u32(c.bufs, b, at + 12))
+        t: link_target_section(c, obj, link_u32(c.bufs, b, at + 12))
         link_mark(&c, &work, t)
     }
 }
@@ -1454,9 +1454,9 @@ fn link_mark_piece(c: &LinkContext, work: &[Int], piece: Int, skip_pc: Bool) Nev
 // conditional init/fini array once the section it links to is live, to a
 // fixpoint; then keep exactly the FDEs of live sections. Each live section's
 // relocations are scanned once, for marking and for link_scan_reloc.
-fn link_collect(c: &LinkContext, entries: [Int], linker_names: [String:Bool]) Never! {
-    last :: c.obj_first_section.len() - 1
-    sections :: if last < 0 -> 0 else -> c.obj_first_section[last] + c.obj_count[last]
+link_collect: fn(c: &LinkContext, entries: [Int], linker_names: [String:Bool]) Never! {
+    last: c.obj_first_section.len() - 1
+    sections: if last < 0 -> 0 else -> c.obj_first_section[last] + c.obj_count[last]
     loop _ in 0..<sections {
         &c.live.push(-1)
         &c.sec_fde.push(-1)
@@ -1464,8 +1464,8 @@ fn link_collect(c: &LinkContext, entries: [Int], linker_names: [String:Bool]) Ne
     // Index the FDEs by the section they describe.
     loop piece in 0..<c.ep_sec.len() {
         if c.ep_target[piece] < 0 -> next
-        obj :: c.ep_obj[piece].copy()
-        t :: link_target_section(c, obj, c.ep_target[piece])
+        obj: c.ep_obj[piece].copy()
+        t: link_target_section(c, obj, c.ep_target[piece])
         c.ep_target[piece] = t
         if t < 0 -> next
         c.ep_next[piece] = c.sec_fde[t]
@@ -1475,7 +1475,7 @@ fn link_collect(c: &LinkContext, entries: [Int], linker_names: [String:Bool]) Ne
     loop entry in entries -> link_mark(&c, &work, entry)
     // Init/fini arrays and SHF_GNU_RETAIN sections of every object are roots.
     loop index in 0..<c.roots.len() {
-        root :: c.roots[index].copy()
+        root: c.roots[index].copy()
         link_mark(&c, &work, root)
     }
     // Personality routines named by the CIEs.
@@ -1486,23 +1486,23 @@ fn link_collect(c: &LinkContext, entries: [Int], linker_names: [String:Bool]) Ne
     head := 0
     loop {
         loop head < work.len() {
-            s :: work[head].copy()
+            s: work[head].copy()
             head += 1
-            obj :: link_obj_of(c, s)
-            b :: c.obj_buffer[obj].copy()
-            r :: link_rela_of(c, obj, s)
+            obj: link_obj_of(c, s)
+            b: c.obj_buffer[obj].copy()
+            r: link_rela_of(c, obj, s)
             // Rows are scanned in the order they were marked.
             &c.rel_base.push(c.rel_slot.len())
             if r >= 0 {
-                count :: link_sec_size(c, obj, r).div_euclid(24)
-                table :: link_sec_offset(c, obj, r)
+                count: link_sec_size(c, obj, r).div_euclid(24)
+                table: link_sec_offset(c, obj, r)
                 loop k in 0..<count {
-                    at :: table + 24 * k
-                    symbol :: link_u32(c.bufs, b, at + 12)
-                    t :: link_target_section(c, obj, symbol)
+                    at: table + 24 * k
+                    symbol: link_u32(c.bufs, b, at + 12)
+                    t: link_target_section(c, obj, symbol)
                     link_mark(&c, &work, t)
                     if t >= 0 && t == c.fault_report_section && c.fault_report_caller < 0 -> c.fault_report_caller = s
-                    slot :: link_scan_reloc(&c, &reported, linker_names, obj, s, at, symbol)
+                    slot: link_scan_reloc(&c, &reported, linker_names, obj, s, at, symbol)
                     &c.rel_slot.push(slot)
                 }
             }
@@ -1513,7 +1513,7 @@ fn link_collect(c: &LinkContext, entries: [Int], linker_names: [String:Bool]) Ne
             }
         }
         loop index in 0..<c.cond_roots.len() {
-            root :: c.cond_roots[index].copy()
+            root: c.cond_roots[index].copy()
             if link_live_row(c, c.cond_guards[index]) >= 0 -> link_mark(&c, &work, root)
         }
         if head == work.len() -> break
@@ -1532,20 +1532,20 @@ fn link_collect(c: &LinkContext, entries: [Int], linker_names: [String:Bool]) Ne
 // function. FDEs are visited in output order and the first FDE to use a
 // record decides which CIE stays, so each CIE is still written before every
 // FDE that names it (link_emit_eh's CIE pointer stays positive).
-fn link_share_cies(c: &LinkContext) Never! {
+link_share_cies: fn(c: &LinkContext) Never! {
     loop piece in 0..<c.ep_sec.len() {
         if c.ep_cie[piece] < 0 -> c.ep_keep[piece] = false
     }
     chosen := [Int:Int]{}
     by_bytes := [String:Int]{}
     loop piece in 0..<c.ep_sec.len() {
-        cie :: c.ep_cie[piece].copy()
+        cie: c.ep_cie[piece].copy()
         if cie < 0 || !c.ep_keep[piece] -> next
         shared := chosen.get(cie) ?? -1
         if shared < 0 {
             shared = cie
             if c.ep_reloc_count[cie] == 0 {
-                key :: link_eh_record_key(c, cie)
+                key: link_eh_record_key(c, cie)
                 shared = by_bytes.get(key) ?? cie
                 if shared == cie -> &by_bytes.add(key, cie).drop("a new record")
             }
@@ -1558,11 +1558,11 @@ fn link_share_cies(c: &LinkContext) Never! {
 
 // The bytes of one `.eh_frame` record as text: its 32-bit words, then any
 // trailing bytes.
-fn link_eh_record_key(c: LinkContext, piece: Int) -> String Never! {
-    obj :: c.ep_obj[piece].copy()
-    b :: c.obj_buffer[obj].copy()
-    start :: link_sec_offset(c, obj, c.ep_sec[piece].copy()) + c.ep_start[piece]
-    length :: c.ep_len[piece].copy()
+link_eh_record_key: fn(c: LinkContext, piece: Int) -> String Never! {
+    obj: c.ep_obj[piece].copy()
+    b: c.obj_buffer[obj].copy()
+    start: link_sec_offset(c, obj, c.ep_sec[piece].copy()) + c.ep_start[piece]
+    length: c.ep_len[piece].copy()
     words := [String]{}
     at := 0
     loop at + 4 <= length {
@@ -1587,15 +1587,15 @@ fn link_eh_record_key(c: LinkContext, piece: Int) -> String Never! {
 // (what rustc emits) relaxes only a REX.W `mov`, to `lea`; GOTPCRELX also
 // relaxes `call`/`jmp` and a `mov` without REX; REX_GOTPCRELX turns a REX.W
 // `mov` into a sign-extended immediate move.
-fn link_got_form(c: LinkContext, kind: Int, obj: Int, s: Int, off: Int, symbol: Int, addend: Int) -> Int Never! {
+link_got_form: fn(c: LinkContext, kind: Int, obj: Int, s: Int, off: Int, symbol: Int, addend: Int) -> Int Never! {
     if addend != -4 || off < 3 -> return 0
-    b :: c.obj_buffer[obj]
-    at :: link_sec_offset(c, obj, s) + off
-    opcode :: link_u8(c.bufs, b, at - 2)
-    modrm :: link_u8(c.bufs, b, at - 1)
+    b: c.obj_buffer[obj]
+    at: link_sec_offset(c, obj, s) + off
+    opcode: link_u8(c.bufs, b, at - 2)
+    modrm: link_u8(c.bufs, b, at - 1)
     form := 0
     if opcode == 0x8b && (modrm.bit_and(0xc7)) == 0x05 {
-        rex :: link_u8(c.bufs, b, at - 3)
+        rex: link_u8(c.bufs, b, at - 3)
         if (rex.bit_and(0xf8)) == 0x48 {
             // A sign-extended imm32 holds addresses below 2 GiB only; above
             // (LINK_RUN_BASE) the load stays rip-relative as `lea`.
@@ -1611,7 +1611,7 @@ fn link_got_form(c: LinkContext, kind: Int, obj: Int, s: Int, off: Int, symbol: 
     form
 }
 
-fn link_is_got_reloc(kind: Int) -> Bool Never! {
+link_is_got_reloc: fn(kind: Int) -> Bool Never! {
     kind == LINK_R_GOTPCREL || kind == LINK_R_GOTPCRELX || kind == LINK_R_REX_GOTPCRELX
 }
 
@@ -1620,21 +1620,21 @@ fn link_is_got_reloc(kind: Int) -> Bool Never! {
 // code do not count, as with `ld --gc-sections`; `linker_names` are defined
 // after layout), and when it is GOT-relative and not relaxed, return its GOT
 // slot (assigned on first use); otherwise -1.
-fn link_scan_reloc(c: &LinkContext, reported: &[Int:Bool], linker_names: [String:Bool], obj: Int, s: Int, at: Int, symbol: Int) -> Int Never! {
-    b :: c.obj_buffer[obj].copy()
-    g :: link_global_of(c, obj, symbol)
+link_scan_reloc: fn(c: &LinkContext, reported: &[Int:Bool], linker_names: [String:Bool], obj: Int, s: Int, at: Int, symbol: Int) -> Int Never! {
+    b: c.obj_buffer[obj].copy()
+    g: link_global_of(c, obj, symbol)
     if g >= 0 && !link_defined(c, g) && reported.get(g) == None && (link_u8(c.bufs, b, link_sym_at(c, obj, symbol) + 4) >> 4) != 2 && linker_names.get(c.g_name[g]) == None {
         &reported.add(g, true).drop("checked absent above")
-        site :: link_section_label(c, s)
-        message :: "undefined symbol `{c.g_name[g]}`, referenced by {site}"
+        site: link_section_label(c, s)
+        message: "undefined symbol `{c.g_name[g]}`, referenced by {site}"
         link_error(&c, message)
     }
-    kind :: link_u32(c.bufs, b, at + 8)
+    kind: link_u32(c.bufs, b, at + 8)
     if !link_is_got_reloc(kind) -> return -1
     if link_got_form(c, kind, obj, s, link_u32(c.bufs, b, at), symbol, link_s64(c.bufs, b, at + 16)) != 0 -> return -1
-    key :: link_got_key(c, obj, symbol)
+    key: link_got_key(c, obj, symbol)
     if c.got.get(key) == .Val(found) -> return found
-    slot :: c.got_keys.len()
+    slot: c.got_keys.len()
     &c.got.add(key, slot).drop("checked absent above")
     &c.got_keys.push(key)
     slot
@@ -1643,10 +1643,10 @@ fn link_scan_reloc(c: &LinkContext, reported: &[Int:Bool], linker_names: [String
 // ---------------------------------------------------------------------------
 // Layout.
 
-fn link_priority(c: LinkContext, s: Int) -> Int Never! {
-    obj :: link_obj_of(c, s)
-    name :: link_cstr(c.bufs, c.obj_buffer[obj], link_sec_name(c, obj, s))
-    bytes :: name.bytes()
+link_priority: fn(c: LinkContext, s: Int) -> Int Never! {
+    obj: link_obj_of(c, s)
+    name: link_cstr(c.bufs, c.obj_buffer[obj], link_sec_name(c, obj, s))
+    bytes: name.bytes()
     dot := -1
     loop (k, byte) in bytes { if Int.from_u8(byte) == 46 -> dot = k }
     if dot <= 0 -> return 65536
@@ -1656,10 +1656,10 @@ fn link_priority(c: LinkContext, s: Int) -> Int Never! {
 // Live rows in section id order: the order objects and their sections were
 // read, except that the fault report follows the first section calling it
 // (link_fault_report).
-fn link_rows_in_order(c: LinkContext) -> [Int] Never! {
-    report :: link_live_row(c, c.fault_report_section)
-    caller :: link_live_row(c, c.fault_report_caller)
-    moved :: report >= 0 && caller >= 0 && c.live_class[report] == c.live_class[caller]
+link_rows_in_order: fn(c: LinkContext) -> [Int] Never! {
+    report: link_live_row(c, c.fault_report_section)
+    caller: link_live_row(c, c.fault_report_caller)
+    moved: report >= 0 && caller >= 0 && c.live_class[report] == c.live_class[caller]
     rows := [Int]{}
     loop row in c.live {
         if row < 0 || (moved && row == report) -> next
@@ -1673,7 +1673,7 @@ fn link_rows_in_order(c: LinkContext) -> [Int] Never! {
 // init/fini arrays, which run in ascending priority (`.init_array.NNNNN`
 // before plain `.init_array`), and the `.init` and `.fini` pieces, each group
 // contiguous at the start of the code.
-fn link_order(c: LinkContext) -> [[Int]] Never! {
+link_order: fn(c: LinkContext) -> [[Int]] Never! {
     lists := [[Int]]{}
     loop _ in 0..<LINK_CLASSES -> &lists.push([Int]{})
     loop row in link_rows_in_order(c) -> &lists[c.live_class[row]].push(row)
@@ -1692,8 +1692,8 @@ fn link_order(c: LinkContext) -> [[Int]] Never! {
 
 // `items` stably ordered by `keys`, where keys[i] is the key of items[i]
 // (bottom-up merge sort on positions).
-fn link_sort_by(items: [Int], keys: [Int]) -> [Int] Never! {
-    count :: items.len()
+link_sort_by: fn(items: [Int], keys: [Int]) -> [Int] Never! {
+    count: items.len()
     order := [Int]{}
     loop k in 0..<count -> &order.push(k)
     width := 1
@@ -1701,8 +1701,8 @@ fn link_sort_by(items: [Int], keys: [Int]) -> [Int] Never! {
         merged := [Int]{}
         start := 0
         loop start < count {
-            middle :: if start + width < count -> start + width else -> count
-            end :: if start + 2 * width < count -> start + 2 * width else -> count
+            middle: if start + width < count -> start + width else -> count
+            end: if start + 2 * width < count -> start + 2 * width else -> count
             left := start
             right := middle
             loop left < middle || right < end {
@@ -1724,11 +1724,11 @@ fn link_sort_by(items: [Int], keys: [Int]) -> [Int] Never! {
     result
 }
 
-fn link_place(c: &LinkContext, rows: [Int], start: Int) -> Int Never! {
+link_place: fn(c: &LinkContext, rows: [Int], start: Int) -> Int Never! {
     addr := start
     loop row in rows {
-        s :: c.live_secs[row].copy()
-        obj :: link_obj_of(c, s)
+        s: c.live_secs[row].copy()
+        obj: link_obj_of(c, s)
         addr = link_align(addr, link_sec_align(c, obj, s))
         c.live_addr[row] = addr
         addr += link_sec_size(c, obj, s)
@@ -1736,7 +1736,7 @@ fn link_place(c: &LinkContext, rows: [Int], start: Int) -> Int Never! {
     addr
 }
 
-struct LinkLayout {
+LinkLayout: struct {
     order: [[Int]]
     phnum: Int
     r_end: Int
@@ -1773,54 +1773,54 @@ struct LinkLayout {
 
 // The image's layout at the link base, with a build-id note when `note`,
 // packed when `packed` (LinkLayout).
-fn link_layout(c: &LinkContext, note: Bool, packed: Bool) -> LinkLayout Never! {
-    order :: link_order(c)
-    has_tls :: order[LINK_TDATA].len() + order[LINK_TBSS].len() > 0
+link_layout: fn(c: &LinkContext, note: Bool, packed: Bool) -> LinkLayout Never! {
+    order: link_order(c)
+    has_tls: order[LINK_TDATA].len() + order[LINK_TBSS].len() > 0
     commons := false
     loop g in 0..<c.g_name.len() { if c.g_kind[g] == LINK_G_COMMON -> commons = true }
     has_rw := c.got_keys.len() > 0 || commons
     loop class in LINK_TDATA..<LINK_CLASSES { if order[class].len() > 0 -> has_rw = true }
-    phnum :: 3 + (if has_rw -> 1 else -> 0) + (if has_tls -> 1 else -> 0) + (if note -> 1 else -> 0)
+    phnum: 3 + (if has_rw -> 1 else -> 0) + (if has_tls -> 1 else -> 0) + (if note -> 1 else -> 0)
     addr := c.base + LINK_EHDR_SIZE + LINK_PHDR_SIZE * phnum
-    note_at :: if note -> addr else -> 0
+    note_at: if note -> addr else -> 0
     if note -> addr += LINK_BUILD_ID_NOTE_SIZE
     addr = link_place(&c, order[LINK_RODATA], addr)
-    r_end :: link_place_eh(&c, addr)
-    text_start :: link_align(r_end, LINK_PAGE)
-    text_end :: link_place(&c, order[LINK_TEXT], text_start)
+    r_end: link_place_eh(&c, addr)
+    text_start: link_align(r_end, LINK_PAGE)
+    text_end: link_place(&c, order[LINK_TEXT], text_start)
     // Packed, the read-write segment's first address shares its page offset
     // with its file offset, the read-only segment's end.
-    rw_start :: link_align(text_end, LINK_PAGE) + (if packed -> (r_end - c.base) % LINK_PAGE else -> 0)
+    rw_start: link_align(text_end, LINK_PAGE) + (if packed -> (r_end - c.base) % LINK_PAGE else -> 0)
     addr = rw_start
     tdata_end := addr
     if has_tls {
         align := 1
         loop class in ([Int]{LINK_TDATA, LINK_TBSS}) {
             loop row in order[class] {
-                s :: c.live_secs[row]
-                section_align :: link_sec_align(c, link_obj_of(c, s), s)
+                s: c.live_secs[row]
+                section_align: link_sec_align(c, link_obj_of(c, s), s)
                 if section_align > align -> align = section_align
             }
         }
         c.tls_align = align
-        tls_start :: link_align(addr, align)
+        tls_start: link_align(addr, align)
         c.tls_start = tls_start
         tdata_end = link_place(&c, order[LINK_TDATA], tls_start)
-        tls_end :: link_place(&c, order[LINK_TBSS], tdata_end)
+        tls_end: link_place(&c, order[LINK_TBSS], tdata_end)
         c.tls_end = tls_end
         addr = tdata_end
     }
-    preinit_start :: link_align(addr, 8)
-    preinit_end :: link_place(&c, order[LINK_PREINIT], preinit_start)
-    init_start :: link_align(preinit_end, 8)
-    init_end :: link_place(&c, order[LINK_INIT], init_start)
-    fini_start :: link_align(init_end, 8)
-    fini_end :: link_place(&c, order[LINK_FINI], fini_start)
+    preinit_start: link_align(addr, 8)
+    preinit_end: link_place(&c, order[LINK_PREINIT], preinit_start)
+    init_start: link_align(preinit_end, 8)
+    init_end: link_place(&c, order[LINK_INIT], init_start)
+    fini_start: link_align(init_end, 8)
+    fini_end: link_place(&c, order[LINK_FINI], fini_start)
     addr = link_place(&c, order[LINK_RELRO], fini_end)
-    got_start :: link_align(addr, 8)
+    got_start: link_align(addr, 8)
     c.got_start = got_start
     addr = got_start + 8 * c.got_keys.len()
-    file_end :: link_place(&c, order[LINK_DATA], addr)
+    file_end: link_place(&c, order[LINK_DATA], addr)
     addr = link_place(&c, order[LINK_BSS], file_end)
     loop g in 0..<c.g_name.len() {
         if c.g_kind[g] != LINK_G_COMMON -> next
@@ -1841,8 +1841,8 @@ fn link_layout(c: &LinkContext, note: Bool, packed: Bool) -> LinkLayout Never! {
 // then the zero terminator; returns the end of the tables. Tables bound for
 // the side debug file (`eh_debug`) are placed from address 0 and take no
 // room in the image: the end is `addr`.
-fn link_place_eh(c: &LinkContext, addr: Int) -> Int Never! {
-    eh_start :: if c.eh_debug -> 0 else -> link_align(addr, 8)
+link_place_eh: fn(c: &LinkContext, addr: Int) -> Int Never! {
+    eh_start: if c.eh_debug -> 0 else -> link_align(addr, 8)
     c.eh_start = eh_start
     eh := 0
     loop piece in 0..<c.ep_sec.len() {
@@ -1856,11 +1856,11 @@ fn link_place_eh(c: &LinkContext, addr: Int) -> Int Never! {
 }
 
 // Give every referenced linker-defined name its address.
-fn link_define_names(c: &LinkContext, l: LinkLayout, startup: Bool) Never! {
+link_define_names: fn(c: &LinkContext, l: LinkLayout, startup: Bool) Never! {
     loop name in link_linker_names() {
-        g :: c.g_index.get(name) ?? next
+        g: c.g_index.get(name) ?? next
         if c.g_kind[g] != LINK_G_NONE && c.g_kind[g] != LINK_G_LINKER -> next
-        value :: if name == {
+        value: if name == {
             "__jet_init_array_start" -> l.init_start
             "__jet_init_array_end" -> l.init_end
             // With the startup object, `__jet_link_main` runs the array, so
@@ -1886,13 +1886,13 @@ fn link_define_names(c: &LinkContext, l: LinkLayout, startup: Bool) Never! {
 // ---------------------------------------------------------------------------
 // Relocation.
 
-fn link_fits32(value: Int) -> Bool Never! { value >= -2147483648 && value <= 2147483647 }
+link_fits32: fn(value: Int) -> Bool Never! { value >= -2147483648 && value <= 2147483647 }
 
-fn link_tpoff(c: LinkContext, addr: Int) -> Int Never! {
+link_tpoff: fn(c: LinkContext, addr: Int) -> Int Never! {
     addr - (c.tls_start + link_align(c.tls_end - c.tls_start, c.tls_align))
 }
 
-fn link_byte_is(out: &[U8], at: Int, bytes: [Int]) -> Bool Never! {
+link_byte_is: fn(out: &[U8], at: Int, bytes: [Int]) -> Bool Never! {
     if at < 0 || at + bytes.len() > out.len() -> return false
     loop (k, byte) in bytes {
         if Int.from_u8(out[at + k]) != byte -> return false
@@ -1900,30 +1900,30 @@ fn link_byte_is(out: &[U8], at: Int, bytes: [Int]) -> Bool Never! {
     true
 }
 
-fn link_put_bytes(out: &[U8], at: Int, bytes: [Int]) Never! {
+link_put_bytes: fn(out: &[U8], at: Int, bytes: [Int]) Never! {
     loop (k, byte) in bytes -> out[at + k] = U8{byte}
 }
 
 // Apply a GOT-relative relocation (link_apply): through its slot, or
 // relaxed as link_got_form decides (only at `off` >= 3, so the instruction
 // bytes it rewrites are in the section).
-fn link_apply_got(c: LinkContext, errors: &[String], out: &[U8], obj: Int, s: Int, kind: Int, off: Int, symbol: Int, addend: Int, pos: Int, place: Int) -> Bool Never! {
-    decided :: link_got_form(c, kind, obj, s, off, symbol, addend)
+link_apply_got: fn(c: LinkContext, errors: &[String], out: &[U8], obj: Int, s: Int, kind: Int, off: Int, symbol: Int, addend: Int, pos: Int, place: Int) -> Bool Never! {
+    decided: link_got_form(c, kind, obj, s, off, symbol, addend)
     if decided == 0 {
-        slot :: c.got.get(link_got_key(c, obj, symbol)) ?? {
+        slot: c.got.get(link_got_key(c, obj, symbol)) ?? {
             &errors.push(link_reloc_text(c, s, off, "GOT relocation without a slot"))
             return false
         }
         link_put32(&out, pos, c.got_start + 8 * slot + addend - place)
         return false
     }
-    target :: link_target_addr(c, obj, symbol)
+    target: link_target_addr(c, obj, symbol)
     // Above 2 GiB a REX.W `mov` relaxes to `lea`, unless its target is low:
     // an undefined weak symbol (address 0, e.g. musl's `_DYNAMIC`) is out of
     // `lea` range there and becomes `mov reg, imm32` as GNU ld does. Neither
     // form takes a GOT slot, so the scan's decision stands.
-    form :: if decided == 1 && kind == LINK_R_REX_GOTPCRELX && (Int.from_u8(out[pos - 3]).bit_and(0xf8)) == 0x48 && !link_fits32(target + addend - place) && link_fits32(target) -> 4 else -> decided
-    value :: if form == 4 -> target else -> target + addend - place
+    form: if decided == 1 && kind == LINK_R_REX_GOTPCRELX && (Int.from_u8(out[pos - 3]).bit_and(0xf8)) == 0x48 && !link_fits32(target + addend - place) && link_fits32(target) -> 4 else -> decided
+    value: if form == 4 -> target else -> target + addend - place
     if !link_fits32(value) -> &errors.push(link_reloc_text(c, s, off, "relaxed GOT relocation out of range"))
     if form == 1 {
         out[pos - 2] = U8{0x8d}
@@ -1938,8 +1938,8 @@ fn link_apply_got(c: LinkContext, errors: &[String], out: &[U8], obj: Int, s: In
         out[pos + 3] = U8{0x90}
     } else {
         // REX.W (REX.R becomes REX.B) C7 /0: mov reg, imm32.
-        rex :: Int.from_u8(out[pos - 3])
-        reg :: (Int.from_u8(out[pos - 1]) >> 3).bit_and(7)
+        rex: Int.from_u8(out[pos - 3])
+        reg: (Int.from_u8(out[pos - 1]) >> 3).bit_and(7)
         out[pos - 3] = U8{(0x48).bit_or(((rex >> 2).bit_and(1)))}
         out[pos - 2] = U8{0xc7}
         out[pos - 1] = U8{(0xc0).bit_or(reg)}
@@ -1954,31 +1954,31 @@ fn link_apply_got(c: LinkContext, errors: &[String], out: &[U8], obj: Int, s: In
 // reads or rewrites is in the section, so `out` may hold the section alone.
 // Returns true when the relocation rewrote a TLS call sequence, so the next
 // relocation (the call to `__tls_get_addr`) must be skipped.
-fn link_apply(c: LinkContext, errors: &[String], out: &[U8], obj: Int, s: Int, at: Int, off: Int, slot: Int, pos: Int, place: Int) -> Bool Never! {
-    b :: c.obj_buffer[obj].copy()
-    kind :: link_u32(c.bufs, b, at + 8)
-    addend :: link_s64(c.bufs, b, at + 16)
+link_apply: fn(c: LinkContext, errors: &[String], out: &[U8], obj: Int, s: Int, at: Int, off: Int, slot: Int, pos: Int, place: Int) -> Bool Never! {
+    b: c.obj_buffer[obj].copy()
+    kind: link_u32(c.bufs, b, at + 8)
+    addend: link_s64(c.bufs, b, at + 16)
     if slot >= 0 {
         // A GOT slot link_scan_reloc assigned.
         link_put32(&out, pos, c.got_start + 8 * slot + addend - place)
         return false
     }
     if kind == LINK_R_NONE -> return false
-    symbol :: link_u32(c.bufs, b, at + 12)
+    symbol: link_u32(c.bufs, b, at + 12)
     if link_is_got_reloc(kind) -> return link_apply_got(c, &errors, &out, obj, s, kind, off, symbol, addend, pos, place)
-    target :: link_target_addr(c, obj, symbol)
+    target: link_target_addr(c, obj, symbol)
     if kind == LINK_R_64 {
         link_put64(&out, pos, target + addend)
         return false
     }
     if kind == LINK_R_PC32 || kind == LINK_R_PLT32 {
-        value :: target + addend - place
+        value: target + addend - place
         if !link_fits32(value) -> &errors.push(link_reloc_text(c, s, off, "PC-relative relocation out of range"))
         link_put32(&out, pos, value)
         return false
     }
     if kind == LINK_R_32 || kind == LINK_R_32S {
-        value :: target + addend
+        value: target + addend
         if (kind == LINK_R_32 && (value < 0 || value > 0xffffffff)) || (kind == LINK_R_32S && !link_fits32(value)) -> &errors.push(link_reloc_text(c, s, off, "32-bit absolute relocation out of range"))
         link_put32(&out, pos, value)
         return false
@@ -1999,8 +1999,8 @@ fn link_apply(c: LinkContext, errors: &[String], out: &[U8], obj: Int, s: Int, a
         // data16 lea rdi, [rip + x@tlsgd]; data16 data16 rex64 call __tls_get_addr
         // (or data16 rex64 call [rip + __tls_get_addr@GOTPCREL])
         // -> mov rax, fs:0; lea rax, [rax + x@tpoff]
-        direct :: link_byte_is(&out, pos + 4, [Int]{0x66, 0x66, 0x48, 0xe8})
-        indirect :: link_byte_is(&out, pos + 4, [Int]{0x66, 0x48, 0xff, 0x15})
+        direct: link_byte_is(&out, pos + 4, [Int]{0x66, 0x66, 0x48, 0xe8})
+        indirect: link_byte_is(&out, pos + 4, [Int]{0x66, 0x48, 0xff, 0x15})
         if !link_byte_is(&out, pos - 4, [Int]{0x66, 0x48, 0x8d, 0x3d}) || (!direct && !indirect) {
             &errors.push(link_reloc_text(c, s, off, "unrecognized TLS general-dynamic sequence"))
             return false
@@ -2012,8 +2012,8 @@ fn link_apply(c: LinkContext, errors: &[String], out: &[U8], obj: Int, s: Int, a
     if kind == LINK_R_TLSLD {
         // lea rdi, [rip + x@tlsld]; call __tls_get_addr (or call [rip + GOT])
         // -> mov rax, fs:0, padded with prefixes to the same length.
-        direct :: link_byte_is(&out, pos + 4, [Int]{0xe8})
-        indirect :: link_byte_is(&out, pos + 4, [Int]{0xff, 0x15})
+        direct: link_byte_is(&out, pos + 4, [Int]{0xe8})
+        indirect: link_byte_is(&out, pos + 4, [Int]{0xff, 0x15})
         if !link_byte_is(&out, pos - 3, [Int]{0x48, 0x8d, 0x3d}) || (!direct && !indirect) {
             &errors.push(link_reloc_text(c, s, off, "unrecognized TLS local-dynamic sequence"))
             return false
@@ -2041,9 +2041,9 @@ fn link_apply(c: LinkContext, errors: &[String], out: &[U8], obj: Int, s: Int, a
             &errors.push(link_reloc_text(c, s, off, "unrecognized TLS initial-exec instruction"))
             return false
         }
-        rex :: Int.from_u8(out[pos - 3])
-        opcode :: Int.from_u8(out[pos - 2])
-        modrm :: Int.from_u8(out[pos - 1])
+        rex: Int.from_u8(out[pos - 3])
+        opcode: Int.from_u8(out[pos - 2])
+        modrm: Int.from_u8(out[pos - 1])
         if (rex != 0x48 && rex != 0x4c) || (opcode != 0x8b && opcode != 0x03) || (modrm.bit_and(0xc7)) != 0x05 {
             &errors.push(link_reloc_text(c, s, off, "unrecognized TLS initial-exec instruction"))
             return false
@@ -2069,60 +2069,60 @@ fn link_apply(c: LinkContext, errors: &[String], out: &[U8], obj: Int, s: Int, a
 // Copy live row `row` to the end of `out` and apply its relocations there;
 // its reports go to `errors`. `out` is the image at the row's file offset,
 // or the row's own piece (link_emit_pieces): the bytes are the same.
-fn link_emit_section(c: LinkContext, errors: &[String], out: &[U8], row: Int) Never! {
-    s :: c.live_secs[row].copy()
-    obj :: link_obj_of(c, s)
-    b :: c.obj_buffer[obj].copy()
-    pos :: out.len()
-    start :: link_sec_offset(c, obj, s)
-    size :: link_sec_size(c, obj, s)
+link_emit_section: fn(c: LinkContext, errors: &[String], out: &[U8], row: Int) Never! {
+    s: c.live_secs[row].copy()
+    obj: link_obj_of(c, s)
+    b: c.obj_buffer[obj].copy()
+    pos: out.len()
+    start: link_sec_offset(c, obj, s)
+    size: link_sec_size(c, obj, s)
     &out.extend(c.bufs[b][start..<start + size])
-    r :: link_rela_of(c, obj, s)
+    r: link_rela_of(c, obj, s)
     if r < 0 -> return
-    count :: link_sec_size(c, obj, r).div_euclid(24)
-    table :: link_sec_offset(c, obj, r)
-    address :: c.live_addr[row].copy()
-    base :: c.rel_base[row].copy()
+    count: link_sec_size(c, obj, r).div_euclid(24)
+    table: link_sec_offset(c, obj, r)
+    address: c.live_addr[row].copy()
+    base: c.rel_base[row].copy()
     skip := false
     loop k in 0..<count {
         if skip {
             skip = false
             next
         }
-        at :: table + 24 * k
+        at: table + 24 * k
         // Section offsets fit 32 bits.
-        off :: link_u32(c.bufs, b, at)
-        slot :: c.rel_slot[base + k].copy()
+        off: link_u32(c.bufs, b, at)
+        slot: c.rel_slot[base + k].copy()
         skip = link_apply(c, &errors, &out, obj, s, at, off, slot, pos + off, address + off)
     }
 }
 
 // The output `.eh_frame`: kept records with their relocations applied and
 // every FDE's CIE pointer recomputed, then the terminator.
-fn link_emit_eh(c: &LinkContext, out: &[U8]) Never! {
-    base :: out.len()
+link_emit_eh: fn(c: &LinkContext, out: &[U8]) Never! {
+    base: out.len()
     errors := [String]{}
     loop piece in 0..<c.ep_sec.len() {
         if !c.ep_keep[piece] -> next
-        s :: c.ep_sec[piece].copy()
-        obj :: c.ep_obj[piece].copy()
-        b :: c.obj_buffer[obj].copy()
-        piece_start :: c.ep_start[piece].copy()
-        start :: link_sec_offset(c, obj, s) + piece_start
-        pos :: out.len()
-        length :: c.ep_len[piece].copy()
+        s: c.ep_sec[piece].copy()
+        obj: c.ep_obj[piece].copy()
+        b: c.obj_buffer[obj].copy()
+        piece_start: c.ep_start[piece].copy()
+        start: link_sec_offset(c, obj, s) + piece_start
+        pos: out.len()
+        length: c.ep_len[piece].copy()
         &out.extend(c.bufs[b][start..<start + length])
-        table :: link_rel_table(c, obj, s)
-        first :: c.ep_first_reloc[piece].copy()
-        end :: first + c.ep_reloc_count[piece]
+        table: link_rel_table(c, obj, s)
+        first: c.ep_first_reloc[piece].copy()
+        end: first + c.ep_reloc_count[piece]
         loop k in first..<end {
-            at :: table + 24 * k
-            rel_off :: link_u32(c.bufs, b, at)
-            off :: rel_off - piece_start
-            place :: c.eh_start + pos - base + off
+            at: table + 24 * k
+            rel_off: link_u32(c.bufs, b, at)
+            off: rel_off - piece_start
+            place: c.eh_start + pos - base + off
             _ := link_apply(c, &errors, &out, obj, s, at, rel_off, -1, pos + off, place)
         }
-        cie :: c.ep_cie[piece].copy()
+        cie: c.ep_cie[piece].copy()
         if cie >= 0 -> link_put32(&out, pos + 4, c.ep_out[piece] + 4 - c.ep_out[cie])
     }
     loop _ in 0..<4 -> &out.push(U8{0})
@@ -2134,7 +2134,7 @@ fn link_emit_eh(c: &LinkContext, out: &[U8]) Never! {
 // (`fields` to `ra_at`), its return address column (`ra_at`, value `ra`) and
 // its initial instructions; whether its FDEs carry augmentation data (`z`);
 // the encoding of their pc_begin and pc_range (DW_EH_PE_*).
-struct LinkEhCie {
+LinkEhCie: struct {
     fields: Int
     ra_at: Int
     ra: Int
@@ -2148,18 +2148,18 @@ struct LinkEhCie {
 // or pc-relative, 4 bytes (signed or not) or 8 unsigned. Any other
 // augmentation (a personality, LSDA pointers, a signal frame) has no
 // `.debug_frame` form.
-fn link_eh_cie(bytes: [U8], at: Int) -> LinkEhCie? Never! {
-    end :: at + 4 + link_debug_le(bytes, at, 4)
+link_eh_cie: fn(bytes: [U8], at: Int) -> LinkEhCie? Never! {
+    end: at + 4 + link_debug_le(bytes, at, 4)
     if end > bytes.len() || at + 12 > end -> return None
-    version :: Int.from_u8(bytes[at + 8])
+    version: Int.from_u8(bytes[at + 8])
     if version != 1 && version != 3 -> return None
-    z :: Int.from_u8(bytes[at + 9]) == 0x7a
+    z: Int.from_u8(bytes[at + 9]) == 0x7a
     if z && (Int.from_u8(bytes[at + 10]) != 0x52 || Int.from_u8(bytes[at + 11]) != 0) -> return None
     if !z && Int.from_u8(bytes[at + 9]) != 0 -> return None
-    fields :: if z -> at + 12 else -> at + 10
+    fields: if z -> at + 12 else -> at + 10
     // Code alignment (uleb), data alignment (sleb), return address column
     // (a byte in version 1, else a uleb).
-    ra_at :: link_debug_leb_end(bytes, link_debug_leb_end(bytes, fields))
+    ra_at: link_debug_leb_end(bytes, link_debug_leb_end(bytes, fields))
     if ra_at >= end -> return None
     fields_end := ra_at + 1
     ra := Int.from_u8(bytes[ra_at])
@@ -2177,7 +2177,7 @@ fn link_eh_cie(bytes: [U8], at: Int) -> LinkEhCie? Never! {
     }
     // The application: absolute (0x00) or pc-relative (0x10), not indirect.
     if instructions > end || (encoding.bit_and(0xe0)) != 0 -> return None
-    format :: encoding.bit_and(0x0f)
+    format: encoding.bit_and(0x0f)
     if format != 0 && format != 3 && format != 4 && format != 0x0b -> return None
     Val(LinkEhCie{fields: fields - at, ra_at: ra_at - at, ra: ra, instructions: instructions - at, z: z, encoding: encoding})
 }
@@ -2186,9 +2186,9 @@ fn link_eh_cie(bytes: [U8], at: Int) -> LinkEhCie? Never! {
 // bytes signed or not, or 8 unsigned) at `at` in `bytes`, whose first byte is
 // at address 0; with `relative` false the pc-relative bit is ignored (an
 // FDE's pc_range). Advances `at` past it.
-fn link_eh_address(bytes: [U8], at: &Int, encoding: Int, relative: Bool) -> Int Never! {
-    format :: encoding.bit_and(0x0f)
-    width :: if format == 3 || format == 0x0b -> 4 else -> 8
+link_eh_address: fn(bytes: [U8], at: &Int, encoding: Int, relative: Bool) -> Int Never! {
+    format: encoding.bit_and(0x0f)
+    width: if format == 3 || format == 0x0b -> 4 else -> 8
     value := link_debug_le(bytes, at, width)
     if format == 0x0b && value >= 0x80000000 -> value -= 0x100000000
     if relative && (encoding.bit_and(0x70)) == 0x10 -> value += at
@@ -2198,8 +2198,8 @@ fn link_eh_address(bytes: [U8], at: &Int, encoding: Int, relative: Bool) -> Int 
 
 // Pad the record that starts at `start` in `out` with DW_CFA_nop to a
 // multiple of `size` bytes and write its length.
-fn link_frame_finish(out: &[U8], start: Int, size: Int) Never! {
-    pad :: (size - (out.len() - start) % size) % size
+link_frame_finish: fn(out: &[U8], start: Int, size: Int) Never! {
+    pad: (size - (out.len() - start) % size) % size
     loop _ in 0..<pad -> &out.push(U8{0})
     link_put32(&out, start, out.len() - start - 4)
 }
@@ -2207,7 +2207,7 @@ fn link_frame_finish(out: &[U8], start: Int, size: Int) Never! {
 // One record of the `.eh_frame` link_emit_eh writes at address 0: its CIE's
 // offset (the record's own for a CIE) and, for an FDE, its pc_begin and
 // pc_range and the offset of its instructions.
-struct LinkEhRecord {
+LinkEhRecord: struct {
     at: Int
     end: Int
     cie_at: Int
@@ -2224,7 +2224,7 @@ struct LinkEhRecord {
 // names its CIE by section offset and carries its pc_begin and pc_range at
 // that size, without augmentation data. Instructions are copied; each record
 // is padded to the address size.
-fn link_debug_frame(c: &LinkContext) -> [U8] Never! {
+link_debug_frame: fn(c: &LinkContext) -> [U8] Never! {
     eh := [U8]{}
     link_emit_eh(&c, &eh)
     cies := [Int:LinkEhCie]{}
@@ -2232,28 +2232,28 @@ fn link_debug_frame(c: &LinkContext) -> [U8] Never! {
     wide := false
     at := 0
     loop at + 4 <= eh.len() {
-        length :: link_debug_le(eh, at, 4)
+        length: link_debug_le(eh, at, 4)
         if length == 0 -> break
-        end :: at + 4 + length
-        id :: link_debug_le(eh, at + 4, 4)
+        end: at + 4 + length
+        id: link_debug_le(eh, at + 4, 4)
         if id == 0 {
-            cie :: link_eh_cie(eh, at) ?? {
+            cie: link_eh_cie(eh, at) ?? {
                 link_error(&c, "an unwind CIE has no .debug_frame form")
                 return [U8]{}
             }
             &cies.add(at, cie).drop("record offsets are unique")
             &records.push(LinkEhRecord{at: at, end: end, cie_at: at, begin: 0, range: 0, instructions: 0})
         } else {
-            cie_at :: at + 4 - id
-            cie :: cies.get(cie_at) ?? {
+            cie_at: at + 4 - id
+            cie: cies.get(cie_at) ?? {
                 link_error(&c, "an unwind FDE names no CIE before it")
                 return [U8]{}
             }
             p := at + 8
-            begin :: link_eh_address(eh, &p, cie.encoding, true)
-            range :: link_eh_address(eh, &p, cie.encoding, false)
+            begin: link_eh_address(eh, &p, cie.encoding, true)
+            range: link_eh_address(eh, &p, cie.encoding, false)
             if cie.z {
-                data :: link_debug_uleb(eh, &p)
+                data: link_debug_uleb(eh, &p)
                 p += data
             }
             if begin < 0 || range < 0 || begin + range > 0xffffffff -> wide = true
@@ -2261,14 +2261,14 @@ fn link_debug_frame(c: &LinkContext) -> [U8] Never! {
         }
         at = end
     }
-    size :: if wide -> 8 else -> 4
+    size: if wide -> 8 else -> 4
     out := [U8]{}
     cie_out := [Int:Int]{}
     loop record in records {
-        start :: out.len()
+        start: out.len()
         elf64_u32(&out, 0)
         if record.cie_at == record.at {
-            cie :: cies.get(record.at) ?? {
+            cie: cies.get(record.at) ?? {
                 link_error(&c, "an unwind CIE has no .debug_frame form")
                 return [U8]{}
             }
@@ -2306,12 +2306,12 @@ fn link_debug_frame(c: &LinkContext) -> [U8] Never! {
 // `.debug_frame` form (link_eh_cie). Jet's own fault report walks frame
 // pointers, so only debuggers and profilers read the tables, and they read
 // `.debug_frame` from the side debug file.
-fn link_eh_unloaded(c: LinkContext) -> Bool Never! {
+link_eh_unloaded: fn(c: LinkContext) -> Bool Never! {
     if link_defined_name(c, "_Unwind_Find_FDE") || link_defined_name(c, "__register_frame_info") -> return false
     loop piece in 0..<c.ep_sec.len() {
         if c.ep_cie[piece] >= 0 || !c.ep_keep[piece] -> next
-        obj :: c.ep_obj[piece].copy()
-        start :: link_sec_offset(c, obj, c.ep_sec[piece]) + c.ep_start[piece]
+        obj: c.ep_obj[piece].copy()
+        start: link_sec_offset(c, obj, c.ep_sec[piece]) + c.ep_start[piece]
         _ := link_eh_cie(c.bufs[c.obj_buffer[obj]], start) ?? return false
     }
     true
@@ -2320,7 +2320,7 @@ fn link_eh_unloaded(c: LinkContext) -> Bool Never! {
 // Pad `out` to `offset` with `fill` (0xcc, `int3`, between code sections).
 // A long pad (a page gap) appends one doubled run of `fill` and a prefix of
 // it: a few block copies, not a push per byte.
-fn link_pad_to(out: &[U8], offset: Int, fill: Int) Never! {
+link_pad_to: fn(out: &[U8], offset: Int, fill: Int) Never! {
     if offset - out.len() <= 16 {
         loop out.len() < offset -> &out.push(U8{fill})
         return
@@ -2332,7 +2332,7 @@ fn link_pad_to(out: &[U8], offset: Int, fill: Int) Never! {
 }
 
 // A program header for the bytes at address `start`, file offset `offset`.
-fn link_phdr(out: &[U8], offset: Int, kind: Int, flags: Int, start: Int, file_size: Int, mem_size: Int, align: Int) Never! {
+link_phdr: fn(out: &[U8], offset: Int, kind: Int, flags: Int, start: Int, file_size: Int, mem_size: Int, align: Int) Never! {
     elf64_u32(&out, kind)
     elf64_u32(&out, flags)
     elf64_u64(&out, offset)
@@ -2343,9 +2343,9 @@ fn link_phdr(out: &[U8], offset: Int, kind: Int, flags: Int, start: Int, file_si
     elf64_u64(&out, align)
 }
 
-fn link_write(c: &LinkContext, l: LinkLayout, entry: Int, pieces: &LinkPieces) -> [U8] Never! {
+link_write: fn(c: &LinkContext, l: LinkLayout, entry: Int, pieces: &LinkPieces) -> [U8] Never! {
     out := [U8]{}
-    ident :: [Int]{0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    ident: [Int]{0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0}
     loop byte in ident -> &out.push(U8{byte})
     elf64_u16(&out, 2)
     elf64_u16(&out, 62)
@@ -2372,19 +2372,19 @@ fn link_write(c: &LinkContext, l: LinkLayout, entry: Int, pieces: &LinkPieces) -
     elf64_u32(&out, 6)
     loop _ in 0..<5 -> elf64_u64(&out, 0)
     elf64_u64(&out, 16)
-    base :: c.base
+    base: c.base
     if l.note_at != 0 -> link_build_id_note(&out)
     link_write_contents(&c, &out, l, base, &pieces)
     out
 }
 
 // The classes the image writer emits from file bytes, in file order.
-fn link_file_classes() -> [Int] Never! {
+link_file_classes: fn() -> [Int] Never! {
     [Int]{LINK_RODATA, LINK_EH, LINK_TEXT, LINK_TDATA, LINK_PREINIT, LINK_INIT, LINK_FINI, LINK_RELRO, LINK_DATA}
 }
 
 // The file offset of `address`, in a section of layout class `class`.
-fn link_file_offset(c: LinkContext, l: LinkLayout, class: Int, address: Int) -> Int Never! {
+link_file_offset: fn(c: LinkContext, l: LinkLayout, class: Int, address: Int) -> Int Never! {
     address - c.base - (if class >= LINK_TDATA -> l.rw_shift else -> 0)
 }
 
@@ -2393,7 +2393,7 @@ fn link_file_offset(c: LinkContext, l: LinkLayout, class: Int, address: Int) -> 
 // before the first of them; a packed layout's code is link_write_code's. A
 // section is its piece in `pieces` when the pieces were built
 // (link_emit_pieces), else emitted in place.
-fn link_write_contents(c: &LinkContext, out: &[U8], l: LinkLayout, origin: Int, pieces: &LinkPieces) Never! {
+link_write_contents: fn(c: &LinkContext, out: &[U8], l: LinkLayout, origin: Int, pieces: &LinkPieces) Never! {
     loop class in link_file_classes() {
         if class == LINK_EH {
             if !c.eh_debug {
@@ -2403,7 +2403,7 @@ fn link_write_contents(c: &LinkContext, out: &[U8], l: LinkLayout, origin: Int, 
             next
         }
         if class == LINK_TEXT && l.packed -> next
-        shift :: if class >= LINK_TDATA -> l.rw_shift else -> 0
+        shift: if class >= LINK_TDATA -> l.rw_shift else -> 0
         loop row in l.order[class] {
             link_pad_to(&out, c.live_addr[row] - origin - shift, if class == LINK_TEXT -> 0xcc else -> 0)
             link_place_row(&c, &out, &pieces, row)
@@ -2412,7 +2412,7 @@ fn link_write_contents(c: &LinkContext, out: &[U8], l: LinkLayout, origin: Int, 
             // The GOT follows the read-only-after-relocation data.
             link_pad_to(&out, c.got_start - origin - shift, 0)
             loop key in c.got_keys {
-                value :: if key >= 0 -> link_global_addr(c, key) else -> link_got_local(c, -1 - key)
+                value: if key >= 0 -> link_global_addr(c, key) else -> link_got_local(c, -1 - key)
                 elf64_u64(&out, value)
             }
         }
@@ -2423,9 +2423,9 @@ fn link_write_contents(c: &LinkContext, out: &[U8], l: LinkLayout, origin: Int, 
 // A packed layout's code, appended to the finished rest of the image
 // `image` from the next page, its program and section headers pointed at
 // it; its padding is int3, and nothing follows it.
-fn link_write_code(c: &LinkContext, image: &[U8], l: LinkLayout, pieces: &LinkPieces) Never! {
+link_write_code: fn(c: &LinkContext, image: &[U8], l: LinkLayout, pieces: &LinkPieces) Never! {
     if !l.packed -> return
-    at :: link_align(image.len(), LINK_PAGE)
+    at: link_align(image.len(), LINK_PAGE)
     link_pad_to(&image, at, 0)
     loop row in l.order[LINK_TEXT] {
         link_pad_to(&image, at + c.live_addr[row] - l.text_start, 0xcc)
@@ -2433,9 +2433,9 @@ fn link_write_code(c: &LinkContext, image: &[U8], l: LinkLayout, pieces: &LinkPi
     }
     // p_offset of the second program header, the code's.
     link_put64(&image, LINK_EHDR_SIZE + LINK_PHDR_SIZE + 8, at)
-    shoff :: link_debug_le(image, 40, 8)
+    shoff: link_debug_le(image, 40, 8)
     loop k in 1..<link_debug_le(image, 60, 2) {
-        header :: shoff + 64 * k
+        header: shoff + 64 * k
         if link_debug_le(image, header + 4, 4) == LINK_SHT_PROGBITS && link_debug_le(image, header + 16, 8) == l.text_start -> link_put64(&image, header + 24, at)
     }
 }
@@ -2443,19 +2443,19 @@ fn link_write_code(c: &LinkContext, image: &[U8], l: LinkLayout, pieces: &LinkPi
 // Each live row's bytes with its relocations applied and its reports, by
 // live row, built ahead on the compiler threads (link_emit_pieces). With no
 // rows (link_no_pieces) the image writer emits every row in place.
-struct LinkPieces {
+LinkPieces: struct {
     bytes: [[U8]]
     errors: [[String]]
 }
 
-fn link_no_pieces() -> LinkPieces Never! {
+link_no_pieces: fn() -> LinkPieces Never! {
     LinkPieces{bytes: [[U8]]{}, errors: [[String]]{}}
 }
 
 // Append live row `row` to `out`, which is at the row's file offset: its
 // piece, which leaves `pieces` once placed, else the row emitted in place.
 // Its reports join the link's in emit order either way.
-fn link_place_row(c: &LinkContext, out: &[U8], pieces: &LinkPieces, row: Int) Never! {
+link_place_row: fn(c: &LinkContext, out: &[U8], pieces: &LinkPieces, row: Int) Never! {
     if pieces.bytes.len() == 0 {
         errors := [String]{}
         link_emit_section(c, &errors, &out, row)
@@ -2470,7 +2470,7 @@ fn link_place_row(c: &LinkContext, out: &[U8], pieces: &LinkPieces, row: Int) Ne
 // The live rows the image writer emits from file bytes, in emit order: the
 // loaded classes' rows (link_write_contents), then the debug groups' rows
 // (link_write_sections).
-fn link_emitted_rows(l: LinkLayout, debug: LinkDebug) -> [Int] Never! {
+link_emitted_rows: fn(l: LinkLayout, debug: LinkDebug) -> [Int] Never! {
     rows := [Int]{}
     loop class in link_file_classes() {
         if class != LINK_EH -> &rows.extend(l.order[class])
@@ -2481,34 +2481,34 @@ fn link_emitted_rows(l: LinkLayout, debug: LinkDebug) -> [Int] Never! {
 
 // Fewest weight units (a row, each of its relocations and each 64 bytes
 // count one) an emitting thread is admitted for.
-LINK_EMIT_MIN_WEIGHT_PER_THREAD :: 20000
+LINK_EMIT_MIN_WEIGHT_PER_THREAD: 20000
 
-fn link_row_weight(c: LinkContext, row: Int) -> Int Never! {
-    s :: c.live_secs[row].copy()
-    obj :: link_obj_of(c, s)
+link_row_weight: fn(c: LinkContext, row: Int) -> Int Never! {
+    s: c.live_secs[row].copy()
+    obj: link_obj_of(c, s)
     weight := 1 + (link_sec_size(c, obj, s) >> 6)
-    r :: link_rela_of(c, obj, s)
+    r: link_rela_of(c, obj, s)
     if r >= 0 -> weight += link_sec_size(c, obj, r).div_euclid(24)
     weight
 }
 
 // The emitting threads' inputs, read only: the link context (moved in and
 // back out, one row) and the rows in emit order.
-struct LinkEmitInputs {
+LinkEmitInputs: struct {
     contexts: [LinkContext]
     rows: [Int]
 }
 
 // One thread's consecutive range of `rows` and, once it finished, the
 // range's pieces and reports in row order.
-struct LinkEmitPart {
+LinkEmitPart: struct {
     start: Int
     end: Int
     bytes: [[U8]]
     errors: [[String]]
 }
 
-struct LinkEmitted {
+LinkEmitted: struct {
     context: LinkContext
     pieces: LinkPieces
 }
@@ -2519,19 +2519,19 @@ struct LinkEmitted {
 // layout, so each piece is the bytes the row has in place, and the reports
 // keep their row. One admitted thread builds no pieces: the image writer
 // then emits every row in place, as it would anyway.
-fn link_emit_pieces(c: ^LinkContext, rows: [Int], threads: CompilerThreads) -> LinkEmitted Never! {
+link_emit_pieces: fn(c: ^LinkContext, rows: [Int], threads: CompilerThreads) -> LinkEmitted Never! {
     weights := [Int]{}
     total := 0
     loop row in rows {
-        weight :: link_row_weight(c, row)
+        weight: link_row_weight(c, row)
         &weights.push(weight)
         total += weight
     }
-    workers :: compiler_threads_admit(threads, rows.len(), total, LINK_EMIT_MIN_WEIGHT_PER_THREAD, 0, 0)
+    workers: compiler_threads_admit(threads, rows.len(), total, LINK_EMIT_MIN_WEIGHT_PER_THREAD, 0, 0)
     if workers <= 1 -> return LinkEmitted{context: ^c, pieces: link_no_pieces()}
-    bounds :: compiler_threads_partition(weights, workers)
-    live :: c.live_secs.len()
-    inputs :: shared LinkEmitInputs{contexts: [LinkContext]{^c}, rows: rows}
+    bounds: compiler_threads_partition(weights, workers)
+    live: c.live_secs.len()
+    inputs: shared LinkEmitInputs{contexts: [LinkContext]{^c}, rows: rows}
     parts := [Shared<LinkEmitPart>]{}
     loop part in 0..<(bounds.len() - 1) -> &parts.push(shared LinkEmitPart{start: bounds[part], end: bounds[part + 1], bytes: [[U8]]{}, errors: [[String]]{}})
     _ := link_emit_parts(inputs, parts, 0) ?? panic("the link emitting threads failed")
@@ -2556,11 +2556,11 @@ fn link_emit_pieces(c: ^LinkContext, rows: [Int], threads: CompilerThreads) -> L
 
 // Builds `parts[from..]`, one task per part and the last part on this
 // thread; returns how many parts were built.
-fn link_emit_parts(inputs: Shared<LinkEmitInputs>, parts: [Shared<LinkEmitPart>], from: Int) -> Int {
+link_emit_parts: fn(inputs: Shared<LinkEmitInputs>, parts: [Shared<LinkEmitPart>], from: Int) -> Int {
     if from >= parts.len() - 1 -> return link_emit_part(inputs, parts[from])
     built := 0
     task.group link_emit_threads {
-        head :: task link_emit_part(inputs, parts[from])
+        head: task link_emit_part(inputs, parts[from])
         built = link_emit_parts(inputs, parts, from + 1)
         built += head.join() ?? panic(compiler_threads_failure_text(err))
     }
@@ -2568,9 +2568,9 @@ fn link_emit_parts(inputs: Shared<LinkEmitInputs>, parts: [Shared<LinkEmitPart>]
 }
 
 // One thread: the pieces of its range of rows.
-fn link_emit_part(inputs: Shared<LinkEmitInputs>, part: Shared<LinkEmitPart>) -> Int {
+link_emit_part: fn(inputs: Shared<LinkEmitInputs>, part: Shared<LinkEmitPart>) -> Int {
     permit := part.guard_edit()
-    reads :: inputs.guard_read()
+    reads: inputs.guard_read()
     loop index in permit.value.start..<permit.value.end {
         piece := [U8]{}
         errors := [String]{}
@@ -2582,7 +2582,7 @@ fn link_emit_part(inputs: Shared<LinkEmitInputs>, part: Shared<LinkEmitPart>) ->
 }
 
 // Address of the local file symbol `fsym` (a GOT entry for a local).
-fn link_got_local(c: LinkContext, fsym: Int) -> Int Never! {
+link_got_local: fn(c: LinkContext, fsym: Int) -> Int Never! {
     obj := 0
     loop obj + 1 < c.obj_first_symbol.len() && c.obj_first_symbol[obj + 1] <= fsym -> obj += 1
     link_target_addr(c, obj, fsym - c.obj_first_symbol[obj])
@@ -2601,17 +2601,17 @@ fn link_got_local(c: LinkContext, fsym: Int) -> Int Never! {
 // Not a layout class: the row of a `.debug_*` section, whose address is its
 // offset in the output section of its name. Added after layout, so it is in
 // no layout order list.
-LINK_DEBUG :: -3
+LINK_DEBUG: -3
 
 // Output `.debug_*` sections: names in first-seen order, and per name the
 // rows of its input sections in input order and its size.
-struct LinkDebug {
+LinkDebug: struct {
     names: [String]
     rows: [[Int]]
     sizes: [Int]
 }
 
-struct LinkSectionHeader {
+LinkSectionHeader: struct {
     name: String
     kind: Int
     flags: Int
@@ -2631,20 +2631,20 @@ struct LinkSectionHeader {
 // `debug_info` (the build's option) no input's debug section gets a row, so
 // the image has no `.debug_*` section whatever the directly linked objects
 // carry: the program object's, the Jet runtime object's and C objects' alike.
-fn link_debug_sections(c: &LinkContext, debug_info: Bool) -> LinkDebug Never! {
+link_debug_sections: fn(c: &LinkContext, debug_info: Bool) -> LinkDebug Never! {
     debug := LinkDebug{names: [String]{}, rows: [[Int]]{}, sizes: [Int]{}}
     if !debug_info -> return debug
     groups := [String:Int]{}
     loop obj in 0..<c.obj_name.len() {
         if c.obj_base[obj] != 0 -> next
-        b :: c.obj_buffer[obj].copy()
-        first :: c.obj_first_section[obj].copy()
+        b: c.obj_buffer[obj].copy()
+        first: c.obj_first_section[obj].copy()
         loop k in 1..<c.obj_count[obj] {
-            s :: first + k
+            s: first + k
             if link_sec_type(c, obj, s) != LINK_SHT_PROGBITS || (link_sec_flags(c, obj, s).bit_and(0x802)) != 0 || link_sec_size(c, obj, s) == 0 -> next
-            name_at :: link_sec_name(c, obj, s)
+            name_at: link_sec_name(c, obj, s)
             if !link_name_has(c.bufs, b, name_at, ".debug_", false) -> next
-            name :: link_cstr(c.bufs, b, name_at)
+            name: link_cstr(c.bufs, b, name_at)
             group := groups.get(name) ?? -1
             if group < 0 {
                 group = debug.names.len()
@@ -2653,8 +2653,8 @@ fn link_debug_sections(c: &LinkContext, debug_info: Bool) -> LinkDebug Never! {
                 &debug.rows.push([Int]{})
                 &debug.sizes.push(0)
             }
-            offset :: link_align(debug.sizes[group], link_sec_align(c, obj, s))
-            row :: c.live_secs.len()
+            offset: link_align(debug.sizes[group], link_sec_align(c, obj, s))
+            row: c.live_secs.len()
             c.live[s] = row
             &c.live_secs.push(s)
             &c.live_class.push(LINK_DEBUG)
@@ -2669,25 +2669,25 @@ fn link_debug_sections(c: &LinkContext, debug_info: Bool) -> LinkDebug Never! {
 }
 
 // The address range of a layout class's rows (empty when it has none).
-fn link_class_extent(c: LinkContext, l: LinkLayout, class: Int) -> [Int] Never! {
-    rows :: l.order[class]
+link_class_extent: fn(c: LinkContext, l: LinkLayout, class: Int) -> [Int] Never! {
+    rows: l.order[class]
     if rows.len() == 0 -> return [Int]{0, 0}
-    last :: rows[rows.len() - 1]
-    s :: c.live_secs[last]
+    last: rows[rows.len() - 1]
+    s: c.live_secs[last]
     [Int]{c.live_addr[rows[0]], c.live_addr[last] + link_sec_size(c, link_obj_of(c, s), s)}
 }
 
 // The output section header index of the image part holding section `s`,
 // or -1 when `s` is not loaded.
-fn link_symbol_header(c: LinkContext, class_headers: [Int], s: Int) -> Int Never! {
-    row :: link_live_row(c, s)
+link_symbol_header: fn(c: LinkContext, class_headers: [Int], s: Int) -> Int Never! {
+    row: link_live_row(c, s)
     if row < 0 -> return -1
-    class :: c.live_class[row]
+    class: c.live_class[row]
     if class < 0 -> return -1
     class_headers[class]
 }
 
-fn link_image_symbol(symtab: &[U8], strtab: &[U8], name: String, info: Int, header: Int, value: Int, size: Int) Never! {
+link_image_symbol: fn(symtab: &[U8], strtab: &[U8], name: String, info: Int, header: Int, value: Int, size: Int) Never! {
     elf64_u32(&symtab, elf64_string(&strtab, name))
     &symtab.push(U8{info})
     &symtab.push(U8{0})
@@ -2701,15 +2701,15 @@ fn link_image_symbol(symtab: &[U8], strtab: &[U8], name: String, info: Int, head
 // debug file's `out` (`side`, link_debug_file) is its ELF header and the
 // image's build-id note: its headers name that note and the loaded
 // sections, whose bytes stay in the image (SHT_NOBITS), at their addresses.
-fn link_write_sections(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkDebug, pieces: &LinkPieces, side: Bool) Never! {
+link_write_sections: fn(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkDebug, pieces: &LinkPieces, side: Bool) Never! {
     headers := [LinkSectionHeader]{}
     class_headers := [Int]{}
     loop _ in 0..<LINK_CLASSES -> &class_headers.push(-1)
     if side -> &headers.push(LinkSectionHeader{name: ".note.gnu.build-id", kind: LINK_SHT_NOTE, flags: 2, addr: l.note_at, offset: LINK_EHDR_SIZE, size: LINK_BUILD_ID_NOTE_SIZE, link: 0, info: 0, align: 4, entry_size: 0})
-    names :: [String]{".rodata", ".eh_frame", ".text", ".tdata", ".tbss", ".preinit_array", ".init_array", ".fini_array", ".data.rel.ro", ".data", ".bss"}
-    kinds :: [Int]{LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_NOBITS, LINK_SHT_PREINIT_ARRAY, LINK_SHT_INIT_ARRAY, LINK_SHT_FINI_ARRAY, LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_NOBITS}
+    names: [String]{".rodata", ".eh_frame", ".text", ".tdata", ".tbss", ".preinit_array", ".init_array", ".fini_array", ".data.rel.ro", ".data", ".bss"}
+    kinds: [Int]{LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_NOBITS, LINK_SHT_PREINIT_ARRAY, LINK_SHT_INIT_ARRAY, LINK_SHT_FINI_ARRAY, LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_NOBITS}
     // ALLOC, plus EXECINSTR for code, WRITE for data, TLS for thread data.
-    flags :: [Int]{2, 2, 6, 0x403, 0x403, 3, 3, 3, 3, 3, 3}
+    flags: [Int]{2, 2, 6, 0x403, 0x403, 3, 3, 3, 3, 3, 3}
     loop class in 0..<LINK_CLASSES {
         extent := link_class_extent(c, l, class)
         if class == LINK_EH && !c.eh_debug -> extent = [Int]{c.eh_start, c.eh_start + c.eh_size}
@@ -2726,16 +2726,16 @@ fn link_write_sections(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkDe
             &headers.push(LinkSectionHeader{name: ".got", kind: if side -> LINK_SHT_NOBITS else -> LINK_SHT_PROGBITS, flags: 3, addr: c.got_start, offset: link_file_offset(c, l, LINK_RELRO, c.got_start), size: 8 * c.got_keys.len(), link: 0, info: 0, align: 8, entry_size: 8})
         }
     }
-    sections :: link_debug_bytes(&c, debug, &pieces, l.text_start, l.text_end)
+    sections: link_debug_bytes(&c, debug, &pieces, l.text_start, l.text_end)
     loop (group, name) in debug.names {
-        start :: out.len()
+        start: out.len()
         &out.extend(sections[group])
         &headers.push(LinkSectionHeader{name: name, kind: LINK_SHT_PROGBITS, flags: 0, addr: 0, offset: start, size: sections[group].len(), link: 0, info: 0, align: 1, entry_size: 0})
     }
     if c.eh_debug {
-        frame :: link_debug_frame(&c)
+        frame: link_debug_frame(&c)
         elf64_pad(&out, 4)
-        start :: out.len()
+        start: out.len()
         &out.extend(frame)
         &headers.push(LinkSectionHeader{name: ".debug_frame", kind: LINK_SHT_PROGBITS, flags: 0, addr: 0, offset: start, size: frame.len(), link: 0, info: 0, align: 4, entry_size: 0})
     }
@@ -2746,45 +2746,45 @@ fn link_write_sections(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkDe
     symtab := [U8]{}
     loop _ in 0..<24 -> &symtab.push(U8{0})
     loop obj in 0..<c.obj_name.len() {
-        b :: c.obj_buffer[obj].copy()
+        b: c.obj_buffer[obj].copy()
         loop k in 1..<c.obj_first_global[obj] {
-            at :: link_sym_at(c, obj, k)
-            info :: link_u8(c.bufs, b, at + 4)
+            at: link_sym_at(c, obj, k)
+            info: link_u8(c.bufs, b, at + 4)
             if (info.bit_and(15)) != 1 && (info.bit_and(15)) != 2 -> next
-            name_offset :: link_u32(c.bufs, b, at)
+            name_offset: link_u32(c.bufs, b, at)
             if name_offset == 0 -> next
-            s :: link_sym_shndx(c, obj, k)
-            header :: link_symbol_header(c, class_headers, s)
+            s: link_sym_shndx(c, obj, k)
+            header: link_symbol_header(c, class_headers, s)
             if header < 0 -> next
             link_image_symbol(&symtab, &strtab, link_cstr(c.bufs, b, c.obj_strtab[obj] + name_offset), info, header, link_sec_addr(c, s) + link_u64(c.bufs, b, at + 8), link_u64(c.bufs, b, at + 16))
         }
     }
-    first_global :: symtab.len().div_euclid(24)
+    first_global: symtab.len().div_euclid(24)
     loop g in 0..<c.g_name.len() {
         if c.g_kind[g] != LINK_G_FILE || c.g_alias[g] >= 0 -> next
-        s :: c.g_section[g]
-        header :: link_symbol_header(c, class_headers, s)
+        s: c.g_section[g]
+        header: link_symbol_header(c, class_headers, s)
         if header < 0 -> next
-        class :: c.live_class[c.live[s]]
+        class: c.live_class[c.live[s]]
         if class == LINK_TDATA || class == LINK_TBSS -> next
-        bind :: if c.g_weak_def[g] -> 2 else -> 1
-        kind :: if class == LINK_TEXT -> 2 else -> 1
+        bind: if c.g_weak_def[g] -> 2 else -> 1
+        kind: if class == LINK_TEXT -> 2 else -> 1
         link_image_symbol(&symtab, &strtab, c.g_name[g], (bind << 4).bit_or(kind), header, link_global_addr(c, g), c.g_size[g])
     }
     elf64_pad(&out, 8)
-    symtab_at :: out.len()
+    symtab_at: out.len()
     &out.extend(symtab)
-    strtab_index :: headers.len() + 2
+    strtab_index: headers.len() + 2
     &headers.push(LinkSectionHeader{name: ".symtab", kind: LINK_SHT_SYMTAB, flags: 0, addr: 0, offset: symtab_at, size: symtab.len(), link: strtab_index, info: first_global, align: 8, entry_size: 24})
-    strtab_at :: out.len()
+    strtab_at: out.len()
     &out.extend(strtab)
     &headers.push(LinkSectionHeader{name: ".strtab", kind: 3, flags: 0, addr: 0, offset: strtab_at, size: strtab.len(), link: 0, info: 0, align: 1, entry_size: 0})
-    shoff :: link_write_section_headers(&out, 0, headers)
+    shoff: link_write_section_headers(&out, 0, headers)
     link_elf_sections(&out, shoff, headers.len() + 2)
 }
 
 // The build-id note with a zero id, appended to `out`.
-fn link_build_id_note(out: &[U8]) Never! {
+link_build_id_note: fn(out: &[U8]) Never! {
     elf64_u32(&out, 4)
     elf64_u32(&out, LINK_BUILD_ID_SIZE)
     elf64_u32(&out, 3)
@@ -2795,17 +2795,17 @@ fn link_build_id_note(out: &[U8]) Never! {
 // A split image's section headers, appended to it: the build-id note's
 // alone (and the name table's), where debuggers read the id that finds the
 // side debug file.
-fn link_image_note_section(image: &[U8], l: LinkLayout, base: Int) Never! {
-    note :: LinkSectionHeader{name: ".note.gnu.build-id", kind: LINK_SHT_NOTE, flags: 2, addr: l.note_at, offset: l.note_at - base, size: LINK_BUILD_ID_NOTE_SIZE, link: 0, info: 0, align: 4, entry_size: 0}
-    shoff :: link_write_section_headers(&image, 0, [LinkSectionHeader]{note})
+link_image_note_section: fn(image: &[U8], l: LinkLayout, base: Int) Never! {
+    note: LinkSectionHeader{name: ".note.gnu.build-id", kind: LINK_SHT_NOTE, flags: 2, addr: l.note_at, offset: l.note_at - base, size: LINK_BUILD_ID_NOTE_SIZE, link: 0, info: 0, align: 4, entry_size: 0}
+    shoff: link_write_section_headers(&image, 0, [LinkSectionHeader]{note})
     link_elf_sections(&image, shoff, 3)
 }
 
 // The side debug file of the image `image`, laid out as `l` (whose build-id
 // note holds a zero id): its ELF header with no program headers, the note,
 // the debug sections, symbol table and section headers (link_write_sections).
-fn link_debug_file(c: &LinkContext, image: [U8], l: LinkLayout, debug: LinkDebug, pieces: &LinkPieces) -> [U8] Never! {
-    note :: l.note_at - c.base
+link_debug_file: fn(c: &LinkContext, image: [U8], l: LinkLayout, debug: LinkDebug, pieces: &LinkPieces) -> [U8] Never! {
+    note: l.note_at - c.base
     out := image[0..<LINK_EHDR_SIZE]
     link_put64(&out, 32, 0)
     loop at in 54..<58 -> out[at] = U8{0}
@@ -2818,10 +2818,10 @@ fn link_debug_file(c: &LinkContext, image: [U8], l: LinkLayout, debug: LinkDebug
 // first 20 bytes of the SHA-256 of their two SHA-256 digests, each taken
 // with the id still zero, written into both notes (the image's at file
 // offset `note`). Returns the id.
-fn link_build_id(image: &[U8], side: &[U8], note: Int) -> [U8] Never! {
+link_build_id: fn(image: &[U8], side: &[U8], note: Int) -> [U8] Never! {
     digests := sha256_bytes(image[0..<image.len()])
     &digests.extend(sha256_bytes(side[0..<side.len()]))
-    hash :: sha256_bytes(digests[0..<digests.len()])
+    hash: sha256_bytes(digests[0..<digests.len()])
     id := [U8]{}
     loop k in 0..<LINK_BUILD_ID_SIZE {
         image[note + 16 + k] = hash[k]
@@ -2835,15 +2835,15 @@ fn link_build_id(image: &[U8], side: &[U8], note: Int) -> [U8] Never! {
 // the null header; the name table's own is added) to `out`, whose first
 // byte is at file offset `origin`. Returns the headers' file offset, for
 // link_elf_sections.
-fn link_write_section_headers(out: &[U8], origin: Int, headers: [LinkSectionHeader]) -> Int Never! {
+link_write_section_headers: fn(out: &[U8], origin: Int, headers: [LinkSectionHeader]) -> Int Never! {
     shstrtab := [U8]{U8{0}}
     name_offsets := [Int]{}
     loop header in headers -> &name_offsets.push(elf64_string(&shstrtab, header.name))
-    names_offset :: elf64_string(&shstrtab, ".shstrtab")
-    shstrtab_at :: origin + out.len()
+    names_offset: elf64_string(&shstrtab, ".shstrtab")
+    shstrtab_at: origin + out.len()
     &out.extend(shstrtab)
     elf64_pad(&out, 8)
-    shoff :: origin + out.len()
+    shoff: origin + out.len()
     loop _ in 0..<64 -> &out.push(U8{0})
     loop (index, header) in headers {
         elf64_u32(&out, name_offsets[index])
@@ -2864,9 +2864,9 @@ fn link_write_section_headers(out: &[U8], origin: Int, headers: [LinkSectionHead
 // Point the ELF header `elf` at `count` section headers at file offset
 // `shoff`, the name table's last: e_shoff, e_shentsize, e_shnum and
 // e_shstrndx.
-fn link_elf_sections(elf: &[U8], shoff: Int, count: Int) Never! {
+link_elf_sections: fn(elf: &[U8], shoff: Int, count: Int) Never! {
     link_put64(&elf, 40, shoff)
-    fields :: [Int]{64, count, count - 1}
+    fields: [Int]{64, count, count - 1}
     loop (index, value) in fields {
         elf[58 + 2 * index] = U8{value.bit_and(255)}
         elf[59 + 2 * index] = U8{(value >> 8).bit_and(255)}
@@ -2879,17 +2879,17 @@ fn link_elf_sections(elf: &[U8], shoff: Int, count: Int) Never! {
 // Load every input buffer: relocatable objects directly, static archives
 // (told apart by the archive magic) as member tables whose symbol indexes
 // join the merged lookup. names[i] names bufs[i] in reports.
-fn link_load_inputs(c: &LinkContext, names: [String]) Never! {
-    count :: names.len()
+link_load_inputs: fn(c: &LinkContext, names: [String]) Never! {
+    count: names.len()
     loop b in 0..<count {
-        size :: c.bufs[b].len()
+        size: c.bufs[b].len()
         if size < 8 || link_u8(c.bufs, b, 0) != 0x21 {
             _ := link_load_object(&c, b, 0, size, names[b])
             next
         }
-        archive :: link_read_archive(names[b], c.bufs[b])
+        archive: link_read_archive(names[b], c.bufs[b])
         loop error in archive.errors -> link_error(&c, error)
-        index :: c.archives.len()
+        index: c.archives.len()
         loop (k, symbol) in archive.symbol_names {
             if c.lookup.get(symbol) == None -> &c.lookup.add(symbol, index * LINK_MEMBER_SCALE + archive.symbol_members[k]).drop("checked absent above")
         }
@@ -2902,14 +2902,14 @@ fn link_load_inputs(c: &LinkContext, names: [String]) Never! {
 // `__libc_start_main` and no object defines `_start`, then pull archive
 // members and write shims until every strong reference that can be
 // satisfied is. Returns the global id of `_start`.
-fn link_resolve_program(c: &LinkContext) -> Int Never! {
+link_resolve_program: fn(c: &LinkContext) -> Int Never! {
     has_start := false
     if c.g_index.get("_start") == .Val(g) -> has_start = c.g_kind[g] != LINK_G_NONE
     if !has_start && c.lookup.get("__libc_start_main") != None {
-        frames :: c.lookup.get("__register_frame_info") != None
+        frames: c.lookup.get("__register_frame_info") != None
         link_load_synth(&c, link_startup(frames), "<linker startup>")
     }
-    entry_g :: link_intern(&c, "_start")
+    entry_g: link_intern(&c, "_start")
     link_reference(&c, entry_g, false)
     loop {
         link_resolve(&c)
@@ -2919,8 +2919,8 @@ fn link_resolve_program(c: &LinkContext) -> Int Never! {
 }
 
 // The section defining `_start`, or -1 with a report.
-fn link_entry_section(c: &LinkContext, entry_g: Int) -> Int Never! {
-    entry_final :: link_final(c, entry_g)
+link_entry_section: fn(c: &LinkContext, entry_g: Int) -> Int Never! {
+    entry_final: link_final(c, entry_g)
     if c.g_kind[entry_final] != LINK_G_FILE || c.g_section[entry_final] < 0 {
         link_error(&c, "nothing defines the entry point `_start` (no object defines it and the archives provide no `__libc_start_main`)")
         return -1
@@ -2931,18 +2931,18 @@ fn link_entry_section(c: &LinkContext, entry_g: Int) -> Int Never! {
 // Whether the linker's startup object is part of the link: written by this
 // link, or carried in a runtime pack (Image/RuntimePack.jet), which exports
 // its `__jet_link_main`.
-fn link_has_startup(c: LinkContext) -> Bool Never! {
+link_has_startup: fn(c: LinkContext) -> Bool Never! {
     if c.g_index.get("__jet_link_main") == .Val(g) -> return c.g_kind[link_final(c, g)] == LINK_G_FILE
     false
 }
 
 // Descriptive canonical linker facts only. The verified held-output producer
 // must bind them to the SAME approved runtime pack before issuing a lease.
-struct X64ResidentLinkRequest {
+X64ResidentLinkRequest: struct {
     runtime_input: Int
     callable_exports: [String]
 }
-struct X64ResidentSymbol {
+X64ResidentSymbol: struct {
     symbol: String
     defining_symbol: String
     input: Int
@@ -2952,14 +2952,14 @@ struct X64ResidentSymbol {
     size: Int
     section_end: Int
 }
-struct X64ResidentSegment {
+X64ResidentSegment: struct {
     address: Int
     file_size: Int
     memory_size: Int
     align: Int
     flags: Int
 }
-struct X64ResidentLinkFacts {
+X64ResidentLinkFacts: struct {
     base: Int
     entry: Int
     segments: [X64ResidentSegment]
@@ -2974,13 +2974,13 @@ struct X64ResidentLinkFacts {
 }
 // The linked image, else (`image.errors` not empty) why it failed; with a
 // split link, its side debug file and build id (else both empty).
-struct X64ResidentLinkResult {
+X64ResidentLinkResult: struct {
     image: X64ExecutableResult
     facts: X64ResidentLinkFacts?
     debug_file: [U8]
     build_id: [U8]
 }
-fn link_resident_failure(errors: ^[String]) -> X64ResidentLinkResult Never! {
+link_resident_failure: fn(errors: ^[String]) -> X64ResidentLinkResult Never! {
     X64ResidentLinkResult{image: X64ExecutableResult{bytes: [U8]{}, errors: ^errors}, facts: None, debug_file: [U8]{}, build_id: [U8]{}}
 }
 
@@ -2993,13 +2993,13 @@ fn link_resident_failure(errors: ^[String]) -> X64ResidentLinkResult Never! {
 // runtime pack starts, none of whose kept code needs libc's startup, starts
 // at its own (link_owned_fits). The ELF header is loaded at `base`
 // (LINK_BASE, or LINK_RUN_BASE for Image/Loader.jet).
-fn x64_link_executable(names: [String], bufs: ^[[U8]], base: Int, threads: CompilerThreads, debug_info: Bool) -> X64ExecutableResult Never! {
+x64_link_executable: fn(names: [String], bufs: ^[[U8]], base: Int, threads: CompilerThreads, debug_info: Bool) -> X64ExecutableResult Never! {
     linked := link_executable_image(names, ^bufs, base, None, threads, debug_info, false)
     ^linked.image
 }
 
 // A static executable whose debug information is in a side file.
-struct X64SplitExecutableResult {
+X64SplitExecutableResult: struct {
     // The executable: its loaded segments, a PT_NOTE naming its GNU build-id
     // note, section headers naming only that note (debuggers read the id
     // from it), and no symbol table or debug section.
@@ -3015,7 +3015,7 @@ struct X64SplitExecutableResult {
 
 // x64_link_executable with the DWARF, `.symtab` and section headers in a
 // side debug file instead of the executable's tail.
-fn x64_link_executable_split(names: [String], bufs: ^[[U8]], base: Int, threads: CompilerThreads) -> X64SplitExecutableResult Never! {
+x64_link_executable_split: fn(names: [String], bufs: ^[[U8]], base: Int, threads: CompilerThreads) -> X64SplitExecutableResult Never! {
     linked := link_executable_image(names, ^bufs, base, None, threads, true, true)
     X64SplitExecutableResult{bytes: ^linked.image.bytes, debug_file: ^linked.debug_file, build_id: ^linked.build_id, errors: ^linked.image.errors}
 }
@@ -3025,7 +3025,7 @@ fn x64_link_executable_split(names: [String], bufs: ^[[U8]], base: Int, threads:
 // `split` writes the debug tail to a side file (x64_link_executable_split),
 // and the image's fault report gives addresses under the build id that names
 // it.
-fn link_executable_image(names: [String], bufs: ^[[U8]], base: Int, request: ^X64ResidentLinkRequest?, threads: CompilerThreads, debug_info: Bool, split: Bool) -> X64ResidentLinkResult Never! {
+link_executable_image: fn(names: [String], bufs: ^[[U8]], base: Int, request: ^X64ResidentLinkRequest?, threads: CompilerThreads, debug_info: Bool, split: Bool) -> X64ResidentLinkResult Never! {
     c := link_context(^bufs, base)
     if split -> c.fault_report = LinkFaultReport.Addresses
     if request == .Val(wanted) {
@@ -3038,7 +3038,7 @@ fn link_executable_image(names: [String], bufs: ^[[U8]], base: Int, request: ^X6
         loop symbol in wanted.callable_exports {
             if symbol == "" || seen.get(symbol) != None -> return link_resident_failure(^[String]{"empty or duplicate resident runtime export `{symbol}`"})
             &seen.add(symbol, true).drop("checked absent above")
-            global :: link_intern(&c, symbol)
+            global: link_intern(&c, symbol)
             link_reference(&c, global, false)
         }
     }
@@ -3054,16 +3054,16 @@ fn link_executable_image(names: [String], bufs: ^[[U8]], base: Int, request: ^X6
     entries := [Int]{entry_section}
     if request == .Val(wanted) {
         loop symbol in wanted.callable_exports {
-            global :: c.g_index.get(symbol) ?? return link_resident_failure(^[String]{"unresolved resident runtime export `{symbol}`"})
-            final :: link_final(c, global)
+            global: c.g_index.get(symbol) ?? return link_resident_failure(^[String]{"unresolved resident runtime export `{symbol}`"})
+            final: link_final(c, global)
             if c.g_kind[final] != LINK_G_FILE || c.g_section[final] < 0 -> return link_resident_failure(^[String]{"resident export `{symbol}` is not a concrete file definition"})
-            object :: c.g_obj[final]
-            section :: c.g_section[final]
+            object: c.g_obj[final]
+            section: c.g_section[final]
             if c.obj_buffer[object] != wanted.runtime_input -> return link_resident_failure(^[String]{"resident export `{symbol}` is not defined by the designated runtime input"})
             if (link_sec_flags(c, object, section).bit_and(4)) == 0 -> return link_resident_failure(^[String]{"resident export `{symbol}` is not executable code"})
-            section_size :: link_sec_size(c, object, section)
-            offset :: c.g_value[final]
-            size :: c.g_size[final]
+            section_size: link_sec_size(c, object, section)
+            offset: c.g_value[final]
+            size: c.g_size[final]
             if offset < 0 || offset >= section_size || size < 0 || size > section_size - offset -> return link_resident_failure(^[String]{"resident export `{symbol}` has an out-of-section extent"})
             &entries.push(section)
         }
@@ -3079,18 +3079,18 @@ fn link_executable_image(names: [String], bufs: ^[[U8]], base: Int, request: ^X6
     c.eh_debug = request == .None && split && link_eh_unloaded(c)
     // A plain executable's layout is packed (LinkLayout); a resident one's
     // segments keep their file offsets at their addresses.
-    layout :: link_layout(&c, split, request == .None)
+    layout: link_layout(&c, split, request == .None)
     if request != .None {
         if layout.text_start <= 0 || layout.text_end < layout.text_start || layout.mem_end > 9223372036854775807 -> return link_resident_failure(^[String]{"resident executable layout is outside the native address range"})
     }
-    startup :: link_has_startup(c)
+    startup: link_has_startup(c)
     link_define_names(&c, layout, startup)
-    entry :: link_global_addr(c, entry_g)
+    entry: link_global_addr(c, entry_g)
     // The unloaded debug tail (`.debug_*` under `debug_info`, `.symtab`,
     // section headers) follows the loaded data, so profilers and debuggers
     // name the code; under `split` it is the side debug file, which the
     // image's build id names. A packed layout's code comes last.
-    debug :: link_debug_sections(&c, debug_info)
+    debug: link_debug_sections(&c, debug_info)
     // The sections' bytes, relocated on the threads, then written in order.
     emitted := link_emit_pieces(^c, link_emitted_rows(layout, debug), threads)
     c = ^emitted.context
@@ -3111,17 +3111,17 @@ fn link_executable_image(names: [String], bufs: ^[[U8]], base: Int, request: ^X6
     if request == .Val(wanted) {
         symbols := [X64ResidentSymbol]{}
         loop symbol in wanted.callable_exports {
-            global :: c.g_index.get(symbol) ?? return link_resident_failure(^[String]{"resident runtime export disappeared after resolution"})
-            final :: link_final(c, global)
-            section :: c.g_section[final]
-            row :: link_live_row(c, section)
+            global: c.g_index.get(symbol) ?? return link_resident_failure(^[String]{"resident runtime export disappeared after resolution"})
+            final: link_final(c, global)
+            section: c.g_section[final]
+            row: link_live_row(c, section)
             if row < 0 || c.live_class[row] != LINK_TEXT -> return link_resident_failure(^[String]{"resident export `{symbol}` is not in the final executable mapping"})
-            object :: c.g_obj[final]
-            address :: link_global_addr(c, global)
-            section_address :: c.live_addr[row]
-            section_size :: link_sec_size(c, object, section)
+            object: c.g_obj[final]
+            address: link_global_addr(c, global)
+            section_address: c.live_addr[row]
+            section_size: link_sec_size(c, object, section)
             if address <= 0 || address < section_address || address < layout.text_start || address >= layout.text_end || section_address < layout.text_start || section_size <= 0 || section_size > layout.text_end - section_address -> return link_resident_failure(^[String]{"resident export `{symbol}` has an invalid linked code address"})
-            section_end :: section_address + section_size
+            section_end: section_address + section_size
             &symbols.push(X64ResidentSymbol{symbol: symbol, defining_symbol: c.g_name[final], input: c.obj_buffer[object], object_offset: c.obj_base[object], address: address, size: c.g_size[final], section_end: section_end})
         }
         segments := [X64ResidentSegment]{

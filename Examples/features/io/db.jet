@@ -3,47 +3,47 @@
 // SQL.raw is the explicit unchecked text escape; this example uses checked
 // SQL templates throughout.
 // `.query`/`.query_one`/`.execute` are the only ways to talk to the database.
-package {
+package: {
     name: "db"
     authority: { allow: [DB, DB.Read, DB.Write, IO, Mem.Alloc, Time.Wait] }
 }
 
-use db :: core.db
+use db: core.db
 
-fn run() {
-    conn :: db.open_memory()
-    policy :: db.policy("greet", "true") ?? panic("policy failed")
-    scoped :: conn.with_policy(policy, "owner")
-    _created :: db.migrate(scoped, "greet-v1", [SQL{"CREATE TABLE greet (id INTEGER PRIMARY KEY, msg TEXT)"}]) ?? panic("create failed")
+run: fn() {
+    conn: db.open_memory()
+    policy: db.policy("greet", "true") ?? panic("policy failed")
+    scoped: conn.with_policy(policy, "owner")
+    _created: db.migrate(scoped, "greet-v1", [SQL{"CREATE TABLE greet (id INTEGER PRIMARY KEY, msg TEXT)"}]) ?? panic("create failed")
     // An "injection-looking" literal — because it is a BIND PARAMETER, not
     // spliced SQL text, it round-trips as inert data.
-    evil :: "'; DROP TABLE greet; --"
-    _ins1 :: scoped.execute(SQL{"INSERT INTO greet (msg) VALUES ({evil})"}) ?? panic("insert failed")
-    hello :: "hello, jet.db!"
-    _ins2 :: scoped.execute(SQL{"INSERT INTO greet (msg) VALUES ({hello})"}) ?? panic("insert failed")
-    rows :: scoped.query(SQL{"SELECT msg FROM greet ORDER BY id"}) ?? panic("query failed")
+    evil: "'; DROP TABLE greet; --"
+    _ins1: scoped.execute(SQL{"INSERT INTO greet (msg) VALUES ({evil})"}) ?? panic("insert failed")
+    hello: "hello, jet.db!"
+    _ins2: scoped.execute(SQL{"INSERT INTO greet (msg) VALUES ({hello})"}) ?? panic("insert failed")
+    rows: scoped.query(SQL{"SELECT msg FROM greet ORDER BY id"}) ?? panic("query failed")
     loop row in rows {
-        msg_val :: row.get("msg") ?? panic("missing msg")
-        msg :: msg_val.text() ?? panic("msg is not text")
+        msg_val: row.get("msg") ?? panic("missing msg")
+        msg: msg_val.text() ?? panic("msg is not text")
         print(msg)
     }
     // Prove the table survived the "injection": still exactly 2 rows.
-    count_opt :: scoped.query_one(SQL{"SELECT COUNT(*) AS n FROM greet"})
+    count_opt: scoped.query_one(SQL{"SELECT COUNT(*) AS n FROM greet"})
     if count_opt == .Val(count_row) {
-        n_val :: count_row.get("n") ?? panic("missing n")
-        n :: n_val.int() ?? panic("n is not an int")
+        n_val: count_row.get("n") ?? panic("missing n")
+        n: n_val.int() ?? panic("n is not an int")
         print("row count: {n}")
     }
     // A transaction: an insert inside begin/rollback must not stick.
-    _begun :: scoped.begin()
-    temporary :: "temporary"
-    _ins3 :: scoped.execute(SQL{"INSERT INTO greet (msg) VALUES ({temporary})"}) ?? panic("insert failed")
-    _rolledback :: scoped.rollback()
-    after_opt :: scoped.query_one(SQL{"SELECT COUNT(*) AS n FROM greet"})
+    _begun: scoped.begin()
+    temporary: "temporary"
+    _ins3: scoped.execute(SQL{"INSERT INTO greet (msg) VALUES ({temporary})"}) ?? panic("insert failed")
+    _rolledback: scoped.rollback()
+    after_opt: scoped.query_one(SQL{"SELECT COUNT(*) AS n FROM greet"})
     if after_opt == .Val(after_row) {
-        n_val :: after_row.get("n") ?? panic("missing n")
-        n :: n_val.int() ?? panic("n is not an int")
+        n_val: after_row.get("n") ?? panic("missing n")
+        n: n_val.int() ?? panic("n is not an int")
         print("row count after rollback: {n}")
     }
-    _closed :: scoped.close()
+    _closed: scoped.close()
 }

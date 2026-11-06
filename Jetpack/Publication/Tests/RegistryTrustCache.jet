@@ -15,8 +15,8 @@ use {
         publication_ensure_registry_root_key, publication_read_registry_root_key,
         publication_registry_clone_arguments,
     ]
-    files :: core.files
-    sys :: core.sys
+    files: core.files
+    sys: core.sys
 }
 
 #Test("registry trust root key accepts exactly 32 hex bytes") {
@@ -33,7 +33,7 @@ use {
 }
 #Test("registry cache invalid components cannot escape root") {
     loop name in ([String]{".", "..", "../shared", "/tmp/shared", "a/b", "a\\b", "a:b", "a b", "a\n", "é"}) {
-        component :: publication_registry_cache_component(name)
+        component: publication_registry_cache_component(name)
         assert(component.starts_with("registry-"))
         assert_eq(component.len(), 73)
         assert(!component.contains("/") && !component.contains("\\"))
@@ -47,7 +47,7 @@ use {
     assert_eq(publication_registry_cache_lock_name(""), ".registry-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855.cache-lock")
 }
 #Test("registry trust paths hash name and never use repository keys") {
-    digest :: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    digest: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
     assert_eq(publication_registry_trust_path("/host/.jet/keys", "abc", "registry-roots", "pub"), "/host/.jet/registry-roots/{digest}.pub")
     assert_eq(publication_registry_trust_path("/host/.jet/keys", "abc", "registry-checkpoints", "state"), "/host/.jet/registry-checkpoints/{digest}.state")
     assert_eq(publication_registry_trust_path("keys", "abc", "registry-roots", "pub"), "registry-roots/{digest}.pub")
@@ -62,53 +62,53 @@ use {
     assert(!publication_registry_origin_matches("file:///repo.git", true, ""))
 }
 #Test("registry clone pins per command while retaining configured origin") {
-    configured :: "git://registry.example.org/index.git"
-    pinned :: "git://8.8.8.8/index.git"
+    configured: "git://registry.example.org/index.git"
+    pinned: "git://8.8.8.8/index.git"
     assert_eq(publication_registry_clone_arguments(configured, pinned, "/cache/.x.partial-1"), [String]{"-c", "url.git://8.8.8.8/index.git.insteadOf=git://registry.example.org/index.git", "clone", "--", configured, "/cache/.x.partial-1"})
     loop scheme in ([String]{"git", "ssh"}) {
-        url :: "{scheme}://registry.example.org/index.git"
-        target :: if scheme == "git" -> pinned else -> url
-        first :: publication_registry_clone_arguments(url, target, "/cache/.x.partial-1")
-        second :: publication_registry_clone_arguments(url, target, "/cache/.x.partial-2")
+        url: "{scheme}://registry.example.org/index.git"
+        target: if scheme == "git" -> pinned else -> url
+        first: publication_registry_clone_arguments(url, target, "/cache/.x.partial-1")
+        second: publication_registry_clone_arguments(url, target, "/cache/.x.partial-2")
         assert_eq(first[first.len() - 2], url)
         assert_eq(second[second.len() - 2], url)
         assert(publication_registry_origin_matches(url, true, "{url}\n"))
     }
 }
 
-fn publication_trust_cache_test_restore_env(name: String, previous: String?) -[Env]> {
+publication_trust_cache_test_restore_env: fn(name: String, previous: String?) -[Env]> {
     if previous == {
         .Val(value) -> sys.set(name, value)
-        .None -> { _ :: sys.unset(name) ?? panic("restore environment") }
+        .None -> { _: sys.unset(name) ?? panic("restore environment") }
     }
 }
-fn publication_trust_cache_test_git(args: [String], cwd: String) -[Env, Exec, Time.Wait]> {
-    output :: foundation_hardened_git_command().args_extend(args).cwd(cwd).run() ?? panic("real git process")
+publication_trust_cache_test_git: fn(args: [String], cwd: String) -[Env, Exec, Time.Wait]> {
+    output: foundation_hardened_git_command().args_extend(args).cwd(cwd).run() ?? panic("real git process")
     assert(output.success)
 }
 // Original tests/pkg.rs:8033-8080; no have_git skip or fake process closure.
 #Test("registry refresh failure preserves previous cache") {
-    root :: files.join(sys.temp_dir(), "jet-registry-cache-test-{publication_registry_unique_suffix()}")
-    bare :: files.join(root, "registry.git")
-    seed :: files.join(root, "seed")
-    cache :: files.join(root, "cache")
+    root: files.join(sys.temp_dir(), "jet-registry-cache-test-{publication_registry_unique_suffix()}")
+    bare: files.join(root, "registry.git")
+    seed: files.join(root, "seed")
+    cache: files.join(root, "cache")
     files.create_dir_all(seed) ?? panic("seed")
     publication_trust_cache_test_git([String]{"init", "--bare", bare}, root)
     publication_trust_cache_test_git([String]{"init"}, seed)
     publication_trust_cache_test_git([String]{"config", "user.email", "test@localhost"}, seed)
     publication_trust_cache_test_git([String]{"config", "user.name", "cache test"}, seed)
-    review :: "reviews/stale-kit/1.0.0.review"
+    review: "reviews/stale-kit/1.0.0.review"
     files.create_dir_all(files.dirname(files.join(seed, review))) ?? panic("review directory")
     files.write(files.join(seed, review), "previously verified review\n") ?? panic("review")
     publication_trust_cache_test_git([String]{"add", "--", review}, seed)
     publication_trust_cache_test_git([String]{"commit", "-m", "seed review"}, seed)
     publication_trust_cache_test_git([String]{"push", bare, "HEAD:refs/heads/main"}, seed)
     publication_trust_cache_test_git([String]{"symbolic-ref", "HEAD", "refs/heads/main"}, bare)
-    previous :: sys.get("JET_REGISTRY_CACHE_DIR")
+    previous: sys.get("JET_REGISTRY_CACHE_DIR")
     sys.set("JET_REGISTRY_CACHE_DIR", cache)
-    registry :: PublicationRegistryConfig.private("scratch", "file://{bare}", false)
-    repo :: publication_ensure_index_clone(registry) ?? panic("initial registry clone")
-    before :: files.read(files.join(repo, review)) ?? panic("previous verified review")
+    registry: PublicationRegistryConfig.private("scratch", "file://{bare}", false)
+    repo: publication_ensure_index_clone(registry) ?? panic("initial registry clone")
+    before: files.read(files.join(repo, review)) ?? panic("previous verified review")
     files.remove_all(bare) ?? panic("remove remote")
     if publication_ensure_index_clone(registry) == {
         .Err(error) -> assert_eq(error.diagnostic.code, "E1235")
@@ -122,22 +122,22 @@ fn publication_trust_cache_test_git(args: [String], cwd: String) -[Env, Exec, Ti
     files.remove_all(root) ?? panic("cleanup")
 }
 #Test("registry offline unavailable cache refuses without downloading") {
-    previous :: sys.get("JET_REGISTRY_CACHE_DIR")
-    root :: files.join(sys.temp_dir(), "jet-registry-offline-test-{publication_registry_unique_suffix()}")
+    previous: sys.get("JET_REGISTRY_CACHE_DIR")
+    root: files.join(sys.temp_dir(), "jet-registry-offline-test-{publication_registry_unique_suffix()}")
     sys.set("JET_REGISTRY_CACHE_DIR", root)
-    registry :: PublicationRegistryConfig.private("scratch", "file:///must-not-be-read.git", false)
+    registry: PublicationRegistryConfig.private("scratch", "file:///must-not-be-read.git", false)
     assert(publication_ensure_local_index_clone(registry) == .Err(_))
     assert(!files.is_dir(root))
     publication_trust_cache_test_restore_env("JET_REGISTRY_CACHE_DIR", previous)
 }
 #Test("registry root pin is host owned immutable and configured missing refuses") {
-    root :: files.join(sys.temp_dir(), "jet-registry-trust-test-{publication_registry_unique_suffix()}")
-    previous_keys :: sys.get("JET_KEYS_DIR")
-    previous_pin :: sys.get("JET_REGISTRY_ROOT_KEY")
+    root: files.join(sys.temp_dir(), "jet-registry-trust-test-{publication_registry_unique_suffix()}")
+    previous_keys: sys.get("JET_KEYS_DIR")
+    previous_pin: sys.get("JET_REGISTRY_ROOT_KEY")
     sys.set("JET_KEYS_DIR", files.join(root, "keys"))
-    _ :: sys.unset("JET_REGISTRY_ROOT_KEY") ?? panic("clear configured pin")
-    key :: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-    pin :: publication_ensure_registry_root_key("scratch", key) ?? panic("establish pin")
+    _: sys.unset("JET_REGISTRY_ROOT_KEY") ?? panic("clear configured pin")
+    key: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    pin: publication_ensure_registry_root_key("scratch", key) ?? panic("establish pin")
     assert_eq(publication_ensure_registry_root_key("scratch", key) ?? panic("same pin"), pin)
     assert_eq(publication_read_registry_root_key("scratch") ?? panic("host pin"), key)
     assert(publication_ensure_registry_root_key("scratch", "1123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef") == .Err(.PermissionDenied(_)))
@@ -153,23 +153,23 @@ fn publication_trust_cache_test_git(args: [String], cwd: String) -[Env, Exec, Ti
 // resolves to one public address, and a clone fetches a local bare repository
 // where the pinned network remote would be. The URL policy and the
 // public-address check run unchanged on the configured URL.
-struct PublicationTrustCacheTestNet {
+PublicationTrustCacheTestNet: struct {
     host: String
     bare: String
 }
 impl PublicationTrustCacheTestNet.PublicationRegistryNet {
-    fn resolve(self, host: String, port: Int) -[Net, Time.Wait]> [[U8]] PublicationRegistryAuthorityError! {
+    resolve: fn(self, host: String, port: Int) -[Net, Time.Wait]> [[U8]] PublicationRegistryAuthorityError! {
         assert_eq(host, self.host)
         assert(port == 9418 || port == 22)
         Ok([[U8]]{[U8]{93, 184, 216, 34}})
     }
 
-    fn fetch_remote(self, url: String, transport: PublicationRegistryTransport) -> String Never! {
+    fetch_remote: fn(self, url: String, transport: PublicationRegistryTransport) -> String Never! {
         if transport == .Local -> panic("{url} is a network registry")
         "file://{self.bare}"
     }
 }
-fn publication_trust_cache_test_publish(seed: String, bare: String, review: String, text: String) -[FS, Env, Exec, Time.Wait]> {
+publication_trust_cache_test_publish: fn(seed: String, bare: String, review: String, text: String) -[FS, Env, Exec, Time.Wait]> {
     files.create_dir_all(files.dirname(files.join(seed, review))) ?? panic("review directory")
     files.write(files.join(seed, review), text) ?? panic("review")
     publication_trust_cache_test_git([String]{"add", "--", review}, seed)
@@ -177,13 +177,13 @@ fn publication_trust_cache_test_publish(seed: String, bare: String, review: Stri
     publication_trust_cache_test_git([String]{"push", bare, "HEAD:refs/heads/main"}, seed)
 }
 #Test("registry git and ssh two refreshes preserve offline configured origin") {
-    previous :: sys.get("JET_REGISTRY_CACHE_DIR")
-    root :: files.join(sys.temp_dir(), "jet-registry-network-cache-test-{publication_registry_unique_suffix()}")
+    previous: sys.get("JET_REGISTRY_CACHE_DIR")
+    root: files.join(sys.temp_dir(), "jet-registry-network-cache-test-{publication_registry_unique_suffix()}")
     sys.set("JET_REGISTRY_CACHE_DIR", files.join(root, "cache"))
-    review :: "reviews/net-kit/1.0.0.review"
+    review: "reviews/net-kit/1.0.0.review"
     loop scheme in ([String]{"git", "ssh"}) {
-        bare :: files.join(root, "{scheme}.git")
-        seed :: files.join(root, "{scheme}-seed")
+        bare: files.join(root, "{scheme}.git")
+        seed: files.join(root, "{scheme}-seed")
         files.create_dir_all(seed) ?? panic("seed")
         publication_trust_cache_test_git([String]{"init", "--bare", bare}, root)
         publication_trust_cache_test_git([String]{"init"}, seed)
@@ -191,16 +191,16 @@ fn publication_trust_cache_test_publish(seed: String, bare: String, review: Stri
         publication_trust_cache_test_git([String]{"config", "user.name", "cache test"}, seed)
         publication_trust_cache_test_publish(seed, bare, review, "first\n")
         publication_trust_cache_test_git([String]{"symbolic-ref", "HEAD", "refs/heads/main"}, bare)
-        url :: "{scheme}://registry.jet-lang.dev/index.git"
-        network :: PublicationTrustCacheTestNet{host: "registry.jet-lang.dev", bare: bare}
-        registry :: PublicationRegistryConfig.private("network-{scheme}", url, false)
-        first :: publication_ensure_index_clone_with_network(registry, network) ?? panic("initial pinned clone")
+        url: "{scheme}://registry.jet-lang.dev/index.git"
+        network: PublicationTrustCacheTestNet{host: "registry.jet-lang.dev", bare: bare}
+        registry: PublicationRegistryConfig.private("network-{scheme}", url, false)
+        first: publication_ensure_index_clone_with_network(registry, network) ?? panic("initial pinned clone")
         assert_eq(files.read(files.join(first, review)) ?? panic("first review"), "first\n")
         publication_trust_cache_test_publish(seed, bare, review, "second\n")
-        second :: publication_ensure_index_clone_with_network(registry, network) ?? panic("second pinned refresh")
+        second: publication_ensure_index_clone_with_network(registry, network) ?? panic("second pinned refresh")
         assert_eq(first, second)
         assert_eq(files.read(files.join(second, review)) ?? panic("refreshed review"), "second\n")
-        origin :: foundation_hardened_git_command().args_extend([String]{"remote", "get-url", "origin"}).cwd(second).run() ?? panic("origin")
+        origin: foundation_hardened_git_command().args_extend([String]{"remote", "get-url", "origin"}).cwd(second).run() ?? panic("origin")
         assert(publication_registry_origin_matches(url, origin.success, origin.output))
         // Offline validates the configured origin and never fetches the now missing remote.
         files.remove_all(bare) ?? panic("remove remote")
@@ -211,12 +211,12 @@ fn publication_trust_cache_test_publish(seed: String, bare: String, review: Stri
 }
 
 #Test("registry held cache mutation preserves owned tree and refuses overwrite") {
-    root :: files.join(sys.temp_dir(), "jet-registry-held-cache-test-{publication_registry_unique_suffix()}")
+    root: files.join(sys.temp_dir(), "jet-registry-held-cache-test-{publication_registry_unique_suffix()}")
     files.create_dir_all(files.join(root, "old")) ?? panic("old clone")
     files.create_dir_all(files.join(root, "partial")) ?? panic("partial clone")
     files.write(files.join(root, "old/verified"), "old verified bytes") ?? panic("old bytes")
     files.write(files.join(root, "partial/verified"), "fresh bytes") ?? panic("fresh bytes")
-    parent :: foundation_open_directory_authority(root) ?? panic("held cache parent")
+    parent: foundation_open_directory_authority(root) ?? panic("held cache parent")
     assert(parent.rename("partial", "old") == .Err(.AlreadyExists(_)))
     assert_eq(files.read(files.join(root, "old/verified")) ?? panic("retained bytes"), "old verified bytes")
     parent.rename("old", "backup") ?? panic("stage previous clone")

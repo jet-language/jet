@@ -3,46 +3,46 @@
 // bound to the named function. A named function, one with an effect and a
 // capturing lambda all fill the field; every tier calls them through the same
 // Result-returning callable ABI.
-enum Stage {
+Stage: enum {
     Node
     Leaf
 }
 
-struct Hook {
+Hook: struct {
     events: [String]
     react: fn(String, Stage) Never! -[IO]>
 
-    fn recording() -> Hook Never! {
+    recording: fn() -> Hook Never! {
         Hook{events: [String]{}, react: ignore}
     }
 
-    fn observe(&self, path: String, stage: Stage) Never! -[IO]> {
+    observe: fn(&self, path: String, stage: Stage) Never! -[IO]> {
         &self.events.push(path.copy())
         self.react(path, stage)
     }
 }
 
-fn ignore(path: String, stage: Stage) Never! -[IO]> {}
+ignore: fn(path: String, stage: Stage) Never! -[IO]> {}
 
-fn announce(path: String, stage: Stage) Never! -[IO]> {
+announce: fn(path: String, stage: Stage) Never! -[IO]> {
     if stage == {
         .Node -> print("node {path}")
         .Leaf -> print("leaf {path}")
     }
 }
 
-fn walk(path: String, hook: &Hook) -[IO]> {
+walk: fn(path: String, hook: &Hook) -[IO]> {
     &hook.observe(path, Stage.Node)
     &hook.observe("{path}/leaf", Stage.Leaf)
 }
 
-fn notify(react: fn(Int) Never!, n: Int) Never! { react(n) }
+notify: fn(react: fn(Int) Never!, n: Int) Never! { react(n) }
 
-fn skip(n: Int) Never! {}
+skip: fn(n: Int) Never! {}
 
-fn tally(n: Int) Never! -[IO]> { print("tally {n}") }
+tally: fn(n: Int) Never! -[IO]> { print("tally {n}") }
 
-fn run() {
+run: fn() {
     quiet := Hook.recording()
     walk("root", &quiet)
     print("quiet events: {quiet.events.len()}")
@@ -51,15 +51,15 @@ fn run() {
     walk("tree", &loud)
     print("loud events: {loud.events.len()}")
 
-    label :: "seen"
+    label: "seen"
     captured := Hook{events: [String]{}, react: (path: String, stage: Stage) -[IO]> { print("{label} {path}") }}
     walk("lambda", &captured)
     print("captured events: {captured.events.len()}")
 
     notify(skip, 3)
-    quietly :: skip
+    quietly: skip
     quietly(4)
-    counted :: tally
+    counted: tally
     counted(5)
     print("done")
 }

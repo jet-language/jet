@@ -34,19 +34,19 @@ use {
 }
 
 #Test("sources merge by key and dedup") {
-    first :: [String: String]{"default": "NixOS/nixpkgs/nixos-24.05@github"}
-    second :: [String: String]{
+    first: [String: String]{"default": "NixOS/nixpkgs/nixos-24.05@github"}
+    second: [String: String]{
         "default": "NixOS/nixpkgs/nixos-24.05@github",
         "unstable": "NixOS/nixpkgs/nixpkgs-unstable@github"
     }
-    merged :: pkg_merge_sources([[String: String]]{first, second}) ?? panic("identical sources merge")
+    merged: pkg_merge_sources([[String: String]]{first, second}) ?? panic("identical sources merge")
     assert_eq(merged.len(), 2)
     assert_eq(merged["unstable"], "NixOS/nixpkgs/nixpkgs-unstable@github")
 }
 
 #Test("sources conflict on different refs") {
-    first :: [String: String]{"default": "NixOS/nixpkgs/nixos-24.05@github"}
-    second :: [String: String]{"default": "NixOS/nixpkgs/nixos-23.11@github"}
+    first: [String: String]{"default": "NixOS/nixpkgs/nixos-24.05@github"}
+    second: [String: String]{"default": "NixOS/nixpkgs/nixos-23.11@github"}
     if pkg_merge_sources([[String: String]]{first, second}) == {
         .Ok(_) -> panic("expected SourceConflict")
         .Err(error) -> assert_eq(error, MergeError.SourceConflict{name: "default", a: "NixOS/nixpkgs/nixos-24.05@github", b: "NixOS/nixpkgs/nixos-23.11@github"})
@@ -54,8 +54,8 @@ use {
 }
 
 #Test("packages concat dedup preserve source and order") {
-    first :: [Pkg]{Pkg.new("default", "ripgrep"), Pkg.new("default", "fd")}
-    second :: [Pkg]{
+    first: [Pkg]{Pkg.new("default", "ripgrep"), Pkg.new("default", "fd")}
+    second: [Pkg]{
         Pkg.new("default", "ripgrep"),
         Pkg.new("unstable", "ripgrep"),
         Pkg.new("default", "jq")
@@ -63,18 +63,18 @@ use {
     assert_eq(pkg_merge_packages([[Pkg]]{first, second}), [Pkg]{Pkg.new("default", "ripgrep"), Pkg.new("default", "fd"), Pkg.new("unstable", "ripgrep"), Pkg.new("default", "jq")})
 }
 
-fn pkg_merge_test_writer(key: String, value: String, layer: ContributionLayer, source: String) -> FactContribution {
+pkg_merge_test_writer: fn(key: String, value: String, layer: ContributionLayer, source: String) -> FactContribution {
     FactContribution.new(key, FactValue.Text{value: value}, SourceScope.Package, layer, source)
 }
 
 #Test("fact law resolves layers and force without a second priority table") {
-    resolved :: pkg_fact_resolve(FactKey.new("k"), [FactContribution]{
+    resolved: pkg_fact_resolve(FactKey.new("k"), [FactContribution]{
         pkg_merge_test_writer("k", "default", ContributionLayer.Declaration, "package.jet"),
         pkg_merge_test_writer("k", "bundle", ContributionLayer.OptimizationBundle, "release"),
         pkg_merge_test_writer("k", "cli", ContributionLayer.CommandLine, "command line")
     }) ?? panic("layers resolve to a deciding writer")
     assert_eq(resolved.value, FactValue.Text{value: "cli"})
-    pinned :: pkg_fact_resolve(FactKey.new("k"), [FactContribution]{
+    pinned: pkg_fact_resolve(FactKey.new("k"), [FactContribution]{
         pkg_merge_test_writer("k", "bundle", ContributionLayer.OptimizationBundle, "release"),
         pkg_merge_test_writer("k", "fleet", ContributionLayer.Fleet, "fleet.jet").forced(),
         pkg_merge_test_writer("k", "cli", ContributionLayer.CommandLine, "command line")
@@ -98,17 +98,17 @@ fn pkg_merge_test_writer(key: String, value: String, layer: ContributionLayer, s
 }
 
 #Test("entry combines packages and resolves settings") {
-    first :: EntryContribution{packages: [Pkg]{Pkg.new("default", "ripgrep")}, settings: [String: [FactContribution]]{"prompt": [FactContribution]{pkg_merge_test_writer("prompt", "jetpack", ContributionLayer.Declaration, "package.jet")}}}
-    second :: EntryContribution{packages: [Pkg]{Pkg.new("default", "fd")}, settings: [String: [FactContribution]]{"prompt": [FactContribution]{pkg_merge_test_writer("prompt", "wordstats", ContributionLayer.OptimizationBundle, "profile")}}}
-    merged :: pkg_merge_entry([EntryContribution]{first, second}) ?? panic("entries merge")
+    first: EntryContribution{packages: [Pkg]{Pkg.new("default", "ripgrep")}, settings: [String: [FactContribution]]{"prompt": [FactContribution]{pkg_merge_test_writer("prompt", "jetpack", ContributionLayer.Declaration, "package.jet")}}}
+    second: EntryContribution{packages: [Pkg]{Pkg.new("default", "fd")}, settings: [String: [FactContribution]]{"prompt": [FactContribution]{pkg_merge_test_writer("prompt", "wordstats", ContributionLayer.OptimizationBundle, "profile")}}}
+    merged: pkg_merge_entry([EntryContribution]{first, second}) ?? panic("entries merge")
     assert_eq(merged.packages, [Pkg]{Pkg.new("default", "ripgrep"), Pkg.new("default", "fd")})
     // The optimization bundle overrides the declaration fallback.
     assert_eq(merged.settings["prompt"], "wordstats")
 }
 
 #Test("entry propagates fact conflict") {
-    first :: EntryContribution{settings: [String: [FactContribution]]{"host": [FactContribution]{pkg_merge_test_writer("host", "a", ContributionLayer.Environment, "env-a")}}}
-    second :: EntryContribution{settings: [String: [FactContribution]]{"host": [FactContribution]{pkg_merge_test_writer("host", "b", ContributionLayer.Environment, "env-b")}}}
+    first: EntryContribution{settings: [String: [FactContribution]]{"host": [FactContribution]{pkg_merge_test_writer("host", "a", ContributionLayer.Environment, "env-a")}}}
+    second: EntryContribution{settings: [String: [FactContribution]]{"host": [FactContribution]{pkg_merge_test_writer("host", "b", ContributionLayer.Environment, "env-b")}}}
     if pkg_merge_entry([EntryContribution]{first, second}) == {
         .Ok(_) -> panic("expected a fact conflict")
         .Err(error) -> {
@@ -138,7 +138,7 @@ fn pkg_merge_test_writer(key: String, value: String, layer: ContributionLayer, s
 }
 
 #Test("entry ignores an unwritten fact with no default") {
-    contribution :: EntryContribution{settings: [String: [FactContribution]]{"absent": [FactContribution]{}}}
-    merged :: pkg_merge_entry([EntryContribution]{contribution}) ?? panic("empty fact contributions merge")
+    contribution: EntryContribution{settings: [String: [FactContribution]]{"absent": [FactContribution]{}}}
+    merged: pkg_merge_entry([EntryContribution]{contribution}) ?? panic("empty fact contributions merge")
     assert(!merged.settings.has_key("absent"))
 }

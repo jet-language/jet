@@ -1,41 +1,41 @@
 // D-JOB-QUEUE1: one typed job flows through the durable queue lifecycle.
 // Set JET_JOB_QUEUE_DB to a fresh database path before launching this example.
-package {
+package: {
     name: "job_queue"
     authority: { allow: [DB, Env, FS, IO, Mem.Alloc, Rand, Time, Time.Wait] }
 }
 
-use jobs :: core.jobs
+use jobs: core.jobs
 
-#Job(.Dev) fn process(payload: String) { print("job:{payload}") }
+#Job(.Dev) process: fn(payload: String) { print("job:{payload}") }
 
-fn run() {
+run: fn() {
     queue := jobs.queue() ?? return
 
-    first :: &queue.enqueue(process, "now", key: "first") ?? return
-    _failed :: &queue.enqueue(process, "fail", key: "failed") ?? return
-    cancelled :: &queue.delay(process, "cancel", for: 1s) ?? return
-    deadlettered :: &queue.delay(process, "dead", for: 1s) ?? return
-    receipt :: queue.receipt(first.id) ?? return
+    first: &queue.enqueue(process, "now", key: "first") ?? return
+    _failed: &queue.enqueue(process, "fail", key: "failed") ?? return
+    cancelled: &queue.delay(process, "cancel", for: 1s) ?? return
+    deadlettered: &queue.delay(process, "dead", for: 1s) ?? return
+    receipt: queue.receipt(first.id) ?? return
     // The id is derived from the package authority, so it differs per queue.
     print("receipt:{receipt.id == first.id}:{receipt.job_type}")
-    records :: queue.inspect(16, true) ?? return
+    records: queue.inspect(16, true) ?? return
     print("records:{records.len()}")
-    events :: queue.events(first.id) ?? return
+    events: queue.events(first.id) ?? return
     print("events:{events.len()}")
 
-    claims :: queue.claim("teaching-worker", 2) ?? return
+    claims: queue.claim("teaching-worker", 2) ?? return
     loop claim in claims {
         queue.heartbeat(claim) ?? return
         if claim.payload.bytes == "now".bytes() {
-            result :: JobResult{
+            result: JobResult{
                 type_id: claim.payload.type_id,
                 bytes: claim.payload.bytes,
                 publish: false,
             }
             queue.acknowledge(claim, result) ?? return
         } else {
-            error :: JobError{
+            error: JobError{
                 type_id: claim.payload.type_id,
                 reason: "teaching failure",
                 detail: None,
@@ -51,6 +51,6 @@ fn run() {
     queue.pause() ?? return
     queue.resume() ?? return
     queue.wait(1ms) ?? return
-    pruned :: queue.prune() ?? return
+    pruned: queue.prune() ?? return
     print("pruned:{pruned}")
 }

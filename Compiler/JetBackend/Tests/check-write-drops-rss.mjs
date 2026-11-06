@@ -78,7 +78,7 @@ const shapes = {
     total += rows.len()`,
   // A captured String local rebound inside the closure body.
   capture: `label := "start"
-    rename :: (n: Int) -> { label = "v{n}" }
+    rename: (n: Int) -> { label = "v{n}" }
     loop v in 0..<count { rename(v) }
     total += label.len()`,
   // A String local rebound; rebound, then appended to.
@@ -205,7 +205,7 @@ const shapes = {
   // A closure owning a captured String, rebound.
   closure: `show := (n: Int) -> "start{n}"
     loop v in 0..<count {
-        mark :: "t{v}"
+        mark: "t{v}"
         show = (n: Int) -> "{mark}{n}"
         total += show(v).len()
     }`,
@@ -224,29 +224,29 @@ const shapes = {
     total += holder.items.len()`,
 };
 
-const program = (body, rounds) => `struct WriteDropsHolder { items: [Int] }
-struct WriteDropsTables { table: [String:Int], rows: [[Int]] }
-enum WriteDropsWrap {
+const program = (body, rounds) => `WriteDropsHolder: struct { items: [Int] }
+WriteDropsTables: struct { table: [String:Int], rows: [[Int]] }
+WriteDropsWrap: enum {
     Empty
     Full(items: [Int])
 }
 
-fn write_drops_dims(n: Int) -> [Int]? {
+write_drops_dims: fn(n: Int) -> [Int]? {
     if n % 2 == 0 -> return Val([Int]{n})
     None
 }
 
-fn write_drops_rebind(rows: &[Int], v: Int) {
+write_drops_rebind: fn(rows: &[Int], v: Int) {
     rows = [Int]{v, v + 1}
 }
 
-fn step(count: Int) -> Int {
+step: fn(count: Int) -> Int {
     total := 0
     ${body}
     total
 }
 
-fn run() {
+run: fn() {
     total := 0
     loop round in 0..<${rounds} { total += step(20000 + round % 3) }
     print("{total}")

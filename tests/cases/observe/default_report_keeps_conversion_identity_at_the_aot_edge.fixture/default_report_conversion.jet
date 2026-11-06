@@ -2,7 +2,7 @@ impl IOError -> Err {
     return Err("store unavailable", code: "E_STORE", cause: Err("disk offline"))
 }
 
-fn read_store() -> Int IOError! {
+read_store: fn() -> Int IOError! {
     return Err(IOError.InvalidInput(IOContext{
         operation: .Read,
         resource: None,
@@ -11,12 +11,12 @@ fn read_store() -> Int IOError! {
     }))
 }
 
-fn get_user() -> Int {
-    value :: read_store()?("loading store")
+get_user: fn() -> Int {
+    value: read_store()?("loading store")
     return Ok(value)
 }
 
-fn run() {
-    value :: get_user()
+run: fn() {
+    value: get_user()
     print(value)
 }

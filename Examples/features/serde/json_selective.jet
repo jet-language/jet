@@ -1,4 +1,4 @@
-package {
+package: {
     name: "serde_json_selective"
     version: "0.1.0"
     authority: { allow: [Exec, FS, FS.Read, IO, Mem.Alloc, Time.Wait] }
@@ -18,28 +18,28 @@ package {
 // projection never weakens validation. Nothing a decode returns borrows the
 // input text, so the text can end before the value does.
 use {
-    encoding :: core.encoding
-    json :: core.encoding.json
-    files :: core.files
-    testing :: core.testing
+    encoding: core.encoding
+    json: core.encoding.json
+    files: core.files
+    testing: core.testing
 }
 
-struct Small {
+Small: struct {
     a: Int
 }
 
-struct Labeled {
+Labeled: struct {
     a: Int
     label: String
 }
 
 // The decoded text is owned: the source string ends with this call.
-fn owned_projection() -> Labeled {
-    source :: "{{\"a\":7,\"label\":\"kept\",\"skipped\":[1,2,3]}}"
+owned_projection: fn() -> Labeled {
+    source: "{{\"a\":7,\"label\":\"kept\",\"skipped\":[1,2,3]}}"
     json.decode<Labeled>(source) ?? panic("decode labeled")
 }
 
-fn kind_name(kind: encoding.EncodingErrorKind) -> String {
+kind_name: fn(kind: encoding.EncodingErrorKind) -> String {
     if kind == {
         .Syntax -> "Syntax"
         .Truncated -> "Truncated"
@@ -51,16 +51,16 @@ fn kind_name(kind: encoding.EncodingErrorKind) -> String {
 }
 
 // The document: field `a`, then 19 skipped fields; `tail` replaces the last.
-fn document(tail: String, after: String) -> String {
+document: fn(tail: String, after: String) -> String {
     fields := [String]{"\"a\":1"}
     loop index in 1..<19 -> &fields.push("\"f{index}\":[{index},{{\"k\":\"v{index}\"}}]")
     &fields.push(tail)
     "{{{fields.join(",")}}}{after}"
 }
 
-fn full(label: String, text: String) -> Int? {
-    tree :: json.parse(text) ?? {
-        line :: err.line ?? 0
+full: fn(label: String, text: String) -> Int? {
+    tree: json.parse(text) ?? {
+        line: err.line ?? 0
         print("{label} full: {kind_name(err.kind)} at line {line} byte {err.byte_offset}: {err.reason}")
         return Val(line)
     }
@@ -68,20 +68,20 @@ fn full(label: String, text: String) -> Int? {
     None
 }
 
-fn projected(label: String, text: String, full_line: Int?) {
-    value :: json.decode<Small>(text) ?? {
-        same :: if full_line == .Val(line) -> err.len() == 1 && err[0].reason.starts_with("invalid JSON (line {line}):") else -> false
+projected: fn(label: String, text: String, full_line: Int?) {
+    value: json.decode<Small>(text) ?? {
+        same: if full_line == .Val(line) -> err.len() == 1 && err[0].reason.starts_with("invalid JSON (line {line}):") else -> false
         print("{label} projected: rejected {err}; same line as full: {same}")
         return
     }
     print("{label} projected: ok a={value.a}; full rejected it: {full_line != None}")
 }
 
-fn first_key(label: String, path: Path) (EncodingError | IOError)! {
-    input :: files.open(path) ?? return Err(err)
+first_key: fn(label: String, path: Path) (EncodingError | IOError)! {
+    input: files.open(path) ?? return Err(err)
     events := json.reader(^input) ?? return Err(err)
-    _start :: &events.next() ?? return Ok(())
-    key :: &events.next() ?? return Ok(())
+    _start: &events.next() ?? return Ok(())
+    key: &events.next() ?? return Ok(())
     if key == {
         .Key(name) -> print("{label} reader: stopped after first key `{name}`; the rest is unread")
         else -> print("{label} reader: the first event after the root is not a key")
@@ -89,18 +89,18 @@ fn first_key(label: String, path: Path) (EncodingError | IOError)! {
     Ok(())
 }
 
-fn drained(label: String, path: Path) (EncodingError | IOError)! {
-    input :: files.open(path) ?? return Err(err)
+drained: fn(label: String, path: Path) (EncodingError | IOError)! {
+    input: files.open(path) ?? return Err(err)
     events := json.reader(^input) ?? return Err(err)
     count := 0
     loop {
         if &events.next() == {
             .Ok(next) -> {
-                _ :: next ?? break
+                _: next ?? break
                 count += 1
             }
             .Err(error) -> {
-                line :: error.line ?? 0
+                line: error.line ?? 0
                 print("{label} reader: {kind_name(error.kind)} after {count} events at line {line} byte {error.byte_offset}: {error.reason}")
                 return Ok(())
             }
@@ -109,8 +109,8 @@ fn drained(label: String, path: Path) (EncodingError | IOError)! {
     print("{label} reader: ok, {count} events")
 }
 
-fn run() (EncodingError | IOError)! {
-    cases :: [
+run: fn() (EncodingError | IOError)! {
+    cases: [
         (label: "valid", text: document("\"f19\":null", "")),
         (label: "malformed skipped field", text: document("\"f19\":[1,]", "")),
         (label: "trailing garbage", text: document("\"f19\":null", " x")),
@@ -119,15 +119,15 @@ fn run() (EncodingError | IOError)! {
         (label: "bad escape in skipped string", text: document("\"f19\":\"\\q\"", "")),
         (label: "truncated", text: document("\"f19\":[1,2", "").removesuffix("}}")),
     ]
-    path :: Path.from(testing.temp_dir("json-selective")).join("doc.json")
+    path: Path.from(testing.temp_dir("json-selective")).join("doc.json")
     loop case in cases {
-        full_line :: full(case.label, case.text)
+        full_line: full(case.label, case.text)
         projected(case.label, case.text, full_line)
         files.write(path.to_string(), case.text) ?? return
         first_key(case.label, path) ?? return
         drained(case.label, path) ?? return
     }
     files.remove(path) ?? return
-    kept :: owned_projection()
+    kept: owned_projection()
     print("owned projection after its source ended: a={kept.a} label={kept.label}")
 }

@@ -1,19 +1,19 @@
 use {
-    application :: app
+    application: app
     core.reactive.loadable.[Loadable]
 }
 
 #Error
-enum UserError {
+UserError: enum {
     Missing
 }
 
-fn user_name(id: String) -[DB.Read]> String UserError! {
+user_name: fn(id: String) -[DB.Read]> String UserError! {
     if id == "" -> return Err(UserError.Missing)
     "v1:{id}"
 }
 
-fn shown(state: Loadable<String, UserError>) -> String {
+shown: fn(state: Loadable<String, UserError>) -> String {
     if state == {
         .Loaded(value) -> value
         .Failed(_) -> "failed"
@@ -21,8 +21,8 @@ fn shown(state: Loadable<String, UserError>) -> String {
     }
 }
 
-fn run() {
-    binding :: application.live(user_name, "alice")
+run: fn() {
+    binding: application.live(user_name, "alice")
     print(shown(application.state(binding)))
     application.push(user_name, "alice", value: "v2:alice")
     print(shown(application.state(binding)))

@@ -2,7 +2,7 @@
 // jetpack::ProviderGraph::normalize_provider_document.
 
 // One `key = value` line under its section header.
-struct TOMLAssignment {
+TOMLAssignment: struct {
     section: String
     array_table: Bool
     key: String
@@ -14,8 +14,8 @@ impl ProviderFactReport {
     // package identity, dependencies by kind and target, features, the build
     // hook, source ownership, and Cargo.lock records, with every native field
     // retained as a typed fact.
-    fn cargo_document(document: String) -> ProviderFactReport Never! {
-        assignments :: provider_toml_assignments(document)
+    cargo_document: fn(document: String) -> ProviderFactReport Never! {
+        assignments: provider_toml_assignments(document)
         package_values := [TOMLAssignment]{}
         loop entry in assignments {
             if !entry.array_table && entry.section == "package" -> &package_values.push(entry)
@@ -24,7 +24,7 @@ impl ProviderFactReport {
         facts.version = provider_first_toml_value(package_values, "version") ?? ""
         facts.license = provider_first_toml_value(package_values, "license") ?? ""
         conflicts := [String]{}
-        identity_keys :: [String]{"name", "version", "license"}
+        identity_keys: [String]{"name", "version", "license"}
         loop key in identity_keys {
             values := [String]{}
             loop entry in package_values {
@@ -40,8 +40,8 @@ impl ProviderFactReport {
         }
         native_values := [String: String]{}
         loop index in 0..<assignments.len() {
-            entry :: assignments[index]
-            native_key :: if entry.array_table -> "provider.cargo.native.lock.{entry.section}.{index}.{entry.key}" else -> "provider.cargo.native.manifest.{entry.section}.{entry.key}"
+            entry: assignments[index]
+            native_key: if entry.array_table -> "provider.cargo.native.lock.{entry.section}.{index}.{entry.key}" else -> "provider.cargo.native.manifest.{entry.section}.{entry.key}"
             if native_values.get(native_key) == {
                 .Val(previous) -> {
                     if previous != entry.value -> &conflicts.push("Cargo native field {native_key} has conflicting values")
@@ -65,7 +65,7 @@ impl ProviderFactReport {
             }
             if entry.section == "features" -> &facts.add_typed_text("provider.cargo.variant.feature.{entry.key}", entry.value)
             if entry.section == "package" && entry.key == "build" {
-                build_value :: provider_toml_value_text(entry.value)
+                build_value: provider_toml_value_text(entry.value)
                 if {
                     build_value == "false" -> {}
                     !provider_toml_string_value(entry.value) -> &losses.push("Cargo package field `build` must be a string or false")
@@ -86,7 +86,7 @@ impl ProviderFactReport {
         facts.dev_dependencies = provider_sorted_unique(facts.dev_dependencies)
         facts.build_dependencies = provider_sorted_unique(facts.build_dependencies)
         facts.platforms = provider_sorted_unique(facts.platforms)
-        lock_records :: provider_cargo_lock_records(assignments)
+        lock_records: provider_cargo_lock_records(assignments)
         has_package_name := false
         loop entry in package_values {
             if entry.key == "name" -> has_package_name = true
@@ -112,13 +112,13 @@ impl ProviderFactReport {
             }
         }
         loop record in lock_records {
-            raw_name :: record.get("name") ?? {
+            raw_name: record.get("name") ?? {
                 &losses.push("Cargo.lock package has no name")
                 next
             }
-            name :: provider_toml_value_text(raw_name)
-            record_version :: provider_toml_value_text(record.get("version") ?? "")
-            string_keys :: [String]{"name", "version", "source", "checksum"}
+            name: provider_toml_value_text(raw_name)
+            record_version: provider_toml_value_text(record.get("version") ?? "")
+            string_keys: [String]{"name", "version", "source", "checksum"}
             loop key in string_keys {
                 if record.get(key) == {
                     .Val(value) -> {
@@ -130,11 +130,11 @@ impl ProviderFactReport {
             if name == facts.name && facts.version != "" && record_version != "" && record_version != facts.version {
                 &conflicts.push("Cargo.lock package `{name}` version `{record_version}` conflicts with manifest version `{facts.version}`")
             }
-            projected_keys :: [String]{"version", "source", "checksum", "dependencies"}
+            projected_keys: [String]{"version", "source", "checksum", "dependencies"}
             loop key in projected_keys {
                 if record.get(key) == {
                     .Val(value) -> {
-                        projection_key :: "provider.cargo.lock.{name}.{key}"
+                        projection_key: "provider.cargo.lock.{name}.{key}"
                         if facts.first_typed(projection_key) == {
                             .Val(previous) -> {
                                 if previous != value -> &conflicts.push("Cargo.lock field {projection_key} has conflicting values")
@@ -146,7 +146,7 @@ impl ProviderFactReport {
                     .None -> {}
                 }
             }
-            registry_source :: if record.get("source") == {
+            registry_source: if record.get("source") == {
                 .Val(source) -> provider_toml_value_text(source).starts_with("registry+")
                 .None -> false
             }
@@ -167,12 +167,12 @@ impl ProviderFactReport {
 }
 
 // Which dependency list a Cargo section feeds.
-enum CargoDependencyKind {
+CargoDependencyKind: enum {
     Runtime
     Dev
     Build
 
-    fn label(self) -> String Never! {
+    label: fn(self) -> String Never! {
         if self == {
             .Runtime -> "runtime"
             .Dev -> "dev"
@@ -181,7 +181,7 @@ enum CargoDependencyKind {
     }
 
     // The table suffix (`[target.<cfg>.<suffix>]` or bare `[<suffix>]`).
-    fn suffix(self) -> String Never! {
+    suffix: fn(self) -> String Never! {
         if self == {
             .Runtime -> ".dependencies"
             .Dev -> ".dev-dependencies"
@@ -191,12 +191,12 @@ enum CargoDependencyKind {
 }
 
 // Every `key = value` line with the `[section]` or `[[section]]` it sits in.
-fn provider_toml_assignments(document: String) -> [TOMLAssignment] Never! {
+provider_toml_assignments: fn(document: String) -> [TOMLAssignment] Never! {
     section := ""
     array_table := false
     assignments := [TOMLAssignment]{}
     loop raw_line in provider_lines(document) {
-        line :: raw_line.trim()
+        line: raw_line.trim()
         if line.starts_with("[[") && line.ends_with("]]") {
             section = line.removeprefix("[[").removesuffix("]]").trim()
             array_table = true
@@ -207,15 +207,15 @@ fn provider_toml_assignments(document: String) -> [TOMLAssignment] Never! {
             array_table = false
             next
         }
-        pair :: line.split_once("=") ?? next
-        key :: pair.before.trim()
+        pair: line.split_once("=") ?? next
+        key: pair.before.trim()
         if key == "" -> next
         &assignments.push(TOMLAssignment{section: section.copy(), array_table: array_table, key: key, value: pair.after.trim()})
     }
     assignments
 }
 
-fn provider_first_toml_value(entries: [TOMLAssignment], key: String) -> String? Never! {
+provider_first_toml_value: fn(entries: [TOMLAssignment], key: String) -> String? Never! {
     loop entry in entries {
         if entry.key == key -> return Val(provider_toml_value_text(entry.value))
     }
@@ -224,21 +224,21 @@ fn provider_first_toml_value(entries: [TOMLAssignment], key: String) -> String? 
 
 // The value with a trailing comment removed and one pair of matching
 // quotes stripped.
-fn provider_toml_value_text(raw: String) -> String Never! {
-    value :: provider_toml_value_without_comment(raw).trim()
+provider_toml_value_text: fn(raw: String) -> String Never! {
+    value: provider_toml_value_without_comment(raw).trim()
     if !provider_toml_quoted(value) -> return value
-    bytes :: value.bytes()
+    bytes: value.bytes()
     pkg_bytes_text(bytes, 1, bytes.len() - 1)
 }
 
 // The value up to the first `#` outside quotes. Inside double quotes a
 // backslash escapes the next character.
-fn provider_toml_value_without_comment(value: String) -> String Never! {
-    bytes :: value.bytes()
+provider_toml_value_without_comment: fn(value: String) -> String Never! {
+    bytes: value.bytes()
     quote := 0
     escaped := false
     loop index in 0..<bytes.len() {
-        code :: Int.from_u8(bytes[index])
+        code: Int.from_u8(bytes[index])
         if {
             quote == 34 && code == 34 && !escaped -> quote = 0
             quote == 39 && code == 39 -> quote = 0
@@ -251,26 +251,26 @@ fn provider_toml_value_without_comment(value: String) -> String Never! {
     value.copy()
 }
 
-fn provider_toml_quoted(value: String) -> Bool Never! {
-    bytes :: value.bytes()
+provider_toml_quoted: fn(value: String) -> Bool Never! {
+    bytes: value.bytes()
     if bytes.len() < 2 -> return false
-    first :: Int.from_u8(bytes[0])
-    last :: Int.from_u8(bytes[bytes.len() - 1])
+    first: Int.from_u8(bytes[0])
+    last: Int.from_u8(bytes[bytes.len() - 1])
     (first == 34 && last == 34) || (first == 39 && last == 39)
 }
 
-fn provider_toml_string_value(value: String) -> Bool Never! {
+provider_toml_string_value: fn(value: String) -> Bool Never! {
     provider_toml_quoted(provider_toml_value_without_comment(value).trim())
 }
 
 // A string or an inline table.
-fn provider_toml_dependency_value(raw: String) -> Bool Never! {
-    value :: provider_toml_value_without_comment(raw).trim()
+provider_toml_dependency_value: fn(raw: String) -> Bool Never! {
+    value: provider_toml_value_without_comment(raw).trim()
     provider_toml_string_value(value) || (value.starts_with("{{") && value.ends_with("}}") && value.bytes().len() >= 2)
 }
 
-fn provider_cargo_dependency_kind(raw_section: String) -> CargoDependencyKind? Never! {
-    section :: raw_section.removeprefix("target.")
+provider_cargo_dependency_kind: fn(raw_section: String) -> CargoDependencyKind? Never! {
+    section: raw_section.removeprefix("target.")
     if section == {
         "dependencies" -> return Val(CargoDependencyKind.Runtime)
         "dev-dependencies" -> return Val(CargoDependencyKind.Dev)
@@ -286,9 +286,9 @@ fn provider_cargo_dependency_kind(raw_section: String) -> CargoDependencyKind? N
 }
 
 // The target of a `target.<cfg>.<kind>` section.
-fn provider_cargo_target_platform(section: String) -> String Never! {
-    target :: section.removeprefix("target.")
-    suffixes :: [String]{".dependencies", ".dev-dependencies", ".build-dependencies"}
+provider_cargo_target_platform: fn(section: String) -> String Never! {
+    target: section.removeprefix("target.")
+    suffixes: [String]{".dependencies", ".dev-dependencies", ".build-dependencies"}
     loop suffix in suffixes {
         if target.ends_with(suffix) -> return target.removesuffix(suffix)
     }
@@ -296,7 +296,7 @@ fn provider_cargo_target_platform(section: String) -> String Never! {
 }
 
 // One record per `[[package]]` entry; a repeated `name` starts the next.
-fn provider_cargo_lock_records(assignments: [TOMLAssignment]) -> [[String: String]] Never! {
+provider_cargo_lock_records: fn(assignments: [TOMLAssignment]) -> [[String: String]] Never! {
     records := [[String: String]]{}
     current := [String: String]{}
     loop entry in assignments {

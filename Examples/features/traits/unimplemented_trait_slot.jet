@@ -2,15 +2,15 @@
 // Such a slot can only hold None, so a call through it is unreachable; every
 // tier (interpreter, dev and release builds) compiles the call site and
 // takes the None path.
-trait HostAdapter {
-    fn handle_call(self, operation: String, raw: Int) -> Int?
+HostAdapter: trait {
+    handle_call: fn(self, operation: String, raw: Int) -> Int?
 }
 
-fn release(adapter: HostAdapter?, raw: Int) -> Int {
-    found :: adapter ?? return -1
+release: fn(adapter: HostAdapter?, raw: Int) -> Int {
+    found: adapter ?? return -1
     found.handle_call("release", raw) ?? 0
 }
 
-fn run() {
+run: fn() {
     print(release(None, 7))
 }

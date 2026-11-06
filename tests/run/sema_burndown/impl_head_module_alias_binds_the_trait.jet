@@ -4,39 +4,39 @@
 // failed E0902. A module-qualified type keeps its trait
 // (`impl inner.Loud.Mine`), and both alias segments may appear
 // (`impl inner.Loud.inner.Shout`).
-module inner {
-    trait Shout {
-        fn shout(self) -> String
+inner: module {
+    Shout: trait {
+        shout: fn(self) -> String
     }
 
-    struct Loud {
+    Loud: struct {
         level: Int
     }
 
-    fn announce<S: Shout>(value: S) -> String { value.shout() }
+    announce: fn<S: Shout>(value: S) -> String { value.shout() }
 }
 
-trait Mine {
-    fn mine(self) -> Int
+Mine: trait {
+    mine: fn(self) -> Int
 }
 
-struct Local {
+Local: struct {
     n: Int
 }
 
 impl Local.inner.Shout {
-    fn shout(self) -> String { "LOCAL {self.n}" }
+    shout: fn(self) -> String { "LOCAL {self.n}" }
 }
 
 impl inner.Loud.Mine {
-    fn mine(self) -> Int { self.level * 10 }
+    mine: fn(self) -> Int { self.level * 10 }
 }
 
 impl inner.Loud.inner.Shout {
-    fn shout(self) -> String { "LOUD {self.level}" }
+    shout: fn(self) -> String { "LOUD {self.level}" }
 }
 
-fn run() {
+run: fn() {
     print(Local{n: 1}.shout())
     print(inner.Loud{level: 2}.mine())
     print(inner.announce(inner.Loud{level: 3}))

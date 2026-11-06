@@ -2,16 +2,16 @@
 // time — the file is never opened at runtime. A `comptime require` then
 // validates the embedded text while compiling (the sanctioned proc-macro
 // use case): if it fails, you get a compile error, not a runtime surprise.
-MOTD :: comptime { embed_file("motd.txt") }
+MOTD: comptime { embed_file("motd.txt") }
 
-OK :: comptime { check_nonempty(MOTD) }
+OK: comptime { check_nonempty(MOTD) }
 
-fn check_nonempty(s: String) -> Bool {
+check_nonempty: fn(s: String) -> Bool {
     assert((s.len() > 0), "motd.txt must not be empty")
     return true
 }
 
-fn run() {
+run: fn() {
     print("message of the day:")
     print("{MOTD}")
 }

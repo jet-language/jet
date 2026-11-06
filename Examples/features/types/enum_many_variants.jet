@@ -4,7 +4,7 @@
 // match over named payloads, derived equality and ordering across variants,
 // and an else-only `if self == { else -> … }` table (Tower #3872).
 #Comparable
-enum Diagnostic {
+Diagnostic: enum {
     MissingSeparator(String)
     EmptyHalf(String)
     ProviderFirst(raw: String, replacement: String)
@@ -19,12 +19,12 @@ enum Diagnostic {
     V12(raw: String, replacement: String)
     Last(raw: String, replacement: String)
 
-    fn code(self) -> String? {
+    code: fn(self) -> String? {
         if self == { else -> None }
     }
 }
 
-fn describe(diagnostic: Diagnostic) -> String {
+describe: fn(diagnostic: Diagnostic) -> String {
     if diagnostic == {
         .MissingSeparator(raw) -> "missing separator in {raw}"
         .EmptyHalf(raw) -> "empty half in {raw}"
@@ -35,7 +35,7 @@ fn describe(diagnostic: Diagnostic) -> String {
     }
 }
 
-fn show(ordering: Ordering) -> String {
+show: fn(ordering: Ordering) -> String {
     if ordering == {
         .Less -> "less"
         .Greater -> "greater"
@@ -43,7 +43,7 @@ fn show(ordering: Ordering) -> String {
     }
 }
 
-fn run() {
+run: fn() {
     print(describe(Diagnostic.MissingSeparator("ab")))
     print(describe(Diagnostic.EmptyHalf(":b")))
     print(describe(Diagnostic.ProviderFirst{raw: "gh:x", replacement: "x@gh"}))

@@ -1,12 +1,12 @@
 // Declaration facts the checker records for effects, types, traits, impls and
 // constants. They hold no checked-tree nodes.
 
-struct TEffectSpan {
+TEffectSpan: struct {
     name: String
     span: Span
 }
 
-struct TEffectFacts {
+TEffectFacts: struct {
     direct: [String]
     solved: [String]
     call_edges: [String]
@@ -17,24 +17,24 @@ struct TEffectFacts {
     maximal_span: Span?{None}
 }
 
-enum TVisibility {
+TVisibility: enum {
     Private
     Package
     Public
 }
 
-struct TForeignProvenance {
+TForeignProvenance: struct {
     language: String
     abi: String
     symbol: String
     span: Span
 }
 
-struct TGenericParam {
+TGenericParam: struct {
     name: String
     bounds: [SymbolID]
 }
-struct TDeclarationFacts {
+TDeclarationFacts: struct {
     type_defs: [TTypeDef]
     traits: [TTraitDef]
     impls: [TImplDef]
@@ -42,26 +42,26 @@ struct TDeclarationFacts {
     core_builtin_owners: [TCoreBuiltinOwner]
 }
 
-enum TDeclarationOwnership {
+TDeclarationOwnership: enum {
     Owned
     ReadBorrow
     WriteBorrow
     Move
 }
-struct TCoreBuiltinOwner {
+TCoreBuiltinOwner: struct {
     symbol: SymbolID
     module_identity: String?
     name: String
     ownership: TDeclarationOwnership
 }
 
-enum TStructLayout {
+TStructLayout: enum {
     C
     CAligned(alignment: Int, target: Bool)
     Columnar
 }
 
-enum TCEnumTag {
+TCEnumTag: enum {
     CInt
     U8
     I8
@@ -73,7 +73,7 @@ enum TCEnumTag {
     I64
 }
 
-struct TLayoutAlignmentFact {
+TLayoutAlignmentFact: struct {
     requested_alignment: Int
     effective_alignment: Int
     target_mode: Bool
@@ -81,7 +81,7 @@ struct TLayoutAlignmentFact {
     fact_identity: String
 }
 
-struct TShapeFieldNames {
+TShapeFieldNames: struct {
     text: String
     json: String?
     cbor: String?
@@ -95,39 +95,39 @@ struct TShapeFieldNames {
     layout: String?
 }
 
-struct TIntegerRange {
+TIntegerRange: struct {
     lo: Int
     hi: Int
 }
 
-enum TSerdeAttributeKind {
+TSerdeAttributeKind: enum {
     RenameAll
     Tag
     Untagged
     DenyUnknownFields
 }
 
-struct TSerdeAttribute {
+TSerdeAttribute: struct {
     kind: TSerdeAttributeKind
     value: String?
     span: Span
 }
 
-struct TFunctionRef {
+TFunctionRef: struct {
     key: String
     module_identity: String
     name: String
     span: Span
     visibility: TVisibility
 }
-struct TCLIBinding {
+TCLIBinding: struct {
     name: String
     span: Span
     function_key: String
     markers: [String]
 }
 
-struct TField {
+TField: struct {
     name: String
     shape_names: TShapeFieldNames
     skip: Bool
@@ -140,13 +140,13 @@ struct TField {
     redact: Bool
 }
 
-enum TVariantPayload {
+TVariantPayload: enum {
     Unit
     Single(value: Type)
     Named(fields: [TField])
 }
 
-struct TVariant {
+TVariant: struct {
     name: String
     wire_name: String
     span: Span
@@ -154,7 +154,7 @@ struct TVariant {
     discriminant: Int?
 }
 
-enum TTypeDefKind {
+TTypeDefKind: enum {
     Struct(fields: [TField], methods: [String])
     Enum(variants: [TVariant], methods: [String])
     Distinct(base: Type, range: TIntegerRange?)
@@ -162,9 +162,9 @@ enum TTypeDefKind {
     // `base`: the member a dimensioned quantity is shown in.
     UnitFamily(members: [String], base: String?)
 }
-enum TCompilerBuiltin { DefaultErr }
+TCompilerBuiltin: enum { DefaultErr }
 
-struct TTypeDef {
+TTypeDef: struct {
     module_identity: String
     key: String
     name: String
@@ -190,18 +190,18 @@ struct TTypeDef {
     kind: TTypeDefKind
 }
 
-struct TAssociatedTypeDecl {
+TAssociatedTypeDecl: struct {
     name: String
     span: Span
 }
 
-struct TAssociatedTypeValue {
+TAssociatedTypeValue: struct {
     name: String
     ty: Type
     span: Span
 }
 
-struct TDeclarationParam {
+TDeclarationParam: struct {
     index: Int
     name: String
     span: Span
@@ -213,7 +213,7 @@ struct TDeclarationParam {
     default_present: Bool
 }
 
-struct TTraitMethod {
+TTraitMethod: struct {
     key: String
     name: String
     span: Span
@@ -229,7 +229,7 @@ struct TTraitMethod {
     default_function_key: String?
 }
 
-struct TTraitDef {
+TTraitDef: struct {
     module_identity: String
     key: String
     name: String
@@ -239,17 +239,17 @@ struct TTraitDef {
     methods: [TTraitMethod]
 }
 
-enum TTargetOS {
+TTargetOS: enum {
     Linux
     MacOS
     Windows
 }
 
-enum TOperatorMarker {
+TOperatorMarker: enum {
     Commutative
 }
 
-struct TImplDef {
+TImplDef: struct {
     module_identity: String
     key: String
     span: Span
@@ -269,14 +269,14 @@ struct TImplDef {
     target_os: TTargetOS?
 }
 
-struct TTraitConstantValue {
+TTraitConstantValue: struct {
     name: String
     ty: Type
     value: TComptimeValue
     span: Span
 }
 
-struct TConstantDef {
+TConstantDef: struct {
     module_identity: String
     key: String
     name: String

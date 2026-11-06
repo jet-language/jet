@@ -1,20 +1,20 @@
 // core-conformance: app.live
 use {
-    application :: app
+    application: app
     core.reactive.loadable.[Loadable]
 }
 
 #Error
-enum LoadError {
+LoadError: enum {
     Negative
 }
 
-fn load(id: Int) -[DB.Read]> Int LoadError! {
+load: fn(id: Int) -[DB.Read]> Int LoadError! {
     if id < 0 -> return Err(LoadError.Negative)
     id * 10
 }
 
-fn shown(state: Loadable<Int, LoadError>) -> String {
+shown: fn(state: Loadable<Int, LoadError>) -> String {
     if state == {
         .Loaded(value) -> "loaded {value}"
         .Failed(_) -> "failed"
@@ -22,7 +22,7 @@ fn shown(state: Loadable<Int, LoadError>) -> String {
     }
 }
 
-fn run() {
-    binding :: application.live(load, 4)
+run: fn() {
+    binding: application.live(load, 4)
     print(shown(application.state(binding)))
 }

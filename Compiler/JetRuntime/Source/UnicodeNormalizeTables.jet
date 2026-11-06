@@ -16,7 +16,7 @@
 // SHA256 PropList.txt: 130dcddcaadaf071008bdfce1e7743e04fdfbc910886f017d9f9ac931d8c64dd
 // NFC canonical-only tables; static I64 decisions, no allocation/Core indexing.
 // Canonical mappings pack two 21-bit scalar lanes (low lane first).
-fn unicode_canonical_mapping(cp: I64) -> I64 Never! {
+unicode_canonical_mapping: fn(cp: I64) -> I64 Never! {
     if {
         (cp < I64{63772}) -> {
             if {
@@ -120,7 +120,7 @@ fn unicode_canonical_mapping(cp: I64) -> I64 Never! {
     }
 }
 
-fn unicode_normal_ccc(cp: I64) -> I64 Never! {
+unicode_normal_ccc: fn(cp: I64) -> I64 Never! {
     if {
         (cp < I64{8404}) -> {
             if {
@@ -146,7 +146,7 @@ fn unicode_normal_ccc(cp: I64) -> I64 Never! {
     }
 }
 
-fn unicode_normal_compose_key(cp: I64) -> I64 Never! {
+unicode_normal_compose_key: fn(cp: I64) -> I64 Never! {
     if {
         (cp < I64{1944060672}) -> {
             if {
@@ -196,6 +196,6 @@ fn unicode_normal_compose_key(cp: I64) -> I64 Never! {
     }
 }
 
-fn unicode_normal_compose(a: I64, b: I64) -> I64 Never! {
+unicode_normal_compose: fn(a: I64, b: I64) -> I64 Never! {
     unicode_normal_compose_key((a << I64{21}).bit_or(b))
 }

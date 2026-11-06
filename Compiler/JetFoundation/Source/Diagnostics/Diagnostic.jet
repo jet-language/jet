@@ -1,36 +1,36 @@
 // Canonical diagnostic values shared by every compiler phase. Spans are UTF-8
 // byte offsets into the checked source; edits and labels use the same spans.
 
-struct Span {
+Span: struct {
     start: Int
     end: Int
 }
 
-struct TextEdit {
+TextEdit: struct {
     span: Span
     new_text: String
 }
-enum DiagnosticMoment { Compile Run Test Tool }
+DiagnosticMoment: enum { Compile Run Test Tool }
 
-enum DiagnosticFixApplicability { Safe Suggested }
+DiagnosticFixApplicability: enum { Safe Suggested }
 
-enum DiagnosticFixSafety { Formatting BehaviorPreserving APIChanging TargetChanging NeedsReview }
+DiagnosticFixSafety: enum { Formatting BehaviorPreserving APIChanging TargetChanging NeedsReview }
 
-enum DiagnosticNoFixReasonKind { Behavior Design Ambiguous }
+DiagnosticNoFixReasonKind: enum { Behavior Design Ambiguous }
 
-struct DiagnosticNoFixReason {
+DiagnosticNoFixReason: struct {
     kind: DiagnosticNoFixReasonKind
     next: String
 }
 
-struct DiagnosticOrigin {
+DiagnosticOrigin: struct {
     display: String
     path: String
     source: String
     revision: String
 }
 
-struct DiagnosticCause {
+DiagnosticCause: struct {
     code: String
     span: Span?{None}
     origin: DiagnosticOrigin?{None}
@@ -39,12 +39,12 @@ struct DiagnosticCause {
 // A secondary source location explaining the primary report, such as the
 // earlier move a later use reaches. The host renderer draws it as its own
 // `file:line:col` snippet with a caret and the message.
-struct DiagnosticLabel {
+DiagnosticLabel: struct {
     span: Span
     message: String
 }
 
-enum DiagnosticCryptoMisuseReason {
+DiagnosticCryptoMisuseReason: enum {
     InvalidLength
     NonceLength
     OutputLength
@@ -58,34 +58,34 @@ enum DiagnosticCryptoMisuseReason {
     DeterministicEntropy
 }
 
-struct DiagnosticErrorContextFrame {
+DiagnosticErrorContextFrame: struct {
     text: String
     file: String
     line: Int
 }
 
-struct DiagnosticErrorConversion {
+DiagnosticErrorConversion: struct {
     source: String
     target: String
 }
 
-struct DiagnosticErrorField {
+DiagnosticErrorField: struct {
     name: String
     value: String
 }
 
-struct DiagnosticErrorSpan {
+DiagnosticErrorSpan: struct {
     start: Int
     end: Int
 }
 
-struct DiagnosticErrorDetails {
+DiagnosticErrorDetails: struct {
     variant: String
     fields: [DiagnosticErrorField]
     source_span: DiagnosticErrorSpan?{None}
 }
 
-struct DiagnosticErrorJourneyFrame {
+DiagnosticErrorJourneyFrame: struct {
     fn_name: String
     file: String
     line: Int
@@ -93,7 +93,7 @@ struct DiagnosticErrorJourneyFrame {
     hops: Int
 }
 
-struct DiagnosticBuildError {
+DiagnosticBuildError: struct {
     code: String?{None}
     message: String
     typed_identity: String?{None}
@@ -104,14 +104,14 @@ struct DiagnosticBuildError {
     details: DiagnosticErrorDetails?{None}
 }
 
-enum DiagnosticStructured {
+DiagnosticStructured: enum {
     SuggestedEdits(edits: [TextEdit])
     CryptoMisuse(reason: DiagnosticCryptoMisuseReason, operation: String, expected: String?, actual: Int?)
     BuildError(report: DiagnosticBuildError)
     RuntimeHostFault(stdout: String)
 }
 
-struct Diagnostic {
+Diagnostic: struct {
     moment: DiagnosticMoment{DiagnosticMoment.Compile}
     severity: Int
     code: String
@@ -137,7 +137,7 @@ struct Diagnostic {
     nearest_granting_scope: String?{None}
 }
 
-fn diagnostic_with_source_path(diagnostic: ^Diagnostic, source_path: String, aggregate_source_offset: Int) -> Diagnostic Never! {
+diagnostic_with_source_path: fn(diagnostic: ^Diagnostic, source_path: String, aggregate_source_offset: Int) -> Diagnostic Never! {
     updated := diagnostic
     updated.source_path = Val(source_path)
     updated.source_offset = Val(aggregate_source_offset)
@@ -145,7 +145,7 @@ fn diagnostic_with_source_path(diagnostic: ^Diagnostic, source_path: String, agg
     updated
 }
 
-fn diagnostic_with_source_mapping(diagnostic: ^Diagnostic, source_path: String, aggregate_source_offset: Int, source_start: Int) -> Diagnostic Never! {
+diagnostic_with_source_mapping: fn(diagnostic: ^Diagnostic, source_path: String, aggregate_source_offset: Int, source_start: Int) -> Diagnostic Never! {
     updated := diagnostic
     updated.source_path = Val(source_path)
     updated.source_offset = Val(aggregate_source_offset)
@@ -153,30 +153,30 @@ fn diagnostic_with_source_mapping(diagnostic: ^Diagnostic, source_path: String, 
     updated
 }
 
-fn diagnostic_with_edit(diagnostic: Diagnostic, edit: TextEdit) -> Diagnostic Never! {
+diagnostic_with_edit: fn(diagnostic: Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     // copy: `diagnostic` is a read parameter; the registry builder owns the value it edits.
     diagnostic_registry_with_edit(diagnostic.copy(), edit)
 }
 
-fn diagnostic_with_moment(diagnostic: ^Diagnostic, moment: DiagnosticMoment) -> Diagnostic Never! {
+diagnostic_with_moment: fn(diagnostic: ^Diagnostic, moment: DiagnosticMoment) -> Diagnostic Never! {
     updated := diagnostic
     updated.moment = moment
     updated
 }
 
-fn diagnostic_with_origin(diagnostic: ^Diagnostic, origin: DiagnosticOrigin) -> Diagnostic Never! {
+diagnostic_with_origin: fn(diagnostic: ^Diagnostic, origin: DiagnosticOrigin) -> Diagnostic Never! {
     updated := diagnostic
     updated.origin = Val(origin)
     updated
 }
 
-fn diagnostic_with_cause(diagnostic: ^Diagnostic, cause: DiagnosticCause) -> Diagnostic Never! {
+diagnostic_with_cause: fn(diagnostic: ^Diagnostic, cause: DiagnosticCause) -> Diagnostic Never! {
     updated := diagnostic
     &updated.cause.push(cause)
     updated
 }
 
-fn diagnostic_with_causes(diagnostic: ^Diagnostic, causes: [DiagnosticCause]) -> Diagnostic Never! {
+diagnostic_with_causes: fn(diagnostic: ^Diagnostic, causes: [DiagnosticCause]) -> Diagnostic Never! {
     updated := diagnostic
     updated.cause = causes
     updated
@@ -184,7 +184,7 @@ fn diagnostic_with_causes(diagnostic: ^Diagnostic, causes: [DiagnosticCause]) ->
 
 // Put the nearest wrapped report first, followed by its own causes in their
 // existing order.
-fn diagnostic_caused_by(diagnostic: ^Diagnostic, cause: Diagnostic) -> Diagnostic Never! {
+diagnostic_caused_by: fn(diagnostic: ^Diagnostic, cause: Diagnostic) -> Diagnostic Never! {
     updated := diagnostic
     &updated.cause.push(DiagnosticCause{code: cause.code.copy(), span: cause.span, origin: cause.origin.copy()})
     loop link in cause.cause -> &updated.cause.push(link.copy())
@@ -192,11 +192,11 @@ fn diagnostic_caused_by(diagnostic: ^Diagnostic, cause: Diagnostic) -> Diagnosti
 }
 
 // A cause names a report by its code, primary span and owning source snapshot.
-fn diagnostic_cause_matches(cause: DiagnosticCause, diagnostic: Diagnostic) -> Bool Never! {
+diagnostic_cause_matches: fn(cause: DiagnosticCause, diagnostic: Diagnostic) -> Bool Never! {
     cause.code == diagnostic.code && cause.span == diagnostic.span && cause.origin == diagnostic.origin
 }
 
-fn diagnostic_cause_is_pending(diagnostic: Diagnostic, pending: [Diagnostic]) -> Bool Never! {
+diagnostic_cause_is_pending: fn(diagnostic: Diagnostic, pending: [Diagnostic]) -> Bool Never! {
     loop cause in diagnostic.cause {
         loop candidate in pending {
             if diagnostic_cause_matches(cause, candidate) -> return true
@@ -208,7 +208,7 @@ fn diagnostic_cause_is_pending(diagnostic: Diagnostic, pending: [Diagnostic]) ->
 // Put root diagnostics before reports that name them as causes. The stable pass
 // keeps source order among independent reports and breaks a cycle by leaving
 // the remaining reports in their original order.
-fn diagnostic_order_root_first(diagnostics: ^[Diagnostic]) -> [Diagnostic] Never! {
+diagnostic_order_root_first: fn(diagnostics: ^[Diagnostic]) -> [Diagnostic] Never! {
     pending := diagnostics
     ordered := [Diagnostic]{}
     loop pending.len() > 0 {
@@ -223,63 +223,63 @@ fn diagnostic_order_root_first(diagnostics: ^[Diagnostic]) -> [Diagnostic] Never
             loop rest in pending -> &ordered.push(rest.copy())
             break
         }
-        root :: &pending.remove(next, .Slot) ?? panic("root-first ordering selected a pending diagnostic")
+        root: &pending.remove(next, .Slot) ?? panic("root-first ordering selected a pending diagnostic")
         &ordered.push(root)
     }
     ordered
 }
 
-fn diagnostic_with_label(diagnostic: ^Diagnostic, span: Span, message: String) -> Diagnostic Never! {
+diagnostic_with_label: fn(diagnostic: ^Diagnostic, span: Span, message: String) -> Diagnostic Never! {
     updated := diagnostic
     &updated.labels.push(DiagnosticLabel{span: span, message: message})
     updated
 }
 
-fn diagnostic_with_edit_grade(diagnostic: Diagnostic, edit: TextEdit, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic Never! {
+diagnostic_with_edit_grade: fn(diagnostic: Diagnostic, edit: TextEdit, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic Never! {
     // copy: `diagnostic` is a read parameter; the registry builder owns the value it edits.
     diagnostic_registry_with_edit_grade(diagnostic.copy(), edit, applicability, safety)
 }
 
-fn diagnostic_with_fix_grades(diagnostic: Diagnostic, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic Never! {
-    edit :: diagnostic.edit ?? panic("diagnostic `{diagnostic.code}` needs an edit before applying explicit fix grades")
+diagnostic_with_fix_grades: fn(diagnostic: Diagnostic, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic Never! {
+    edit: diagnostic.edit ?? panic("diagnostic `{diagnostic.code}` needs an edit before applying explicit fix grades")
     // copy: `diagnostic` is a read parameter; the registry builder owns the value it edits.
     diagnostic_registry_with_edit_grade(diagnostic.copy(), edit, applicability, safety)
 }
 
-fn diagnostic_with_structured_edit(diagnostic: Diagnostic, edit: TextEdit) -> Diagnostic Never! {
+diagnostic_with_structured_edit: fn(diagnostic: Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     // copy: `diagnostic` is a read parameter; the registry builder owns the value it edits.
     diagnostic_registry_with_structured_edit(diagnostic.copy(), edit)
 }
 
-fn diagnostic_with_source_derived_suggestion(diagnostic: Diagnostic, span: Span, new_text: String) -> Diagnostic Never! {
+diagnostic_with_source_derived_suggestion: fn(diagnostic: Diagnostic, span: Span, new_text: String) -> Diagnostic Never! {
     // copy: `diagnostic` is a read parameter; the registry builder owns the value it edits.
     diagnostic_registry_with_source_derived_suggestion(diagnostic.copy(), span, new_text)
 }
 
-fn diagnostic_with_alternative_edit(diagnostic: Diagnostic, edit: TextEdit) -> Diagnostic Never! {
+diagnostic_with_alternative_edit: fn(diagnostic: Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     // copy: `diagnostic` is a read parameter; the registry builder owns the value it edits.
     diagnostic_registry_with_alternative_edit(diagnostic.copy(), edit)
 }
 
-fn diagnostic_with_no_fix_reason(diagnostic: ^Diagnostic, reason: DiagnosticNoFixReason) -> Diagnostic Never! {
+diagnostic_with_no_fix_reason: fn(diagnostic: ^Diagnostic, reason: DiagnosticNoFixReason) -> Diagnostic Never! {
     updated := diagnostic
     updated.no_fix_reason = Val(reason)
     updated
 }
 
-fn diagnostic_with_detail(diagnostic: ^Diagnostic, detail: String) -> Diagnostic Never! {
+diagnostic_with_detail: fn(diagnostic: ^Diagnostic, detail: String) -> Diagnostic Never! {
     updated := diagnostic
     updated.detail = Val(detail)
     updated
 }
 
-fn diagnostic_with_structured(diagnostic: ^Diagnostic, structured: DiagnosticStructured) -> Diagnostic Never! {
+diagnostic_with_structured: fn(diagnostic: ^Diagnostic, structured: DiagnosticStructured) -> Diagnostic Never! {
     updated := diagnostic
     updated.structured = Val(structured)
     updated
 }
 
-fn diagnostic_with_rights(diagnostic: ^Diagnostic, denial_kind: String, call_chain: [String], scope_chain: [String], nearest_granting_scope: String?) -> Diagnostic Never! {
+diagnostic_with_rights: fn(diagnostic: ^Diagnostic, denial_kind: String, call_chain: [String], scope_chain: [String], nearest_granting_scope: String?) -> Diagnostic Never! {
     updated := diagnostic
     updated.denial_kind = Val(denial_kind)
     updated.call_chain = call_chain
@@ -288,5 +288,5 @@ fn diagnostic_with_rights(diagnostic: ^Diagnostic, denial_kind: String, call_cha
     updated
 }
 
-DIAGNOSTIC_ERROR :: 1
-DIAGNOSTIC_LINT :: 2
+DIAGNOSTIC_ERROR: 1
+DIAGNOSTIC_LINT: 2

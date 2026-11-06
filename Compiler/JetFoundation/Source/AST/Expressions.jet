@@ -6,9 +6,9 @@
 // unit's first byte (`parser_node_id`), so ids are unique per file and do not
 // depend on how the parse was chunked. A rewrite that rebuilds a node keeps
 // its id; a node no source spelled carries `AST_NODE_GENERATED`.
-AST_NODE_GENERATED :: -1
+AST_NODE_GENERATED: -1
 
-enum Expr {
+Expr: enum {
     Str(parts: [StrPart], span: Span, id: Int)
     StrMatchLit(parts: [StrMatchPart], span: Span, id: Int)
     BinMatchLit(parts: [BinMatchPart], span: Span, id: Int)
@@ -60,45 +60,45 @@ enum Expr {
     Paren(value: Expr, span: Span, id: Int)
 }
 
-struct IntegerWidth {
+IntegerWidth: struct {
     signed: Bool
     bits: Int
 }
 
-struct ExprField {
+ExprField: struct {
     name: String
     name_span: Span
     value: Expr
 }
 
-struct ExprMember {
+ExprMember: struct {
     name: String
     span: Span
 }
 
-struct ExprPair {
+ExprPair: struct {
     key: Expr
     value: Expr
 }
 
-struct TupleField {
+TupleField: struct {
     name: String
     value: Expr
 }
 
-enum EnumLitArg {
+EnumLitArg: enum {
     Positional(value: Expr)
     Named(label: String, expr: Expr)
 }
 
-struct Call {
+Call: struct {
     name: String
     name_span: Span
     type_args: [Type]
     args: [CallArg]
 }
 
-struct CallArg {
+CallArg: struct {
     convention: AccessConvention
     expr: Expr
     span: Span
@@ -107,12 +107,12 @@ struct CallArg {
     spread: Bool
 }
 
-struct CallLabel {
+CallLabel: struct {
     name: String
     span: Span
 }
 
-struct CallArgFlags {
+CallArgFlags: struct {
     owned_last_use: Bool
     shared_access_desugar: Bool
     is_trailing_block: Bool
@@ -137,18 +137,18 @@ struct CallArgFlags {
     shared_operand: Bool{false}
 }
 
-struct BinderRef {
+BinderRef: struct {
     name: String
     slot: Int
     ty: Type
 }
 
-enum MarkerCallArg {
+MarkerCallArg: enum {
     Expr(value: Expr)
     EffectRow(effects: [EffectRowEntry], span: Span)
 }
 
-enum BinOp {
+BinOp: enum {
     Add
     Sub
     Mul
@@ -173,12 +173,12 @@ enum BinOp {
     Or
 }
 
-enum UnOp {
+UnOp: enum {
     Neg
     Not
 }
 
-enum IndexKind {
+IndexKind: enum {
     Unknown
     List
     Range
@@ -192,13 +192,13 @@ enum IndexKind {
 
 // `Take` is the `^` mark on the place a method call
 // consumes (`^buf.seal()`); sema checks it and lowers the unmarked call.
-enum PlaceAccess {
+PlaceAccess: enum {
     Read
     Write
     Take
 }
 
-enum TryConvert {
+TryConvert: enum {
     NoConversion
     Never
     DefaultErr
@@ -206,12 +206,12 @@ enum TryConvert {
     WidenUnion(enum_name: String, tag: String)
 }
 
-enum StrPart {
+StrPart: enum {
     Lit(text: String)
     Interp(expr: Expr, format: StrFormat)
     Byte(value: U8)
 }
-fn ast_empty_call_arg_flags() -> CallArgFlags Never! {
+ast_empty_call_arg_flags: fn() -> CallArgFlags Never! {
     CallArgFlags{
         owned_last_use: false,
         shared_access_desugar: false,
@@ -234,7 +234,7 @@ fn ast_empty_call_arg_flags() -> CallArgFlags Never! {
     }
 }
 
-fn ast_empty_lambda_meta() -> LambdaMeta Never! {
+ast_empty_lambda_meta: fn() -> LambdaMeta Never! {
     LambdaMeta{
         escapes: false,
         runtime_erased: false,
@@ -268,7 +268,7 @@ fn ast_empty_lambda_meta() -> LambdaMeta Never! {
     }
 }
 
-enum StrFormat {
+StrFormat: enum {
     Display
     Debug
     Pretty
@@ -284,25 +284,25 @@ enum StrFormat {
     Unit(format: UnitFormat)
 }
 
-enum UnitFormat {
+UnitFormat: enum {
     Symbol
     Name
     Bare
 }
 
-struct LambdaParam {
+LambdaParam: struct {
     name: String
     name_span: Span
     ty: Type?
     ty_span: Span?
 }
 
-enum LambdaBody {
+LambdaBody: enum {
     Expr(value: Expr)
     Block(body: [Stmt])
 }
 
-struct Lambda {
+Lambda: struct {
     take_names: [NamedSpan]
     params: [LambdaParam]
     effects: [EffectRowEntry]?
@@ -311,12 +311,12 @@ struct Lambda {
     meta: LambdaMeta
 }
 
-struct NamedSpan {
+NamedSpan: struct {
     name: String
     span: Span
 }
 
-struct LambdaMeta {
+LambdaMeta: struct {
     escapes: Bool
     runtime_erased: Bool
     http_route_source: String?{None}
@@ -349,7 +349,7 @@ struct LambdaMeta {
     frame_schedule_derivation: DerivationRef?
 }
 
-enum TypedLitBody {
+TypedLitBody: enum {
     Fields(fields: [ExprField])
     Elements(elements: [Expr])
     Entries(entries: [ExprPair])
@@ -358,25 +358,25 @@ enum TypedLitBody {
     Empty
 }
 
-enum ByteTextPart {
+ByteTextPart: enum {
     Lit(text: String)
     Byte(value: U8)
 }
 
-struct ArithmeticPolicyFact {
+ArithmeticPolicyFact: struct {
     mode: ArithmeticMode
     scope_span: Span
     operation_span: Span
     operation: ArithmeticOperation?
 }
 
-enum ArithmeticMode {
+ArithmeticMode: enum {
     Checked
     Wrapping
     Saturating
 }
 
-enum ArithmeticOperation {
+ArithmeticOperation: enum {
     Add
     Sub
     Mul
@@ -384,7 +384,7 @@ enum ArithmeticOperation {
     Pow
 }
 
-struct FrameSchedule {
+FrameSchedule: struct {
     operations: [FrameOperation]
     dependencies: [FrameDependency]
     transfers: [FrameTransfer]
@@ -393,7 +393,7 @@ struct FrameSchedule {
     conservative: [String]
 }
 
-struct FrameOperation {
+FrameOperation: struct {
     name: String
     source_index: Int
     accesses: [ResourceAccess]
@@ -402,7 +402,7 @@ struct FrameOperation {
     external_effect: Bool
 }
 
-struct ResourceAccess {
+ResourceAccess: struct {
     resource: ResourceIdentity
     mode: ResourceAccessMode
     region: ResourceRegion
@@ -410,44 +410,44 @@ struct ResourceAccess {
     temporary: Bool
 }
 
-enum ResourceIdentity {
+ResourceIdentity: enum {
     Named(name: String)
     Unknown
 }
 
-enum ResourceAccessMode {
+ResourceAccessMode: enum {
     Read
     Write
     Move
 }
 
-enum ResourceRegion {
+ResourceRegion: enum {
     Whole
     Bytes(start: Int, length: Int)
     Unknown
 }
 
-struct ResourceLayout {
+ResourceLayout: struct {
     size: Int
     align: Int
     layout: String
     device: String
 }
 
-enum FrameCompletion {
+FrameCompletion: enum {
     Synchronous
     Pending(token: String)
     Event(token: String)
 }
 
-struct FrameDependency {
+FrameDependency: struct {
     before: Int
     after: Int
     resource: String
     reason: String
 }
 
-struct FrameTransfer {
+FrameTransfer: struct {
     before: Int
     after: Int
     resource: String
@@ -455,7 +455,7 @@ struct FrameTransfer {
     to_device: String
 }
 
-struct FrameReuse {
+FrameReuse: struct {
     previous_resource: String
     next_resource: String
     previous_last_use: Int
@@ -464,7 +464,7 @@ struct FrameReuse {
     reason: String
 }
 
-struct FrameRetention {
+FrameRetention: struct {
     resource: String
     operation: Int
     owner: String
@@ -472,16 +472,16 @@ struct FrameRetention {
     completed: Bool
 }
 
-struct DerivationRef {
+DerivationRef: struct {
     id: String
 }
 // S71 the ordinary call that `receiver?.method(args)` runs on the
 // present payload. Syntax walkers reuse their `MethodCall` facts through it.
-fn expr_optional_method_call_as_call(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg]) -> Expr Never! {
+expr_optional_method_call_as_call: fn(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg]) -> Expr Never! {
     Expr.MethodCall{receiver: receiver, method: method, method_span: method_span, owner_type_args: [Type]{}, type_args: type_args, args: args, id: AST_NODE_GENERATED}
 }
 
-fn expr_span(expr: Expr) -> Span {
+expr_span: fn(expr: Expr) -> Span {
     if expr == {
         .Str(_, span, _) -> return span
         .StrMatchLit(_, span, _) -> return span
@@ -537,7 +537,7 @@ fn expr_span(expr: Expr) -> Span {
 }
 
 // The AST NodeId of an expression (AST_NODE_GENERATED for a compiler-built one).
-fn expr_node_id(expr: Expr) -> Int Never! {
+expr_node_id: fn(expr: Expr) -> Int Never! {
     if expr == {
         .Str(_, _, id) -> id
         .StrMatchLit(_, _, id) -> id
@@ -593,7 +593,7 @@ fn expr_node_id(expr: Expr) -> Int Never! {
 
 // The first source byte of an expression. A method call is spanned at its
 // method name, so a method chain or a member path starts at its receiver.
-fn expr_source_start(expr: Expr) -> Int Never! {
+expr_source_start: fn(expr: Expr) -> Int Never! {
     if expr == {
         .Paren(_, span, _) -> return span.start
         .Field(base, _, _, _) -> return expr_source_start(base)
@@ -607,6 +607,6 @@ fn expr_source_start(expr: Expr) -> Int Never! {
 // An expression's source extent from its first byte (`expr_source_start`)
 // to the end of its own span: a method call covers its receiver path
 // through the method name (`xs.zip`), any other expression its own span.
-fn expr_source_span(expr: Expr) -> Span Never! {
+expr_source_span: fn(expr: Expr) -> Span Never! {
     Span{start: expr_source_start(expr), end: expr_span(expr).end}
 }

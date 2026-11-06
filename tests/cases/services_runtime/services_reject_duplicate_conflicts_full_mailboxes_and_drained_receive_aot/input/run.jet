@@ -1,28 +1,28 @@
 
 use {
-    services :: core.service
-    testing :: core.testing
+    services: core.service
+    testing: core.testing
 }
 
-fn failure_worker() {}
+failure_worker: fn() {}
 
-fn run() {
+run: fn() {
     tree := services.tree("delivery")
     &tree.set_delivery(services.delivery_durable()) ?? panic("delivery")
     temp := testing.temp_dir("service-failure")
-    store_path :: Path.from(temp).join("delivery.state").to_string()
-    store :: services.state_store(store_path) ?? panic("state store")
+    store_path: Path.from(temp).join("delivery.state").to_string()
+    store: services.state_store(store_path) ?? panic("state store")
     &tree.set_state_event_log(store, "delivery-events", 1, "reversible") ?? panic("state")
-    worker :: &tree.worker("worker", failure_worker, capacity: 1) ?? panic("worker")
+    worker: &tree.worker("worker", failure_worker, capacity: 1) ?? panic("worker")
     &tree.start() ?? panic("start")
 
-    first :: &tree.send_durable(worker, "first", key: "k1") ?? panic("first")
+    first: &tree.send_durable(worker, "first", key: "k1") ?? panic("first")
     first.status() ?? panic("first status")
-    duplicate :: &tree.send_durable(worker, "first", key: "k1") ?? panic("duplicate")
+    duplicate: &tree.send_durable(worker, "first", key: "k1") ?? panic("duplicate")
     duplicate.status() ?? panic("duplicate status")
     if &tree.send_durable(worker, "different", key: "k1") == {
         .Ok(delivery) -> {
-            cancelled :: ^delivery.cancel() ?? panic("unexpected conflict delivery")
+            cancelled: ^delivery.cancel() ?? panic("unexpected conflict delivery")
             ^cancelled.status() ?? panic("unexpected conflict status")
             print("conflict:accepted")
         }
@@ -30,7 +30,7 @@ fn run() {
     }
     if &tree.send_durable(worker, "second", key: "k2") == {
         .Ok(delivery) -> {
-            cancelled :: delivery.cancel() ?? panic("unexpected full delivery")
+            cancelled: delivery.cancel() ?? panic("unexpected full delivery")
             cancelled.status() ?? panic("unexpected full status")
             print("full:accepted")
         }

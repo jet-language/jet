@@ -61,7 +61,7 @@ function sites(text) {
   let lineStart = 0;
   for (const line of text.split('\n')) {
     const code = line.replace(/\/\/.*$/, '');
-    if (!/^\s*fn\s/.test(code) && !/"/.test(code)) {
+    if (!/^\s*(?:fn\s|[A-Za-z_][\w.]*:\s*fn\b)/.test(code) && !/"/.test(code)) {
       for (const m of code.matchAll(SITE)) {
         if (m[2] === 'self') continue;
         const caret = lineStart + m.index + m[1].length;

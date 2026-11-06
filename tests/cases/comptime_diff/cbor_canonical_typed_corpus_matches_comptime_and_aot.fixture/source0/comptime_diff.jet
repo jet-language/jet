@@ -1,19 +1,19 @@
 use {
-    comptime_diff_hex :: core.encoding.hex
-    json :: core.encoding.json
-    cbor :: core.encoding.cbor
-    hex :: core.encoding.hex
+    comptime_diff_hex: core.encoding.hex
+    json: core.encoding.json
+    cbor: core.encoding.cbor
+    hex: core.encoding.hex
 }
 
 #Codable
-struct Packet { id: Int, payload: [U8] }
+Packet: struct { id: Int, payload: [U8] }
 
-EXPECTED_MAP :: comptime { hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("json")) ?? panic("canonical")) }
-EXPECTED_FLOATS :: comptime { hex.encode(cbor.to_bytes_canonical([Float]{ 1.5, 100000.0, -0.0 }) ?? panic("canonical")) }
-EXPECTED_NAN :: comptime { hex.encode(cbor.to_bytes_canonical(Float.NAN) ?? panic("canonical")) }
-EXPECTED_TYPED :: comptime { hex.encode(cbor.to_bytes_canonical(Packet{ id: 7, payload: [222, 173] }) ?? panic("canonical")) }
+EXPECTED_MAP: comptime { hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("json")) ?? panic("canonical")) }
+EXPECTED_FLOATS: comptime { hex.encode(cbor.to_bytes_canonical([Float]{ 1.5, 100000.0, -0.0 }) ?? panic("canonical")) }
+EXPECTED_NAN: comptime { hex.encode(cbor.to_bytes_canonical(Float.NAN) ?? panic("canonical")) }
+EXPECTED_TYPED: comptime { hex.encode(cbor.to_bytes_canonical(Packet{ id: 7, payload: [222, 173] }) ?? panic("canonical")) }
 
-fn run() {
+run: fn() {
     actual_map := hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("json")) ?? panic("canonical"))
     actual_floats := hex.encode(cbor.to_bytes_canonical([Float]{ 1.5, 100000.0, -0.0 }) ?? panic("canonical"))
     actual_nan := hex.encode(cbor.to_bytes_canonical(Float.NAN) ?? panic("canonical"))
@@ -26,7 +26,7 @@ fn run() {
 
 }
 
-fn comptime_diff_frame(expected_text: String, actual_text: String) {
+comptime_diff_frame: fn(expected_text: String, actual_text: String) {
     print("{comptime_diff_hex.encode(expected_text.bytes())}")
     print("{comptime_diff_hex.encode(actual_text.bytes())}")
 }

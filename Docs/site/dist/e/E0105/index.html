@@ -36,15 +36,24 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Rename or remove one of the definitions</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0105</code>: <code>tests/ui/corelib_parts_derives/structure_once_duplicate_generated_tests_reenter_test_registration.stderr</code>.</p>
-<pre class="diag">Error [jet.DuplicateDefinition]: `case 1` is defined twice
-  --&gt; tests/ui/corelib_parts_derives/structure_once_duplicate_generated_tests_reenter_test_registration.jet:6:11
+<p>First UI snapshot mentioning <code>E0105</code>: <code>tests/ui/ambiguous_call_e0772.stderr</code>.</p>
+<pre class="diag">Error [jet.DuplicateDefinition]: Method `put` is defined twice on `Store`
+  --&gt; tests/ui/ambiguous_call_e0772.jet:8:8
     |
-  6 |     #Test(&quot;case {case.n}&quot;) {
-    |           ^^^^^^^^^^^^^^^
- Why: Every test needs a unique name so failures are easy to find
+  8 |     fn put(self, key: String, id: String) -&gt; String { &quot;{key} = {id}&quot; }
+    |        ^^^
+ Why: Each method name may appear only once on a type
  Fix: Rename or remove one of the definitions
 More: jet-lang.dev/e/E0105
+
+Error [jet.AmbiguousCall]: This call to `put` matches more than one callable body
+  --&gt; tests/ui/ambiguous_call_e0772.jet:18:17
+    |
+ 18 |     print(store.put(&quot;name&quot;, &quot;text&quot;))
+    |                 ^^^
+ Why: The overload set has no unique inferred method
+ Fix: Add labels or type arguments that select one method
+More: jet-lang.dev/e/E0772
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>

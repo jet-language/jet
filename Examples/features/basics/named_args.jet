@@ -4,17 +4,17 @@
 // labelled arguments in any order. `/` closes the positional-only zone and
 // `*` opens the label-only zone. `timeout seconds: Int` publishes the label
 // `timeout` while the body reads `seconds`.
-struct Rect {
+Rect: struct {
     width: Float
     height: Float
 
-    fn new(width: Float, height: Float) -> Rect { {width: width, height: height} }
+    new: fn(width: Float, height: Float) -> Rect { {width: width, height: height} }
 
-    fn area(self) -> Float { self.width * self.height }
+    area: fn(self) -> Float { self.width * self.height }
 
-    fn scale(self, factor: Float, clamp: Bool{false}) -> Rect {
-        scaled_w :: self.width * factor
-        scaled_h :: self.height * factor
+    scale: fn(self, factor: Float, clamp: Bool{false}) -> Rect {
+        scaled_w: self.width * factor
+        scaled_h: self.height * factor
         if {
             clamp -> {
                 return Rect{width: 100.0, height: 100.0}
@@ -31,32 +31,32 @@ struct Rect {
 // `host` is positional-only: its name stays free to change. `timeout` and
 // `tls` are label-only, so every call says which policy it is setting.
 // `timeout seconds` splits the public label from the local name.
-fn connect(host: String, /, *, timeout seconds: Int{30}, tls: Bool{true}) -> String {
+connect: fn(host: String, /, *, timeout seconds: Int{30}, tls: Bool{true}) -> String {
     "{host} t={seconds} tls={tls}"
 }
 
 // Prints its tag, then hands back its value — so the output shows the order
 // the supplied expressions actually ran in.
-fn note(label: String, value: Float) -> Float {
+note: fn(label: String, value: Float) -> Float {
     print("eval {label}")
     value
 }
 
 // The owned call exercises a concrete defaulted slot and a variadic rest;
 // the tap calls make source-order and exactly-once evaluation visible.
-fn tap<T>(label: String, value: ^T) -> T {
+tap: fn<T>(label: String, value: ^T) -> T {
     print("tap {label}")
     value
 }
 
-fn collect(first: ^Int, second: ^Int{first}, rest: ...Int) -> Int {
+collect: fn(first: ^Int, second: ^Int{first}, rest: ...Int) -> Int {
     print("rest {rest.len()}")
     second
 }
 
 // A known API stays cheap to call positionally. The editor renders this as
 // `clamp(value: 12, low: 0, high: 10)` without changing the source.
-fn clamp(value: Int, low: Int, high: Int) -> Int {
+clamp: fn(value: Int, low: Int, high: Int) -> Int {
     if value < low -> return low
     if value > high -> return high
     value
@@ -64,31 +64,31 @@ fn clamp(value: Int, low: Int, high: Int) -> Int {
 
 // D-APILABEL1=A: a function type reuses the parameter grammar, so its zones
 // are part of callable identity. `apply` only accepts a labelled call.
-fn apply(action: fn(*, force: Bool) -> Int) -> Int { action(force: true) }
+apply: fn(action: fn(*, force: Bool) -> Int) -> Int { action(force: true) }
 
-fn saver(*, force: Bool) -> Int {
+saver: fn(*, force: Bool) -> Int {
     print("saver {force}")
     7
 }
 
-fn run() {
+run: fn() {
     // Adjacent same-type parameters remain legal by position; ghost text
     // carries the names when the reader needs them.
-    bare_rect :: Rect.new(4.0, 3.0)
+    bare_rect: Rect.new(4.0, 3.0)
     print("{bare_rect.area()}")
     print(clamp(12, 0, 10))
 
-    r :: Rect.new(width: 4.0, height: 3.0)
-    a :: r.area()
+    r: Rect.new(width: 4.0, height: 3.0)
+    a: r.area()
     print("{a}")
     // default fills: clamp omitted
-    r2 :: r.scale(2.0)
+    r2: r.scale(2.0)
     print("{r2.width}")
     // label at call site
-    r3 :: r.scale(factor: 0.5)
+    r3: r.scale(factor: 0.5)
     print("{r3.width}")
     // explicit labeled Bool
-    r4 :: r.scale(1.0, clamp: true)
+    r4: r.scale(1.0, clamp: true)
     print("{r4.width}")
 
     // Reordered labels, and the `timeout` default skipped over.
@@ -98,7 +98,7 @@ fn run() {
 
     // Supplied expressions run left to right in the order they were WRITTEN,
     // not in declaration order — so "eval h" prints before "eval w".
-    both :: Rect.new(height: note("h", 2.0), width: note("w", 5.0))
+    both: Rect.new(height: note("h", 2.0), width: note("w", 5.0))
     print("{both.area()}")
 
     // A label-only parameter on a function TYPE.
@@ -106,7 +106,7 @@ fn run() {
 
     // Owned defaulted slot plus variadic rest: the first call supplies an
     // empty spread explicitly, and the second packs two written tail values.
-    empty :: [Int]{}
+    empty: [Int]{}
     print(collect(tap("first", 1), 1, ...empty))
     print(collect(tap("first", 1), tap("second", 2), tap("third", 3), tap("fourth", 4)))
 }

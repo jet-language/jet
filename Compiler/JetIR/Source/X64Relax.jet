@@ -29,7 +29,7 @@ use jet_backend.[X64_FUNCTION_ALIGN, x64_nops, x64_patch_rel32]
 // its loop's end, the no-ops before it, and how many bytes of no-ops the
 // code up to and including it gained; and the largest alignment a head
 // takes, the function's own (at least X64_FUNCTION_ALIGN).
-struct IRX64Relax {
+IRX64Relax: struct {
     sites: [Int]
     starts: [Int]
     lengths: [Int]
@@ -48,9 +48,9 @@ struct IRX64Relax {
 // fetch window, half a cache line) that a 16-byte start could leave across
 // two windows starts on a window instead, so it is fetched whole each
 // iteration and never crosses a cache line.
-IR_X64_LOOP_WINDOW :: 32
+IR_X64_LOOP_WINDOW: 32
 
-fn ir_x64_loop_align(length: Int) -> Int Never! {
+ir_x64_loop_align: fn(length: Int) -> Int Never! {
     if length > X64_FUNCTION_ALIGN && length <= IR_X64_LOOP_WINDOW -> IR_X64_LOOP_WINDOW else -> X64_FUNCTION_ALIGN
 }
 
@@ -58,14 +58,14 @@ fn ir_x64_loop_align(length: Int) -> Int Never! {
 // repeats allowed) in `code`, in place, aligns the loop heads `heads` (old
 // offsets of instruction starts, in any order, no loop inside another),
 // each loop ending at `ends` (the same index), and returns the layout map.
-fn ir_x64_relax(code: &[U8], sites: [Int], heads: [Int], ends: [Int]) -> IRX64Relax Never! {
+ir_x64_relax: fn(code: &[U8], sites: [Int], heads: [Int], ends: [Int]) -> IRX64Relax Never! {
     ordered := sites.copy()
     &ordered.sort()
     r := IRX64Relax{sites: [Int]{}, starts: [Int]{}, lengths: [Int]{}, short: [Bool]{}, stays_long: [Bool]{}, shrunk: [Int]{}, heads: [Int]{}, ends: [Int]{}, pads: [Int]{}, padded: [Int]{}, align: X64_FUNCTION_ALIGN}
     targets := [Int]{}
     loop site in ordered {
         if r.sites.len() > 0 && r.sites[r.sites.len() - 1] == site -> next
-        jump :: Int.from_u8(code[site - 1]) == 0xe9
+        jump: Int.from_u8(code[site - 1]) == 0xe9
         &r.sites.push(site)
         &r.starts.push(if jump -> site - 1 else -> site - 2)
         &r.lengths.push(if jump -> 5 else -> 6)
@@ -82,10 +82,10 @@ fn ir_x64_relax(code: &[U8], sites: [Int], heads: [Int], ends: [Int]) -> IRX64Re
         &r.padded.push(0)
         at := r.heads.len() - 1
         loop at > 0 && r.heads[at - 1] > r.heads[at] {
-            moved :: r.heads[at - 1]
+            moved: r.heads[at - 1]
             r.heads[at - 1] = r.heads[at]
             r.heads[at] = moved
-            ended :: r.ends[at - 1]
+            ended: r.ends[at - 1]
             r.ends[at - 1] = r.ends[at]
             r.ends[at] = ended
             at -= 1
@@ -98,8 +98,8 @@ fn ir_x64_relax(code: &[U8], sites: [Int], heads: [Int], ends: [Int]) -> IRX64Re
         // A short branch the padding pushed out of reach goes back to long.
         loop index in 0..<r.sites.len() {
             if !r.short[index] -> next
-            end :: r.starts[index] + r.lengths[index]
-            reach :: ir_x64_relaxed_at(r, targets[index]) - ir_x64_relaxed_end(r, end)
+            end: r.starts[index] + r.lengths[index]
+            reach: ir_x64_relaxed_at(r, targets[index]) - ir_x64_relaxed_end(r, end)
             if reach < -128 || reach > 127 {
                 r.short[index] = false
                 r.stays_long[index] = true
@@ -113,13 +113,13 @@ fn ir_x64_relax(code: &[U8], sites: [Int], heads: [Int], ends: [Int]) -> IRX64Re
         shorten := [Int]{}
         loop index in 0..<r.sites.len() {
             if r.short[index] || r.stays_long[index] -> next
-            end :: r.starts[index] + r.lengths[index]
-            saving :: r.lengths[index] - 2
+            end: r.starts[index] + r.lengths[index]
+            saving: r.lengths[index] - 2
             // Where this branch would end, and its target would be, were it
             // short too.
-            from :: ir_x64_relaxed_end(r, end) - saving
-            to :: ir_x64_relaxed_at(r, targets[index]) - (if targets[index] >= end -> saving else -> 0)
-            reach :: to - from
+            from: ir_x64_relaxed_end(r, end) - saving
+            to: ir_x64_relaxed_at(r, targets[index]) - (if targets[index] >= end -> saving else -> 0)
+            reach: to - from
             if reach >= -128 && reach <= 127 -> &shorten.push(index)
         }
         loop index in shorten -> r.short[index] = true
@@ -141,16 +141,16 @@ fn ir_x64_relax(code: &[U8], sites: [Int], heads: [Int], ends: [Int]) -> IRX64Re
             head += 1
             next
         }
-        index :: branch
+        index: branch
         branch += 1
-        start :: r.starts[index]
+        start: r.starts[index]
         loop at in copied..<start -> &out.push(code[at])
-        end :: r.starts[index] + r.lengths[index]
-        target :: ir_x64_relaxed_at(r, targets[index])
-        jump :: r.lengths[index] == 5
+        end: r.starts[index] + r.lengths[index]
+        target: ir_x64_relaxed_at(r, targets[index])
+        jump: r.lengths[index] == 5
         if r.short[index] {
             &out.push(if jump -> U8{0xeb} else -> U8{0x70 + (Int.from_u8(code[start + 1]) - 0x80)})
-            reach :: target - (out.len() + 1)
+            reach: target - (out.len() + 1)
             &out.push(U8{reach.bit_and(255)})
         } else {
             if jump {
@@ -159,7 +159,7 @@ fn ir_x64_relax(code: &[U8], sites: [Int], heads: [Int], ends: [Int]) -> IRX64Re
                 &out.push(U8{0x0f})
                 &out.push(code[start + 1])
             }
-            field :: out.len()
+            field: out.len()
             loop _ in 0..<4 -> &out.push(U8{0})
             x64_patch_rel32(&out, field, target)
         }
@@ -172,7 +172,7 @@ fn ir_x64_relax(code: &[U8], sites: [Int], heads: [Int], ends: [Int]) -> IRX64Re
 
 // How many bytes the code up to and including each branch shrank by, from
 // the branches short now.
-fn ir_x64_relax_shrink(r: &IRX64Relax) Never! {
+ir_x64_relax_shrink: fn(r: &IRX64Relax) Never! {
     total := 0
     loop index in 0..<r.sites.len() {
         if r.short[index] -> total += r.lengths[index] - 2
@@ -183,12 +183,12 @@ fn ir_x64_relax_shrink(r: &IRX64Relax) Never! {
 // Each head's no-ops in the layout of the branches short now, in code
 // order: the head's place after the shrinking and the no-ops before it,
 // and its loop's length there (no head is inside it).
-fn ir_x64_relax_pad(r: &IRX64Relax) Never! {
+ir_x64_relax_pad: fn(r: &IRX64Relax) Never! {
     total := 0
     loop index in 0..<r.heads.len() {
-        at :: r.heads[index] - ir_x64_relax_shrunk(r, r.heads[index]) + total
-        length :: r.ends[index] - ir_x64_relax_shrunk(r, r.ends[index]) + total - at
-        align :: ir_x64_loop_align(length)
+        at: r.heads[index] - ir_x64_relax_shrunk(r, r.heads[index]) + total
+        length: r.ends[index] - ir_x64_relax_shrunk(r, r.ends[index]) + total - at
+        align: ir_x64_loop_align(length)
         if align > r.align -> r.align = align
         r.pads[index] = (align - at % align) % align
         total += r.pads[index]
@@ -197,8 +197,8 @@ fn ir_x64_relax_pad(r: &IRX64Relax) Never! {
 }
 
 // The signed rel32 field at `at`.
-fn ir_x64_rel32_at(code: [U8], at: Int) -> Int Never! {
-    word :: Int.from_u8(code[at]).bit_or((Int.from_u8(code[at + 1]) << 8)).bit_or((Int.from_u8(code[at + 2]) << 16)).bit_or((Int.from_u8(code[at + 3]) << 24))
+ir_x64_rel32_at: fn(code: [U8], at: Int) -> Int Never! {
+    word: Int.from_u8(code[at]).bit_or((Int.from_u8(code[at + 1]) << 8)).bit_or((Int.from_u8(code[at + 2]) << 16)).bit_or((Int.from_u8(code[at + 3]) << 24))
     if word >= 2147483648 -> word - 4294967296 else -> word
 }
 
@@ -206,23 +206,23 @@ fn ir_x64_rel32_at(code: [U8], at: Int) -> Int Never! {
 // relaxed code: every short branch that ends at or before it moved it up,
 // and the no-ops of every head at or before it moved it down (a head's
 // own instruction starts after them).
-fn ir_x64_relaxed_at(r: IRX64Relax, at: Int) -> Int Never! {
+ir_x64_relaxed_at: fn(r: IRX64Relax, at: Int) -> Int Never! {
     at - ir_x64_relax_shrunk(r, at) + ir_x64_relax_padded(r, at, true)
 }
 
 // Where an instruction that ends at offset `at` of the old layout ends in
 // the relaxed code: before the no-ops of a head at `at`.
-fn ir_x64_relaxed_end(r: IRX64Relax, at: Int) -> Int Never! {
+ir_x64_relaxed_end: fn(r: IRX64Relax, at: Int) -> Int Never! {
     at - ir_x64_relax_shrunk(r, at) + ir_x64_relax_padded(r, at, false)
 }
 
 // How many bytes the short branches ending at or before `at` shrank by.
-fn ir_x64_relax_shrunk(r: IRX64Relax, at: Int) -> Int Never! {
+ir_x64_relax_shrunk: fn(r: IRX64Relax, at: Int) -> Int Never! {
     // The last branch ending at or before `at`.
     low := 0
     high := r.sites.len()
     loop low < high {
-        middle :: (low + high) /% 2
+        middle: (low + high) /% 2
         if r.starts[middle] + r.lengths[middle] <= at {
             low = middle + 1
         } else {
@@ -233,11 +233,11 @@ fn ir_x64_relax_shrunk(r: IRX64Relax, at: Int) -> Int Never! {
 }
 
 // The no-op bytes of the heads before `at` (and at it, when `inclusive`).
-fn ir_x64_relax_padded(r: IRX64Relax, at: Int, inclusive: Bool) -> Int Never! {
+ir_x64_relax_padded: fn(r: IRX64Relax, at: Int, inclusive: Bool) -> Int Never! {
     low := 0
     high := r.heads.len()
     loop low < high {
-        middle :: (low + high) /% 2
+        middle: (low + high) /% 2
         if r.heads[middle] < at || (inclusive && r.heads[middle] == at) {
             low = middle + 1
         } else {
@@ -257,7 +257,7 @@ fn ir_x64_relax_padded(r: IRX64Relax, at: Int, inclusive: Bool) -> Int Never! {
     loop _ in 0..<4 -> &code.push(U8{0})
     x64_patch_rel32(&code, 1, 33)
     x64_patch_rel32(&code, 29, 8)
-    r :: ir_x64_relax(&code, [Int]{1, 29}, [Int]{8}, [Int]{33})
+    r: ir_x64_relax(&code, [Int]{1, 29}, [Int]{8}, [Int]{33})
     assert_eq(r.align, 32)
     assert_eq(ir_x64_relaxed_at(r, 8), 32)
     assert_eq(code.len(), 54)
@@ -278,7 +278,7 @@ fn ir_x64_relax_padded(r: IRX64Relax, at: Int, inclusive: Bool) -> Int Never! {
     loop _ in 0..<4 -> &code.push(U8{0})
     x64_patch_rel32(&code, 1, 128)
     x64_patch_rel32(&code, 124, 122)
-    r :: ir_x64_relax(&code, [Int]{1, 124}, [Int]{122}, [Int]{128})
+    r: ir_x64_relax(&code, [Int]{1, 124}, [Int]{122}, [Int]{128})
     assert_eq(r.align, 16)
     assert_eq(ir_x64_relaxed_at(r, 122), 128)
     assert_eq(code.len(), 131)

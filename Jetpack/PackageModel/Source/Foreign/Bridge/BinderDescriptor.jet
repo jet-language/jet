@@ -17,11 +17,11 @@ use {
     jetpack_trust_root.[CacheProvenance]
 }
 
-FOREIGN_DESCRIPTOR_SCHEMA :: "jet-ffi-descriptor-v1"
-FOREIGN_ABI_CONTRACT_VERSION :: 1
+FOREIGN_DESCRIPTOR_SCHEMA: "jet-ffi-descriptor-v1"
+FOREIGN_ABI_CONTRACT_VERSION: 1
 
 // Registered foreign language roots.
-enum ForeignLanguage {
+ForeignLanguage: enum {
     C
     Cpp
     Rust
@@ -47,7 +47,7 @@ enum ForeignLanguage {
     Com
 
     // Every registered language in declaration order.
-    fn all() -> [ForeignLanguage] Never! {
+    all: fn() -> [ForeignLanguage] Never! {
         [ForeignLanguage]{
             ForeignLanguage.C, ForeignLanguage.Cpp, ForeignLanguage.Rust, ForeignLanguage.Py,
             ForeignLanguage.JS, ForeignLanguage.Swift, ForeignLanguage.Go, ForeignLanguage.Java,
@@ -59,7 +59,7 @@ enum ForeignLanguage {
     }
 
     // The Rust `Debug` spelling of the variant; descriptor stamps embed it.
-    fn debug_name(self) -> String Never! {
+    debug_name: fn(self) -> String Never! {
         if self == {
             .C -> "C"
             .Cpp -> "Cpp"
@@ -88,7 +88,7 @@ enum ForeignLanguage {
     }
 
     // The `<lang>` mount root of `<lang>.<lib>`.
-    fn root(self) -> String Never! {
+    root: fn(self) -> String Never! {
         if self == {
             .C -> C_MODULE_ROOT
             .Cpp -> CPP_MODULE_ROOT
@@ -117,20 +117,20 @@ enum ForeignLanguage {
     }
 
     // The language whose mount root is `root`.
-    fn from_root(root: String) -> ForeignLanguage? Never! {
+    from_root: fn(root: String) -> ForeignLanguage? Never! {
         loop language in ForeignLanguage.all() {
             if language.root() == root -> return Val(language)
         }
         None
     }
 
-    fn bindings_subdir(self) -> String Never! {
+    bindings_subdir: fn(self) -> String Never! {
         "{BINDINGS_ROOT_SUBDIR}/{self.root()}"
     }
 
     // Prefix used by generated bridge symbols. It lives beside the descriptor
     // table so the loader cannot grow a second language map.
-    fn bridge_prefix(self) -> String Never! {
+    bridge_prefix: fn(self) -> String Never! {
         if self == {
             .C -> ""
             .Cpp -> "jet_cpp_"
@@ -158,7 +158,7 @@ enum ForeignLanguage {
         }
     }
 
-    fn abi_contract(self) -> ForeignABIContract Never! {
+    abi_contract: fn(self) -> ForeignABIContract Never! {
         if self == {
             .C | .Cpp | .Swift | .Go | .Fortran | .Cobol | .Ada | .Pascal -> ForeignABIContract.c()
             .Rust -> ForeignABIContract.native()
@@ -167,17 +167,17 @@ enum ForeignLanguage {
     }
 }
 
-enum BinderSurface {
+BinderSurface: enum {
     Namespace
 
-    fn debug_name(self) -> String Never! { "Namespace" }
+    debug_name: fn(self) -> String Never! { "Namespace" }
 }
 
-enum BinderStatus {
+BinderStatus: enum {
     Active
     Planned
 
-    fn debug_name(self) -> String Never! {
+    debug_name: fn(self) -> String Never! {
         if self == {
             .Active -> "Active"
             .Planned -> "Planned"
@@ -185,7 +185,7 @@ enum BinderStatus {
     }
 }
 
-enum BinderRuntime {
+BinderRuntime: enum {
     DirectCABI
     ClangCppShim
     LegacyRustExtern
@@ -210,7 +210,7 @@ enum BinderRuntime {
     SupervisedOctave
     WindowsComAutomation
 
-    fn debug_name(self) -> String Never! {
+    debug_name: fn(self) -> String Never! {
         if self == {
             .DirectCABI -> "DirectCAbi"
             .ClangCppShim -> "ClangCppShim"
@@ -239,7 +239,7 @@ enum BinderRuntime {
     }
 }
 
-enum BindingStubKind {
+BindingStubKind: enum {
     CHeader
     CppHeader
     RustExternBlock
@@ -264,7 +264,7 @@ enum BindingStubKind {
     OctaveScript
     ComTypeLibrary
 
-    fn debug_name(self) -> String Never! {
+    debug_name: fn(self) -> String Never! {
         if self == {
             .CHeader -> "CHeader"
             .CppHeader -> "CppHeader"
@@ -293,13 +293,13 @@ enum BindingStubKind {
     }
 }
 
-enum ForeignCallingConvention {
+ForeignCallingConvention: enum {
     C
     Cpp
     Rust
     HostMessage
 
-    fn debug_name(self) -> String Never! {
+    debug_name: fn(self) -> String Never! {
         if self == {
             .C -> "C"
             .Cpp -> "Cpp"
@@ -309,14 +309,14 @@ enum ForeignCallingConvention {
     }
 }
 
-enum ForeignLayoutModel {
+ForeignLayoutModel: enum {
     CABI
     AdapterTyped
     OpaqueHandle
     Message
     Native
 
-    fn debug_name(self) -> String Never! {
+    debug_name: fn(self) -> String Never! {
         if self == {
             .CABI -> "CAbi"
             .AdapterTyped -> "AdapterTyped"
@@ -327,7 +327,7 @@ enum ForeignLayoutModel {
     }
 }
 
-enum ForeignOwnershipModel {
+ForeignOwnershipModel: enum {
     SignatureDeclared
     AdapterOwned
     ByValue
@@ -335,7 +335,7 @@ enum ForeignOwnershipModel {
     OwnedHandle
     SharedHandle
 
-    fn debug_name(self) -> String Never! {
+    debug_name: fn(self) -> String Never! {
         if self == {
             .SignatureDeclared -> "SignatureDeclared"
             .AdapterOwned -> "AdapterOwned"
@@ -347,7 +347,7 @@ enum ForeignOwnershipModel {
     }
 }
 
-enum ForeignErrorModel {
+ForeignErrorModel: enum {
     JetBoundary
     AdapterResult
     ErrorCode
@@ -355,7 +355,7 @@ enum ForeignErrorModel {
     PanicBoundary
     ForeignException
 
-    fn debug_name(self) -> String Never! {
+    debug_name: fn(self) -> String Never! {
         if self == {
             .JetBoundary -> "JetBoundary"
             .AdapterResult -> "AdapterResult"
@@ -367,14 +367,14 @@ enum ForeignErrorModel {
     }
 }
 
-enum ForeignCallbackModel {
+ForeignCallbackModel: enum {
     ReentrantThreadSafe
     AdapterMarshalled
     NoCallback
     CABI
     HostRegistration
 
-    fn debug_name(self) -> String Never! {
+    debug_name: fn(self) -> String Never! {
         if self == {
             .ReentrantThreadSafe -> "ReentrantThreadSafe"
             .AdapterMarshalled -> "AdapterMarshalled"
@@ -385,11 +385,11 @@ enum ForeignCallbackModel {
     }
 }
 
-enum ForeignAsyncModel {
+ForeignAsyncModel: enum {
     JetTask
     AdapterMarshalled
 
-    fn debug_name(self) -> String Never! {
+    debug_name: fn(self) -> String Never! {
         if self == {
             .JetTask -> "JetTask"
             .AdapterMarshalled -> "AdapterMarshalled"
@@ -397,11 +397,11 @@ enum ForeignAsyncModel {
     }
 }
 
-enum ForeignTaskBoundary {
+ForeignTaskBoundary: enum {
     RejectCapturedState
     AdapterMarshalled
 
-    fn debug_name(self) -> String Never! {
+    debug_name: fn(self) -> String Never! {
         if self == {
             .RejectCapturedState -> "RejectCapturedState"
             .AdapterMarshalled -> "AdapterMarshalled"
@@ -409,11 +409,11 @@ enum ForeignTaskBoundary {
     }
 }
 
-enum ForeignSafety {
+ForeignSafety: enum {
     GeneratedWrapper
     UnsafeRaw
 
-    fn debug_name(self) -> String Never! {
+    debug_name: fn(self) -> String Never! {
         if self == {
             .GeneratedWrapper -> "GeneratedWrapper"
             .UnsafeRaw -> "UnsafeRaw"
@@ -423,7 +423,7 @@ enum ForeignSafety {
 
 // Scalar projection selected by a binder descriptor. `Unsupported` is a
 // deliberate fail-closed value, not a request to invent a fallback type.
-enum ForeignScalar {
+ForeignScalar: enum {
     Int
     Float
     Bool
@@ -431,7 +431,7 @@ enum ForeignScalar {
     String
     Unsupported
 
-    fn debug_name(self) -> String Never! {
+    debug_name: fn(self) -> String Never! {
         if self == {
             .Int -> "Int"
             .Float -> "Float"
@@ -442,7 +442,7 @@ enum ForeignScalar {
         }
     }
 
-    fn jet_name(self) -> String? Never! {
+    jet_name: fn(self) -> String? Never! {
         if self == {
             .Int -> Val("Int")
             .Float -> Val("Float")
@@ -455,7 +455,7 @@ enum ForeignScalar {
 
     // Rust type emitted at the checked C boundary for the matching Jet
     // scalar. Closed with no placeholder arm.
-    fn c_rust_name(self) -> String? Never! {
+    c_rust_name: fn(self) -> String? Never! {
         if self == {
             .Int -> Val("std::os::raw::c_longlong")
             .Float -> Val("f64")
@@ -468,13 +468,13 @@ enum ForeignScalar {
 }
 
 // `[Int, Float]`: the Rust `Debug` spelling of a scalar list.
-fn pkg_foreign_scalar_list_debug(scalars: [ForeignScalar]) -> String Never! {
+pkg_foreign_scalar_list_debug: fn(scalars: [ForeignScalar]) -> String Never! {
     names := [String]{}
     loop scalar in scalars -> &names.push(scalar.debug_name())
     "[{names.join(", ")}]"
 }
 
-struct ForeignABIContract {
+ForeignABIContract: struct {
     version: Int
     calling_convention: ForeignCallingConvention
     layout: ForeignLayoutModel
@@ -491,7 +491,7 @@ struct ForeignABIContract {
     string: ForeignScalar
 
     // `ForeignAbiContract::C`.
-    fn c() -> ForeignABIContract Never! {
+    c: fn() -> ForeignABIContract Never! {
         ForeignABIContract{
             version: FOREIGN_ABI_CONTRACT_VERSION,
             calling_convention: ForeignCallingConvention.C,
@@ -511,7 +511,7 @@ struct ForeignABIContract {
     }
 
     // `ForeignAbiContract::CXX`.
-    fn cxx() -> ForeignABIContract Never! {
+    cxx: fn() -> ForeignABIContract Never! {
         contract := ForeignABIContract.c()
         contract.calling_convention = ForeignCallingConvention.Cpp
         contract.layout = ForeignLayoutModel.OpaqueHandle
@@ -520,7 +520,7 @@ struct ForeignABIContract {
     }
 
     // `ForeignAbiContract::MESSAGE` (the adapter contract).
-    fn message() -> ForeignABIContract Never! {
+    message: fn() -> ForeignABIContract Never! {
         contract := ForeignABIContract.c()
         contract.calling_convention = ForeignCallingConvention.HostMessage
         contract.layout = ForeignLayoutModel.AdapterTyped
@@ -534,7 +534,7 @@ struct ForeignABIContract {
     }
 
     // `ForeignAbiContract::NATIVE`.
-    fn native() -> ForeignABIContract Never! {
+    native: fn() -> ForeignABIContract Never! {
         contract := ForeignABIContract.message()
         contract.calling_convention = ForeignCallingConvention.Rust
         contract.layout = ForeignLayoutModel.Native
@@ -544,10 +544,10 @@ struct ForeignABIContract {
     // Map a normalized C declaration to the one descriptor-owned Jet scalar.
     // Unsupported pointers and declarations return `None` and are skipped by
     // the binder; no generated fake signature can reach the compiler.
-    fn c_scalar(self, normalized: String) -> ForeignScalar? Never! {
+    c_scalar: fn(self, normalized: String) -> ForeignScalar? Never! {
         if self.layout != ForeignLayoutModel.CABI -> return None
         if normalized.ends_with("*") {
-            base :: normalized.removesuffix("*").trim()
+            base: normalized.removesuffix("*").trim()
             if base == {
                 "char" | "signed char" | "unsigned char" -> return Val(ForeignScalar.String)
                 else -> return None
@@ -564,17 +564,17 @@ struct ForeignABIContract {
     // Stable text included in generated stubs, binder output, and cache
     // provenance. A descriptor mutation therefore invalidates every product
     // made from it instead of silently reusing an old ABI.
-    fn stamp(self) -> String Never! {
+    stamp: fn(self) -> String Never! {
         "{FOREIGN_DESCRIPTOR_SCHEMA};version={self.version};calling={self.calling_convention.debug_name()};layout={self.layout.debug_name()};ownership={self.ownership.debug_name()};errors={self.errors.debug_name()};callbacks={self.callbacks.debug_name()};async={self.async_completion.debug_name()};tasks={self.task_boundary.debug_name()};safety={self.safety.debug_name()};integer={self.integer.debug_name()};float={self.floating.debug_name()};bool={self.boolean.debug_name()};char={self.character.debug_name()};string={self.string.debug_name()}"
     }
 
     // Field-for-field equality; the stamp names every field.
-    fn same_as(self, other: ForeignABIContract) -> Bool Never! {
+    same_as: fn(self, other: ForeignABIContract) -> Bool Never! {
         self.stamp() == other.stamp()
     }
 }
 
-enum BinderCapability {
+BinderCapability: enum {
     TypedStub
     SafeWrapper
     OwnershipConversion
@@ -586,7 +586,7 @@ enum BinderCapability {
     TargetDispatch
     UnsafeRawEscape
 
-    fn debug_name(self) -> String Never! {
+    debug_name: fn(self) -> String Never! {
         if self == {
             .TypedStub -> "TypedStub"
             .SafeWrapper -> "SafeWrapper"
@@ -602,7 +602,7 @@ enum BinderCapability {
     }
 }
 
-enum ForeignProvider {
+ForeignProvider: enum {
     System
     Cargo
     Npm
@@ -610,7 +610,7 @@ enum ForeignProvider {
     SwiftPM
     Jetpack
 
-    fn debug_name(self) -> String Never! {
+    debug_name: fn(self) -> String Never! {
         if self == {
             .System -> "System"
             .Cargo -> "Cargo"
@@ -622,12 +622,12 @@ enum ForeignProvider {
     }
 }
 
-enum ForeignStubFile {
+ForeignStubFile: enum {
     NoStub
     Suffix(String)
     StemSuffix(String)
 
-    fn debug_name(self) -> String Never! {
+    debug_name: fn(self) -> String Never! {
         if self == {
             .NoStub -> "None"
             .Suffix(suffix) -> "Suffix(\"{suffix}\")"
@@ -636,7 +636,7 @@ enum ForeignStubFile {
     }
 }
 
-struct BinderDescriptor {
+BinderDescriptor: struct {
     language: ForeignLanguage
     surface: BinderSurface
     status: BinderStatus
@@ -649,21 +649,21 @@ struct BinderDescriptor {
     cache_extension: String
     type_stub_file: ForeignStubFile
 
-    fn abi_contract(self) -> ForeignABIContract Never! {
+    abi_contract: fn(self) -> ForeignABIContract Never! {
         self.contract
     }
 
-    fn capabilities_debug(self) -> String Never! {
+    capabilities_debug: fn(self) -> String Never! {
         names := [String]{}
         loop capability in self.capabilities -> &names.push(capability.debug_name())
         "[{names.join(", ")}]"
     }
 
-    fn stamp(self) -> String Never! {
+    stamp: fn(self) -> String Never! {
         "{FOREIGN_DESCRIPTOR_SCHEMA};language={self.language.debug_name()};surface={self.surface.debug_name()};status={self.status.debug_name()};runtime={self.runtime.debug_name()};stub={self.stub_kind.debug_name()};contract={self.contract.stamp()};effect={self.effect_root};provider={self.provider.debug_name()};cache={self.cache_extension};type-stub={self.type_stub_file.debug_name()};capabilities={self.capabilities_debug()};bridge={self.language.bridge_prefix()}"
     }
 
-    fn capability_report(self) -> BinderCapabilityReport Never! {
+    capability_report: fn(self) -> BinderCapabilityReport Never! {
         BinderCapabilityReport{
             schema: FOREIGN_DESCRIPTOR_SCHEMA,
             language: self.language,
@@ -676,7 +676,7 @@ struct BinderDescriptor {
     }
 }
 
-struct BinderCapabilityReport {
+BinderCapabilityReport: struct {
     schema: String
     language: ForeignLanguage
     status: BinderStatus
@@ -686,23 +686,23 @@ struct BinderCapabilityReport {
     capabilities: [BinderCapability]
 }
 
-fn pkg_binder_c_capabilities() -> [BinderCapability] Never! {
+pkg_binder_c_capabilities: fn() -> [BinderCapability] Never! {
     [BinderCapability]{BinderCapability.TypedStub, BinderCapability.SafeWrapper, BinderCapability.OwnershipConversion, BinderCapability.LayoutValidation, BinderCapability.ErrorConversion, BinderCapability.CallbackValidation, BinderCapability.CacheProvenance, BinderCapability.PackageProvider, BinderCapability.UnsafeRawEscape}
 }
 
-fn pkg_binder_target_capabilities() -> [BinderCapability] Never! {
+pkg_binder_target_capabilities: fn() -> [BinderCapability] Never! {
     [BinderCapability]{BinderCapability.TypedStub, BinderCapability.SafeWrapper, BinderCapability.OwnershipConversion, BinderCapability.LayoutValidation, BinderCapability.ErrorConversion, BinderCapability.CallbackValidation, BinderCapability.CacheProvenance, BinderCapability.PackageProvider, BinderCapability.TargetDispatch, BinderCapability.UnsafeRawEscape}
 }
 
-fn pkg_binder_adapter_capabilities() -> [BinderCapability] Never! {
+pkg_binder_adapter_capabilities: fn() -> [BinderCapability] Never! {
     [BinderCapability]{BinderCapability.TypedStub, BinderCapability.SafeWrapper, BinderCapability.OwnershipConversion, BinderCapability.LayoutValidation, BinderCapability.ErrorConversion, BinderCapability.CacheProvenance, BinderCapability.PackageProvider, BinderCapability.UnsafeRawEscape}
 }
 
-fn pkg_binder_planned_capabilities() -> [BinderCapability] Never! {
+pkg_binder_planned_capabilities: fn() -> [BinderCapability] Never! {
     pkg_binder_c_capabilities()
 }
 
-fn pkg_binder_row(language: ForeignLanguage, runtime: BinderRuntime, stub_kind: BindingStubKind, status: BinderStatus, contract: ForeignABIContract, capabilities: [BinderCapability], effect_root: String, provider: ForeignProvider, type_stub_file: ForeignStubFile) -> BinderDescriptor Never! {
+pkg_binder_row: fn(language: ForeignLanguage, runtime: BinderRuntime, stub_kind: BindingStubKind, status: BinderStatus, contract: ForeignABIContract, capabilities: [BinderCapability], effect_root: String, provider: ForeignProvider, type_stub_file: ForeignStubFile) -> BinderDescriptor Never! {
     BinderDescriptor{
         language: language,
         surface: BinderSurface.Namespace,
@@ -720,10 +720,10 @@ fn pkg_binder_row(language: ForeignLanguage, runtime: BinderRuntime, stub_kind: 
 
 // Canonical descriptor table (`FOREIGN_BINDERS`). Driver routing and package
 // binders both read this table; no language adapter owns a parallel contract.
-fn pkg_foreign_binders() -> [BinderDescriptor] Never! {
-    c :: ForeignABIContract.c()
-    message :: ForeignABIContract.message()
-    no_stub :: ForeignStubFile.NoStub
+pkg_foreign_binders: fn() -> [BinderDescriptor] Never! {
+    c: ForeignABIContract.c()
+    message: ForeignABIContract.message()
+    no_stub: ForeignStubFile.NoStub
     [BinderDescriptor]{
         pkg_binder_row(ForeignLanguage.C, BinderRuntime.DirectCABI, BindingStubKind.CHeader, BinderStatus.Active, c, pkg_binder_c_capabilities(), "FFI", ForeignProvider.System, no_stub),
         pkg_binder_row(ForeignLanguage.Cpp, BinderRuntime.ClangCppShim, BindingStubKind.CppHeader, BinderStatus.Active, ForeignABIContract.cxx(), pkg_binder_c_capabilities(), "FFI.Cpp", ForeignProvider.System, no_stub),
@@ -751,28 +751,28 @@ fn pkg_foreign_binders() -> [BinderDescriptor] Never! {
     }
 }
 
-fn pkg_binder_descriptor(language: ForeignLanguage) -> BinderDescriptor? Never! {
+pkg_binder_descriptor: fn(language: ForeignLanguage) -> BinderDescriptor? Never! {
     loop descriptor in pkg_foreign_binders() {
         if descriptor.language == language -> return Val(descriptor)
     }
     None
 }
 
-fn pkg_foreign_abi_contract(language: ForeignLanguage) -> ForeignABIContract Never! {
-    descriptor :: pkg_binder_descriptor(language) ?? return ForeignABIContract.message()
+pkg_foreign_abi_contract: fn(language: ForeignLanguage) -> ForeignABIContract Never! {
+    descriptor: pkg_binder_descriptor(language) ?? return ForeignABIContract.message()
     descriptor.contract
 }
 
 // Basis assigned to one foreign boundary obligation. Foundation owns the
 // vocabulary so sema, the checked tree, and execution tiers read the same words.
-enum FFIEvidenceBasis {
+FFIEvidenceBasis: enum {
     Proved
     Enforced
     Contained
     Trusted
     Unknown
 
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         if self == {
             .Proved -> "proved"
             .Enforced -> "enforced"
@@ -782,7 +782,7 @@ enum FFIEvidenceBasis {
         }
     }
 
-    fn parse(value: String) -> FFIEvidenceBasis? Never! {
+    parse: fn(value: String) -> FFIEvidenceBasis? Never! {
         if value == {
             "proved" -> Val(FFIEvidenceBasis.Proved)
             "enforced" -> Val(FFIEvidenceBasis.Enforced)
@@ -793,14 +793,14 @@ enum FFIEvidenceBasis {
         }
     }
 
-    fn permits_guarantee(self) -> Bool Never! {
+    permits_guarantee: fn(self) -> Bool Never! {
         if self == {
             .Proved | .Enforced | .Contained -> true
             else -> false
         }
     }
 
-    fn is_unknown(self) -> Bool Never! {
+    is_unknown: fn(self) -> Bool Never! {
         self == FFIEvidenceBasis.Unknown
     }
 }
@@ -808,14 +808,14 @@ enum FFIEvidenceBasis {
 // The close-symbol provenance and concurrency spellings of a generated C
 // handle. The enums themselves are OpaqueHandleBinder's `CloseSource` and
 // `ThreadSafety`.
-fn pkg_ffi_close_source_name(source: CloseSource) -> String Never! {
+pkg_ffi_close_source_name: fn(source: CloseSource) -> String Never! {
     if source == {
         .Conventional -> "conventional"
         .Overlay -> "overlay"
     }
 }
 
-fn pkg_ffi_close_source_parse(value: String) -> CloseSource? Never! {
+pkg_ffi_close_source_parse: fn(value: String) -> CloseSource? Never! {
     if value == {
         "conventional" -> Val(CloseSource.Conventional)
         "overlay" -> Val(CloseSource.Overlay)
@@ -823,7 +823,7 @@ fn pkg_ffi_close_source_parse(value: String) -> CloseSource? Never! {
     }
 }
 
-fn pkg_ffi_thread_safety_name(safety: ThreadSafety) -> String Never! {
+pkg_ffi_thread_safety_name: fn(safety: ThreadSafety) -> String Never! {
     if safety == {
         .Unspecified -> "unspecified"
         .Safe -> "safe"
@@ -831,7 +831,7 @@ fn pkg_ffi_thread_safety_name(safety: ThreadSafety) -> String Never! {
     }
 }
 
-fn pkg_ffi_thread_safety_parse(value: String) -> ThreadSafety? Never! {
+pkg_ffi_thread_safety_parse: fn(value: String) -> ThreadSafety? Never! {
     if value == {
         "unspecified" -> Val(ThreadSafety.Unspecified)
         "safe" -> Val(ThreadSafety.Safe)
@@ -844,12 +844,12 @@ fn pkg_ffi_thread_safety_parse(value: String) -> ThreadSafety? Never! {
 // set the program names; `transitive` is the set an overlay supplied. Neither
 // is inferred from headers or symbols; both are canonical so cache
 // identities stay stable.
-struct FFILinkClosure {
+FFILinkClosure: struct {
     direct: [String]
     transitive: [String]
 
-    fn new(direct: [String], transitive: [String]) -> FFILinkClosure Never! {
-        direct_rows :: pkg_ffi_sorted_nonempty(direct)
+    new: fn(direct: [String], transitive: [String]) -> FFILinkClosure Never! {
+        direct_rows: pkg_ffi_sorted_nonempty(direct)
         transitive_rows := [String]{}
         loop library in pkg_ffi_sorted_nonempty(transitive) {
             if !direct_rows.contains(library) -> &transitive_rows.push(library)
@@ -857,11 +857,11 @@ struct FFILinkClosure {
         FFILinkClosure{direct: direct_rows, transitive: transitive_rows}
     }
 
-    fn empty() -> FFILinkClosure Never! {
+    empty: fn() -> FFILinkClosure Never! {
         FFILinkClosure{direct: [String]{}, transitive: [String]{}}
     }
 
-    fn libraries(self) -> [String] Never! {
+    libraries: fn(self) -> [String] Never! {
         out := [String]{}
         loop library in self.direct -> &out.push(library)
         loop library in self.transitive -> &out.push(library)
@@ -870,12 +870,12 @@ struct FFILinkClosure {
 
     // Stable human-readable encoding for binding metadata and bridge
     // provenance. Empty lists stay explicit.
-    fn stable_key(self) -> String Never! {
+    stable_key: fn(self) -> String Never! {
         "direct={self.direct.join(",")};transitive={self.transitive.join(",")}"
     }
 }
 
-fn pkg_ffi_sorted_nonempty(values: [String]) -> [String] Never! {
+pkg_ffi_sorted_nonempty: fn(values: [String]) -> [String] Never! {
     out := [String]{}
     loop value in values {
         if value == "" || out.contains(value) -> next
@@ -886,7 +886,7 @@ fn pkg_ffi_sorted_nonempty(values: [String]) -> [String] Never! {
 }
 
 // One opaque C typedef promoted to a nominal Jet handle.
-struct FFIHandleFact {
+FFIHandleFact: struct {
     lib: String
     typedef_name: String
     jet_name: String
@@ -895,13 +895,13 @@ struct FFIHandleFact {
     thread_safety: ThreadSafety
 
     // Stable field encoding for content-addressed bridge identities.
-    fn stable_key(self) -> String Never! {
+    stable_key: fn(self) -> String Never! {
         "lib={self.lib};typedef={self.typedef_name};jet={self.jet_name};close={self.close};close-source={pkg_ffi_close_source_name(self.close_source)};thread-safety={pkg_ffi_thread_safety_name(self.thread_safety)}"
     }
 }
 
 // Compiler-owned adapter used when a native close function returns a status.
-struct FFICloseAdapter {
+FFICloseAdapter: struct {
     lib: String
     handle_type: String
     raw_function: String
@@ -909,7 +909,7 @@ struct FFICloseAdapter {
 }
 
 // One bindgen export replaced by a user `#Import` overlay.
-struct COverlayOverride {
+COverlayOverride: struct {
     lib: String
     generated_symbol: String
     overlay_symbol: String
@@ -917,7 +917,7 @@ struct COverlayOverride {
 
 // The result of resolving one C `use` in one file. `scope == None` is a
 // file-wide import; `Val` names the inline module owning it.
-struct CImportLink {
+CImportLink: struct {
     importing_idx: Int
     scope: String?
     alias: String
@@ -925,15 +925,15 @@ struct CImportLink {
 }
 
 // One C library that the program links against.
-struct CLib {
+CLib: struct {
     lib: String
     module_idx: Int
 }
 
-FFI_BOUNDARY_OBLIGATIONS :: [String]{"abi", "layout", "width", "alignment", "ownership", "lifetime", "cleanup", "encoding", "nullability", "errors", "exceptions", "callbacks", "task-thread", "target", "copy-cost", "effects"}
+FFI_BOUNDARY_OBLIGATIONS: [String]{"abi", "layout", "width", "alignment", "ownership", "lifetime", "cleanup", "encoding", "nullability", "errors", "exceptions", "callbacks", "task-thread", "target", "copy-cost", "effects"}
 
 // Lower-layer carrier projected from ForeignBoundaryContract.
-struct FFIBoundaryObligation {
+FFIBoundaryObligation: struct {
     name: String
     basis: FFIEvidenceBasis
     checker: String
@@ -942,7 +942,7 @@ struct FFIBoundaryObligation {
 }
 
 // Lower-layer boundary facts carried by the bundle's C FFI record.
-struct FFIBoundaryFacts {
+FFIBoundaryFacts: struct {
     schema: String
     digest: String
     language: String
@@ -959,32 +959,32 @@ struct FFIBoundaryFacts {
     generator: String
     obligations: [FFIBoundaryObligation]
 
-    fn obligation(self, name: String) -> FFIBoundaryObligation? Never! {
+    obligation: fn(self, name: String) -> FFIBoundaryObligation? Never! {
         loop obligation in self.obligations {
             if obligation.name == name -> return Val(obligation)
         }
         None
     }
 
-    fn permits_guarantee(self, name: String) -> Bool Never! {
-        obligation :: self.obligation(name) ?? return false
+    permits_guarantee: fn(self, name: String) -> Bool Never! {
+        obligation: self.obligation(name) ?? return false
         obligation.basis.permits_guarantee()
     }
 
-    fn has_unknown_obligations(self) -> Bool Never! {
+    has_unknown_obligations: fn(self) -> Bool Never! {
         loop obligation in self.obligations {
             if obligation.basis.is_unknown() -> return true
         }
         false
     }
 
-    fn validate(self) ForeignBridgeError! {
-        required :: [String]{self.schema, self.digest, self.language, self.library, self.effect_root, self.effects, self.source_authority, self.artifact_coverage_digest, self.loaded_artifact, self.target, self.generator}
+    validate: fn(self) ForeignBridgeError! {
+        required: [String]{self.schema, self.digest, self.language, self.library, self.effect_root, self.effects, self.source_authority, self.artifact_coverage_digest, self.loaded_artifact, self.target, self.generator}
         loop value in required {
             if value.trim() == "" -> return Err(ForeignBridgeError{message: "foreign boundary carrier is incomplete"})
         }
         if !self.effects.split(";").to_list().contains(self.effect_root) -> return Err(ForeignBridgeError{message: "foreign boundary carrier narrowed its effect root"})
-        coverage_complete :: self.transitive_dependencies != None && self.reachable_callbacks != None && self.compiler_flags != None
+        coverage_complete: self.transitive_dependencies != None && self.reachable_callbacks != None && self.compiler_flags != None
         if !coverage_complete {
             loop obligation in self.obligations {
                 if !obligation.basis.is_unknown() -> return Err(ForeignBridgeError{message: "foreign boundary carrier has incomplete artifact coverage"})
@@ -1003,7 +1003,7 @@ struct FFIBoundaryFacts {
 }
 
 // Gathered C-FFI artifacts threaded into sema and codegen.
-struct CFFI {
+CFFI: struct {
     import_links: [CImportLink]
     libs: [CLib]
     // Bindgen symbols replaced by matching user overlay declarations.
@@ -1017,33 +1017,33 @@ struct CFFI {
     // Compiler-owned Unit adapters for status-returning native closers.
     close_adapters: [FFICloseAdapter]
 
-    fn empty() -> CFFI Never! {
+    empty: fn() -> CFFI Never! {
         CFFI{import_links: [CImportLink]{}, libs: [CLib]{}, overlay_overrides: [COverlayOverride]{}, boundaries: [FFIBoundaryFacts]{}, handle_facts: [FFIHandleFact]{}, link_closure: FFILinkClosure.empty(), close_adapters: [FFICloseAdapter]{}}
     }
 
-    fn target_for(self, importing_idx: Int, alias: String) -> Int? Never! {
+    target_for: fn(self, importing_idx: Int, alias: String) -> Int? Never! {
         self.target_for_scope(importing_idx, None, alias)
     }
 
-    fn target_for_scope(self, importing_idx: Int, scope: String?, alias: String) -> Int? Never! {
+    target_for_scope: fn(self, importing_idx: Int, scope: String?, alias: String) -> Int? Never! {
         loop link in self.import_links {
             if link.importing_idx == importing_idx && link.scope == scope && link.alias == alias -> return Val(link.target_idx)
         }
         None
     }
 
-    fn links_c(self) -> Bool Never! {
+    links_c: fn(self) -> Bool Never! {
         self.libs.len() > 0
     }
 
-    fn handle_fact(self, lib: String, jet_name: String) -> FFIHandleFact? Never! {
+    handle_fact: fn(self, lib: String, jet_name: String) -> FFIHandleFact? Never! {
         loop fact in self.handle_facts {
             if fact.lib == lib && fact.jet_name == jet_name -> return Val(fact)
         }
         None
     }
 
-    fn boundary_for(self, lib: String) -> FFIBoundaryFacts? Never! {
+    boundary_for: fn(self, lib: String) -> FFIBoundaryFacts? Never! {
         loop boundary in self.boundaries {
             if boundary.library == lib -> return Val(boundary)
         }

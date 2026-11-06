@@ -8,14 +8,14 @@
 // (E1102).
 use jet_foundation.[AccessConvention, CallArg, Diagnostic, Expr, Func, KernelMarker, PlaceAccess, Span, Stmt, Type, expr_span]
 
-SEMA_KERNEL_SAFE_COMPUTE_CALLS :: [String]{
+SEMA_KERNEL_SAFE_COMPUTE_CALLS: [String]{
     "abs", "add", "broadcast_to", "det", "div", "exp", "fft", "full", "from_list", "inv", "matmul",
     "maximum", "minimum", "mul", "negate", "numel", "ones", "rank", "reshape", "shape", "solve",
     "sqrt", "sub", "sum_axis", "to_list", "to_sparse", "transpose", "zeros",
 }
 
 // One unproved obligation and where it fails.
-struct SemaKernelFailure {
+SemaKernelFailure: struct {
     obligation: String
     span: Span
 }
@@ -23,24 +23,24 @@ struct SemaKernelFailure {
 // A kernel whose declaration obligations hold, waiting for its effect row:
 // the marker, whether it declares a non-empty effect row, and its first body
 // obligation failure.
-struct SemaKernelPending {
+SemaKernelPending: struct {
     span: Span
     declared_effects: Bool
     body_failure: SemaKernelFailure?
 }
 
-fn sema_kernel_failure(obligation: String, span: Span) -> Diagnostic Never! {
+sema_kernel_failure: fn(obligation: String, span: Span) -> Diagnostic Never! {
     sema_error("E1102", span, "`#Kernel(.parallel)` cannot cross its worker boundary: sema cannot prove {obligation}", "a safe kernel crosses a worker boundary only after sema proves sendability, bounds, aliasing, captures, races, barriers, and control flow before lowering", "use a read-only effect-free expression over checked Core compute operations, or move provider/raw code behind its typed `#Unsafe` boundary")
 }
 
 // The declaration obligations read from the header alone, in order: a
 // top-level declaration, a safe boundary, an effect-free kind of body, and
 // read-only monomorphic parameters.
-fn sema_kernel_declaration_failure(func: Func, kernel: KernelMarker, method: Bool) -> SemaKernelFailure? Never! {
+sema_kernel_declaration_failure: fn(func: Func, kernel: KernelMarker, method: Bool) -> SemaKernelFailure? Never! {
     if method -> return Val(SemaKernelFailure{obligation: "top-level declaration", span: kernel.span})
     if func.is_unsafe -> return Val(SemaKernelFailure{obligation: "safe memory boundary", span: func.unsafe_span ?? kernel.span})
     if func.is_reactive || func.is_job || func.inline_foreign != None -> return Val(SemaKernelFailure{obligation: "effect-free function body", span: kernel.span})
-    read_only :: loop param in func.params {
+    read_only: loop param in func.params {
         if param.variadic || param.convention != AccessConvention.Read -> break false
     } ?? true
     if func.type_params.len() > 0 || !read_only -> return Val(SemaKernelFailure{obligation: "read-only, monomorphic parameters", span: kernel.span})
@@ -50,13 +50,13 @@ fn sema_kernel_declaration_failure(func: Func, kernel: KernelMarker, method: Boo
 // The header obligations of `func`'s kernel: the declaration, then every
 // parameter and the declared result as a sendable kernel boundary value.
 // False when one fails, reported.
-fn sema_kernel_check_declaration(func: Func, kernel: KernelMarker, method: Bool, params: [TParameter], result: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+sema_kernel_check_declaration: fn(func: Func, kernel: KernelMarker, method: Bool, params: [TParameter], result: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     if sema_kernel_declaration_failure(func, kernel, method) == .Val(failure) {
         &diagnostics.push(sema_kernel_failure(failure.obligation, failure.span))
         return false
     }
     loop param in params {
-        problem :: sema_ownership_crossing_problem(param.ty, SemaSendCrossing.Kernel, true, environment, program, scopes, context) ?? next
+        problem: sema_ownership_crossing_problem(param.ty, SemaSendCrossing.Kernel, true, environment, program, scopes, context) ?? next
         &diagnostics.push(sema_ownership_crossing_diagnostic(param.name, param.ty, problem, SemaSendCrossing.Kernel, kernel.span))
         return false
     }
@@ -72,8 +72,8 @@ fn sema_kernel_check_declaration(func: Func, kernel: KernelMarker, method: Bool,
 // The pending effect and body obligations of a top-level kernel whose header
 // obligations hold, or None. `compute_aliases` are the module's aliases of
 // `core.compute`.
-fn sema_kernel_pending(func: Func, compute_aliases: [String]) -> SemaKernelPending? Never! {
-    kernel :: func.kernel ?? return None
+sema_kernel_pending: fn(func: Func, compute_aliases: [String]) -> SemaKernelPending? Never! {
+    kernel: func.kernel ?? return None
     if sema_kernel_declaration_failure(func, kernel, false) != None -> return None
     names := (loop param in func.params -> param.name)
     body_failure := SemaKernelFailure?{None}
@@ -81,17 +81,17 @@ fn sema_kernel_pending(func: Func, compute_aliases: [String]) -> SemaKernelPendi
         body_failure = sema_kernel_prove_statement(statement, &names, compute_aliases)
         if body_failure != None -> break
     }
-    declared :: if func.declared_effects == .Val(row) -> row.len() > 0 else -> false
+    declared: if func.declared_effects == .Val(row) -> row.len() > 0 else -> false
     Val(SemaKernelPending{span: kernel.span, declared_effects: declared, body_failure: body_failure})
 }
 
-fn sema_kernel_prove_statement(statement: Stmt, names: &[String], compute_aliases: [String]) -> SemaKernelFailure? Never! {
+sema_kernel_prove_statement: fn(statement: Stmt, names: &[String], compute_aliases: [String]) -> SemaKernelFailure? Never! {
     if statement == {
         .Expr(value) -> return sema_kernel_prove_expr(value, names, compute_aliases)
         .Return(value, _) -> return if value == .Val(returned) -> sema_kernel_prove_expr(returned, names, compute_aliases) else -> None
         .Val(binding) -> {
             if binding.mutable || binding.pattern != None -> return Val(SemaKernelFailure{obligation: "immutable scalar locals", span: binding.name_span})
-            failure :: sema_kernel_prove_expr(binding.init, names, compute_aliases)
+            failure: sema_kernel_prove_expr(binding.init, names, compute_aliases)
             if failure != None -> return failure
             &names.push(binding.name)
             return None
@@ -100,34 +100,34 @@ fn sema_kernel_prove_statement(statement: Stmt, names: &[String], compute_aliase
     }
 }
 
-fn sema_kernel_prove_args(args: [CallArg], names: [String], compute_aliases: [String]) -> SemaKernelFailure? Never! {
+sema_kernel_prove_args: fn(args: [CallArg], names: [String], compute_aliases: [String]) -> SemaKernelFailure? Never! {
     loop argument in args {
-        failure :: sema_kernel_prove_expr(argument.expr, names, compute_aliases)
+        failure: sema_kernel_prove_expr(argument.expr, names, compute_aliases)
         if failure != None -> return failure
     }
     None
 }
 
-fn sema_kernel_prove_expr(expression: Expr, names: [String], compute_aliases: [String]) -> SemaKernelFailure? Never! {
+sema_kernel_prove_expr: fn(expression: Expr, names: [String], compute_aliases: [String]) -> SemaKernelFailure? Never! {
     if expression == {
         .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Char(_, _, _) -> return None
         .Ident(name, span, _) -> return if names.contains(name) -> None else -> Val(SemaKernelFailure{obligation: "closed captures", span: span})
         .Unary(_, inner, _, _) | .Paren(inner, _, _) | .Copy(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) | .Present(inner, _, _) | .Tainted(inner, _, _, _) | .Field(inner, _, _, _) -> return sema_kernel_prove_expr(inner, names, compute_aliases)
         .Place(inner, access, span, _) -> return if access == PlaceAccess.Read -> sema_kernel_prove_expr(inner, names, compute_aliases) else -> Val(SemaKernelFailure{obligation: "race-free straight-line body", span: span})
         .Binary(_, left, right, _, _) -> {
-            failure :: sema_kernel_prove_expr(left, names, compute_aliases)
+            failure: sema_kernel_prove_expr(left, names, compute_aliases)
             if failure != None -> return failure
             return sema_kernel_prove_expr(right, names, compute_aliases)
         }
         .ListLit(items, _, _) -> {
             loop item in items {
-                failure :: sema_kernel_prove_expr(item, names, compute_aliases)
+                failure: sema_kernel_prove_expr(item, names, compute_aliases)
                 if failure != None -> return failure
             }
             return None
         }
         .MethodCall(receiver, method, method_span, _, _, args, _) -> {
-            audited :: if receiver == .Ident(alias, _, _) -> compute_aliases.contains(alias) && SEMA_KERNEL_SAFE_COMPUTE_CALLS.contains(method) else -> false
+            audited: if receiver == .Ident(alias, _, _) -> compute_aliases.contains(alias) && SEMA_KERNEL_SAFE_COMPUTE_CALLS.contains(method) else -> false
             if audited -> return sema_kernel_prove_args(args, names, compute_aliases)
             return Val(SemaKernelFailure{obligation: "audited Core compute calls only", span: method_span})
         }
@@ -141,7 +141,7 @@ fn sema_kernel_prove_expr(expression: Expr, names: [String], compute_aliases: [S
 
 // The effect and body obligations of a pending kernel, with its solved
 // effect facts: no declared, direct, called or opaque effects, then the body.
-fn sema_kernel_check_effects(pending: SemaKernelPending, direct: [String], call_edges: [String], maximal: Bool, diagnostics: &[Diagnostic]) -> Bool {
+sema_kernel_check_effects: fn(pending: SemaKernelPending, direct: [String], call_edges: [String], maximal: Bool, diagnostics: &[Diagnostic]) -> Bool {
     if pending.declared_effects || direct.len() > 0 || call_edges.len() > 0 || maximal {
         &diagnostics.push(sema_kernel_failure("no reachable effects or opaque calls", pending.span))
         return false
@@ -154,7 +154,7 @@ fn sema_kernel_check_effects(pending: SemaKernelPending, direct: [String], call_
 }
 
 // The module's local aliases of `core.compute`.
-fn sema_kernel_compute_aliases(module_row: SemaRegistrationModule) -> [String] Never! {
+sema_kernel_compute_aliases: fn(module_row: SemaRegistrationModule) -> [String] Never! {
     aliases := [String]{}
     loop row in sema_core_registration_imports(module_row) {
         if row.module_name == "core.compute" && row.item == None -> &aliases.push(row.alias)

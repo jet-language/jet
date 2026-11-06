@@ -3,38 +3,38 @@
 // plain bindings, and loops over a read parameter's places read the place
 // itself; a copy is made only where the value is kept, edited, or consumed.
 
-struct Graph {
+Graph: struct {
     names: [String]
 }
 
-struct Env {
+Env: struct {
     graph: Graph?
     plain: Graph
 }
 
-fn names_in(env: Env) -> Int {
+names_in: fn(env: Env) -> Int {
     if env.graph == .Val(graph) -> return graph.names.len()
     0
 }
 
-fn has_graph(env: Env) -> Bool {
+has_graph: fn(env: Env) -> Bool {
     env.graph != None
 }
 
-fn first_name(env: Env) -> String {
-    graph :: env.graph ?? return "none"
+first_name: fn(env: Env) -> String {
+    graph: env.graph ?? return "none"
     graph.names[0]
 }
 
-fn total_length(env: Env) -> Int {
-    graph_option :: env.graph
-    graph :: graph_option ?? return 0
+total_length: fn(env: Env) -> Int {
+    graph_option: env.graph
+    graph: graph_option ?? return 0
     total := 0
     loop name in graph.names -> total += name.len()
     total
 }
 
-fn count_matches(env: Env, wanted: String) -> Int {
+count_matches: fn(env: Env, wanted: String) -> Int {
     if env.graph == {
         .Val(graph) -> {
             count := 0
@@ -48,52 +48,52 @@ fn count_matches(env: Env, wanted: String) -> Int {
 }
 
 // Keeping a read alias copies it: the caller's later edits never reach it.
-fn kept_graph(env: Env) -> Graph {
-    graph :: env.graph ?? return env.plain
+kept_graph: fn(env: Env) -> Graph {
+    graph: env.graph ?? return env.plain
     graph
 }
 
 // Editing a copy taken from a read alias never reaches the parameter.
-fn renamed(env: Env) -> Graph {
-    plain :: env.plain
+renamed: fn(env: Env) -> Graph {
+    plain: env.plain
     updated := plain
     &updated.names.push("added")
     updated
 }
 
-fn consume(graph: ^Graph) -> Int {
+consume: fn(graph: ^Graph) -> Int {
     graph.names.len()
 }
 
-fn consumed(env: Env) -> Int {
-    graph :: env.graph ?? return 0
+consumed: fn(env: Env) -> Int {
+    graph: env.graph ?? return 0
     // `graph` reads `env.graph` through a view (`env` is a read parameter), so the
     // consumer gets an explicit copy; `^graph` would be E0201.
     consume(graph.copy())
 }
 
-fn count_names(names: [String]) -> Int {
+count_names: fn(names: [String]) -> Int {
     names.len()
 }
 
 // Slicing a read parameter's list reads the list in place; only the slice
 // is a new list.
-fn tail_count(env: Env) -> Int {
-    graph :: env.graph ?? return 0
+tail_count: fn(env: Env) -> Int {
+    graph: env.graph ?? return 0
     count_names(graph.names[1..<3])
 }
 
-struct Holder {
+Holder: struct {
     graph: Graph
     note: String
 }
 
 // An owned parameter's last use moves it into the struct; no copy is left.
-fn hold(graph: ^Graph, note: ^String) -> Holder {
+hold: fn(graph: ^Graph, note: ^String) -> Holder {
     Holder{graph: graph, note: note}
 }
 
-fn run() {
+run: fn() {
     env := Env{graph: Val(Graph{names: [String]{"ab", "c", "ab"}}), plain: Graph{names: [String]{"p"}}}
     print(names_in(env))
     print(has_graph(env))
@@ -104,7 +104,7 @@ fn run() {
     edited := renamed(env)
     print(consumed(env))
     print(tail_count(env))
-    held :: hold(Graph{names: [String]{"h", "i"}}, "note")
+    held: hold(Graph{names: [String]{"h", "i"}}, "note")
     env.graph = None
     env.plain = Graph{names: [String]{}}
     print(kept.names.len())

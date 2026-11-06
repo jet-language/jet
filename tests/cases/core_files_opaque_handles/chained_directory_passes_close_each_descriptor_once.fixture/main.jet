@@ -1,9 +1,9 @@
-use files :: core.files
-use process :: core.process
+use files: core.files
+use process: core.process
 
-fn held(slot: Int) -[FS]> Bool {
-    name :: "{slot}"
-    names :: files.list_dir("/proc/self/fd") ?? panic("list /proc/self/fd")
+held: fn(slot: Int) -[FS]> Bool {
+    name: "{slot}"
+    names: files.list_dir("/proc/self/fd") ?? panic("list /proc/self/fd")
     loop entry in names {
         if entry.name == name -> return true
     }
@@ -13,21 +13,21 @@ fn held(slot: Int) -[FS]> Bool {
 // A spec that already passes a directory, passed on again: the second spec
 // takes the first one's row, so both slots reach the child and each
 // descriptor closes once, when the last spec ends.
-fn chained(directory: Directory, round: Int) -[IO, FS, Exec, Env]> {
-    first :: directory.pass_to(process.cmd(["sh", "-c", "test -d /dev/fd/300 && test -d /dev/fd/301 && echo child sees 300 and 301"]), 300) ?? panic("pass 300")
-    second :: directory.pass_to(first, 301) ?? panic("pass 301")
-    receipt :: second.stdout(.Capture).run() ?? panic("run")
+chained: fn(directory: Directory, round: Int) -[IO, FS, Exec, Env]> {
+    first: directory.pass_to(process.cmd(["sh", "-c", "test -d /dev/fd/300 && test -d /dev/fd/301 && echo child sees 300 and 301"]), 300) ?? panic("pass 300")
+    second: directory.pass_to(first, 301) ?? panic("pass 301")
+    receipt: second.stdout(.Capture).run() ?? panic("run")
     print("round {round}: {receipt.output.trim()}")
 }
 
-fn round(directory: Directory, n: Int) -[IO, FS, Exec, Env]> {
+round: fn(directory: Directory, n: Int) -[IO, FS, Exec, Env]> {
     chained(directory, n)
     print("round {n}: parent holds 300 {held(300)}, 301 {held(301)}")
 }
 
 // The second round reuses both slots, which a leaked descriptor refuses.
-fn run() -[IO, FS, Exec, Env]> {
-    directory :: files.open_directory(".") ?? panic("open .")
+run: fn() -[IO, FS, Exec, Env]> {
+    directory: files.open_directory(".") ?? panic("open .")
     round(directory, 1)
     round(directory, 2)
 }

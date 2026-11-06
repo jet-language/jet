@@ -1,13 +1,13 @@
 
-fn report() Never! {}
-fn start(group: Group, remaining: Int) Never! {
+report: fn() Never! {}
+start: fn(group: Group, remaining: Int) Never! {
     if remaining == 0 -> return
-    worker :: task report()
+    worker: task report()
     start(group, remaining - 1)
-    joined :: ^worker.join() ?? panic("join failed")
+    joined: ^worker.join() ?? panic("join failed")
     joined ?? panic("infallible worker")
 }
-fn run() {
+run: fn() {
     task.group group {
         start(group, 2)
     }

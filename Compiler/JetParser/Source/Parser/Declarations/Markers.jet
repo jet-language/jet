@@ -53,41 +53,41 @@ use {
     ]
 }
 
-struct ParsedMarkerArgs {
+ParsedMarkerArgs: struct {
     args: [MarkerCallArg]
     labels: [CallLabel?]
 }
 
-struct ParsedMarkerGroup {
+ParsedMarkerGroup: struct {
     markers: [Marker]
     span: Span
 }
 
-fn parser_marker_expression(marker: Marker, index: Int) -> Expr? {
+parser_marker_expression: fn(marker: Marker, index: Int) -> Expr? {
     if index < 0 || index >= marker.args.len() -> return None
     if marker.args[index] == { .Expr(value) -> Val(value) else -> None }
 }
 
-fn parser_marker_label(marker: Marker, index: Int) -> String Never! {
+parser_marker_label: fn(marker: Marker, index: Int) -> String Never! {
     if index < 0 || index >= marker.arg_labels.len() -> return ""
-    label :: marker.arg_labels[index]
+    label: marker.arg_labels[index]
     if label == { .Val(value) -> value.name else -> "" }
 }
 
-fn parser_fact_decl_ahead(state: &JetParserState) -> Bool Never! {
+parser_fact_decl_ahead: fn(state: &JetParserState) -> Bool Never! {
     parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "fact" && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_kind_at(&state, 2) == TOKEN_LPAREN
 }
 
 // The settings an `impl Marker` block may give.
-PARSER_MARKER_SETTINGS :: [String]{"sites", "repeatable", "owns_menu", "inherits", "resolution", "scopes", "companion"}
+PARSER_MARKER_SETTINGS: [String]{"sites", "repeatable", "owns_menu", "inherits", "resolution", "scopes", "companion"}
 
 // `impl Marker { … }` in a struct body: the marker's settings as
-// `name :: value`, a fixed `group :: #[…]`, and the
-// `fn expand(self, target: Target)` template. The struct's fields join as
+// `name: value`, a fixed `group: #[…]`, and the
+// `expand: fn(self, target: Target)` template. The struct's fields join as
 // the marker's parameters when the struct closes (parser_finish_marker_struct).
-fn parser_parse_marker_impl(state: &JetParserState, value: &StructDef) {
-    start :: parser_bump(&state)
-    repeated :: value.marker != None
+parser_parse_marker_impl: fn(state: &JetParserState, value: &StructDef) {
+    start: parser_bump(&state)
+    repeated: value.marker != None
     if repeated -> parser_add_error_code(&state, "E0908", start.span, "`{value.name}` has a second `impl Marker` block", "a struct declares one marker, so its settings, group and template share one block", "move these members into the first `impl Marker` block")
     parser_bump(&state)
     parser_expect(&state, TOKEN_LBRACE, "`{{` to open the `impl Marker` body")
@@ -96,18 +96,18 @@ fn parser_parse_marker_impl(state: &JetParserState, value: &StructDef) {
     loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF && !parser_aborting(&state) {
         parser_skip_semicolons(&state)
         if parser_current_kind(&state) == TOKEN_RBRACE -> break
-        token :: parser_current(&state)
+        token: parser_current(&state)
         if token.kind == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON {
             parser_parse_marker_setting(&state, &declaration)
             next
         }
         if token.kind == TOKEN_KW_FN {
-            span :: parser_parse_marker_expand(&state, &declaration)
+            span: parser_parse_marker_expand(&state, &declaration)
             if expand_span == None -> expand_span = Val(span)
             next
         }
-        found :: parser_describe_token(state, token)
-        parser_add_error(&state, token.span, "expected a marker setting or `fn expand`, found {found}", "an `impl Marker` block holds `name :: value` settings, a `group :: #[…]` and the `fn expand(self, target: Target)` template", "write a setting such as `sites :: [.Function]`, or `fn expand(self, target: Target) {{ … }}`")
+        found: parser_describe_token(state, token)
+        parser_add_error(&state, token.span, "expected a marker setting or `expand: fn`, found {found}", "an `impl Marker` block holds `name: value` settings, a `group: #[…]` and the `expand: fn(self, target: Target)` template", "write a setting such as `sites: [.Function]`, or `expand: fn(self, target: Target) {{ … }}`")
         break
     }
     parser_expect(&state, TOKEN_RBRACE, "`}}` to close the `impl Marker` body")
@@ -117,58 +117,58 @@ fn parser_parse_marker_impl(state: &JetParserState, value: &StructDef) {
     value.marker_expand_span = expand_span
 }
 
-// `name :: value` in `impl Marker`: a setting, kept as the `$name` fact the
-// marker rules read, or the marker's `group :: #[…]`.
-fn parser_parse_marker_setting(state: &JetParserState, declaration: &MarkerDecl) {
-    name_token :: parser_bump(&state)
+// `name: value` in `impl Marker`: a setting, kept as the `$name` fact the
+// marker rules read, or the marker's `group: #[…]`.
+parser_parse_marker_setting: fn(state: &JetParserState, declaration: &MarkerDecl) {
+    name_token: parser_bump(&state)
     parser_bump(&state)
-    key :: parser_value(state, name_token)
+    key: parser_value(state, name_token)
     if key == "group" {
-        group :: parser_parse_marker_group_entries(&state, true)
+        group: parser_parse_marker_group_entries(&state, true)
         if declaration.group != None {
-            parser_add_error_code(&state, "E0937", name_token.span, "the `impl Marker` block gives `group` twice", "a marker has one group", "remove one `group :: …`")
+            parser_add_error_code(&state, "E0937", name_token.span, "the `impl Marker` block gives `group` twice", "a marker has one group", "remove one `group: …`")
             return
         }
         declaration.group = Val(group.markers)
         return
     }
-    parsed :: parser_parse_expression(&state, 1, 0)
+    parsed: parser_parse_expression(&state, 1, 0)
     parser_finish_statement(&state)
     if !PARSER_MARKER_SETTINGS.contains(key) {
-        known :: PARSER_MARKER_SETTINGS.join(", ")
+        known: PARSER_MARKER_SETTINGS.join(", ")
         parser_add_error_code(&state, "E0936", name_token.span, "`{key}` is not a setting of `Marker`", "an `impl Marker` block gives only the settings a marker has: {known}", "remove `{key}`, or write one of the marker settings")
         return
     }
-    fact :: "${key}"
+    fact: "${key}"
     loop earlier in declaration.params {
         if earlier.name == fact {
-            parser_add_error_code(&state, "E0937", name_token.span, "the `impl Marker` block gives `{key}` twice", "a marker has one value for each setting", "remove one `{key} :: …`")
+            parser_add_error_code(&state, "E0937", name_token.span, "the `impl Marker` block gives `{key}` twice", "a marker has one value for each setting", "remove one `{key}: …`")
             return
         }
     }
     &declaration.params.push(MarkerDeclParam{name: fact, name_span: name_token.span, ty: None, value: Val(parsed.expr), variadic: false})
 }
 
-// `fn expand(self, target: Target) { … }`: the marker's template, which the
+// `expand: fn(self, target: Target) { … }`: the marker's template, which the
 // compiler expands with the marked item bound to `target`.
-fn parser_parse_marker_expand(state: &JetParserState, declaration: &MarkerDecl) -> Span {
-    start :: parser_bump(&state)
-    name :: parser_expect_name(&state, "after `fn` in `impl Marker`")
-    method :: parser_value(state, name)
-    params :: parser_parse_param_list(&state)
-    signature :: parser_cover(start.span, parser_lookahead(&state, -1).span)
-    shaped :: method == "expand" && params.len() == 2 && params[0].name == "self" && params[0].convention == AccessConvention.Read && params[1].name == "target" && params[1].convention == AccessConvention.Read && params[1].ty == Type.Named{name: "Target"} && parser_current_kind(&state) == TOKEN_LBRACE
+parser_parse_marker_expand: fn(state: &JetParserState, declaration: &MarkerDecl) -> Span {
+    start: parser_bump(&state)
+    name: parser_expect_name(&state, "after `fn` in `impl Marker`")
+    method: parser_value(state, name)
+    params: parser_parse_param_list(&state)
+    signature: parser_cover(start.span, parser_lookahead(&state, -1).span)
+    shaped: method == "expand" && params.len() == 2 && params[0].name == "self" && params[0].convention == AccessConvention.Read && params[1].name == "target" && params[1].convention == AccessConvention.Read && params[1].ty == Type.Named{name: "Target"} && parser_current_kind(&state) == TOKEN_LBRACE
     if !shaped {
-        what :: if method == "expand" -> "`fn expand` doesn't match the `Marker` contract" else -> "`{method}` is not a method of `Marker`"
-        parser_add_error_code(&state, "E0907", signature, what, "`impl Marker` has one method, the template the compiler expands with the marked item bound to `target`", "write `fn expand(self, target: Target) {{ … }}`")
+        what: if method == "expand" -> "`expand: fn` doesn't match the `Marker` contract" else -> "`{method}` is not a method of `Marker`"
+        parser_add_error_code(&state, "E0907", signature, what, "`impl Marker` has one method, the template the compiler expands with the marked item bound to `target`", "write `expand: fn(self, target: Target) {{ … }}`")
         loop parser_current_kind(&state) != TOKEN_LBRACE && parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF -> parser_bump(&state)
         if parser_current_kind(&state) != TOKEN_LBRACE -> return signature
     }
-    body :: parser_marker_body(&state)
-    span :: parser_cover(start.span, parser_lookahead(&state, -1).span)
+    body: parser_marker_body(&state)
+    span: parser_cover(start.span, parser_lookahead(&state, -1).span)
     if !shaped -> return span
     if declaration.body != None {
-        parser_add_error_code(&state, "E0105", name.span, "`fn expand` is defined twice in `impl Marker`", "a marker has one template", "remove one of the definitions")
+        parser_add_error_code(&state, "E0105", name.span, "`expand: fn` is defined twice in `impl Marker`", "a marker has one template", "remove one of the definitions")
         return span
     }
     declaration.body = Val(body)
@@ -178,9 +178,9 @@ fn parser_parse_marker_expand(state: &JetParserState, declaration: &MarkerDecl) 
 // At the struct's close the fields become the marker's parameters, ahead of
 // its settings. A last list field with no default takes the use site's
 // remaining arguments one by one.
-fn parser_finish_marker_struct(state: &JetParserState, value: &StructDef) {
+parser_finish_marker_struct: fn(state: &JetParserState, value: &StructDef) {
     declaration := value.marker ?? return
-    settings :: declaration.params.len()
+    settings: declaration.params.len()
     params := [MarkerDeclParam]{}
     loop (index, field) in value.fields {
         if index == value.fields.len() - 1 && field.default == None {
@@ -193,17 +193,17 @@ fn parser_finish_marker_struct(state: &JetParserState, value: &StructDef) {
     }
     loop setting in declaration.params -> &params.push(setting)
     if declaration.group != None && (value.fields.len() > 0 || settings > 0 || declaration.body != None) {
-        parser_add_error_code(&state, "E0999", value.name_span, "the marker group `{value.name}` has fields, settings or a template", "a group names a fixed marker stack, so a use site passes nothing into it and it expands to its members", "remove everything but `group :: #[…]`, or declare a marker without a group")
+        parser_add_error_code(&state, "E0999", value.name_span, "the marker group `{value.name}` has fields, settings or a template", "a group names a fixed marker stack, so a use site passes nothing into it and it expands to its members", "remove everything but `group: #[…]`, or declare a marker without a group")
     }
     declaration.params = params
     declaration.span = value.span
     value.marker = Val(declaration)
 }
 
-fn parser_parse_fact_decl(state: &JetParserState) -> Item {
-    start :: parser_bump(&state)
-    name :: parser_expect_name(&state, "the fact name in `fact Name(params…)`")
-    params :: parser_marker_decl_params(&state)
+parser_parse_fact_decl: fn(state: &JetParserState) -> Item {
+    start: parser_bump(&state)
+    name: parser_expect_name(&state, "the fact name in `fact Name(params…)`")
+    params: parser_marker_decl_params(&state)
     end := parser_lookahead(&state, -1).span
     if parser_current_kind(&state) == TOKEN_SEMI -> parser_bump(&state)
     Item.FactDecl{value: FactDecl{name: parser_value(state, name), name_span: name.span, params: params, span: parser_cover(start.span, end)}}
@@ -212,24 +212,24 @@ fn parser_parse_fact_decl(state: &JetParserState) -> Item {
 // Rule arguments read `name: Type{default}`;
 // a fixed fact about the rule reads `$name: value`. A parameter may be named
 // by any written word, including a keyword.
-fn parser_marker_decl_params(state: &JetParserState) -> [MarkerDeclParam] {
+parser_marker_decl_params: fn(state: &JetParserState) -> [MarkerDeclParam] {
     parser_expect(&state, TOKEN_LPAREN, "`(` to open the marker's parameter list")
     params := [MarkerDeclParam]{}
     if parser_current_kind(&state) != TOKEN_RPAREN {
         loop !parser_aborting(&state) {
-            token :: parser_current(&state)
-            marked :: token.kind == TOKEN_IDENT && parser_value(state, token).starts_with("$")
-            keyword_name :: token.kind != TOKEN_IDENT && parser_is_keyword_token(state, token)
-            name_token :: if {
+            token: parser_current(&state)
+            marked: token.kind == TOKEN_IDENT && parser_value(state, token).starts_with("$")
+            keyword_name: token.kind != TOKEN_IDENT && parser_is_keyword_token(state, token)
+            name_token: if {
                 keyword_name -> parser_bump(&state)
                 marked -> parser_expect_name(&state, "a marker fact name")
                 else -> parser_expect_name(&state, "a marker parameter name")
             }
-            name :: if token.kind == TOKEN_IDENT -> parser_value(state, name_token) else -> parser_text(state, name_token)
+            name: if token.kind == TOKEN_IDENT -> parser_value(state, name_token) else -> parser_text(state, name_token)
             parser_expect(&state, TOKEN_COLON, "`:` between the parameter name and its type or value")
             if {
                 marked -> {
-                    value :: parser_parse_expression_no_struct_lit(&state, 1)
+                    value: parser_parse_expression_no_struct_lit(&state, 1)
                     &params.push(MarkerDeclParam{name: name, name_span: name_token.span, ty: None, value: Val(value.expr), variadic: false})
                 }
                 else -> {
@@ -238,7 +238,7 @@ fn parser_marker_decl_params(state: &JetParserState) -> [MarkerDeclParam] {
                         parser_bump(&state)
                         variadic = true
                     }
-                    parsed :: parser_parse_type(&state, 0)
+                    parsed: parser_parse_type(&state, 0)
                     default := Expr?{None}
                     if {
                         parser_current_kind(&state) == TOKEN_LBRACE -> {
@@ -262,7 +262,7 @@ fn parser_marker_decl_params(state: &JetParserState) -> [MarkerDeclParam] {
 
 // Rust `derive_body_items`: the body is a template, so nested `comptime loop`
 // statements are template loops.
-fn parser_marker_body(state: &JetParserState) -> [DeriveBodyItem] {
+parser_marker_body: fn(state: &JetParserState) -> [DeriveBodyItem] {
     parser_expect(&state, TOKEN_LBRACE, "`{{` before a marker body")
     state.derive_template_depth += 1
     body := [DeriveBodyItem]{}
@@ -273,16 +273,16 @@ fn parser_marker_body(state: &JetParserState) -> [DeriveBodyItem] {
             &body.push(parser_marker_template_loop(&state))
             next
         }
-        // Visibility words and declaration markers (`#Codable struct …`) on
+        // Visibility words and declaration markers (`#Codable Name: struct …`) on
         // their own line attach to the member item below.
         if parser_current_kind(&state) == TOKEN_KW_PUB || parser_current_kind(&state) == TOKEN_KW_PRIV || (parser_current_kind(&state) == TOKEN_HASH && !parser_test_ahead(&state) && parser_hash_leads_to_item(&state)) {
-            modifiers :: parser_parse_item_modifiers(&state, true)
+            modifiers: parser_parse_item_modifiers(&state, true)
             &body.push(DeriveBodyItem.Item{value: parser_marker_body_item(&state, modifiers)})
             next
         }
         if {
             parser_current_kind(&state) == TOKEN_KW_FN || parser_current_kind(&state) == TOKEN_KW_STRUCT || parser_current_kind(&state) == TOKEN_KW_ENUM || parser_current_kind(&state) == TOKEN_KW_IMPL || parser_current_kind(&state) == TOKEN_KW_TAG -> {
-                modifiers :: ParsedItemModifiers{is_pub: false, is_package_pub: false, is_comptime: false, markers: [Marker]{}, start_span: parser_current(&state).span}
+                modifiers: ParsedItemModifiers{is_pub: false, is_package_pub: false, is_comptime: false, markers: [Marker]{}, start_span: parser_current(&state).span}
                 &body.push(DeriveBodyItem.Item{value: parser_marker_body_item(&state, modifiers)})
             }
             parser_test_ahead(&state) -> &body.push(DeriveBodyItem.Item{value: parser_parse_test(&state)})
@@ -294,10 +294,10 @@ fn parser_marker_body(state: &JetParserState) -> [DeriveBodyItem] {
     body
 }
 
-fn parser_marker_body_item(state: &JetParserState, modifiers: ParsedItemModifiers) -> Item {
+parser_marker_body_item: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -> Item {
     if parser_current_kind(&state) == {
         TOKEN_KW_FN -> {
-            parsed :: parser_parse_function(&state, modifiers, true)
+            parsed: parser_parse_function(&state, modifiers, true)
             Item.Func{value: parsed.value}
         }
         TOKEN_KW_STRUCT -> Item.Struct{value: parser_parse_struct(&state, modifiers)}
@@ -312,46 +312,46 @@ fn parser_marker_body_item(state: &JetParserState, modifiers: ParsedItemModifier
 }
 
 // A declaration loop is `comptime loop`, in marker bodies and at the root.
-fn parser_template_loop_ahead(state: &JetParserState) -> Bool Never! {
+parser_template_loop_ahead: fn(state: &JetParserState) -> Bool Never! {
     parser_prep_verb_ahead(&state, 0, TOKEN_KW_LOOP)
 }
 
-fn parser_parse_template_loop(state: &JetParserState) -> ItemTemplateLoop {
-    start :: parser_bump(&state)
+parser_parse_template_loop: fn(state: &JetParserState) -> ItemTemplateLoop {
+    start: parser_bump(&state)
     parser_expect(&state, TOKEN_KW_LOOP, "after `comptime` in a declaration loop")
-    variable :: parser_expect_name(&state, "for a declaration loop binding")
+    variable: parser_expect_name(&state, "for a declaration loop binding")
     parser_expect(&state, TOKEN_KW_IN, "between a declaration loop binding and source")
     // Rust `derive_body_loop`: `expr_no_struct_lit`, so `T.$fields {` opens
     // the loop body instead of a struct literal.
-    source :: parser_parse_expression_no_struct_lit(&state, 0)
-    body :: parser_marker_body(&state)
-    end :: parser_lookahead(&state, -1).span
+    source: parser_parse_expression_no_struct_lit(&state, 0)
+    body: parser_marker_body(&state)
+    end: parser_lookahead(&state, -1).span
     ItemTemplateLoop{var: parser_value(state, variable), var_span: variable.span, source: source.expr, body: ^body, span: parser_cover(start.span, end)}
 }
 
-fn parser_marker_template_loop(state: &JetParserState) -> DeriveBodyItem {
-    parsed :: parser_parse_template_loop(&state)
+parser_marker_template_loop: fn(state: &JetParserState) -> DeriveBodyItem {
+    parsed: parser_parse_template_loop(&state)
     DeriveBodyItem.Loop{var: parsed.var, var_span: parsed.var_span, source: parsed.source, body: parsed.body, span: parsed.span}
 }
 
 // One `#[A, B(…)]` list. Rust `parse_marker_bracket_group`: every
 // entry is read like a bare marker, and a list of one is E0999.
-fn parser_parse_marker_group_list(state: &JetParserState) -> ParsedMarkerGroup {
+parser_parse_marker_group_list: fn(state: &JetParserState) -> ParsedMarkerGroup {
     parser_parse_marker_group_entries(&state, false)
 }
 
-fn parser_parse_marker_group_entries(state: &JetParserState, declaration: Bool) -> ParsedMarkerGroup {
-    hash :: parser_expect(&state, TOKEN_HASH, "before a marker group")
+parser_parse_marker_group_entries: fn(state: &JetParserState, declaration: Bool) -> ParsedMarkerGroup {
+    hash: parser_expect(&state, TOKEN_HASH, "before a marker group")
     parser_expect(&state, TOKEN_LBRACKET, "`[` after a marker-group sigil")
     markers := [Marker]{}
     loop parser_current_kind(&state) != TOKEN_RBRACKET && parser_current_kind(&state) != TOKEN_EOF {
         negated := false
-        start :: parser_current(&state).span
+        start: parser_current(&state).span
         if parser_current_kind(&state) == TOKEN_BANG {
             parser_bump(&state)
             negated = true
         }
-        name :: parser_expect_marker_path(&state, "for a marker in a marker group")
+        name: parser_expect_marker_path(&state, "for a marker in a marker group")
         if negated && !declaration -> parser_check_signed_marker(&state, start.start, name)
         args := ParsedMarkerArgs{args: [MarkerCallArg]{}, labels: [CallLabel?]{}}
         end := name.span
@@ -369,8 +369,8 @@ fn parser_parse_marker_group_entries(state: &JetParserState, declaration: Bool) 
             break
         }
     }
-    close :: parser_expect(&state, TOKEN_RBRACKET, "`]` after marker-group entries")
-    span :: parser_cover(hash.span, close.span)
+    close: parser_expect(&state, TOKEN_RBRACKET, "`]` after marker-group entries")
+    span: parser_cover(hash.span, close.span)
     if declaration && markers.len() < 2 {
         parser_add_error_code(&state, "E0999", span, "a named marker group needs at least two members", "a group names a marker stack, not a marker alias or an empty rule", "write the marker directly at its use site, or give the group at least two members")
     } else if markers.len() == 1 -> parser_report_singleton_marker_group(&state, span, markers[0])
@@ -382,8 +382,8 @@ fn parser_parse_marker_group_entries(state: &JetParserState, declaration: Bool) 
 
 // `!` refuses only a trait the
 // structural auto-derive engine can provide, bare or inside `#[…]`.
-fn parser_check_signed_marker(state: &JetParserState, bang_start: Int, name: Token) {
-    marker_name :: parser_value(state, name)
+parser_check_signed_marker: fn(state: &JetParserState, bang_start: Int, name: Token) {
+    marker_name: parser_value(state, name)
     if owned_trait_auto_derive_marker(marker_name) -> return
     parser_add_fatal_code(&state, "E0931", Span{start: bang_start, end: name.span.end}, "`!{marker_name}` is not a signed auto-derive trait", "`!` rejects compiler generation only for structurally auto-derived traits", "remove `!` from `#{marker_name}`, or use it with an auto-derived trait")
 }
@@ -391,16 +391,16 @@ fn parser_check_signed_marker(state: &JetParserState, bang_start: Int, name: Tok
 // Rust `marker_call_arg`: a marker argument is an ordinary (optionally
 // labeled) call argument or an effect row `-[Effects]>`, which keeps its own
 // carrier until sema checks the rule's effect slot.
-fn parser_parse_marker_args(state: &JetParserState) -> ParsedMarkerArgs {
+parser_parse_marker_args: fn(state: &JetParserState) -> ParsedMarkerArgs {
     parser_expect(&state, TOKEN_LPAREN, "`(` before marker arguments")
     args := [MarkerCallArg]{}
     labels := [CallLabel?]{}
     if parser_current_kind(&state) != TOKEN_RPAREN {
         loop {
             label := CallLabel?{None}
-            label_kind :: parser_current_kind(&state)
+            label_kind: parser_current_kind(&state)
             if (label_kind == TOKEN_IDENT || label_kind == TOKEN_KW_TAG || label_kind == TOKEN_KW_USE) && parser_kind_at(&state, 1) == TOKEN_COLON {
-                label_token :: parser_bump(&state)
+                label_token: parser_bump(&state)
                 parser_bump(&state)
                 label_name := parser_value(state, label_token)
                 if label_token.kind == TOKEN_KW_TAG -> label_name = "tag"
@@ -408,24 +408,24 @@ fn parser_parse_marker_args(state: &JetParserState) -> ParsedMarkerArgs {
                 label = Val(CallLabel{name: label_name, span: label_token.span})
             }
             if parser_current_kind(&state) == TOKEN_MINUS && parser_kind_at(&state, 1) == TOKEN_LBRACKET {
-                start :: parser_bump(&state)
+                start: parser_bump(&state)
                 parser_bump(&state)
-                effects :: parser_parse_effect_row_entries(&state, TOKEN_RBRACKET)
+                effects: parser_parse_effect_row_entries(&state, TOKEN_RBRACKET)
                 parser_expect(&state, TOKEN_RBRACKET, "`]` to close the effect row")
-                close :: parser_expect(&state, TOKEN_GT, "`>` after the effect row")
+                close: parser_expect(&state, TOKEN_GT, "`>` after the effect row")
                 &args.push(MarkerCallArg.EffectRow{effects: effects, span: parser_cover(start.span, close.span)})
             } else {
                 // A marker value is read, never written or taken; the access
                 // sigil is consumed as in an ordinary call argument.
                 parser_call_access_prefix(&state)
-                argument :: parser_parse_expression(&state, 1, 2)
+                argument: parser_parse_expression(&state, 1, 2)
                 &args.push(MarkerCallArg.Expr{value: argument.expr})
             }
             &labels.push(label)
             if parser_current_kind(&state) == TOKEN_RPAREN -> break
             if parser_current_kind(&state) != TOKEN_COMMA {
                 if parser_unclosed_delimiter(&state, "call") -> return ParsedMarkerArgs{args: args, labels: labels}
-                token :: parser_current(&state)
+                token: parser_current(&state)
                 parser_add_error(&state, token.span, "expected `,` between marker arguments", "marker arguments are comma-separated", "add a comma or close the marker arguments")
                 break
             }
@@ -439,19 +439,19 @@ fn parser_parse_marker_args(state: &JetParserState) -> ParsedMarkerArgs {
 
 // The marker as written after its `#`, for E0999 repair edits; None when the
 // parse has no source text.
-fn parser_marker_written_text(state: &JetParserState, marker: Marker) -> String? {
+parser_marker_written_text: fn(state: &JetParserState, marker: Marker) -> String? {
     start := marker.span.start
-    end :: marker.span.end
+    end: marker.span.end
     if start < 0 || end > state.sources[0].len() || end <= start -> return None
     if state.sources[0][start] == (U8{35}) -> start += 1
-    text :: String.from_bytes(state.sources[0].slice(start, end)) ?? return None
+    text: String.from_bytes(state.sources[0].slice(start, end)) ?? return None
     Val(text)
 }
 
-fn parser_report_singleton_marker_group(state: &JetParserState, span: Span, marker: Marker) {
+parser_report_singleton_marker_group: fn(state: &JetParserState, span: Span, marker: Marker) {
     if parser_aborting(&state) -> return
-    diagnostic :: diagnostic_from_registry("E0999", Val(span), "one marker is written without brackets", "brackets group two or more markers; one marker stays bare", "replace `#[{marker.name}]` with `#{marker.name}`")
-    written :: parser_marker_written_text(&state, marker) ?? {
+    diagnostic: diagnostic_from_registry("E0999", Val(span), "one marker is written without brackets", "brackets group two or more markers; one marker stays bare", "replace `#[{marker.name}]` with `#{marker.name}`")
+    written: parser_marker_written_text(&state, marker) ?? {
         &state.diagnostics.push(diagnostic)
         return
     }
@@ -461,22 +461,22 @@ fn parser_report_singleton_marker_group(state: &JetParserState, span: Span, mark
 // (Rust `parse_attached_marker_sequence`): two or more
 // distinct rules on one target are one ordered `#[A, B]` list. `chunks`
 // counts the bare markers and lists written; `span` covers all of them.
-fn parser_report_adjacent_markers(state: &JetParserState, markers: [Marker], chunks: Int, bracket_chunks: Int, span: Span, noun: String) {
+parser_report_adjacent_markers: fn(state: &JetParserState, markers: [Marker], chunks: Int, bracket_chunks: Int, span: Span, noun: String) {
     if (chunks == 1 && bracket_chunks == 1) || parser_aborting(&state) -> return
     distinct := [String]{}
     loop marker in markers {
         if !distinct.contains(marker.name) -> &distinct.push(marker.name)
     }
     if distinct.len() <= 1 -> return
-    diagnostic :: diagnostic_from_registry("E0999", Val(span), "adjacent {noun} markers belong in one bracket list", "two or more rules attached to one {noun} use one ordered `#[A, B]` group", "replace the adjacent markers with one bracket list")
+    diagnostic: diagnostic_from_registry("E0999", Val(span), "adjacent {noun} markers belong in one bracket list", "two or more rules attached to one {noun} use one ordered `#[A, B]` group", "replace the adjacent markers with one bracket list")
     rendered := [String]{}
     loop marker in markers {
-        text :: parser_marker_written_text(&state, marker) ?? {
+        text: parser_marker_written_text(&state, marker) ?? {
             &state.diagnostics.push(diagnostic)
             return
         }
         &rendered.push(text)
     }
-    joined :: rendered.join(", ")
+    joined: rendered.join(", ")
     &state.diagnostics.push(diagnostic_with_structured_edit(diagnostic, TextEdit{span: span, new_text: "#[{joined}]"}))
 }

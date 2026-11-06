@@ -1,34 +1,34 @@
-use files :: core.files
+use files: core.files
 
 #CLI
-struct Args {
+Args: struct {
     root: String
     needle: String
 }
 
-struct ScanInput {
+ScanInput: struct {
     rows: [String]
     needle: String
 }
 
-fn count_lines(input: ScanInput) -> Int {
+count_lines: fn(input: ScanInput) -> Int {
     total := 0
     loop line in input.rows {
         total += line.count(input.needle)
     }
     total
 }
-fn run(args: Args) {
-    root :: args.root
-    needle :: args.needle.copy()
+run: fn(args: Args) {
+    root: args.root
+    needle: args.needle.copy()
     paths := (files.walk_files(root) ?? panic("walk failed")).filter(entry -> entry.path.ends_with(".txt")).map(entry -> entry.path)
-    inputs :: paths.map(path -> ScanInput{rows: (files.read(path) ?? panic("read failed")).lines(), needle: needle})
-    counts :: inputs.para_map((input: ScanInput) -> count_lines(input))
+    inputs: paths.map(path -> ScanInput{rows: (files.read(path) ?? panic("read failed")).lines(), needle: needle})
+    counts: inputs.para_map((input: ScanInput) -> count_lines(input))
     matched := 0
     total := 0
     loop index in 0..<paths.len() {
-        path :: paths[index]
-        count :: counts[index]
+        path: paths[index]
+        count: counts[index]
         if count > 0 {
             print("{path}:{count}")
             matched += 1

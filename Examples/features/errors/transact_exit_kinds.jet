@@ -8,52 +8,52 @@
 // transact_panic_rollback.jet shows a panic, transact_process_exit.jet and
 // transact_os_stop.jet an exit. A cancellation or a deadline rolls back as a
 // panic does.
-package {
+package: {
     name: "transact_exit_kinds"
     authority: { allow: [IO] }
 }
 
-struct Ledger {
+Ledger: struct {
     name: String
     balance: Int
 }
 
-struct LedgerSnap {
+LedgerSnap: struct {
     balance: Int
 }
 
 impl Ledger.Rollback {
-    type Snapshot = LedgerSnap
+    Snapshot: LedgerSnap
 
-    fn snapshot(self) -> LedgerSnap { return LedgerSnap{balance: self.balance} }
+    snapshot: fn(self) -> LedgerSnap { return LedgerSnap{balance: self.balance} }
 
-    fn restore(&self, snap: ^LedgerSnap) {
+    restore: fn(&self, snap: ^LedgerSnap) {
         print("  {self.name}: balance {self.balance} restored to {snap.balance}")
         self.balance = snap.balance
     }
 }
 
 #Error
-enum Refused {
+Refused: enum {
     Closed
 }
 
-fn refuse() -> Int Refused! {
+refuse: fn() -> Int Refused! {
     Err(Refused.Closed)
 }
 
-fn audit() {
+audit: fn() {
     panic("the audit log is unavailable")
 }
 
-fn commit(ledger: &Ledger) {
+commit: fn(ledger: &Ledger) {
     #Transact(tx) {
         ledger.balance -= 10
         tx.on_rollback(() -> print("  commit: hook (never runs)"))
     }
 }
 
-fn early_return(ledger: &Ledger) -> Int {
+early_return: fn(ledger: &Ledger) -> Int {
     #Transact(tx) {
         ledger.balance -= 10
         tx.on_rollback(() -> print("  early return: first hook"))
@@ -63,17 +63,17 @@ fn early_return(ledger: &Ledger) -> Int {
     0
 }
 
-fn failure(ledger: &Ledger) -> Int Refused! {
+failure: fn(ledger: &Ledger) -> Int Refused! {
     #Transact(tx) {
         ledger.balance -= 10
         tx.on_rollback(() -> print("  failure: first hook"))
         tx.on_rollback(() -> print("  failure: second hook"))
-        _ :: refuse()
+        _: refuse()
     }
     Ok(0)
 }
 
-fn loop_break(ledger: &Ledger) {
+loop_break: fn(ledger: &Ledger) {
     loop {
         #Transact(tx) {
             ledger.balance -= 10
@@ -83,7 +83,7 @@ fn loop_break(ledger: &Ledger) {
     }
 }
 
-fn failing_hook(ledger: &Ledger) -> Int {
+failing_hook: fn(ledger: &Ledger) -> Int {
     #Transact(tx) {
         ledger.balance -= 10
         tx.on_rollback(() -> print("  failing hook: first hook still runs"))
@@ -94,18 +94,18 @@ fn failing_hook(ledger: &Ledger) -> Int {
     0
 }
 
-fn run() {
+run: fn() {
     ledger := Ledger{name: "ledger", balance: 1000}
     print("commit:")
     commit(&ledger)
     print("  balance {ledger.balance}")
 
     print("early return:")
-    _ :: early_return(&ledger)
+    _: early_return(&ledger)
     print("  balance {ledger.balance}")
 
     print("failure:")
-    _ :: failure(&ledger) ?? -1
+    _: failure(&ledger) ?? -1
     print("  balance {ledger.balance}")
 
     print("break:")
@@ -113,6 +113,6 @@ fn run() {
     print("  balance {ledger.balance}")
 
     print("failing hook:")
-    _ :: failing_hook(&ledger)
+    _: failing_hook(&ledger)
     print("  balance {ledger.balance}")
 }

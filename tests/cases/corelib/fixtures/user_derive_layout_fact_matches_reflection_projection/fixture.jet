@@ -1,41 +1,41 @@
 
 derive T.LayoutFacts {
-    info :: T.$layout
-    reflected :: T.reflect().layout
-    selected :: info[.count]
-    kind :: info.kind
-    target :: info.target
-    guarantee :: info.guarantee
-    layout_source :: info.source
-    reflected_kind :: reflected.kind
-    field_name :: selected.name
-    size :: info.size
-    reflected_size :: reflected.size
-    selected_offset :: selected.offset
-    reflected_offset :: reflected.fields[0].offset
-    name :: T.reflect().name
-    fn layout_facts(self) -> String { "{$kind}:{$target}:{$guarantee}:{$layout_source}:{$reflected_kind}:{$field_name}:{$size}:{$reflected_size}:{$selected_offset}:{$reflected_offset}" }
+    info: T.$layout
+    reflected: T.reflect().layout
+    selected: info[.count]
+    kind: info.kind
+    target: info.target
+    guarantee: info.guarantee
+    layout_source: info.source
+    reflected_kind: reflected.kind
+    field_name: selected.name
+    size: info.size
+    reflected_size: reflected.size
+    selected_offset: selected.offset
+    reflected_offset: reflected.fields[0].offset
+    name: T.reflect().name
+    layout_facts: fn(self) -> String { "{$kind}:{$target}:{$guarantee}:{$layout_source}:{$reflected_kind}:{$field_name}:{$size}:{$reflected_size}:{$selected_offset}:{$reflected_offset}" }
 }
 
 #LayoutFacts
-struct Packet {
+Packet: struct {
     count: Int
     label: String
 }
 
 #[Layout(c), LayoutFacts]
-struct CPacket {
+CPacket: struct {
     count: U32
     flag: U8
 }
 
 #[Layout(columnar), LayoutFacts]
-struct ColumnPacket {
+ColumnPacket: struct {
     count: Int
     label: String
 }
 
-fn run() {
+run: fn() {
     packet := Packet{ count: 2, label: "ok" }
     c_packet := CPacket{ count: 2, flag: 1 }
     column_packet := ColumnPacket{ count: 2, label: "ok" }

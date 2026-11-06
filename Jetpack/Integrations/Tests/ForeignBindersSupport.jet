@@ -5,12 +5,12 @@ use {
 }
 
 // Non-overlapping occurrences of `needle` (Rust `str::matches(..).count()`).
-fn pkg_binders_test_count(haystack: String, needle: String) -> Int Never! {
+pkg_binders_test_count: fn(haystack: String, needle: String) -> Int Never! {
     haystack.split(needle).to_list().len() - 1
 }
 
 // Whether `tool --version` runs on this host.
-fn pkg_binders_test_tool_runs(tool: String) -[Exec, Time.Wait]> Bool Never! {
+pkg_binders_test_tool_runs: fn(tool: String) -[Exec, Time.Wait]> Bool Never! {
     if process.cmd([String]{tool, "--version"}).run() == {
         .Ok(receipt) -> receipt.success
         .Err(_) -> false
@@ -19,14 +19,14 @@ fn pkg_binders_test_tool_runs(tool: String) -[Exec, Time.Wait]> Bool Never! {
 
 // The canonical path of the first regular file `name` on PATH; the claim
 // cannot run without it.
-fn pkg_binders_test_required_tool(name: String) -[FS, Env]> String Never! {
-    found :: pkg_bridge_tool_path(name) ?? panic("{name} is required for the C++ binder test")
+pkg_binders_test_required_tool: fn(name: String) -[FS, Env]> String Never! {
+    found: pkg_bridge_tool_path(name) ?? panic("{name} is required for the C++ binder test")
     files.canonicalize(found) ?? panic("{name} is required for the C++ binder test")
 }
 
 // Discover `source` through the real PHP tokenizer from a private file.
-fn pkg_binders_test_php_discover(php: String, source: String, serial: Int) -[FS, Env, Exec, Time.Wait]> [String] ForeignBindError! {
-    path :: files.join(sys.temp_dir(), "jet_php_tokens_{sys.pid()}_{serial}.php")
+pkg_binders_test_php_discover: fn(php: String, source: String, serial: Int) -[FS, Env, Exec, Time.Wait]> [String] ForeignBindError! {
+    path: files.join(sys.temp_dir(), "jet_php_tokens_{sys.pid()}_{serial}.php")
     files.write(path, source) ?? panic("write PHP token fixture")
     if pkg_php_discover_functions(php, path) == {
         .Ok(names) -> {
@@ -41,10 +41,10 @@ fn pkg_binders_test_php_discover(php: String, source: String, serial: Int) -[FS,
 }
 
 // Read exactly `count` bytes from a streamed child output.
-fn pkg_binders_test_read_exact(child: &ProcessChild, count: Int) -[Exec, Time.Wait]> [U8] {
+pkg_binders_test_read_exact: fn(child: &ProcessChild, count: Int) -[Exec, Time.Wait]> [U8] {
     out := [U8]{}
     loop out.len() < count {
-        chunk :: child.stdout.read(count - out.len()) ?? panic("read worker output")
+        chunk: child.stdout.read(count - out.len()) ?? panic("read worker output")
         if chunk.len() == 0 -> panic("worker closed its output early")
         loop byte in chunk -> &out.push(byte)
     }
@@ -52,7 +52,7 @@ fn pkg_binders_test_read_exact(child: &ProcessChild, count: Int) -[Exec, Time.Wa
 }
 
 // A little-endian u32 length prefix.
-fn pkg_binders_test_u32_le(value: Int) -> [U8] Never! {
+pkg_binders_test_u32_le: fn(value: Int) -> [U8] Never! {
     out := [U8]{}
     loop index in 0..<4 -> &out.push(U8{((value >> (index * 8))).bit_and(255)})
     out

@@ -1,23 +1,23 @@
-use data :: core.data
+use data: core.data
 
 #Codable
-struct Sale {
+Sale: struct {
     region: String
     amount: Decimal
 }
 
-fn decoded(tree: Dyn) -> String {
-    value :: Decimal.decode(tree) ?? return "rejected: {err[0].reason}"
+decoded: fn(tree: Dyn) -> String {
+    value: Decimal.decode(tree) ?? return "rejected: {err[0].reason}"
     value.to_string()
 }
 
-fn run() {
+run: fn() {
     // CSV cells are text, so a Decimal column decodes from text.
-    sales :: data.csv<Sale>("region,amount\nNorth,166.20\nSouth,-3.5\nEast,7\n") ?? panic("csv: {err.reason}")
+    sales: data.csv<Sale>("region,amount\nNorth,166.20\nSouth,-3.5\nEast,7\n") ?? panic("csv: {err.reason}")
     loop sale in sales -> print("{sale.region} {sale.amount.to_string()}")
     // Decimal encodes as its scale-keeping text and decodes from that text.
-    price :: Decimal("0.10")
-    back :: Decimal.decode(price.encode()) ?? panic("round trip")
+    price: Decimal("0.10")
+    back: Decimal.decode(price.encode()) ?? panic("round trip")
     print("{back.to_string()} {back == price}")
     // An Int still decodes; text that is not a decimal and other kinds report
     // the field failure.

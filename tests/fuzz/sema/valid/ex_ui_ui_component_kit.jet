@@ -1,37 +1,37 @@
-use ui :: core.ui
+use ui: core.ui
 
-struct Label {
+Label: struct {
     text: String
 }
 
-fn label(text: String) -> Label { return Label{text: text.copy()} }
+label: fn(text: String) -> Label { return Label{text: text.copy()} }
 
-fn label_view(value: Label) -> UINode { ui.text(value.text) }
+label_view: fn(value: Label) -> UINode { ui.text(value.text) }
 
-struct Input {
+Input: struct {
     value: String
     placeholder: String
 }
 
-fn input(placeholder: String) -> Input { return Input{value: "", placeholder: placeholder.copy()} }
+input: fn(placeholder: String) -> Input { return Input{value: "", placeholder: placeholder.copy()} }
 
-fn input_view(value: Input) -> UINode {
+input_view: fn(value: Input) -> UINode {
     shown := value.value.copy()
     if value.value == "" -> shown = value.placeholder.copy()
     return ui.node_role(shown, 20.0, 1.0, ui.aria_role_text_input())
 }
 
-struct Button {
+Button: struct {
     label: String
 }
 
-fn button(label: String) -> Button { return Button{label: label.copy()} }
+button: fn(label: String) -> Button { return Button{label: label.copy()} }
 
-fn button_view(value: Button) -> UINode { ui.button(value.label) }
+button_view: fn(value: Button) -> UINode { ui.button(value.label) }
 
-fn container(children: [UINode]) -> UINode { ui.box(children) }
+container: fn(children: [UINode]) -> UINode { ui.box(children) }
 
-fn run() {
+run: fn() {
     tree := container([label_view(label("Name")), input_view(input("type")), button_view(button("Save"))])
     backend := ui.null_backend()
     backend.paint(tree)

@@ -1,9 +1,9 @@
 use {
-    core :: core
+    core: core
     core.data.[DataAuthority, DataError, DataErrorKind, DataFormat, DataFreshness, DataInvalidationCause, DataLoader, DataLoaderKind, DataLoaderStatus, DataSnapshotIdentity, DataSourceIdentity, DataStream]
 }
 
-fn loader_error(kind: DataErrorKind, reason: String, operation: String) -> DataError Never! {
+loader_error: fn(kind: DataErrorKind, reason: String, operation: String) -> DataError Never! {
     DataError{
         kind: kind,
         operation: operation,
@@ -21,7 +21,7 @@ fn loader_error(kind: DataErrorKind, reason: String, operation: String) -> DataE
 // them.  `last_good` is only changed by that commit, so bind/invalidate can
 // retain a known snapshot without falsely reporting a fresh one.
 
-fn bind<T>(loader: &DataLoader<T>, payload: [U8]) DataError! {
+bind: fn<T>(loader: &DataLoader<T>, payload: [U8]) DataError! {
     if loader.cancelled -> return Err(loader_error(DataErrorKind.State, "loader was cancelled", source_path<T>(loader)))
     if !accepts_payload<T>(loader) {
         return Err(loader_error(
@@ -35,7 +35,7 @@ fn bind<T>(loader: &DataLoader<T>, payload: [U8]) DataError! {
         return Err(loader_error(DataErrorKind.Limit, "payload exceeds max_item_bytes", "data.loader.bind"))
     }
     if loader.limits.encoding.max_total_bytes != None {
-        total :: loader.limits.encoding.max_total_bytes ?? 0
+        total: loader.limits.encoding.max_total_bytes ?? 0
         if bytes > total {
             return Err(loader_error(DataErrorKind.Limit, "payload exceeds max_total_bytes", "data.loader.bind"))
         }
@@ -51,19 +51,19 @@ fn bind<T>(loader: &DataLoader<T>, payload: [U8]) DataError! {
     return
 }
 
-fn bind_text<T>(loader: &DataLoader<T>, text: String) DataError! {
+bind_text: fn<T>(loader: &DataLoader<T>, text: String) DataError! {
     bind<T>(&loader, text.bytes())
 }
 
-fn authority<T>(loader: DataLoader<T>) -> DataAuthority Never! { loader.authority.copy() }
+authority: fn<T>(loader: DataLoader<T>) -> DataAuthority Never! { loader.authority.copy() }
 
-fn status<T>(loader: DataLoader<T>) -> DataLoaderStatus Never! { loader.status.copy() }
+status: fn<T>(loader: DataLoader<T>) -> DataLoaderStatus Never! { loader.status.copy() }
 
-fn ready<T>(loader: DataLoader<T>) -> Bool Never! {
+ready: fn<T>(loader: DataLoader<T>) -> Bool Never! {
     !loader.cancelled && !loader.status.backpressure
 }
 
-fn needs_refresh<T>(loader: DataLoader<T>) -> Bool Never! {
+needs_refresh: fn<T>(loader: DataLoader<T>) -> Bool Never! {
     if loader.status.freshness == DataFreshness.Fresh
         || loader.status.freshness == DataFreshness.Offline
         || loader.status.freshness == DataFreshness.Cancelled {
@@ -72,7 +72,7 @@ fn needs_refresh<T>(loader: DataLoader<T>) -> Bool Never! {
     true
 }
 
-fn snapshot_reusable(previous: DataSnapshotIdentity, current: DataSnapshotIdentity) -> Bool Never! {
+snapshot_reusable: fn(previous: DataSnapshotIdentity, current: DataSnapshotIdentity) -> Bool Never! {
     previous.id == current.id
         && previous.source == current.source
         && previous.content == current.content
@@ -80,9 +80,9 @@ fn snapshot_reusable(previous: DataSnapshotIdentity, current: DataSnapshotIdenti
         && previous.format == current.format
 }
 
-fn source_identity<T>(loader: DataLoader<T>) -> DataSourceIdentity Never! { loader.source.copy() }
+source_identity: fn<T>(loader: DataLoader<T>) -> DataSourceIdentity Never! { loader.source.copy() }
 
-fn cancel<T>(loader: &DataLoader<T>) Never! {
+cancel: fn<T>(loader: &DataLoader<T>) Never! {
     loader.cancelled = true
     if loader.source.kind != DataLoaderKind.Value -> loader.payload = None
     loader.status.freshness = DataFreshness.Cancelled
@@ -93,7 +93,7 @@ fn cancel<T>(loader: &DataLoader<T>) Never! {
     loader.status.last_good = loader.last_good != None
 }
 
-fn offline<T>(loader: &DataLoader<T>, enabled: Bool) Never! {
+offline: fn<T>(loader: &DataLoader<T>, enabled: Bool) Never! {
     loader.offline = enabled
     if enabled {
         if loader.payload == None && loader.last_good != None {
@@ -113,7 +113,7 @@ fn offline<T>(loader: &DataLoader<T>, enabled: Bool) Never! {
     }
 }
 
-fn invalidate<T>(loader: &DataLoader<T>, cause: DataInvalidationCause) Never! {
+invalidate: fn<T>(loader: &DataLoader<T>, cause: DataInvalidationCause) Never! {
     loader.status.invalidated_by = cause.copy()
     loader.status.freshness = DataFreshness.Stale
     loader.status.error = ""
@@ -124,12 +124,12 @@ fn invalidate<T>(loader: &DataLoader<T>, cause: DataInvalidationCause) Never! {
     loader.status.last_good = loader.last_good != None
 }
 
-fn stream<T: Decode>(loader: DataLoader<T>) -> DataStream<T> DataError! {
+stream: fn<T: Decode>(loader: DataLoader<T>) -> DataStream<T> DataError! {
     if loader.cancelled -> return Err(loader_error(DataErrorKind.State, "loader stream was cancelled", source_path<T>(loader)))
     bytes_opt := loader.payload
     if bytes_opt == None && loader.offline -> bytes_opt = loader.last_good
-    bytes :: bytes_opt ?? return Err(loader_error(DataErrorKind.State, "loader has no bound payload", source_path<T>(loader)))
-    text :: String.from_bytes(bytes) ?? return Err(loader_error(DataErrorKind.Decode, "loader payload is not UTF-8", source_path<T>(loader)))
+    bytes: bytes_opt ?? return Err(loader_error(DataErrorKind.State, "loader has no bound payload", source_path<T>(loader)))
+    text: String.from_bytes(bytes) ?? return Err(loader_error(DataErrorKind.Decode, "loader payload is not UTF-8", source_path<T>(loader)))
     rows := [T]{}
     if loader.format == DataFormat.CSV {
         rows = core.data.csv<T>(text) ?? return Err(loader_error(DataErrorKind.Decode, "CSV stream decode failed", source_path<T>(loader)))
@@ -146,12 +146,12 @@ fn stream<T: Decode>(loader: DataLoader<T>) -> DataStream<T> DataError! {
     core.data.stream.from_items<T>(&rows)
 }
 
-fn accepts_payload<T>(loader: DataLoader<T>) -> Bool Never! {
+accepts_payload: fn<T>(loader: DataLoader<T>) -> Bool Never! {
     if loader.source.kind == DataLoaderKind.URL || loader.source.kind == DataLoaderKind.Database -> return true
     loader.source.kind == DataLoaderKind.File && loader.source.member.len() > 0
 }
 
-fn decode_jsonl<T: Decode>(text: String) -> [T] DataError! {
+decode_jsonl: fn<T: Decode>(text: String) -> [T] DataError! {
     out := [T]{}
     raw := text.bytes()
     start := 0
@@ -161,10 +161,10 @@ fn decode_jsonl<T: Decode>(text: String) -> [T] DataError! {
         if end > start && raw[end - 1] == (U8{13}) -> end = end - 1
         if end > start {
             line_bytes := raw[start..(end - 1)]
-            line :: String.from_bytes(line_bytes) ?? return Err(loader_error(DataErrorKind.Decode, "JSONL row is not UTF-8", "data.loader.stream"))
+            line: String.from_bytes(line_bytes) ?? return Err(loader_error(DataErrorKind.Decode, "JSONL row is not UTF-8", "data.loader.stream"))
             if !blank(line) {
                 wrapped := "[{line}]"
-                row :: core.data.json<T>(wrapped) ?? return Err(loader_error(DataErrorKind.Decode, "JSONL row decode failed", "data.loader.stream"))
+                row: core.data.json<T>(wrapped) ?? return Err(loader_error(DataErrorKind.Decode, "JSONL row decode failed", "data.loader.stream"))
                 if row.len() != 1 -> return Err(loader_error(DataErrorKind.Decode, "JSONL row did not decode to one value", "data.loader.stream"))
                 &out.push(row[0].copy())
             }
@@ -174,7 +174,7 @@ fn decode_jsonl<T: Decode>(text: String) -> [T] DataError! {
     Ok(out)
 }
 
-fn blank(text: String) -> Bool Never! {
+blank: fn(text: String) -> Bool Never! {
     if text.len() == 0 -> return true
     loop byte in text.bytes() {
         if byte != (U8{32}) && byte != (U8{9}) -> return false
@@ -182,9 +182,9 @@ fn blank(text: String) -> Bool Never! {
     true
 }
 
-fn source_path<T>(loader: DataLoader<T>) -> String Never! { loader.source.locator }
+source_path: fn<T>(loader: DataLoader<T>) -> String Never! { loader.source.locator }
 
-fn copy_bytes(bytes: [U8]) -> [U8] Never! {
+copy_bytes: fn(bytes: [U8]) -> [U8] Never! {
     out := [U8]{}
     loop byte in bytes -> &out.push(byte)
     out

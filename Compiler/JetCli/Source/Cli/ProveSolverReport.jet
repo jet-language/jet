@@ -6,7 +6,7 @@
 // are checked independently before they are reported; a failed check is an
 // internal error (exit 101), never a result.
 use {
-    prove_crypto :: core.crypto
+    prove_crypto: core.crypto
     jet_driver.[JetDriverCompileMode, JetDriverLoweringInputs, jet_driver_lowering_inputs]
     jet_foundation.[Diagnostic, Span, diagnostic_column_at, diagnostic_from_registry, diagnostic_line_at, diagnostic_render_all, foundation_json_quote]
 }
@@ -14,7 +14,7 @@ use {
 // One solver row: the obligation, the member path and the line and column
 // its span starts and ends at, its evidence and obligation ids, its formula
 // hash ("" with no formula), and the outcome.
-struct JetCLISolverRow {
+JetCLISolverRow: struct {
     obligation: JetCLISolverObligation
     path: String
     line: Int
@@ -31,7 +31,7 @@ struct JetCLISolverRow {
 // before lowering, gives the checked functions; every owned member's
 // obligations are ordered, then searched. A group whose check failed has no
 // checked functions; its front-end errors already fail the run.
-fn jet_cli_prove_solver(identity: JetCLIProveIdentity, members: [JetCLIProveMember], groups: [JetCLIProveGroup], cwd: String, color: Bool) -> [JetCLISolverRow] JetCLIProveStop! {
+jet_cli_prove_solver: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMember], groups: [JetCLIProveGroup], cwd: String, color: Bool) -> [JetCLISolverRow] JetCLIProveStop! {
     rows := [JetCLISolverRow]{}
     claimed := loop _ in members -> false
     loop group in groups {
@@ -42,8 +42,8 @@ fn jet_cli_prove_solver(identity: JetCLIProveIdentity, members: [JetCLIProveMemb
             claimed[index] = true
             &owned.push(member.copy())
         }
-        entry :: members[group.entry].path
-        front :: jet_cli_solver_inputs(jet_cli_prepare_overlays(entry, entry, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Check)) ?? return Err(JetCLIProveStop{output: jet_cli_ice("the solver's check compile of `{entry}` failed inside Jet")})
+        entry: members[group.entry].path
+        front: jet_cli_solver_inputs(jet_cli_prepare_overlays(entry, entry, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Check)) ?? return Err(JetCLIProveStop{output: jet_cli_ice("the solver's check compile of `{entry}` failed inside Jet")})
         if front == {
             .Refused(output) -> return Err(JetCLIProveStop{output: output.copy()})
             .Checked(found) -> {
@@ -67,12 +67,12 @@ fn jet_cli_prove_solver(identity: JetCLIProveIdentity, members: [JetCLIProveMemb
 
 // The checked functions of a prepared check compile, stopped before
 // lowering (None when the check failed), or the refusal that stopped it.
-enum JetCLISolverFront {
+JetCLISolverFront: enum {
     Checked(inputs: JetDriverLoweringInputs?)
     Refused(output: JetDriverVerbOutput)
 }
 
-fn jet_cli_solver_inputs(prepared: ^JetCLIPrepared) -> JetCLISolverFront {
+jet_cli_solver_inputs: fn(prepared: ^JetCLIPrepared) -> JetCLISolverFront {
     if ^prepared == {
         .Refused(output) -> JetCLISolverFront.Refused{output: output}
         .Prepared(request, _) -> {
@@ -82,9 +82,9 @@ fn jet_cli_solver_inputs(prepared: ^JetCLIPrepared) -> JetCLISolverFront {
     }
 }
 
-fn jet_cli_solver_obligation_id(identity: JetCLIProveIdentity, kind: String, path: String, source: String, span: Span, formula_sha: String) -> String Never! {
+jet_cli_solver_obligation_id: fn(identity: JetCLIProveIdentity, kind: String, path: String, source: String, span: Span, formula_sha: String) -> String Never! {
     out := [U8]{}
-    fields :: [String]{
+    fields: [String]{
         identity.input_sha256, kind, path,
         "{diagnostic_line_at(source, span.start)}", "{diagnostic_column_at(source, span.start)}",
         "{diagnostic_line_at(source, span.end)}", "{diagnostic_column_at(source, span.end)}",
@@ -94,7 +94,7 @@ fn jet_cli_solver_obligation_id(identity: JetCLIProveIdentity, kind: String, pat
     prove_crypto.sha256(out).hex()
 }
 
-fn jet_cli_solver_row_order(left: JetCLISolverRow, right: JetCLISolverRow) -> Ordering Never! {
+jet_cli_solver_row_order: fn(left: JetCLISolverRow, right: JetCLISolverRow) -> Ordering Never! {
     if left.path != right.path -> return left.path <=> right.path
     if left.obligation.span.start != right.obligation.span.start -> return left.obligation.span.start <=> right.obligation.span.start
     if left.obligation.span.end != right.obligation.span.end -> return left.obligation.span.end <=> right.obligation.span.end
@@ -105,22 +105,22 @@ fn jet_cli_solver_row_order(left: JetCLISolverRow, right: JetCLISolverRow) -> Or
 // The unsearched rows of every member's obligations, each `unknown` with its
 // extraction reason until jet_cli_prove_solver searches it. A checked
 // function's file is the path the compile was given, relative to `cwd`.
-fn jet_cli_solver_rows(identity: JetCLIProveIdentity, members: [JetCLIProveMember], inputs: JetDriverLoweringInputs, cwd: String) -> [JetCLISolverRow] Never! {
+jet_cli_solver_rows: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMember], inputs: JetDriverLoweringInputs, cwd: String) -> [JetCLISolverRow] Never! {
     names := [String:String]{}
     loop function in inputs.functions -> names[function.key] = function.name
-    callees :: JetCLISolverCallees{decls: inputs.decls, names: names}
+    callees: JetCLISolverCallees{decls: inputs.decls, names: names}
     files := [String]{}
     loop function in inputs.functions {
         if !files.contains(function.source_file) -> &files.push(function.source_file.copy())
     }
     rows := [JetCLISolverRow]{}
     loop member in members {
-        home :: jet_cli_solver_absolute(member.absolute, cwd)
+        home: jet_cli_solver_absolute(member.absolute, cwd)
         loop file in files {
             if jet_cli_solver_absolute(file, cwd) != home -> next
             loop obligation in jet_cli_solver_obligations(inputs.functions, callees, file, member.source) {
-                formula_sha :: if obligation.formula == .Val(formula) -> jet_cli_solver_formula_sha256(formula) else -> ""
-                obligation_id :: jet_cli_solver_obligation_id(identity, obligation.kind, member.path, member.source, obligation.span, formula_sha)
+                formula_sha: if obligation.formula == .Val(formula) -> jet_cli_solver_formula_sha256(formula) else -> ""
+                obligation_id: jet_cli_solver_obligation_id(identity, obligation.kind, member.path, member.source, obligation.span, formula_sha)
                 &rows.push(JetCLISolverRow{
                     obligation: obligation,
                     path: member.path.copy(),
@@ -140,8 +140,8 @@ fn jet_cli_solver_rows(identity: JetCLIProveIdentity, members: [JetCLIProveMembe
 }
 
 // `file` as an absolute path with empty and `.` parts dropped.
-fn jet_cli_solver_absolute(file: String, cwd: String) -> String Never! {
-    joined :: if file.starts_with("/") -> file.copy() else -> "{cwd}/{file}"
+jet_cli_solver_absolute: fn(file: String, cwd: String) -> String Never! {
+    joined: if file.starts_with("/") -> file.copy() else -> "{cwd}/{file}"
     parts := [String]{}
     loop part in joined.split("/").to_list() {
         if part != "" && part != "." -> &parts.push(part)
@@ -150,8 +150,8 @@ fn jet_cli_solver_absolute(file: String, cwd: String) -> String Never! {
 }
 
 // The search's outcome after its independent check.
-fn jet_cli_solver_checked_outcome(formula: JetCLISolverFormula) -> JetCLISolverOutcome Never! {
-    outcome :: jet_cli_solver_prove(formula)
+jet_cli_solver_checked_outcome: fn(formula: JetCLISolverFormula) -> JetCLISolverOutcome Never! {
+    outcome: jet_cli_solver_prove(formula)
     if outcome == {
         .Proved(proved) -> {
             if !jet_cli_solver_certificate_valid(formula, proved.certificate) -> panic("the solver's certificate failed its independent check for formula {jet_cli_solver_formula_sha256(formula)}")
@@ -164,18 +164,18 @@ fn jet_cli_solver_checked_outcome(formula: JetCLISolverFormula) -> JetCLISolverO
     outcome
 }
 
-fn jet_cli_solver_quote_or_null(value: String) -> String Never! {
+jet_cli_solver_quote_or_null: fn(value: String) -> String Never! {
     if value == "" -> "null" else -> foundation_json_quote(value)
 }
 
 // The row's evidence body (Rust `evidence_json`), open for the derivation.
-fn jet_cli_solver_row_body(row: JetCLISolverRow, indexes: String) -> String Never! {
-    head :: "\"backend\":\"{JET_CLI_SOLVER_BACKEND}\",\"backendVersion\":\"{JET_CLI_SOLVER_BACKEND_VERSION}\""
-    tail :: "\"formulaSha256\":{jet_cli_solver_quote_or_null(row.formula_sha)},\"obligationId\":{foundation_json_quote(row.obligation_id)},\"obligationKind\":{foundation_json_quote(row.obligation.kind)}"
-    payload :: if row.outcome == {
+jet_cli_solver_row_body: fn(row: JetCLISolverRow, indexes: String) -> String Never! {
+    head: "\"backend\":\"{JET_CLI_SOLVER_BACKEND}\",\"backendVersion\":\"{JET_CLI_SOLVER_BACKEND_VERSION}\""
+    tail: "\"formulaSha256\":{jet_cli_solver_quote_or_null(row.formula_sha)},\"obligationId\":{foundation_json_quote(row.obligation_id)},\"obligationKind\":{foundation_json_quote(row.obligation.kind)}"
+    payload: if row.outcome == {
         .Proved(proved) -> "{{{head},\"certificate\":{proved.certificate},\"certificateSha256\":{foundation_json_quote(prove_crypto.sha256("{proved.certificate}\n".bytes()).hex())},\"counterexample\":null,{tail},\"reason\":null,\"status\":\"proved\",\"stepLimit\":{JET_CLI_SOLVER_MAX_STEPS},\"steps\":{proved.steps}}}"
         .Disproved(disproved) -> {
-            values :: loop value in disproved.values -> "{{\"name\":{foundation_json_quote(value.name)},\"value\":\"{value.value}\"}}"
+            values: loop value in disproved.values -> "{{\"name\":{foundation_json_quote(value.name)},\"value\":\"{value.value}\"}}"
             "{{{head},\"certificate\":null,\"certificateSha256\":null,\"counterexample\":[{values.join(",")}],{tail},\"reason\":null,\"status\":\"disproved\",\"stepLimit\":{JET_CLI_SOLVER_MAX_STEPS},\"steps\":{disproved.steps}}}"
         }
         .Unknown(unknown) -> "{{{head},\"certificate\":null,\"certificateSha256\":null,\"counterexample\":null,{tail},\"reason\":{foundation_json_quote(unknown.reason)},\"status\":\"unknown\",\"stepLimit\":{JET_CLI_SOLVER_MAX_STEPS},\"steps\":{unknown.steps}}}"
@@ -183,7 +183,7 @@ fn jet_cli_solver_row_body(row: JetCLISolverRow, indexes: String) -> String Neve
     "{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":1,\"diagnosticIndexes\":{indexes},\"facet\":\"solver\",\"id\":{foundation_json_quote(row.id)},\"kind\":\"solver\",\"outcome\":\"{jet_cli_solver_status(row)}\",\"producer\":\"{JET_CLI_SOLVER_BACKEND}\",\"property\":null,\"reason\":null,\"solver\":{payload},\"source\":{{\"column\":{row.column},\"line\":{row.line},\"path\":{foundation_json_quote(row.path)}}},\"state\":\"checked\""
 }
 
-fn jet_cli_solver_status(row: JetCLISolverRow) -> String Never! {
+jet_cli_solver_status: fn(row: JetCLISolverRow) -> String Never! {
     if row.outcome == {
         .Proved(_) -> "proved"
         .Disproved(_) -> "disproved"
@@ -191,7 +191,7 @@ fn jet_cli_solver_status(row: JetCLISolverRow) -> String Never! {
     }
 }
 
-fn jet_cli_solver_count(rows: [JetCLISolverRow], status: String) -> Int Never! {
+jet_cli_solver_count: fn(rows: [JetCLISolverRow], status: String) -> Int Never! {
     count := 0
     loop row in rows {
         if jet_cli_solver_status(row) == status -> count += 1
@@ -201,24 +201,24 @@ fn jet_cli_solver_count(rows: [JetCLISolverRow], status: String) -> Int Never! {
 
 // The `solver` summary. Every native-presburger obligation runs, so none is
 // unavailable.
-fn jet_cli_solver_summary_json(rows: [JetCLISolverRow]) -> String Never! {
+jet_cli_solver_summary_json: fn(rows: [JetCLISolverRow]) -> String Never! {
     "{{\"disproved\":{jet_cli_solver_count(rows, "disproved")},\"proved\":{jet_cli_solver_count(rows, "proved")},\"selected\":{rows.len()},\"unavailable\":0,\"unknown\":{jet_cli_solver_count(rows, "unknown")}}}"
 }
 
 // A disproved row's E2950, or None.
-fn jet_cli_solver_diagnostic(row: JetCLISolverRow) -> Diagnostic? Never! {
+jet_cli_solver_diagnostic: fn(row: JetCLISolverRow) -> Diagnostic? Never! {
     if row.outcome == .Disproved(disproved) -> Val(jet_cli_solver_counterexample(row, disproved.values)) else -> None
 }
 
 // The report's E2950 entry, at the obligation's span.
-fn jet_cli_solver_diagnostic_json(row: JetCLISolverRow, diagnostic: Diagnostic) -> String Never! {
-    span :: "{{\"endColumn\":{row.end_column},\"endLine\":{row.end_line},\"path\":{foundation_json_quote(row.path)},\"sourceLine\":null,\"startColumn\":{row.column},\"startLine\":{row.line}}}"
+jet_cli_solver_diagnostic_json: fn(row: JetCLISolverRow, diagnostic: Diagnostic) -> String Never! {
+    span: "{{\"endColumn\":{row.end_column},\"endLine\":{row.end_line},\"path\":{foundation_json_quote(row.path)},\"sourceLine\":null,\"startColumn\":{row.column},\"startLine\":{row.line}}}"
     "{{\"caret\":null,\"code\":{foundation_json_quote(diagnostic.code)},\"context\":[],\"frames\":[],\"message\":{foundation_json_quote(diagnostic.what)},\"notes\":[{foundation_json_quote("Why: {diagnostic.why}")},{foundation_json_quote("Fix: {diagnostic.fix}")}],\"origin\":{{\"producer\":\"{JET_CLI_SOLVER_BACKEND}\",\"stage\":\"solver\"}},\"safeLocals\":[],\"severity\":\"error\",\"span\":{span},\"type\":\"solver\"}}"
 }
 
 // The human SOLVER section: the counts, then each row with its backend work
 // or the reason it is unknown, in plain words when there are some.
-fn jet_cli_solver_human(rows: [JetCLISolverRow]) -> String Never! {
+jet_cli_solver_human: fn(rows: [JetCLISolverRow]) -> String Never! {
     text := "SOLVER   proved {jet_cli_solver_count(rows, "proved")}; disproved {jet_cli_solver_count(rows, "disproved")}; unknown {jet_cli_solver_count(rows, "unknown")}; unavailable 0\n"
     loop row in rows {
         text = "{text}  {jet_cli_solver_status(row)}  {row.obligation.kind} at {row.path}:{row.line}:{row.column}\n"
@@ -226,7 +226,7 @@ fn jet_cli_solver_human(rows: [JetCLISolverRow]) -> String Never! {
             .Proved(proved) -> text = "{text}  backend {JET_CLI_SOLVER_BACKEND}-v{JET_CLI_SOLVER_BACKEND_VERSION}; steps {proved.steps}/{JET_CLI_SOLVER_MAX_STEPS}\n"
             .Disproved(disproved) -> text = "{text}  backend {JET_CLI_SOLVER_BACKEND}-v{JET_CLI_SOLVER_BACKEND_VERSION}; steps {disproved.steps}/{JET_CLI_SOLVER_MAX_STEPS}\n"
             .Unknown(unknown) -> {
-                detail :: if unknown.reason == row.obligation.reason && row.obligation.detail != "" -> " ({row.obligation.detail})" else -> ""
+                detail: if unknown.reason == row.obligation.reason && row.obligation.detail != "" -> " ({row.obligation.detail})" else -> ""
                 text = "{text}  reason: {unknown.reason}{detail}\n"
             }
         }
@@ -238,15 +238,15 @@ fn jet_cli_solver_human(rows: [JetCLISolverRow]) -> String Never! {
 
 // "`a = 1`", "`a = 1` and `b = 2`", "`a = 1`, `b = 2` and `c = 3`": code is
 // quoted, as diagnostic prose quotes it, so sentence case never touches a name.
-fn jet_cli_solver_values_text(values: [JetCLISolverValue]) -> String Never! {
-    parts :: loop value in values -> "`{value.name} = {value.value}`"
+jet_cli_solver_values_text: fn(values: [JetCLISolverValue]) -> String Never! {
+    parts: loop value in values -> "`{value.name} = {value.value}`"
     if parts.len() <= 1 -> return parts.join("")
     "{parts.slice(0, parts.len() - 1).join(", ")} and {parts[parts.len() - 1]}"
 }
 
 // What the claim asks of `result` in words, when it is `result <op> rhs`.
-fn jet_cli_solver_return_rule(claim: String) -> String? Never! {
-    rules :: [[String]]{
+jet_cli_solver_return_rule: fn(claim: String) -> String? Never! {
+    rules: [[String]]{
         [String]{"result >= ", "is at least "}, [String]{"result <= ", "is at most "},
         [String]{"result != ", "differs from "}, [String]{"result == ", "equals "},
         [String]{"result > ", "is greater than "}, [String]{"result < ", "is less than "},
@@ -259,21 +259,21 @@ fn jet_cli_solver_return_rule(claim: String) -> String? Never! {
 
 // The E2950 diagnostic of a disproved row: what was disproved, the values
 // that do it, and the fix for that kind of claim.
-fn jet_cli_solver_counterexample(row: JetCLISolverRow, values: [JetCLISolverValue]) -> Diagnostic Never! {
-    obligation :: row.obligation
-    callee :: if obligation.callee == "" -> "its callee" else -> "`{obligation.callee}`"
-    subject :: if obligation.kind == {
+jet_cli_solver_counterexample: fn(row: JetCLISolverRow, values: [JetCLISolverValue]) -> Diagnostic Never! {
+    obligation: row.obligation
+    callee: if obligation.callee == "" -> "its callee" else -> "`{obligation.callee}`"
+    subject: if obligation.kind == {
         "function_postcondition" -> "function postcondition `{obligation.function}`"
         "call_precondition" -> "call precondition {callee} in `{obligation.function}`"
         else -> "fixed-list index bound in `{obligation.function}`"
     }
     // One value reads "x = 0 satisfies … but makes …"; more read "satisfy … make".
-    satisfy :: if values.len() == 1 -> "satisfies" else -> "satisfy"
-    make :: if values.len() == 1 -> "makes" else -> "make"
-    holds :: if obligation.pre -> "{satisfy} the precondition" else -> "{satisfy} every assumption"
-    fix :: if obligation.kind == {
+    satisfy: if values.len() == 1 -> "satisfies" else -> "satisfy"
+    make: if values.len() == 1 -> "makes" else -> "make"
+    holds: if obligation.pre -> "{satisfy} the precondition" else -> "{satisfy} every assumption"
+    fix: if obligation.kind == {
         "function_postcondition" -> {
-            rule :: jet_cli_solver_return_rule(obligation.claim)
+            rule: jet_cli_solver_return_rule(obligation.claim)
             if rule == .Val(text) -> "change `{obligation.function}` so every return {text}, or correct the `#Post` claim" else -> "change `{obligation.function}` so every return makes `{obligation.claim}` true, or correct the `#Post` claim"
         }
         "call_precondition" -> "check that `{obligation.claim}` holds before calling {callee}, or correct the `#Pre` claim"

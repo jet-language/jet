@@ -1,14 +1,14 @@
 // An uncaught `[FieldError]` from a typed decode ends the program with exit 1.
 // The report's message is the same text `print(errors)` shows: one
 // `at `path`: reason` entry per failed field, on every tier.
-use json :: core.encoding.json
+use json: core.encoding.json
 
-struct Service {
+Service: struct {
     name: String
     port: Int
 }
 
-fn run() [FieldError]! {
-    service :: json.decode<Service>("{{\"name\":7,\"port\":\"http\"}}")
+run: fn() [FieldError]! {
+    service: json.decode<Service>("{{\"name\":7,\"port\":\"http\"}}")
     print(service.name)
 }

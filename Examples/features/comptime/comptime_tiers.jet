@@ -9,29 +9,29 @@
 // Tier 2 — ambient: reads the host filesystem, environment, etc.
 //           Requires BOTH a `#Impure("reason") { … }` gate AND
 //           `--gate impure=allow` on the build command.
-use math :: core.math
+use math: core.math
 
 // Tier 0: pure math — always evaluates at compile time.
-DIGITS_OF_PI :: comptime { math.floor(Float{31415.9}) }
+DIGITS_OF_PI: comptime { math.floor(Float{31415.9}) }
 
-GREETING :: comptime { "hello" }
+GREETING: comptime { "hello" }
 
 // Tier 1a: embed_file reads the file once at compile time; its path and
 // content hash are recorded in .jet/lock. (Shown as comment — no file
 // to embed in this self-contained example.)
 //
-//   NOTICE :: embed_file("notice.txt")
+//   NOTICE: embed_file("notice.txt")
 // Tier 1b: fetch downloads a URL once at compile time; HTTPS works by default,
 // and the URL plus sha256 pin are recorded in .jet/lock so every machine's build is byte-identical.
 // The sha256: argument is the content hash — change the URL contents and
 // the build fails with E3413 until you update the hash (hermetic by design).
 //
-//   use net :: core.net
-//   SCHEMA :: net.fetch(
+//   use net: core.net
+//   SCHEMA: net.fetch(
 //       "https://example.com/schema.json",
 //       sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
 //   )
-fn run() {
+run: fn() {
     print("{GREETING}, world")
     print("pi × 10^4 ≈ {DIGITS_OF_PI}")
     // Tier 2 gate: the block itself is fine without --gate impure=allow as

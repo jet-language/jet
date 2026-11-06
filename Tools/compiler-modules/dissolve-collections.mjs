@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // D-MOD-CYCLE1=A cutover for directories that hold several independent
 // programs under one package.jet. A package is one namespace with at most one
-// `fn run`, so such a directory is a collection of loose files, not a package.
+// `run: fn`, so such a directory is a collection of loose files, not a package.
 // This removes the directory's package.jet; each file then checks and runs as
 // a loose file. A manifest that carries more than identity and authority
 // (settings, build profiles, outputs, dependencies) is reported instead of
@@ -48,7 +48,7 @@ for (const rootArg of roots) {
   const manifest = readFileSync(manifestPath, "utf8");
   const keys = [...manifest.matchAll(/^([a-z_]+):/gm)].map((match) => match[1]);
   const extra = keys.filter((key) => !SIMPLE_KEYS.has(key));
-  const runs = members(root).filter((file) => /^(pub )?fn run\(/m.test(readFileSync(file, "utf8")));
+  const runs = members(root).filter((file) => /^(pub )?run: fn\(/m.test(readFileSync(file, "utf8")));
   if (extra.length > 0) {
     blocked += 1;
     console.log(`MANUAL ${rootArg}: manifest keys ${extra.join(", ")} must move into the program that uses them`);

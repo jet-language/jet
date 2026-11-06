@@ -8,15 +8,15 @@
 // The checked registry could not be produced: every diagnostic of the
 // checked bundle, in compiler order, when one is an error.
 #Error
-struct JobRegistryCheckError {
+JobRegistryCheckError: struct {
     diagnostics: [Diagnostic]
 }
 
 // Project entry for bare `jet dev`, matching `jet`'s run-first convention:
 // the typed Package run output, then `run.jet`, `src/run.jet`, and
 // `<package>.jet`, else the (missing) root `run.jet`.
-fn cli_find_project_entry(project_dir: String) -[IO, FS, Env, Exec, Time.Wait]> String Never! {
-    resolver :: AuthorityResolver.open(project_dir) ?? cli_report_entry_authority_error(err.diagnostic())
+cli_find_project_entry: fn(project_dir: String) -[IO, FS, Env, Exec, Time.Wait]> String Never! {
+    resolver: AuthorityResolver.open(project_dir) ?? cli_report_entry_authority_error(err.diagnostic())
     package := CheckedPackage?{None}
     if resolver.checked_package(".") == {
         .Ok(found) -> package = Val(found)
@@ -38,14 +38,14 @@ fn cli_find_project_entry(project_dir: String) -[IO, FS, Env, Exec, Time.Wait]> 
     if cli_checked_project_entry(resolver, DEFAULT_ENTRY_FILE) == .Val(entry) -> return entry
     if cli_checked_project_entry(resolver, files.join("src", DEFAULT_ENTRY_FILE)) == .Val(entry) -> return entry
     if package == .Val(checked) {
-        named :: "{checked.facts.name}.{FILE_EXT}"
+        named: "{checked.facts.name}.{FILE_EXT}"
         if cli_checked_project_entry(resolver, named) == .Val(entry) -> return entry
     }
     files.join(resolver.root, DEFAULT_ENTRY_FILE)
 }
 
 // A checked, revalidated project file, or None when it does not exist.
-fn cli_checked_project_entry(resolver: AuthorityResolver, relative: String) -[IO, FS, Env, Exec, Time.Wait]> String? Never! {
+cli_checked_project_entry: fn(resolver: AuthorityResolver, relative: String) -[IO, FS, Env, Exec, Time.Wait]> String? Never! {
     if resolver.checked_file(relative) == {
         .Ok(file) -> {
             if resolver.revalidate_file(file) == .Err(error) -> cli_report_entry_authority_error(error.diagnostic())
@@ -59,17 +59,17 @@ fn cli_checked_project_entry(resolver: AuthorityResolver, relative: String) -[IO
 }
 
 // Render one entry-authority refusal and exit with the user-error code.
-fn cli_report_entry_authority_error(diagnostic: Diagnostic) -[IO, Env, Exec, Time.Wait]> Never {
+cli_report_entry_authority_error: fn(diagnostic: Diagnostic) -[IO, Env, Exec, Time.Wait]> Never {
     Theme.resolve_choice(ColorChoice.Auto).error_coded(diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix)
     process.exit(EXIT_USER_ERROR)
 }
 
-// Whether `file` defines a top-level `fn dev()` or `fn run()` (U19's
+// Whether `file` defines a top-level `dev: fn()` or `run: fn()` (U19's
 // dev-with-fallback rule, E1254 otherwise). A lex or parse failure just
 // means "no": the real diagnostics surface when the compiler loads the file.
-fn cli_has_dev_or_run_entry(file: String) -[FS]> Bool Never! {
-    src :: files.read(file) ?? return false
-    parsed :: parse_source(src.bytes())
+cli_has_dev_or_run_entry: fn(file: String) -[FS]> Bool Never! {
+    src: files.read(file) ?? return false
+    parsed: parse_source(src.bytes())
     if parsed.diagnostics.len() > 0 -> return false
     loop item in parsed.program.items {
         if item == {
@@ -86,12 +86,12 @@ fn cli_has_dev_or_run_entry(file: String) -[FS]> Bool Never! {
 // fact to a host; the registry is the checked entry's own `#Job` items
 // (importing a helper module never extends the job namespace). Job-only
 // projects need no `run` entry.
-fn cli_checked_project_job_registry(file: String) -[FS, Env, Exec, Time.Wait]> JobRegistry JobRegistryCheckError! {
-    source :: files.read(file) ?? return Err(cli_job_registry_unchecked(file, "`{file}` could not be read: {err}"))
+cli_checked_project_job_registry: fn(file: String) -[FS, Env, Exec, Time.Wait]> JobRegistry JobRegistryCheckError! {
+    source: files.read(file) ?? return Err(cli_job_registry_unchecked(file, "`{file}` could not be read: {err}"))
     // copy: the request owns its texts; `file` (a read parameter) names every refusal below and
     // `source` is parsed for the registry after the check.
-    response :: envmodel_compiler_service(JET_COMPILER_SERVICE_CHECK_ENTRY, compiler_service_check_request(file.copy(), source.copy())) ?? return Err(cli_job_registry_unchecked(file, err.detail))
-    diagnostics :: compiler_service_check_diagnostics(response) ?? return Err(cli_job_registry_unchecked(file, "the compiler's answer is not a list of diagnostics"))
+    response: envmodel_compiler_service(JET_COMPILER_SERVICE_CHECK_ENTRY, compiler_service_check_request(file.copy(), source.copy())) ?? return Err(cli_job_registry_unchecked(file, err.detail))
+    diagnostics: compiler_service_check_diagnostics(response) ?? return Err(cli_job_registry_unchecked(file, "the compiler's answer is not a list of diagnostics"))
     loop diagnostic in diagnostics {
         if diagnostic.severity == DIAGNOSTIC_ERROR -> return Err(JobRegistryCheckError{diagnostics: diagnostics})
     }
@@ -99,14 +99,14 @@ fn cli_checked_project_job_registry(file: String) -[FS, Env, Exec, Time.Wait]> J
 }
 
 // E2105: the checker could not be asked or did not answer.
-fn cli_job_registry_unchecked(file: String, detail: String) -> JobRegistryCheckError Never! {
+cli_job_registry_unchecked: fn(file: String, detail: String) -> JobRegistryCheckError Never! {
     JobRegistryCheckError{diagnostics: [Diagnostic]{diagnostic_from_registry("E2105", None, "the project jobs in `{file}` could not be checked: {detail}", "Jet could not complete the named file, tool, or operating-system operation", "check that the `jet` compiler sits beside `jetpack` or on PATH, then run the command again")}}
 }
 
 // Checked `#Job fn` names in the complete project bundle,
 // sorted and distinct; an unchecked bundle has none.
-fn cli_list_project_jobs(file: String) -[FS, Env, Exec, Time.Wait]> [String] Never! {
-    registry :: cli_checked_project_job_registry(file) ?? return [String]{}
+cli_list_project_jobs: fn(file: String) -[FS, Env, Exec, Time.Wait]> [String] Never! {
+    registry: cli_checked_project_job_registry(file) ?? return [String]{}
     names := [String]{}
     loop job in registry.jobs() -> &names.push(job.name)
     cli_sorted_unique(names)

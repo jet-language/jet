@@ -7,19 +7,19 @@ use jet_foundation.[
     foundation_utf8_lead_width, foundation_utf8_width,
 ]
 
-fn read_bytes_require(ok: Bool, message: String) Never! {
+read_bytes_require: fn(ok: Bool, message: String) Never! {
     if !ok -> panic("READ bytes: {message}")
 }
 
 #Test("read_bytes") {
-    source :: [U8]{65, 0, 10, 13, 9, 27, 127, 194, 128, 194, 159, 226, 128, 168, 226, 128, 169, 240, 159, 152, 128, 244, 143, 191, 191}
-    starts :: [Int]{0, 1, 2, 3, 4, 5, 6, 7, 9, 11, 14, 17, 21}
-    codepoints :: [Int]{65, 0, 10, 13, 9, 27, 127, 128, 159, 8232, 8233, 128512, 1114111}
-    next_bytes :: [Int]{1, 2, 3, 4, 5, 6, 7, 9, 11, 14, 17, 21, 25}
+    source: [U8]{65, 0, 10, 13, 9, 27, 127, 194, 128, 194, 159, 226, 128, 168, 226, 128, 169, 240, 159, 152, 128, 244, 143, 191, 191}
+    starts: [Int]{0, 1, 2, 3, 4, 5, 6, 7, 9, 11, 14, 17, 21}
+    codepoints: [Int]{65, 0, 10, 13, 9, 27, 127, 128, 159, 8232, 8233, 128512, 1114111}
+    next_bytes: [Int]{1, 2, 3, 4, 5, 6, 7, 9, 11, 14, 17, 21, 25}
     read_bytes_require(foundation_read_bytes_len(source) == 25, "original byte extent")
     read_bytes_require(foundation_read_bytes_at(source, 0) == 65 && foundation_read_bytes_at(source, 24) == 191, "first and last byte")
     loop index in 0..<starts.len() {
-        scalar :: foundation_read_bytes_scalar_at(source, starts[index])
+        scalar: foundation_read_bytes_scalar_at(source, starts[index])
         read_bytes_require(scalar.codepoint == codepoints[index], "canonical scalar")
         read_bytes_require(scalar.next_byte == next_bytes[index], "next byte boundary")
     }
@@ -33,7 +33,7 @@ fn read_bytes_require(ok: Bool, message: String) Never! {
     foundation_append_read_bytes(&out, source, 21, 25)
     read_bytes_require(out == ([U8]{62, 194, 128, 194, 159, 244, 143, 191, 191}), "supplementary scalar copied byte-exact")
     read_bytes_require(source == ([U8]{65, 0, 10, 13, 9, 27, 127, 194, 128, 194, 159, 226, 128, 168, 226, 128, 169, 240, 159, 152, 128, 244, 143, 191, 191}), "source stays unchanged after output append")
-    empty :: [U8]{}
+    empty: [U8]{}
     read_bytes_require(foundation_read_bytes_len(empty) == 0, "empty extent")
     foundation_append_read_bytes(&out, empty, 0, 0)
     read_bytes_require(out.len() == 9, "empty source appends nothing")

@@ -13,8 +13,8 @@ try:
     lines = source.read_text().splitlines(keepends=True)
     edited = []
     for line in lines:
-        if line.startswith("fn prepare()"):
-            line = line.replace("fn prepare", "fn configure", 1)
+        if line.startswith("prepare: fn()"):
+            line = line.replace("prepare: fn", "configure: fn", 1)
         elif line.rstrip("\r\n") == "    prepare()":
             line = line.replace("prepare()", "configure()", 1)
         edited.append(line)

@@ -1,11 +1,11 @@
 // Original tests/explain_syntax.rs103-129; public positioned text + exact ASCII word scanner.
-use files :: core.files
+use files: core.files
 
-fn s5_explain_word(code: Int) -> Bool {
+s5_explain_word: fn(code: Int) -> Bool {
     (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 || code == 45
 }
 
-fn s5_explain_token(word: String) {
+s5_explain_token: fn(word: String) {
     if word.starts_with("SIGIL_") || word.starts_with("OP_") || word.starts_with("D-") {
         print("offending token: {word}")
         assert(false, "default explanation leaks an internal token")
@@ -13,18 +13,20 @@ fn s5_explain_token(word: String) {
 }
 
 #Test("positioned meanings, nonempty examples, and no internal words") {
-    plain :: files.read("plain.txt") ?? panic("captured plain explanation")
-    what :: files.read("what.txt") ?? panic("captured JSON what")
+    plain: files.read("plain.txt") ?? panic("captured plain explanation")
+    what: files.read("what.txt") ?? panic("captured JSON what")
     assert(plain.contains("Example:"))
-    bytes :: plain.bytes()
+    bytes: plain.bytes()
     start := 0
+    // The scan walks bytes, so each word is cut from the bytes: an
+    // explanation may hold non-ASCII text such as `…`.
     loop index in 0..<bytes.len() {
         if !s5_explain_word(Int.from_u8(bytes[index])) {
-            s5_explain_token(plain.slice(start..<index))
+            s5_explain_token(String.from_bytes(bytes.slice(start, index)) ?? "")
             start = index + 1
         }
     }
-    s5_explain_token(plain.slice(start..<bytes.len()))
+    s5_explain_token(String.from_bytes(bytes.slice(start, bytes.len())) ?? "")
     positioned := 0
     examples := 0
     in_example := false

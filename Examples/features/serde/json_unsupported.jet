@@ -1,22 +1,22 @@
 use {
-    json :: core.encoding.json
-    jsonl :: core.encoding.jsonl
-    math :: core.math
+    json: core.encoding.json
+    jsonl: core.encoding.jsonl
+    math: core.math
 }
 
 // A comptime value runs on the build's implicit `Err` rail: an unhandled
 // failure fails the build, so this one handles the failure itself.
-COMPTIME_UNSUPPORTED :: comptime {
+COMPTIME_UNSUPPORTED: comptime {
     if json.to_string(Dyn.Float(math.NAN)) == {
         .Ok(_) -> "accepted"
         .Err(error) -> if error.format == .JSON && error.kind == .Unsupported -> error.reason else -> "another error"
     }
 }
-COMPTIME_CHAR :: comptime { json.to_string('\n') ?? panic("comptime Char JSON") }
-C0_EXPECTED :: "\"\\u0000\\u0001\\u0002\\u0003\\u0004\\u0005\\u0006\\u0007\\b\\t\\n\\u000b\\f\\r\\u000e\\u000f\\u0010\\u0011\\u0012\\u0013\\u0014\\u0015\\u0016\\u0017\\u0018\\u0019\\u001a\\u001b\\u001c\\u001d\\u001e\\u001f\""
+COMPTIME_CHAR: comptime { json.to_string('\n') ?? panic("comptime Char JSON") }
+C0_EXPECTED: "\"\\u0000\\u0001\\u0002\\u0003\\u0004\\u0005\\u0006\\u0007\\b\\t\\n\\u000b\\f\\r\\u000e\\u000f\\u0010\\u0011\\u0012\\u0013\\u0014\\u0015\\u0016\\u0017\\u0018\\u0019\\u001a\\u001b\\u001c\\u001d\\u001e\\u001f\""
 
-fn reject(label: String, number: Float) {
-    tree :: Dyn.Array([Dyn]{Dyn.Float(number)})
+reject: fn(label: String, number: Float) {
+    tree: Dyn.Array([Dyn]{Dyn.Float(number)})
     if json.to_string(tree) == {
         .Ok(_) -> panic("non-finite JSON accepted")
         .Err(error) -> {
@@ -29,12 +29,12 @@ fn reject(label: String, number: Float) {
     if json.dumps(tree) == .Ok(_) -> panic("non-finite dumps accepted")
     if json.dump(tree) == .Ok(_) -> panic("non-finite dump accepted")
     if json.to_string_pretty(tree) == .Ok(_) -> panic("non-finite pretty accepted")
-    leaf :: Dyn.Float(number)
+    leaf: Dyn.Float(number)
     assert_eq("{leaf}", "{number}")
     print("display: {number} {leaf}")
 }
 
-fn run() {
+run: fn() {
     assert_eq(COMPTIME_UNSUPPORTED, "JSON cannot encode a non-finite Float")
     print("comptime: {COMPTIME_UNSUPPORTED}")
     assert_eq(COMPTIME_CHAR, json.to_string('\n') ?? panic("Char JSON parity"))
@@ -45,12 +45,12 @@ fn run() {
     print("Char: {json.to_string('\n') ?? panic("Char JSON")}")
     bytes := [U8]{}
     loop index in 0..<32 -> &bytes.push(U8{index})
-    controls :: String.from_bytes(bytes) ?? panic("C0 text")
-    wire :: json.to_string(controls) ?? panic("C0 JSON")
+    controls: String.from_bytes(bytes) ?? panic("C0 text")
+    wire: json.to_string(controls) ?? panic("C0 JSON")
     assert_eq(wire, C0_EXPECTED)
     assert((json.parse(wire) ?? panic("C0 round trip")) == Dyn.Text(controls))
     print("C0 lowercase: {wire.contains("\\u001f") && !wire.contains("\\u001F")}")
-    bad :: Dyn.Float(math.NAN)
+    bad: Dyn.Float(math.NAN)
     if jsonl.to_string([Dyn]{Dyn.Int(12), bad}) == {
         .Ok(_) -> panic("non-finite JSONL accepted")
         .Err(error) -> {

@@ -2,20 +2,20 @@
 // used by libsqlite3-sys 0.28.0, never an ambient system SQLite.
 use {
     core.mem
-    sql :: c.sqlite3
+    sql: c.sqlite3
 }
 
-#Import module c.sqlite3 {
-    fn open(filename: String, database: &U64, flags: I32, vfs: U64) -> I32 = "sqlite3_open_v2"
-    fn exec(database: U64, text: String, callback: U64, data: U64, error: &U64) -> I32 = "sqlite3_exec"
-    fn prepare(database: U64, text: String, bytes: I32, statement: &U64, tail: &U64) -> I32 = "sqlite3_prepare_v2"
-    fn step(statement: U64) -> I32 = "sqlite3_step"
-    fn column(statement: U64, index: I32) -> I64 = "sqlite3_column_int64"
-    fn finalize(statement: U64) -> I32 = "sqlite3_finalize"
-    fn close(database: U64) -> I32 = "sqlite3_close"
+#Import c.sqlite3: module {
+    open: fn(filename: String, database: &U64, flags: I32, vfs: U64) -> I32 = "sqlite3_open_v2"
+    exec: fn(database: U64, text: String, callback: U64, data: U64, error: &U64) -> I32 = "sqlite3_exec"
+    prepare: fn(database: U64, text: String, bytes: I32, statement: &U64, tail: &U64) -> I32 = "sqlite3_prepare_v2"
+    step: fn(statement: U64) -> I32 = "sqlite3_step"
+    column: fn(statement: U64, index: I32) -> I64 = "sqlite3_column_int64"
+    finalize: fn(statement: U64) -> I32 = "sqlite3_finalize"
+    close: fn(database: U64) -> I32 = "sqlite3_close"
 }
 
-fn run() {
+run: fn() {
     #Unsafe("exclusive out-slots hold SQLite pointers; zero words mean null, SQL is NUL-terminated for each borrowed call, and each live pointer is finalized/closed once") {
         database := U64{0}
         if (sql.open(":memory:", &database, I32{6}, U64{0}) != I32{0}) -> panic("SQLite open failed")

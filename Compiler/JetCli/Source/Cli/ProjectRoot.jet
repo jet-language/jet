@@ -7,14 +7,14 @@
 // registered diagnostic, never a silently different root. `cache` is the one
 // declaration cache of the command's discovery session.
 use {
-    cli_files :: core.files
+    cli_files: core.files
     jet_pkg_model.[
         AuthorityResolver, ManifestError, WorkspaceDeclarationCache,
         pkg_find_inline_package_root_checked, pkg_find_manifest_root_checked,
     ]
 }
 
-fn jet_cli_selected_project_root(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> String ManifestError! {
+jet_cli_selected_project_root: fn(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> String ManifestError! {
     if jet_cli_find_workspace_root_checked(&cache, start) == {
         .Ok(found) -> {
             if found == .Val(root) -> return Ok(root)
@@ -37,7 +37,7 @@ fn jet_cli_selected_project_root(cache: &WorkspaceDeclarationCache, start: Strin
 // `receipt_project_root`: the selected root, else the canonical start, else the
 // start as given. History is optional, so a discovery diagnostic never stops
 // the command that records it.
-fn jet_cli_receipt_project_root(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> String Never! {
+jet_cli_receipt_project_root: fn(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> String Never! {
     if jet_cli_selected_project_root(&cache, start) == {
         .Ok(root) -> root
         .Err(_) -> cli_files.realpath(start) ?? start
@@ -47,7 +47,7 @@ fn jet_cli_receipt_project_root(cache: &WorkspaceDeclarationCache, start: String
 // `find_workspace_root_checked`: the nearest directory whose checked authority
 // resolves a workspace declaration. Every failure is the workspace diagnostic,
 // as `find_workspace_root_with_error` maps it.
-fn jet_cli_find_workspace_root_checked(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> String? ManifestError! {
+jet_cli_find_workspace_root_checked: fn(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> String? ManifestError! {
     dir := AuthorityResolver.authority_walk_root(start) ?? return Err(ManifestError{diagnostic: err.workspace_diagnostic()})
     loop {
         if AuthorityResolver.open_for_authority_walk(dir) == {
@@ -69,10 +69,10 @@ fn jet_cli_find_workspace_root_checked(cache: &WorkspaceDeclarationCache, start:
 
 // `find_repository_root`: the nearest real `.git` marker, never a link to one.
 // A worktree's `.git` file is a repository marker too.
-fn jet_cli_find_repository_root(start: String) -[FS, Env]> String? Never! {
+jet_cli_find_repository_root: fn(start: String) -[FS, Env]> String? Never! {
     dir := AuthorityResolver.authority_walk_root(start) ?? return None
     loop {
-        marker :: if dir.ends_with("/") -> "{dir}.git" else -> "{dir}/.git"
+        marker: if dir.ends_with("/") -> "{dir}.git" else -> "{dir}/.git"
         if cli_files.stat(marker) == .Ok(info) {
             if !info.is_symlink && (info.is_dir || info.is_file) -> return Val(dir)
         }
@@ -83,8 +83,8 @@ fn jet_cli_find_repository_root(start: String) -[FS, Env]> String? Never! {
 // `find_package_root_checked`: the extracted manifest root or the inline
 // Package carrier's root; the inline root wins so a later facts read reports
 // the explicit conflict instead of silently choosing one.
-fn jet_cli_find_package_root_checked(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> String? ManifestError! {
-    manifest :: if pkg_find_manifest_root_checked(&cache, start) == {
+jet_cli_find_package_root_checked: fn(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> String? ManifestError! {
+    manifest: if pkg_find_manifest_root_checked(&cache, start) == {
         .Ok(found) -> found
         .Err(error) -> { return Err(error) }
     }

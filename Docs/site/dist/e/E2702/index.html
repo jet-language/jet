@@ -38,100 +38,100 @@
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E2702</code>: <code>tests/ui/crypto_argon2id_literal_policy.stderr</code>.</p>
 <pre class="diag">Error [jet.CryptoMisuse]: Crypto API misuse
-  --&gt; tests/ui/crypto_argon2id_literal_policy.jet:10:49
+  --&gt; tests/ui/crypto_argon2id_literal_policy.jet:10:47
     |
- 10 |         salt_short :: expert.argon2id(password, [0, 0, 0, 0, 0, 0, 0], 8192, 1, 1, 16)
-    |                                                 ^^^^^^^^^^^^^^^^^^^^^
+ 10 |         salt_short: expert.argon2id(password, [0, 0, 0, 0, 0, 0, 0], 8192, 1, 1, 16)
+    |                                               ^^^^^^^^^^^^^^^^^^^^^
  Why: The salt is 7 bytes, and `argon2id` takes 8..64 bytes, so the call can only fail
  Fix: Replace the offending cryptographic argument with the concrete value or bound named in the diagnostic: pass a salt of 8..64 bytes
 More: jet-lang.dev/e/E2702
 
 Error [jet.CryptoMisuse]: Crypto API misuse
-  --&gt; tests/ui/crypto_argon2id_literal_policy.jet:11:48
+  --&gt; tests/ui/crypto_argon2id_literal_policy.jet:11:46
     |
- 11 |         salt_long :: expert.argon2id(password, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64], 8192, 1, 1, 16)
-    |                                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ 11 |         salt_long: expert.argon2id(password, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64], 8192, 1, 1, 16)
+    |                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
  Why: The salt is 65 bytes, and `argon2id` takes 8..64 bytes, so the call can only fail
  Fix: Replace the offending cryptographic argument with the concrete value or bound named in the diagnostic: pass a salt of 8..64 bytes
 More: jet-lang.dev/e/E2702
 
 Error [jet.CryptoMisuse]: Crypto API misuse
-  --&gt; tests/ui/crypto_argon2id_literal_policy.jet:12:75
+  --&gt; tests/ui/crypto_argon2id_literal_policy.jet:12:73
     |
- 12 |         memory_low :: expert.argon2id(password, [0, 0, 0, 0, 0, 0, 0, 0], 8191, 1, 1, 16)
-    |                                                                           ^^^^
+ 12 |         memory_low: expert.argon2id(password, [0, 0, 0, 0, 0, 0, 0, 0], 8191, 1, 1, 16)
+    |                                                                         ^^^^
  Why: The memory cost in KiB is 8191, and `argon2id` takes 8192..262144, so the call can only fail
  Fix: Replace the offending cryptographic argument with the concrete value or bound named in the diagnostic: pass a memory cost in KiB of 8192..262144
 More: jet-lang.dev/e/E2702
 
 Error [jet.CryptoMisuse]: Crypto API misuse
-  --&gt; tests/ui/crypto_argon2id_literal_policy.jet:13:76
+  --&gt; tests/ui/crypto_argon2id_literal_policy.jet:13:74
     |
- 13 |         memory_high :: expert.argon2id(password, [0, 0, 0, 0, 0, 0, 0, 0], 262145, 1, 1, 16)
-    |                                                                            ^^^^^^
+ 13 |         memory_high: expert.argon2id(password, [0, 0, 0, 0, 0, 0, 0, 0], 262145, 1, 1, 16)
+    |                                                                          ^^^^^^
  Why: The memory cost in KiB is 262145, and `argon2id` takes 8192..262144, so the call can only fail
  Fix: Replace the offending cryptographic argument with the concrete value or bound named in the diagnostic: pass a memory cost in KiB of 8192..262144
 More: jet-lang.dev/e/E2702
 
 Error [jet.CryptoMisuse]: Crypto API misuse
-  --&gt; tests/ui/crypto_argon2id_literal_policy.jet:14:85
+  --&gt; tests/ui/crypto_argon2id_literal_policy.jet:14:83
     |
- 14 |         iterations_low :: expert.argon2id(password, [0, 0, 0, 0, 0, 0, 0, 0], 8192, 0, 1, 16)
-    |                                                                                     ^
+ 14 |         iterations_low: expert.argon2id(password, [0, 0, 0, 0, 0, 0, 0, 0], 8192, 0, 1, 16)
+    |                                                                                   ^
  Why: The iteration count is 0, and `argon2id` takes 1..10, so the call can only fail
  Fix: Replace the offending cryptographic argument with the concrete value or bound named in the diagnostic: pass an iteration count of 1..10
 More: jet-lang.dev/e/E2702
 
 Error [jet.CryptoMisuse]: Crypto API misuse
-  --&gt; tests/ui/crypto_argon2id_literal_policy.jet:15:86
+  --&gt; tests/ui/crypto_argon2id_literal_policy.jet:15:84
     |
- 15 |         iterations_high :: expert.argon2id(password, [0, 0, 0, 0, 0, 0, 0, 0], 8192, 11, 1, 16)
-    |                                                                                      ^^
+ 15 |         iterations_high: expert.argon2id(password, [0, 0, 0, 0, 0, 0, 0, 0], 8192, 11, 1, 16)
+    |                                                                                    ^^
  Why: The iteration count is 11, and `argon2id` takes 1..10, so the call can only fail
  Fix: Replace the offending cryptographic argument with the concrete value or bound named in the diagnostic: pass an iteration count of 1..10
 More: jet-lang.dev/e/E2702
 
 Error [jet.CryptoMisuse]: Crypto API misuse
-  --&gt; tests/ui/crypto_argon2id_literal_policy.jet:16:83
+  --&gt; tests/ui/crypto_argon2id_literal_policy.jet:16:81
     |
- 16 |         lanes_low :: expert.argon2id(password, [0, 0, 0, 0, 0, 0, 0, 0], 8192, 1, 0, 16)
-    |                                                                                   ^
+ 16 |         lanes_low: expert.argon2id(password, [0, 0, 0, 0, 0, 0, 0, 0], 8192, 1, 0, 16)
+    |                                                                                 ^
  Why: The lane count is 0, and `argon2id` takes 1..8, so the call can only fail
  Fix: Replace the offending cryptographic argument with the concrete value or bound named in the diagnostic: pass a lane count of 1..8
 More: jet-lang.dev/e/E2702
 
 Error [jet.CryptoMisuse]: Crypto API misuse
-  --&gt; tests/ui/crypto_argon2id_literal_policy.jet:17:84
+  --&gt; tests/ui/crypto_argon2id_literal_policy.jet:17:82
     |
- 17 |         lanes_high :: expert.argon2id(password, [0, 0, 0, 0, 0, 0, 0, 0], 8192, 1, 9, 16)
-    |                                                                                    ^
+ 17 |         lanes_high: expert.argon2id(password, [0, 0, 0, 0, 0, 0, 0, 0], 8192, 1, 9, 16)
+    |                                                                                  ^
  Why: The lane count is 9, and `argon2id` takes 1..8, so the call can only fail
  Fix: Replace the offending cryptographic argument with the concrete value or bound named in the diagnostic: pass a lane count of 1..8
 More: jet-lang.dev/e/E2702
 
 Error [jet.CryptoMisuse]: Crypto API misuse
-  --&gt; tests/ui/crypto_argon2id_literal_policy.jet:18:89
+  --&gt; tests/ui/crypto_argon2id_literal_policy.jet:18:87
     |
- 18 |         output_short :: expert.argon2id(password, [0, 0, 0, 0, 0, 0, 0, 0], 8192, 1, 1, 15)
-    |                                                                                         ^^
+ 18 |         output_short: expert.argon2id(password, [0, 0, 0, 0, 0, 0, 0, 0], 8192, 1, 1, 15)
+    |                                                                                       ^^
  Why: The output length is 15, and `argon2id` takes 16..64, so the call can only fail
  Fix: Replace the offending cryptographic argument with the concrete value or bound named in the diagnostic: pass an output length of 16..64
 More: jet-lang.dev/e/E2702
 
 Error [jet.CryptoMisuse]: Crypto API misuse
-  --&gt; tests/ui/crypto_argon2id_literal_policy.jet:19:88
+  --&gt; tests/ui/crypto_argon2id_literal_policy.jet:19:86
     |
- 19 |         output_long :: expert.argon2id(password, [0, 0, 0, 0, 0, 0, 0, 0], 8192, 1, 1, 65)
-    |                                                                                        ^^
+ 19 |         output_long: expert.argon2id(password, [0, 0, 0, 0, 0, 0, 0, 0], 8192, 1, 1, 65)
+    |                                                                                      ^^
  Why: The output length is 65, and `argon2id` takes 16..64, so the call can only fail
  Fix: Replace the offending cryptographic argument with the concrete value or bound named in the diagnostic: pass an output length of 16..64
 More: jet-lang.dev/e/E2702
 
 Error [jet.CryptoMisuse]: Crypto API misuse
-  --&gt; tests/ui/crypto_argon2id_literal_policy.jet:20:74
+  --&gt; tests/ui/crypto_argon2id_literal_policy.jet:20:72
     |
- 20 |         work_high :: expert.argon2id(password, [0, 0, 0, 0, 0, 0, 0, 0], 262144, 5, 1, 16)
-    |                                                                          ^^^^^^
+ 20 |         work_high: expert.argon2id(password, [0, 0, 0, 0, 0, 0, 0, 0], 262144, 5, 1, 16)
+    |                                                                        ^^^^^^
  Why: The memory cost × iterations is 1310720, and `argon2id` takes at most 1048576, so the call can only fail
  Fix: Replace the offending cryptographic argument with the concrete value or bound named in the diagnostic: pass a memory cost × iterations of at most 1048576
 More: jet-lang.dev/e/E2702

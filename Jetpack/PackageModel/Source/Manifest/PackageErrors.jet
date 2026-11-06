@@ -3,7 +3,7 @@
 // (Manifest.jet) turns a parse error into its registered E12xx diagnostic.
 
 #Error
-enum PackageParseError {
+PackageParseError: enum {
     MissingName
     MissingRecord(String)
     MalformedField(String)
@@ -38,7 +38,7 @@ enum PackageParseError {
     // Malformed hosted whole-program allocator fact.
     BadAllocatorPolicy(detail: String)
 
-    fn message(self) -> String Never! {
+    message: fn(self) -> String Never! {
         if self == {
             .MissingName -> "Package needs a `name` field"
             .MissingRecord(name) -> "`{name}` needs a record value"
@@ -67,7 +67,7 @@ enum PackageParseError {
 
 // Why Package composition or output selection failed.
 #Error
-enum ComposeError {
+ComposeError: enum {
     MembersInConfig(origin: String)
     Conflict(field: String, left_origin: String, right_origin: String, left: String, right: String)
     UnknownDefault(intent: String, output: String)
@@ -75,7 +75,7 @@ enum ComposeError {
     // `defaults.test` names neither a test profile nor an output.
     UnknownTestDefault(name: String, profiles: [String])
 
-    fn message(self) -> String Never! {
+    message: fn(self) -> String Never! {
         if self == {
             .MembersInConfig(origin) -> "Config `{origin}` cannot declare Package members"
             .Conflict(field, left_origin, right_origin, left, right) -> "conflicting `{field}` from `{left_origin}` ({left}) and `{right_origin}` ({right})"
@@ -89,11 +89,11 @@ enum ComposeError {
 // Structural carrier failures and canonical Package
 // field failures share one parse result.
 #Error
-enum InlinePackageParseError {
+InlinePackageParseError: enum {
     Structure(InlinePackageError)
     Fields(PackageParseError)
 
-    fn message(self) -> String Never! {
+    message: fn(self) -> String Never! {
         if self == {
             .Structure(error) -> error.message()
             .Fields(error) -> error.message()

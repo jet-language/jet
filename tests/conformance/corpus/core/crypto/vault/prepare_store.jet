@@ -1,13 +1,13 @@
 // core-conformance: core.crypto.vault.prepare_store
 use {
-    crypto :: core.crypto
-    vault :: core.crypto.vault
+    crypto: core.crypto
+    vault: core.crypto.vault
 }
 
-fn run() -[Secret, IO]> {
-    key :: crypto.SigningKey.new_random() ?? return
-    plan :: vault.prepare_store<crypto.SigningKey>("", ^key) ?? return
-    write :: vault.authorize_write(plan, "fixed prepare-store authorization") ?? return
-    result :: vault.commit_store(^write, ^plan) ?? return
+run: fn() -[Secret, IO]> {
+    key: crypto.SigningKey.new_random() ?? return
+    plan: vault.prepare_store<crypto.SigningKey>("", ^key) ?? return
+    write: vault.authorize_write(plan, "fixed prepare-store authorization") ?? return
+    result: vault.commit_store(^write, ^plan) ?? return
     print(result)
 }

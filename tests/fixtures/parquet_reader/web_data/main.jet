@@ -2,58 +2,58 @@
 // The bytes are declared with embed_bytes, then bound through the canonical
 // provider loader path before typed snapshot/decode. No parser lives here.
 use {
-    data :: core.data
-    ui :: core.ui
+    data: core.data
+    ui: core.ui
 }
 
 #[Target(Web), HTML("index.html")]
 
 #Codable
-struct IntCell {
+IntCell: struct {
     int32_field: Int?
 }
 
 #Codable
-struct WrongCell {
+WrongCell: struct {
     required_text: String
 }
 
-GOOD_PARQUET :: comptime { embed_bytes("../int32_with_null_pages.parquet") }
-BAD_PARQUET :: comptime { embed_bytes("../ARROW-RS-GH-6229-DICTHEADER.parquet") }
+GOOD_PARQUET: comptime { embed_bytes("../int32_with_null_pages.parquet") }
+BAD_PARQUET: comptime { embed_bytes("../ARROW-RS-GH-6229-DICTHEADER.parquet") }
 
-fn typed_success() -> String {
-    loader :: data.url<[IntCell]>("https://typed-data.invalid/embedded.parquet", "parquet", "typed-data.invalid", data.DataLimits.safe()) ?? panic("typed loader")
+typed_success: fn() -> String {
+    loader: data.url<[IntCell]>("https://typed-data.invalid/embedded.parquet", "parquet", "typed-data.invalid", data.DataLimits.safe()) ?? panic("typed loader")
     loader.bind(GOOD_PARQUET) ?? panic("typed bind")
-    snapshot :: data.snapshot<[IntCell]>(&loader) ?? panic("typed snapshot")
-    row :: snapshot.value.at(200) ?? panic("null-page row")
+    snapshot: data.snapshot<[IntCell]>(&loader) ?? panic("typed snapshot")
+    row: snapshot.value.at(200) ?? panic("null-page row")
     return "good rows={snapshot.value.len()} null_page={row.int32_field == None}"
 }
 
-fn typed_decode_failure() -> Bool {
-    loader :: data.url<[WrongCell]>("https://typed-data.invalid/embedded.parquet", "parquet", "typed-data.invalid", data.DataLimits.safe()) ?? panic("malformed typed loader")
+typed_decode_failure: fn() -> Bool {
+    loader: data.url<[WrongCell]>("https://typed-data.invalid/embedded.parquet", "parquet", "typed-data.invalid", data.DataLimits.safe()) ?? panic("malformed typed loader")
     loader.bind(GOOD_PARQUET) ?? panic("malformed typed bind")
-    snapshot :: data.snapshot<[WrongCell]>(&loader)
+    snapshot: data.snapshot<[WrongCell]>(&loader)
     return if snapshot == {
         .Err(_) -> true
         .Ok(_) -> false
     }
 }
 
-fn provider_failure() -> Bool {
-    loader :: data.url<[IntCell]>("https://typed-data.invalid/malformed.parquet", "parquet", "typed-data.invalid", data.DataLimits.safe()) ?? panic("provider loader")
+provider_failure: fn() -> Bool {
+    loader: data.url<[IntCell]>("https://typed-data.invalid/malformed.parquet", "parquet", "typed-data.invalid", data.DataLimits.safe()) ?? panic("provider loader")
     loader.bind(BAD_PARQUET) ?? panic("provider bind")
-    snapshot :: data.snapshot<[IntCell]>(&loader)
+    snapshot: data.snapshot<[IntCell]>(&loader)
     return if snapshot == {
         .Err(_) -> true
         .Ok(_) -> false
     }
 }
 
-fn run() {
-    typed :: typed_success()
-    typed_failed :: typed_decode_failure()
-    provider_failed :: provider_failure()
-    report :: "{typed}; typed_decode_failed={typed_failed}; provider_failed={provider_failed}"
-    backend :: ui.null_backend()
+run: fn() {
+    typed: typed_success()
+    typed_failed: typed_decode_failure()
+    provider_failed: provider_failure()
+    report: "{typed}; typed_decode_failed={typed_failed}; provider_failed={provider_failed}"
+    backend: ui.null_backend()
     ui.mount(backend, ui.box([ui.text(report)]), ui.constraint(0.0, 0.0, 720.0, 80.0))
 }

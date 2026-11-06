@@ -1,9 +1,9 @@
 
 extern rust "std" {
-    #Undo(undo_mutate) fn mutate(value: Int) -> Int = "std::convert::identity"
+    #Undo(undo_mutate) mutate: fn(value: Int) -> Int = "std::convert::identity"
 }
-fn undo_mutate(value: Int) { print("left") }
-fn exercise() {
+undo_mutate: fn(value: Int) { print("left") }
+exercise: fn() {
     #Transact(tx) {
         mutate(1)
         return

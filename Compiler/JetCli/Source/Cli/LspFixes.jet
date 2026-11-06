@@ -4,14 +4,14 @@ use {
     jet_driver.[jet_driver_apply_edits]
 }
 
-struct JetCLIFix {
+JetCLIFix: struct {
     title: String
     edit: TextEdit
     applicability: DiagnosticFixApplicability
     safety: DiagnosticFixSafety
 }
 
-struct JetCLIFixApply {
+JetCLIFixApply: struct {
     source: String
     applied: Int
     deferred: Int
@@ -20,7 +20,7 @@ struct JetCLIFixApply {
 // A fix `jet fix` did not apply (FixCommands.jet), and why: one that needs
 // review (`--all` applies it), or one whose edited file no longer checks.
 // The fix log records each (jet_cli_fix_log).
-struct JetCLIFixSkip {
+JetCLIFixSkip: struct {
     title: String
     edit: TextEdit
     reason: String
@@ -28,11 +28,11 @@ struct JetCLIFixSkip {
 
 // `jet fix` applies a diagnostic's primary edit; its alternative edits are
 // the other choices an editor offers as code actions.
-fn jet_cli_fixes_from_diagnostics(diagnostics: [Diagnostic]) -> [JetCLIFix] Never! {
+jet_cli_fixes_from_diagnostics: fn(diagnostics: [Diagnostic]) -> [JetCLIFix] Never! {
     fixes := [JetCLIFix]{}
     loop diagnostic in diagnostics {
-        applicability :: diagnostic.applicability ?? next
-        safety :: diagnostic.safety ?? next
+        applicability: diagnostic.applicability ?? next
+        safety: diagnostic.safety ?? next
         if diagnostic.edit == .Val(edit) {
             &fixes.push(JetCLIFix{title: diagnostic.fix, edit: edit, applicability: applicability, safety: safety})
         }
@@ -40,12 +40,12 @@ fn jet_cli_fixes_from_diagnostics(diagnostics: [Diagnostic]) -> [JetCLIFix] Neve
     fixes
 }
 
-fn jet_cli_collect_fixes_from_diagnostics(diagnostics: [Diagnostic], source: String) -> [JetCLIFix] Never! {
+jet_cli_collect_fixes_from_diagnostics: fn(diagnostics: [Diagnostic], source: String) -> [JetCLIFix] Never! {
     fixes := jet_cli_fixes_from_diagnostics(diagnostics)
     fixes
 }
 
-fn jet_cli_safe_fixes(fixes: [JetCLIFix]) -> [JetCLIFix] Never! {
+jet_cli_safe_fixes: fn(fixes: [JetCLIFix]) -> [JetCLIFix] Never! {
     selected := [JetCLIFix]{}
     loop fix in fixes {
         if fix.applicability == .Safe && (fix.safety == .Formatting || fix.safety == .BehaviorPreserving) {
@@ -55,7 +55,7 @@ fn jet_cli_safe_fixes(fixes: [JetCLIFix]) -> [JetCLIFix] Never! {
     selected
 }
 
-fn jet_cli_fix_apply_non_overlapping(source: String, fixes: [JetCLIFix]) -> JetCLIFixApply Never! {
+jet_cli_fix_apply_non_overlapping: fn(source: String, fixes: [JetCLIFix]) -> JetCLIFixApply Never! {
     order := [Int]{}
     loop index in 0..<fixes.len() -> &order.push(index)
     width := 1
@@ -63,15 +63,15 @@ fn jet_cli_fix_apply_non_overlapping(source: String, fixes: [JetCLIFix]) -> JetC
         merged := [Int]{}
         start := 0
         loop start < order.len() {
-            middle :: if start + width < order.len() -> start + width else -> order.len()
-            end :: if start + width * 2 < order.len() -> start + width * 2 else -> order.len()
+            middle: if start + width < order.len() -> start + width else -> order.len()
+            end: if start + width * 2 < order.len() -> start + width * 2 else -> order.len()
             left := start
             right := middle
             loop left < middle || right < end {
                 take_left := right >= end
                 if !take_left && left < middle {
-                    a :: fixes[order[left]].edit.span
-                    b :: fixes[order[right]].edit.span
+                    a: fixes[order[left]].edit.span
+                    b: fixes[order[right]].edit.span
                     take_left = a.start < b.start || (a.start == b.start && a.end >= b.end)
                 }
                 if take_left {
@@ -91,7 +91,7 @@ fn jet_cli_fix_apply_non_overlapping(source: String, fixes: [JetCLIFix]) -> JetC
     deferred := 0
     previous := TextEdit?{None}
     loop index in order {
-        edit :: fixes[index].edit
+        edit: fixes[index].edit
         if previous == .Val(last) {
             if last.span.start == edit.span.start && last.span.end == edit.span.end && last.new_text == edit.new_text {
                 next
@@ -104,8 +104,8 @@ fn jet_cli_fix_apply_non_overlapping(source: String, fixes: [JetCLIFix]) -> JetC
         }
         &kept.push(edit)
     }
-    applied :: kept.len()
-    updated :: if jet_driver_apply_edits(source, kept) == {
+    applied: kept.len()
+    updated: if jet_driver_apply_edits(source, kept) == {
         .Ok(text) -> text
         .Err(_) -> source
     }

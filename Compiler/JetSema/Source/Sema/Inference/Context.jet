@@ -11,7 +11,7 @@ use jet_foundation.[
     type_identity_equal,
 ]
 
-struct SemaInferenceTypeParam {
+SemaInferenceTypeParam: struct {
     name: String
     bounds: [String]
     span: Span
@@ -21,13 +21,13 @@ struct SemaInferenceTypeParam {
     bound_module: String
 }
 
-struct SemaInferenceBinding {
+SemaInferenceBinding: struct {
     name: String
     ty: Type
     source: String
 }
 
-struct SemaInferenceConflict {
+SemaInferenceConflict: struct {
     param: String
     first: Type
     first_source: String
@@ -35,7 +35,7 @@ struct SemaInferenceConflict {
     second_source: String
 }
 
-struct SemaInferenceBoundEvidence {
+SemaInferenceBoundEvidence: struct {
     param: String
     actual: Type
     bound: String
@@ -45,7 +45,7 @@ struct SemaInferenceBoundEvidence {
 
 // The registration graph is not part of the context: solver entry points take
 // it as a read parameter, so building a context never copies the graph.
-struct SemaInferenceContext {
+SemaInferenceContext: struct {
     caller_module_identity: String
     caller_package_identity: String
     type_params: [SemaInferenceTypeParam]
@@ -53,7 +53,7 @@ struct SemaInferenceContext {
     expected: Type?
 }
 
-struct SemaInferenceResult {
+SemaInferenceResult: struct {
     substitutions: [SemaInferenceBinding]
     type_args: [Type]
     parameters: [Type]
@@ -63,39 +63,39 @@ struct SemaInferenceResult {
     compatible: Bool
 }
 
-fn sema_inference_type_params(parameters: [TypeParam]) -> [SemaInferenceTypeParam] Never! {
-    result :: loop parameter in parameters -> SemaInferenceTypeParam{name: parameter.name, bounds: parameter.bounds, span: parameter.name_span, identity_key: "", bound_module: ""}
+sema_inference_type_params: fn(parameters: [TypeParam]) -> [SemaInferenceTypeParam] Never! {
+    result: loop parameter in parameters -> SemaInferenceTypeParam{name: parameter.name, bounds: parameter.bounds, span: parameter.name_span, identity_key: "", bound_module: ""}
     result
 }
 
-fn sema_inference_registration_params(parameters: [SemaRegistrationGenericParam]) -> [SemaInferenceTypeParam] Never! {
-    result :: loop parameter in parameters -> SemaInferenceTypeParam{name: parameter.name, bounds: parameter.bounds, span: parameter.span, identity_key: parameter.identity_key, bound_module: parameter.module_identity}
+sema_inference_registration_params: fn(parameters: [SemaRegistrationGenericParam]) -> [SemaInferenceTypeParam] Never! {
+    result: loop parameter in parameters -> SemaInferenceTypeParam{name: parameter.name, bounds: parameter.bounds, span: parameter.span, identity_key: parameter.identity_key, bound_module: parameter.module_identity}
     result
 }
 
-fn sema_inference_bindings_for_type_args(parameters: [SemaInferenceTypeParam], type_args: [Type]) -> [SemaInferenceBinding] Never! {
+sema_inference_bindings_for_type_args: fn(parameters: [SemaInferenceTypeParam], type_args: [Type]) -> [SemaInferenceBinding] Never! {
     if parameters.len() != type_args.len() -> return [SemaInferenceBinding]{}
-    result :: loop (index, parameter) in parameters -> SemaInferenceBinding{name: parameter.name, ty: type_args[index], source: "explicit type argument"}
+    result: loop (index, parameter) in parameters -> SemaInferenceBinding{name: parameter.name, ty: type_args[index], source: "explicit type argument"}
     result
 }
 
-fn sema_inference_context(caller_module_identity: String, caller_package_identity: String, type_params: [SemaInferenceTypeParam], lexical_generic_params: [TGenericParam], expected: Type?) -> SemaInferenceContext Never! {
+sema_inference_context: fn(caller_module_identity: String, caller_package_identity: String, type_params: [SemaInferenceTypeParam], lexical_generic_params: [TGenericParam], expected: Type?) -> SemaInferenceContext Never! {
     SemaInferenceContext{caller_module_identity: caller_module_identity, caller_package_identity: caller_package_identity, type_params: type_params, lexical_generic_params: lexical_generic_params, expected: expected}
 }
 
-fn sema_inference_binding_at(bindings: [SemaInferenceBinding], name: String) -> SemaInferenceBinding? {
+sema_inference_binding_at: fn(bindings: [SemaInferenceBinding], name: String) -> SemaInferenceBinding? {
     loop binding in bindings {
         if binding.name == name -> return Val(binding)
     }
     None
 }
 
-fn sema_inference_result_binding(result: SemaInferenceResult, name: String) -> Type? {
-    binding :: sema_inference_binding_at(result.substitutions, name) ?? return None
+sema_inference_result_binding: fn(result: SemaInferenceResult, name: String) -> Type? {
+    binding: sema_inference_binding_at(result.substitutions, name) ?? return None
     Val(binding.ty)
 }
 
-fn sema_inference_bounds_checked(parameters: [SemaInferenceTypeParam], evidence: [SemaInferenceBoundEvidence], substitutions: [SemaInferenceBinding]) -> Bool Never! {
+sema_inference_bounds_checked: fn(parameters: [SemaInferenceTypeParam], evidence: [SemaInferenceBoundEvidence], substitutions: [SemaInferenceBinding]) -> Bool Never! {
     required_count := 0
     loop parameter in parameters {
         loop bound in parameter.bounds {
@@ -104,7 +104,7 @@ fn sema_inference_bounds_checked(parameters: [SemaInferenceTypeParam], evidence:
             loop row in evidence {
                 if row.param == parameter.name && row.bound == bound {
                     found = row.satisfied
-                    expected :: sema_inference_binding_at(substitutions, parameter.name)
+                    expected: sema_inference_binding_at(substitutions, parameter.name)
                     if expected == {
                         .Val(binding) -> {
                             // A result binding is already resolved (sema_inference_declared_bindings).
@@ -134,6 +134,6 @@ fn sema_inference_bounds_checked(parameters: [SemaInferenceTypeParam], evidence:
     true
 }
 
-fn sema_inference_result_bounds_checked(result: SemaInferenceResult, parameters: [SemaInferenceTypeParam]) -> Bool Never! {
+sema_inference_result_bounds_checked: fn(result: SemaInferenceResult, parameters: [SemaInferenceTypeParam]) -> Bool Never! {
     result.complete && sema_inference_bounds_checked(parameters, result.evidence, result.substitutions)
 }

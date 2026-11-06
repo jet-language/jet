@@ -38,10 +38,10 @@
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E3411</code>: <code>tests/ui/impure_no_flag.stderr</code>.</p>
 <pre class="diag">Error [jet.ImpureGateNotAllowed]: `opening a file` inside `#Impure` is a Tier-2 comptime effect, but `--gate impure=allow` was not passed
-  --&gt; tests/ui/impure_no_flag.jet:5:30
+  --&gt; tests/ui/impure_no_flag.jet:5:28
     |
-  5 |         cfg :: comptime { fs.read(&quot;config.txt&quot;) }
-    |                              ^^^^
+  5 |         cfg: comptime { fs.read(&quot;config.txt&quot;) }
+    |                            ^^^^
  Why: The `#Impure` block opts in to ambient I/O, but the invocation gate is also required so CI can audit builds that touch the host.
  Fix: Add `--gate impure=allow` to your `jet build` / `jet run` invocation.
 More: jet-lang.dev/e/E3411

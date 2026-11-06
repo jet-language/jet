@@ -1,25 +1,25 @@
 use {
-    abi :: c.jet_php_ops
-    json :: core.encoding.json
+    abi: c.jet_php_ops
+    json: core.encoding.json
 }
 
-#Import module c.jet_php_ops {
-    fn open() -> Int = "jet_php_ops_open"
-    fn take_error() -> Int = "jet_php_ops_take_error"
-    fn cancel(handle: Int) = "jet_php_ops_cancel"
-    fn close(handle: Int) = "jet_php_ops_close"
-    fn transform(handle: Int, input: String, deadline_ms: Int) -> String = "jet_php_ops_invoke_transform"
-    fn fail_call(handle: Int, input: String, deadline_ms: Int) -> String = "jet_php_ops_invoke_fail_call"
-    fn sleep_call(handle: Int, input: String, deadline_ms: Int) -> String = "jet_php_ops_invoke_sleep_call"
-    fn pooled_sleep(handle: Int, input: String, deadline_ms: Int) -> String = "jet_php_ops_invoke_pooled_sleep"
+#Import c.jet_php_ops: module {
+    open: fn() -> Int = "jet_php_ops_open"
+    take_error: fn() -> Int = "jet_php_ops_take_error"
+    cancel: fn(handle: Int) = "jet_php_ops_cancel"
+    close: fn(handle: Int) = "jet_php_ops_close"
+    transform: fn(handle: Int, input: String, deadline_ms: Int) -> String = "jet_php_ops_invoke_transform"
+    fail_call: fn(handle: Int, input: String, deadline_ms: Int) -> String = "jet_php_ops_invoke_fail_call"
+    sleep_call: fn(handle: Int, input: String, deadline_ms: Int) -> String = "jet_php_ops_invoke_sleep_call"
+    pooled_sleep: fn(handle: Int, input: String, deadline_ms: Int) -> String = "jet_php_ops_invoke_pooled_sleep"
 }
 
-struct PhpPool {
+PhpPool: struct {
     priv value: Int
 }
 
 #Error
-enum PhpError {
+PhpError: enum {
     NotRunning
     Timeout
     Cancelled
@@ -29,20 +29,20 @@ enum PhpError {
 }
 
 impl PhpPool.Close {
-    fn close(^self) { abi.close(self.value) }
+    close: fn(^self) { abi.close(self.value) }
 }
 
-fn close(pool: ^PhpPool) { abi.close(pool.value) }
+close: fn(pool: ^PhpPool) { abi.close(pool.value) }
 
-fn open() -> PhpPool PhpError! {
-    handle :: abi.open()
+open: fn() -> PhpPool PhpError! {
+    handle: abi.open()
     if abi.take_error() != 0 -> return Err(PhpError.NotRunning)
     return Ok(PhpPool{value: handle})
 }
 
-fn cancel(pool: PhpPool) { abi.cancel(pool.value) }
+cancel: fn(pool: PhpPool) { abi.cancel(pool.value) }
 
-fn decode_response(raw: String, code: Int) -> Dyn PhpError! {
+decode_response: fn(raw: String, code: Int) -> Dyn PhpError! {
     if code == 1 -> return Err(PhpError.NotRunning)
     if code == 2 -> return Err(PhpError.Timeout)
     if code == 3 -> return Err(PhpError.Cancelled)
@@ -54,26 +54,26 @@ fn decode_response(raw: String, code: Int) -> Dyn PhpError! {
     return Ok(&response.field("value") ?? Dyn.Null)
 }
 
-fn transform(pool: PhpPool, input: Dyn, deadline_ms: Int) -> Dyn PhpError! {
-    raw :: abi.transform(pool.value, json.to_string(input) ?? return Err(PhpError.Protocol), deadline_ms)
-    code :: abi.take_error()
+transform: fn(pool: PhpPool, input: Dyn, deadline_ms: Int) -> Dyn PhpError! {
+    raw: abi.transform(pool.value, json.to_string(input) ?? return Err(PhpError.Protocol), deadline_ms)
+    code: abi.take_error()
     return decode_response(raw, code)
 }
 
-fn fail_call(pool: PhpPool, input: Dyn, deadline_ms: Int) -> Dyn PhpError! {
-    raw :: abi.fail_call(pool.value, json.to_string(input) ?? return Err(PhpError.Protocol), deadline_ms)
-    code :: abi.take_error()
+fail_call: fn(pool: PhpPool, input: Dyn, deadline_ms: Int) -> Dyn PhpError! {
+    raw: abi.fail_call(pool.value, json.to_string(input) ?? return Err(PhpError.Protocol), deadline_ms)
+    code: abi.take_error()
     return decode_response(raw, code)
 }
 
-fn sleep_call(pool: PhpPool, input: Dyn, deadline_ms: Int) -> Dyn PhpError! {
-    raw :: abi.sleep_call(pool.value, json.to_string(input) ?? return Err(PhpError.Protocol), deadline_ms)
-    code :: abi.take_error()
+sleep_call: fn(pool: PhpPool, input: Dyn, deadline_ms: Int) -> Dyn PhpError! {
+    raw: abi.sleep_call(pool.value, json.to_string(input) ?? return Err(PhpError.Protocol), deadline_ms)
+    code: abi.take_error()
     return decode_response(raw, code)
 }
 
-fn pooled_sleep(pool: PhpPool, input: Dyn, deadline_ms: Int) -> Dyn PhpError! {
-    raw :: abi.pooled_sleep(pool.value, json.to_string(input) ?? return Err(PhpError.Protocol), deadline_ms)
-    code :: abi.take_error()
+pooled_sleep: fn(pool: PhpPool, input: Dyn, deadline_ms: Int) -> Dyn PhpError! {
+    raw: abi.pooled_sleep(pool.value, json.to_string(input) ?? return Err(PhpError.Protocol), deadline_ms)
+    code: abi.take_error()
     return decode_response(raw, code)
 }

@@ -11,7 +11,7 @@ try {
   const edited = readFileSync(source, "utf8")
     .split(/(?<=\n)/)
     .map((line) => {
-      if (line.startsWith("fn prepare()")) return line.replace("fn prepare", "fn configure");
+      if (line.startsWith("prepare: fn()")) return line.replace("prepare: fn", "configure: fn");
       if (line.replace(/[\r\n]+$/, "") === "    prepare()") {
         return line.replace("prepare()", "configure()");
       }

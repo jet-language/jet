@@ -1,13 +1,13 @@
-fn missing() -> Int {
-    result :: loop {
+missing: fn() -> Int {
+    result: loop {
         if true { break }
         break 1
     }
     result
 }
 
-fn mismatch() -> Int {
-    result :: loop {
+mismatch: fn() -> Int {
+    result: loop {
         if true {
             break 1
         }
@@ -16,9 +16,9 @@ fn mismatch() -> Int {
     result
 }
 
-fn routed_missing() -> Int {
-    result :: loop {
-        found :: loop value in [1] {
+routed_missing: fn() -> Int {
+    result: loop {
+        found: loop value in [1] {
             if value == 2 {
                 break value
             }
@@ -28,14 +28,14 @@ fn routed_missing() -> Int {
     result
 }
 
-fn fallible() -> Int String! { return Err("failed") }
+fallible: fn() -> Int String! { return Err("failed") }
 
-fn fallback_routed_missing() -> Int {
-    result :: loop {
+fallback_routed_missing: fn() -> Int {
+    result: loop {
         fallible() ?? break(result)
         break 1
     }
     result
 }
 
-fn run() {}
+run: fn() {}

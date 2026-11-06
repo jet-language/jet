@@ -32,7 +32,7 @@ const bodies = paths.map((path) => {
   let importing = false;
   const body = lines.filter((line) => {
     if (line.startsWith("use ")) {
-      if (/^use (?:\w+ :: )?core\./u.test(line)) uses.add(line);
+      if (/^use (?:\w+: )?core\./u.test(line)) uses.add(line);
       importing = line.includes("[") && !line.includes("]");
       return false;
     }
@@ -48,7 +48,7 @@ mkdirSync(out, { recursive: true });
 const unit = join(out, "unit.jet");
 writeFileSync(unit, [...uses, "", ...bodies].join("\n"));
 // A --test unit takes the one language edition the driver accepts.
-const edition = /^JET_DRIVER_EDITION :: "([^"]+)"$/mu.exec(readFileSync(join(root, "Compiler/JetDriver/Source/Driver/Loader.jet"), "utf8"))?.[1];
+const edition = /^JET_DRIVER_EDITION: "([^"]+)"$/mu.exec(readFileSync(join(root, "Compiler/JetDriver/Source/Driver/Loader.jet"), "utf8"))?.[1];
 if (!edition) throw new Error("JET_DRIVER_EDITION not found in Compiler/JetDriver/Source/Driver/Loader.jet");
 const packageSource = test !== null
   ? `name: "jet_runtime_tests"\nversion: "0.0.1"\nedition: "${edition}"\n`

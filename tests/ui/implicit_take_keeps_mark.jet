@@ -1,31 +1,31 @@
-struct Lock {
+Lock: struct {
     name: String
 }
 
 impl Lock.Close {
-    fn close(^self) { print("release {self.name}") }
+    close: fn(^self) { print("release {self.name}") }
 }
 
-struct Session {
+Session: struct {
     lock: Lock
     user: String
 }
 
-fn hand_off(s: ^Session) { print(s.user) }
+hand_off: fn(s: ^Session) { print(s.user) }
 
-fn sink<T>(x: ^T) { print("sunk") }
+sink: fn<T>(x: ^T) { print("sunk") }
 
-fn forward<T>(x: ^T) {
+forward: fn<T>(x: ^T) {
     sink(x)
 }
 
-fn consume(s: ^String) -> String { s }
+consume: fn(s: ^String) -> String { s }
 
-fn run() {
-    held :: Session{lock: Lock{name: "db"}, user: "ada"}
+run: fn() {
+    held: Session{lock: Lock{name: "db"}, user: "ada"}
     hand_off(held)
     forward("v")
-    t :: "vault"
-    f :: () -> print(consume(t))
+    t: "vault"
+    f: () -> print(consume(t))
     f()
 }

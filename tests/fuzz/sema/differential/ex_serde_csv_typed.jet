@@ -2,19 +2,19 @@
 // `csv.decode<Sale>` maps columns to fields by header name; one derive then
 // re-emits the same values as JSON.
 use {
-    csv :: core.encoding.csv
-    json :: core.encoding.json
+    csv: core.encoding.csv
+    json: core.encoding.json
 }
 
 #Codable
-struct Sale {
+Sale: struct {
     item: String
     qty: Int
 }
 
-fn run() {
-    raw :: "item,qty\npen,3\nink,5"
-    sales :: csv.decode<Sale>(raw) ?? panic("bad csv")
+run: fn() {
+    raw: "item,qty\npen,3\nink,5"
+    sales: csv.decode<Sale>(raw) ?? panic("bad csv")
     total := 0
     loop s in sales -> total += s.qty
     print("rows: {sales.len()}")

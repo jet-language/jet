@@ -11,23 +11,23 @@
 // seam printed while broken in place of that tier's real output.
 
 use {
-    crypto :: core.crypto
-    files :: core.files
-    json :: core.encoding.json
-    process :: core.process
-    sys :: core.sys
-    time :: core.time
+    crypto: core.crypto
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+    sys: core.sys
+    time: core.time
 }
 
-JET_RUN :: "jet_run"
-AOT_RELEASE :: "aot_release"
-REGRESSION_ORACLE :: "regression-golden"
-REGRESSION_ORACLE_VERSION :: "1"
-REGRESSION_MUTATOR :: "regression-inversion/1"
+JET_RUN: "jet_run"
+AOT_RELEASE: "aot_release"
+REGRESSION_ORACLE: "regression-golden"
+REGRESSION_ORACLE_VERSION: "1"
+REGRESSION_MUTATOR: "regression-inversion/1"
 // Ten minutes: a release build of a seed takes seconds; only a hang gets near.
-TIER_TIMEOUT_NS :: 600000000000
+TIER_TIMEOUT_NS: 600000000000
 
-struct RegressionSeed {
+RegressionSeed: struct {
     surface: String
     seed: String
     source: String
@@ -40,7 +40,7 @@ struct RegressionSeed {
 }
 
 // One tier's run of one seed. `command` keeps the {source} slot.
-struct TierRun {
+TierRun: struct {
     tier: String
     command: String
     stdout: String
@@ -51,7 +51,7 @@ struct TierRun {
 }
 
 // Who ran the seeds, on what: every finding bundle carries it.
-struct RunIdentity {
+RunIdentity: struct {
     run_id: String
     started: String
     finished: String
@@ -62,12 +62,12 @@ struct RunIdentity {
     registry_snapshot_hash: String
 }
 
-fn regression_seeds() -> [RegressionSeed] Never! {
+regression_seeds: fn() -> [RegressionSeed] Never! {
     [RegressionSeed]{
         RegressionSeed{
             surface: "regression:semantic-equality",
             seed: "regression-semantic-equality-001",
-            source: "fn run() {{\n    left :: [[1, 2], [3]]\n    right :: [[1, 2], [3]]\n    print(left == right)\n}}\n",
+            source: "run: fn() {{\n    left: [[1, 2], [3]]\n    right: [[1, 2], [3]]\n    print(left == right)\n}}\n",
             stdin: "",
             expected: "true\n",
             broken: "false\n",
@@ -76,7 +76,7 @@ fn regression_seeds() -> [RegressionSeed] Never! {
         RegressionSeed{
             surface: "regression:indexed-place",
             seed: "regression-indexed-place-001",
-            source: "fn run() {{\n    outer := [[1, 2], [3]]\n    &outer[0].push(9)\n    print(outer)\n}}\n",
+            source: "run: fn() {{\n    outer := [[1, 2], [3]]\n    &outer[0].push(9)\n    print(outer)\n}}\n",
             stdin: "",
             expected: "[[1, 2, 9], [3]]\n",
             broken: "[[1, 2], [3]]\n",
@@ -85,7 +85,7 @@ fn regression_seeds() -> [RegressionSeed] Never! {
         RegressionSeed{
             surface: "regression:packed-int",
             seed: "regression-packed-int-001",
-            source: "fn run() {{\n    print(9223372036854775807)\n}}\n",
+            source: "run: fn() {{\n    print(9223372036854775807)\n}}\n",
             stdin: "",
             expected: "9223372036854775807\n",
             broken: "-1\n",
@@ -94,7 +94,7 @@ fn regression_seeds() -> [RegressionSeed] Never! {
         RegressionSeed{
             surface: "regression:release-emission",
             seed: "regression-release-emission-001",
-            source: "fn run() {{\n    value :: 3\n    print(value + 4)\n}}\n",
+            source: "run: fn() {{\n    value: 3\n    print(value + 4)\n}}\n",
             stdin: "",
             expected: "7\n",
             broken: "0\n",
@@ -103,7 +103,7 @@ fn regression_seeds() -> [RegressionSeed] Never! {
         RegressionSeed{
             surface: "regression:stdin-transport",
             seed: "regression-stdin-transport-001",
-            source: "use term :: core.term\n\nfn run() {{\n    line :: term.readline() ?? panic(\"read\")\n    print(line)\n}}\n",
+            source: "use term: core.term\n\nrun: fn() {{\n    line: term.readline() ?? panic(\"read\")\n    print(line)\n}}\n",
             stdin: "alpha\n",
             expected: "alpha\n",
             // A closed stdin reads as "", so the line printed is empty.
@@ -114,24 +114,24 @@ fn regression_seeds() -> [RegressionSeed] Never! {
 }
 
 // Sorted by name, as a bundle's tier commands are.
-fn regression_tiers() -> [String] Never! {
+regression_tiers: fn() -> [String] Never! {
     [String]{AOT_RELEASE, JET_RUN}
 }
 
 // The shell command of a tier. `$JET` names the compiler, as everywhere in
 // the repo; a replay without it uses `jet` from PATH. The `check` stage is
 // not a tier: it says whether the compiler admits the source at all.
-fn tier_command(tier: String) -> String Never! {
+tier_command: fn(tier: String) -> String Never! {
     if tier == CHECK_STAGE -> return "\"${{JET:-jet}}\" check {SOURCE_SLOT}"
     if tier == AOT_RELEASE -> return "\"${{JET:-jet}}\" build {SOURCE_SLOT} --release --quiet --output-dir={SOURCE_SLOT}.out && {SOURCE_SLOT}.out/\"$(basename {SOURCE_SLOT} .jet)\""
     "\"${{JET:-jet}}\" run {SOURCE_SLOT}"
 }
 
-fn shell_quoted(word: String) -> String Never! {
+shell_quoted: fn(word: String) -> String Never! {
     "'{word.replace("'", "'\\''")}'"
 }
 
-fn seed_dyn(seed: RegressionSeed) -> Dyn Never! {
+seed_dyn: fn(seed: RegressionSeed) -> Dyn Never! {
     Dyn.Object([String: Dyn]{
         "broken": Dyn.Text(seed.broken.copy()),
         "broken_tier": Dyn.Text(seed.broken_tier.copy()),
@@ -144,7 +144,7 @@ fn seed_dyn(seed: RegressionSeed) -> Dyn Never! {
 }
 
 // The configuration a finding was found under: every seed and tier command.
-fn regression_config_hash() -> String Never! {
+regression_config_hash: fn() -> String Never! {
     seeds := [Dyn]{}
     loop seed in regression_seeds() -> &seeds.push(seed_dyn(seed))
     commands := [Dyn]{}
@@ -152,7 +152,7 @@ fn regression_config_hash() -> String Never! {
     digest(json.canonical(Dyn.Object([String: Dyn]{"commands": Dyn.Array(commands), "seeds": Dyn.Array(seeds)})) ?? "")
 }
 
-fn failed_run(run: TierRun, message: String) -> TierRun Never! {
+failed_run: fn(run: TierRun, message: String) -> TierRun Never! {
     out := run.copy()
     out.stderr = message.copy()
     out
@@ -162,21 +162,21 @@ fn failed_run(run: TierRun, message: String) -> TierRun Never! {
 // child's pipe and closing it. An empty `stdin` leaves the pipe closed. The
 // command runs in the source's directory and names it by its file name, so
 // no scratch path reaches the compiler's output.
-fn run_tier(jet: String, tier: String, path: String, stdin: String) -[Exec, Time.Wait]> TierRun Never! {
-    command :: tier_command(tier)
-    run :: TierRun{tier: tier.copy(), command: command.copy(), stdout: "", stderr: "", exit: None, signal: None, timeout: false}
-    spec :: process.cmd([String]{"sh", "-c", command.replace(SOURCE_SLOT, shell_quoted(files.basename(path)))}).cwd(files.dirname(path)).env("JET", jet).timeout(time.Duration{ns: TIER_TIMEOUT_NS})
-    receipt :: if {
+run_tier: fn(jet: String, tier: String, path: String, stdin: String) -[Exec, Time.Wait]> TierRun Never! {
+    command: tier_command(tier)
+    run: TierRun{tier: tier.copy(), command: command.copy(), stdout: "", stderr: "", exit: None, signal: None, timeout: false}
+    spec: process.cmd([String]{"sh", "-c", command.replace(SOURCE_SLOT, shell_quoted(files.basename(path)))}).cwd(files.dirname(path)).env("JET", jet).timeout(time.Duration{ns: TIER_TIMEOUT_NS})
+    receipt: if {
         stdin == "" -> spec.run() ?? return failed_run(run, "sh did not start: {err}")
         else -> {
-            child :: spec.stdin(.Stream).spawn() ?? return failed_run(run, "sh did not start: {err}")
+            child: spec.stdin(.Stream).spawn() ?? return failed_run(run, "sh did not start: {err}")
             undelivered := ""
             if child.stdin.write_all(stdin.bytes()) == {
                 .Ok(_) -> {}
                 .Err(failure) -> undelivered = "stdin was not delivered: {failure}"
             }
             child.stdin.close()
-            finished :: child.wait() ?? return failed_run(run, "sh did not finish: {err}")
+            finished: child.wait() ?? return failed_run(run, "sh did not finish: {err}")
             if undelivered != "" -> return failed_run(run, undelivered)
             finished
         }
@@ -185,7 +185,7 @@ fn run_tier(jet: String, tier: String, path: String, stdin: String) -[Exec, Time
     out.stdout = receipt.output.copy()
     out.stderr = receipt.errors.copy()
     out.timeout = receipt.timed_out
-    signal :: receipt.signal
+    signal: receipt.signal
     if signal == .Val(number) -> out.signal = Val("{number}")
     if !receipt.timed_out && out.signal == None -> out.exit = Val(receipt.code)
     out
@@ -193,15 +193,15 @@ fn run_tier(jet: String, tier: String, path: String, stdin: String) -[Exec, Time
 
 // Every tier's run of `seed`, its source written under `scratch`. With
 // `invert`, the seam's broken behavior is put back on its tier.
-fn run_seed(seed: RegressionSeed, jet: String, scratch: String, invert: Bool{false}) -[FS, Exec, Time.Wait]> [TierRun] Err! {
-    dir :: files.join(scratch, seed.seed)
+run_seed: fn(seed: RegressionSeed, jet: String, scratch: String, invert: Bool{false}) -[FS, Exec, Time.Wait]> [TierRun] Err! {
+    dir: files.join(scratch, seed.seed)
     files.create_dir_all(dir) ?? return Err("cannot create {dir}: {err}")
-    path :: files.join(dir, "seed.jet")
+    path: files.join(dir, "seed.jet")
     files.write(path, seed.source) ?? return Err("cannot write {path}: {err}")
     runs := [TierRun]{}
     loop tier in regression_tiers() {
-        inverted :: invert && tier == seed.broken_tier
-        withheld :: inverted && seed.stdin != ""
+        inverted: invert && tier == seed.broken_tier
+        withheld: inverted && seed.stdin != ""
         run := run_tier(jet, tier, path, if withheld -> "" else -> seed.stdin)
         if inverted && !withheld -> run.stdout = seed.broken.copy()
         &runs.push(run)
@@ -210,21 +210,21 @@ fn run_seed(seed: RegressionSeed, jet: String, scratch: String, invert: Bool{fal
 }
 
 // The inversion an inverted run of `seed` used, as a bundle's mutation arm.
-fn inversion_arm(seed: RegressionSeed) -> String Never! {
+inversion_arm: fn(seed: RegressionSeed) -> String Never! {
     if seed.stdin != "" -> return "inverted:{seed.broken_tier}:stdin-withheld"
     "inverted:{seed.broken_tier}:broken-output"
 }
 
-fn clean_run(seed: RegressionSeed, run: TierRun) -> Bool Never! {
+clean_run: fn(seed: RegressionSeed, run: TierRun) -> Bool Never! {
     run.exit == Val(0) && !run.timeout && run.signal == None && run.stdout == seed.expected
 }
 
 // What is wrong with an inverted run of `seed`, or "". The seam's tier must
 // diverge and every other tier must stay clean, so a real failure elsewhere
 // is never taken for the inversion being seen.
-fn inversion_problem(seed: RegressionSeed, runs: [TierRun]) -> String Never! {
+inversion_problem: fn(seed: RegressionSeed, runs: [TierRun]) -> String Never! {
     loop run in runs {
-        clean :: clean_run(seed, run)
+        clean: clean_run(seed, run)
         if run.tier == seed.broken_tier && clean -> return "inverting {seed.surface} left {run.tier} clean"
         if run.tier != seed.broken_tier && !clean -> return "{seed.surface} failed on {run.tier}, which its inversion does not touch"
     }
@@ -233,20 +233,20 @@ fn inversion_problem(seed: RegressionSeed, runs: [TierRun]) -> String Never! {
 
 // Silent wrong data, or any divergence of the default `jet run`, is P0. A
 // loud failure of another tier starts at P1.
-fn severity(run: TierRun) -> String Never! {
+severity: fn(run: TierRun) -> String Never! {
     if run.tier == JET_RUN || run.exit == Val(0) -> return "P0"
     "P1"
 }
 
 // The finding for `seed` in `runs`: none when every tier printed exactly the
 // expected bytes and exited 0; otherwise the first tier that did not, sealed.
-fn seed_finding(seed: RegressionSeed, runs: [TierRun], identity: RunIdentity, mutation_arm: String) -> [Dyn] Err! {
+seed_finding: fn(seed: RegressionSeed, runs: [TierRun], identity: RunIdentity, mutation_arm: String) -> [Dyn] Err! {
     commands := [TierCommand]{}
     loop run in runs -> &commands.push(TierCommand{tier: run.tier.copy(), command: run.command.copy()})
     loop run in runs {
         if clean_run(seed, run) -> next
-        oracle_input :: json.canonical(seed_dyn(seed)) ?? return Err("seed {seed.seed} has no canonical form: {err}")
-        input :: ReproInput{
+        oracle_input: json.canonical(seed_dyn(seed)) ?? return Err("seed {seed.seed} has no canonical form: {err}")
+        input: ReproInput{
             run_id: "{identity.run_id}/{seed.seed}/{run.tier}",
             started: identity.started.copy(),
             finished: identity.finished.copy(),
@@ -275,23 +275,23 @@ fn seed_finding(seed: RegressionSeed, runs: [TierRun], identity: RunIdentity, mu
             classification: severity(run),
             tower_action: Dyn.Object([String: Dyn]{"action": Dyn.Text("create-or-update"), "by": Dyn.Text("hardening-rig"), "dedup_key": Dyn.Text(seed.surface.copy())}),
         }
-        bundle :: make_repro(input) ?? return Err("the {seed.surface} finding did not seal: {err}")
+        bundle: make_repro(input) ?? return Err("the {seed.surface} finding did not seal: {err}")
         return Ok([Dyn]{bundle})
     }
     Ok([Dyn]{})
 }
 
 // The compiler the tiers run: $JET, else `jet` on PATH.
-fn compiler_path() -[Env, Exec, Time.Wait]> String Err! {
-    named :: sys.get("JET") ?? ""
+compiler_path: fn() -[Env, Exec, Time.Wait]> String Err! {
+    named: sys.get("JET") ?? ""
     if named != "" -> return Ok(named)
-    found :: process.cmd([String]{"sh", "-c", "command -v jet"}).run() ?? return Err("cannot look for jet on PATH: {err}")
-    path :: found.output.trim()
+    found: process.cmd([String]{"sh", "-c", "command -v jet"}).run() ?? return Err("cannot look for jet on PATH: {err}")
+    path: found.output.trim()
     if found.code != 0 || path == "" -> return Err("no compiler: set JET or put jet on PATH")
     Ok(path.copy())
 }
 
-fn binary_digest(path: String) -[FS]> String Err! {
-    bytes :: files.read_bytes(path) ?? return Err("cannot read the compiler {path}: {err}")
+binary_digest: fn(path: String) -[FS]> String Err! {
+    bytes: files.read_bytes(path) ?? return Err("cannot read the compiler {path}: {err}")
     Ok("sha256:{crypto.sha256(bytes).hex()}")
 }

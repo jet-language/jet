@@ -1,12 +1,12 @@
 // Web dev-server state and terminal/browser parity. Browser swaps preserve module-owned state.
 use {
-    fs :: std.fs
+    fs: std.fs
     std.io.[BufReader, IsTerminal, Write]
     std.net.[IpAddr, SocketAddr, TcpListener, TcpStream]
     core.files.[OSPath]
     std.sync.atomic.[AtomicBool, AtomicU64, AtomicUsize, Ordering]
     std.sync.[Arc, Mutex]
-    thread :: std.thread
+    thread: std.thread
     std.time.[Duration, Instant]
     jet_devserver.TerminalStyleReload.[TerminalCapabilityFacts, TerminalColorMode, TerminalStyleHostAdapter, TerminalStyleHostSource]
     jet_driver.Diagnostics.[ColorChoice]
@@ -17,8 +17,8 @@ use {
     jet_foundation.HotSwap.[HotSwapDecision]
     jet_foundation.JSON.[foundation_json_escape, parse_json_with_limit]
     jet_devserver.[ResidentDevSession]
-    Session :: jet_devserver.Session
-    BrowserTrace :: jet_devserver.BrowserTrace
+    Session: jet_devserver.Session
+    BrowserTrace: jet_devserver.BrowserTrace
     jet_devserver.BrowserWebAdapter.[BrowserWebState]
     jet_devserver.WebErrorPage.[WebErrorDevStatusFacts]
     jet_devserver.Canvas.[DebugSessions]
@@ -31,24 +31,24 @@ use {
     jetpack_foundation.[ColorChoice]
     core.encoding.[Dyn]
 }
-APPLICATION_PORT_RANGE :: 8080..8089
-CANVAS_SESSION_BYTES :: 32
-MAX_CONNECTION_THREADS :: 64
-LIVE_RELOAD_POLL_MS :: 40
-CLIENT_TTL_MS :: Session.CLIENT_TTL_MS
-MAX_CLIENTS :: Session.MAX_CLIENTS
-REQUEST_DEADLINE :: Duration.from_secs(10)
-MAX_STATIC_RESPONSE_BYTES :: 64 * 1024 * 1024
+APPLICATION_PORT_RANGE: 8080..8089
+CANVAS_SESSION_BYTES: 32
+MAX_CONNECTION_THREADS: 64
+LIVE_RELOAD_POLL_MS: 40
+CLIENT_TTL_MS: Session.CLIENT_TTL_MS
+MAX_CLIENTS: Session.MAX_CLIENTS
+REQUEST_DEADLINE: Duration.from_secs(10)
+MAX_STATIC_RESPONSE_BYTES: 64 * 1024 * 1024
 // GATE #4494: native atomics, locks, terminal IO, clock and listener ownership.
-PUBLICATION_COUNTER :: AtomicU64.new(0)
-fn decode_devtools_envelope(payload: String) -> JetDevtoolsDecodedEnvelope Err! {
-    root :: parse_json_with_limit(payload, JET_DEVTOOLS_MAX_ENVELOPE_BYTES) ?? return .Err("devtools envelope is not valid bounded JSON")
-    object :: object_map(&root) ?? return .Err("devtools envelope must be an object")
-    protocol :: devtools_required_string(&object, "protocol")
+PUBLICATION_COUNTER: AtomicU64.new(0)
+decode_devtools_envelope: fn(payload: String) -> JetDevtoolsDecodedEnvelope Err! {
+    root: parse_json_with_limit(payload, JET_DEVTOOLS_MAX_ENVELOPE_BYTES) ?? return .Err("devtools envelope is not valid bounded JSON")
+    object: object_map(&root) ?? return .Err("devtools envelope must be an object")
+    protocol: devtools_required_string(&object, "protocol")
     if protocol != JET_DEVTOOLS_PROTOCOL -> return .Err("devtools envelope protocol does not match jet.devtools.v1")
     if object.contains_key("history") -> return .Err("devtools envelope must use the single `events` stream")
-    session_id :: devtools_required_string(&object, "session_id")
-    started_at_ms :: devtools_required_u64(&object, "started_at_ms")
+    session_id: devtools_required_string(&object, "session_id")
+    started_at_ms: devtools_required_u64(&object, "started_at_ms")
     if object.get("direction") == .Val(direction) {
         if devtools_required_value_string(direction, "direction")? == {
             "host_to_runtime" -> {
@@ -65,33 +65,33 @@ fn decode_devtools_envelope(payload: String) -> JetDevtoolsDecodedEnvelope Err! 
     if object.contains_key("commands") -> return .Err("devtools command envelope requires direction")
     return .Events(decode_devtools_events(&object, session_id, started_at_ms)?)
 }
-fn decode_devtools_events(object: [String:Dyn], session_id: String, started_at_ms: U64) -> JetDevtoolsEnvelope Err! {
-    events :: if object.get("events") == {
+decode_devtools_events: fn(object: [String:Dyn], session_id: String, started_at_ms: U64) -> JetDevtoolsEnvelope Err! {
+    events: if object.get("events") == {
         .Val(.Array(v)) -> v
         else -> { return .Err("devtools envelope `events` must be an array") }
     }
     if events.len() > JET_DEVTOOLS_MAX_EVENTS -> return .Err("devtools envelope exceeds the retained event limit")
     envelope := JetDevtoolsEnvelope.new(session_id.to_string(), started_at_ms)
     loop value in events {
-        event :: object_map(value) ?? return .Err("devtools envelope event must be an object")
-        sequence :: devtools_required_u64(&event, "sequence")
+        event: object_map(value) ?? return .Err("devtools envelope event must be an object")
+        sequence: devtools_required_u64(&event, "sequence")
         if sequence == 0 -> return .Err("devtools envelope event sequence must be positive")
-        timestamp_ms :: devtools_required_u64(&event, "timestamp_ms")
-        source :: devtools_required_string(&event, "source")
-        kind :: devtools_required_string(&event, "kind")
-        entity :: devtools_required_string(&event, "entity")
-        fields_value :: event.get("fields") ?? return .Err("devtools envelope missing `fields`")
-        _ :: object_map(fields_value) ?? return .Err("devtools envelope `fields` must be an object")
-        fields :: Session.render_json(fields_value)
-        payload :: if event.get("payload") == {
+        timestamp_ms: devtools_required_u64(&event, "timestamp_ms")
+        source: devtools_required_string(&event, "source")
+        kind: devtools_required_string(&event, "kind")
+        entity: devtools_required_string(&event, "entity")
+        fields_value: event.get("fields") ?? return .Err("devtools envelope missing `fields`")
+        _: object_map(fields_value) ?? return .Err("devtools envelope `fields` must be an object")
+        fields: Session.render_json(fields_value)
+        payload: if event.get("payload") == {
             .None | .Val(.Null) -> .None
             .Val(.Object(_)) -> .Val(devtools_required_object_json(&event, "payload")?)
             else -> { return .Err("devtools event payload must be an object or null") }
         }
-        decoded :: decode_devtools_body(kind, entity, fields_value)
-        typed :: if decoded == {
+        decoded: decode_devtools_body(kind, entity, fields_value)
+        typed: if decoded == {
             .Val(body) -> {
-                typed :: JetDevtoolsEvent.from_wire(sequence, timestamp_ms, ^source, ^body, ^fields, ^payload)
+                typed: JetDevtoolsEvent.from_wire(sequence, timestamp_ms, ^source, ^body, ^fields, ^payload)
                 if typed.kind() != kind || typed.entity() != entity -> return .Err("devtools event identity does not match its typed body")
                 typed
             }
@@ -103,7 +103,7 @@ fn decode_devtools_events(object: [String:Dyn], session_id: String, started_at_m
         if selection == {
             .Null -> envelope.set_selection(.None)
             .Object(v) -> {
-                selection :: object_map_entries(v)
+                selection: object_map_entries(v)
                 envelope.set_selection(.Val(JetDevtoolsSelection.new(devtools_required_string(&selection, "panel_id"), devtools_optional_string(&selection, "item_key")?)))
             }
             else -> { return .Err("devtools envelope selection must be an object or null") }
@@ -119,18 +119,18 @@ fn decode_devtools_events(object: [String:Dyn], session_id: String, started_at_m
     }
     if object.get("lifecycle") == .Val(v) -> envelope.set_lifecycle(devtools_lifecycle(devtools_required_value_string(v, "lifecycle")?)?)
     if object.get("freshness") == .Val(v) {
-        freshness :: object_map(v) ?? return .Err("devtools envelope freshness must be an object")
+        freshness: object_map(v) ?? return .Err("devtools envelope freshness must be an object")
         envelope.set_freshness(JetDevtoolsFreshnessFact { state: devtools_freshness_state(devtools_required_string(&freshness, "state")?), observed_at_ms: devtools_required_u64(&freshness, "observed_at_ms")? })
     }
     if object.get("privacy") == .Val(v) {
-        privacy :: object_map(v) ?? return .Err("devtools envelope privacy must be an object")
+        privacy: object_map(v) ?? return .Err("devtools envelope privacy must be an object")
         envelope.privacy = JetDevtoolsPrivacy { loopback_only: devtools_required_bool(&privacy, "loopback_only"), payload_free_by_default: devtools_required_bool(&privacy, "payload_free_by_default")?, published_payloads: devtools_required_bool(&privacy, "published_payloads")? }
     }
     if object.get("source_identity") == .Val(v) {
         envelope.source_identity = if v == {
             .Null -> .None
             .Object(v) -> {
-                identity :: object_map_entries(v)
+                identity: object_map_entries(v)
                 .Val(JetDevtoolsSourceIdentityFact.new(devtools_optional_string(&identity, "source_id"), devtools_optional_string(&identity, "build_id")?, devtools_optional_string(&identity, "revision")?, devtools_optional_string(&identity, "world_id")?))
             }
             else -> { return .Err("devtools envelope source_identity must be an object or null") }
@@ -140,31 +140,31 @@ fn decode_devtools_events(object: [String:Dyn], session_id: String, started_at_m
     if object.contains_key("truncated") -> envelope.truncated = devtools_required_bool(object, "truncated")
     return envelope
 }
-fn decode_devtools_command_envelope(object: [String:Dyn], session_id: String, started_at_ms: U64) -> JetDevtoolsCommandEnvelope Err! {
-    expected :: ["protocol", "session_id", "started_at_ms", "direction", "commands"]
+decode_devtools_command_envelope: fn(object: [String:Dyn], session_id: String, started_at_ms: U64) -> JetDevtoolsCommandEnvelope Err! {
+    expected: ["protocol", "session_id", "started_at_ms", "direction", "commands"]
     if !devtools_has_exact_fields(object, &expected) -> return .Err("devtools command envelope has unexpected top-level fields")
-    direction :: devtools_required_value_string(object.get("direction") ?? return .Err("devtools command envelope requires direction"), "direction")
+    direction: devtools_required_value_string(object.get("direction") ?? return .Err("devtools command envelope requires direction"), "direction")
     if direction != "host_to_runtime" -> return .Err("devtools command envelope direction must be host_to_runtime")
-    commands :: if object.get("commands") == {
+    commands: if object.get("commands") == {
         .Val(.Array(v)) -> v
         else -> { return .Err("devtools envelope `commands` must be an array") }
     }
     if commands.len() > JET_DEVTOOLS_MAX_COMMANDS -> return .Err("devtools envelope exceeds the retained command limit")
     envelope := JetDevtoolsCommandEnvelope.new(session_id.to_string(), started_at_ms)
     loop value in commands {
-        command :: object_map(value) ?? return .Err("devtools envelope command must be an object")
+        command: object_map(value) ?? return .Err("devtools envelope command must be an object")
         if command.len() != 2 || !command.contains_key("kind") || !command.contains_key("payload") -> return .Err("devtools envelope command must contain only kind and payload")
-        kind :: devtools_required_string(&command, "kind")
-        payload :: command.get("payload").and_then(object_map) ?? return .Err("devtools envelope command payload must be an object")
+        kind: devtools_required_string(&command, "kind")
+        payload: command.get("payload").and_then(object_map) ?? return .Err("devtools envelope command payload must be an object")
         if kind == {
             "DatabaseExplain" -> {
                 if !devtools_has_exact_fields(&payload, &["session_id", "request_id", "statement_identity", "timeout_ms", "max_rows"]) -> return .Err("devtools envelope database command payload has unexpected fields")
-                request :: JetDevtoolsDatabaseExplainRequest.new(devtools_required_string(&payload, "session_id"), devtools_required_string(&payload, "request_id")?, devtools_required_string(&payload, "statement_identity")?, devtools_required_u64(&payload, "timeout_ms")?, devtools_required_u64(&payload, "max_rows")?)?
+                request: JetDevtoolsDatabaseExplainRequest.new(devtools_required_string(&payload, "session_id"), devtools_required_string(&payload, "request_id")?, devtools_required_string(&payload, "statement_identity")?, devtools_required_u64(&payload, "timeout_ms")?, devtools_required_u64(&payload, "max_rows")?)?
                 envelope.enqueue_command(.DatabaseExplain(^request))
             }
             "GameControl" -> {
                 if !devtools_has_exact_fields(&payload, &["session_id", "request_id", "kind", "source_id", "revision", "world_id", "actor_id", "component_id", "authored_instance_id", "source_span_start", "source_span_end", "field", "value", "category", "expression", "required_authority", "frame_id", "budget"]) -> return .Err("devtools envelope game control payload has unexpected fields")
-                request :: JetDevtoolsGameControlRequest {
+                request: JetDevtoolsGameControlRequest {
                     session_id: devtools_required_string(&payload, "session_id"), request_id: devtools_required_string(&payload, "request_id")?,
                     kind: JetDevtoolsGameControlKind.from_str(devtools_required_string(&payload, "kind")?)?,
                     source_id: devtools_optional_string(&payload, "source_id")?, revision: devtools_optional_string(&payload, "revision")?,
@@ -180,7 +180,7 @@ fn decode_devtools_command_envelope(object: [String:Dyn], session_id: String, st
             }
             "ProjectRebuild" -> {
                 if !devtools_has_exact_fields(&payload, &["session_id", "request_id", "expected_revision"]) -> return .Err("devtools envelope project rebuild payload has unexpected fields")
-                request :: JetDevtoolsProjectRebuildRequest.new(devtools_required_string(&payload, "session_id")?, devtools_required_string(&payload, "request_id")?, devtools_required_string(&payload, "expected_revision")?)?
+                request: JetDevtoolsProjectRebuildRequest.new(devtools_required_string(&payload, "session_id")?, devtools_required_string(&payload, "request_id")?, devtools_required_string(&payload, "expected_revision")?)?
                 envelope.enqueue_command(.ProjectRebuild(^request))?
             }
             else -> { return .Err("devtools envelope contains an unsupported command kind") }
@@ -189,12 +189,12 @@ fn decode_devtools_command_envelope(object: [String:Dyn], session_id: String, st
     envelope.validate()
     return envelope
 }
-fn decode_devtools_body(kind: String, _entity: String, fields: &Dyn) -> JetDevtoolsEventBody? Err! {
-    object :: object_map(fields) ?? return .Err("devtools event fields must be an object")
+decode_devtools_body: fn(kind: String, _entity: String, fields: &Dyn) -> JetDevtoolsEventBody? Err! {
+    object: object_map(fields) ?? return .Err("devtools event fields must be an object")
     if devtools_expected_fields(kind) == .Val(expected) {
         if !devtools_has_exact_fields(&object, &expected) -> return .None
     }
-    body :: if kind == {
+    body: if kind == {
         "Build" -> {
             devtools_exact_fields(&object, &["status", "tier", "diagnostics", "kept", "reset"])
             JetDevtoolsEventBody.Build { status: devtools_required_string(&object, "status"), tier: devtools_required_string(&object, "tier")?, diagnostics: devtools_required_string_array(&object, "diagnostics")?, kept: devtools_required_u64(&object, "kept")?, reset: devtools_required_u64(&object, "reset")? }
@@ -205,7 +205,7 @@ fn decode_devtools_body(kind: String, _entity: String, fields: &Dyn) -> JetDevto
         }
         "Query" -> {
             devtools_exact_fields(&object, &["name", "state", "footprint"])?
-            state :: JetDevtoolsQueryState{if devtools_required_string(&object, "state")? == {
+            state: JetDevtoolsQueryState{if devtools_required_string(&object, "state")? == {
                 "fetching" -> .Fetching
                 "fresh" -> .Fresh
                 "stale" -> .Stale
@@ -216,7 +216,7 @@ fn decode_devtools_body(kind: String, _entity: String, fields: &Dyn) -> JetDevto
         }
         "Mutation" -> {
             devtools_exact_fields(&object, &["name", "lifecycle", "rollback"])?
-            lifecycle :: JetDevtoolsMutationLifecycle{if devtools_required_string(&object, "lifecycle")? == {
+            lifecycle: JetDevtoolsMutationLifecycle{if devtools_required_string(&object, "lifecycle")? == {
                 "started" -> .Started
                 "committed" -> .Committed
                 "failed" -> .Failed
@@ -227,7 +227,7 @@ fn decode_devtools_body(kind: String, _entity: String, fields: &Dyn) -> JetDevto
         }
         "Form" -> {
             devtools_exact_fields(&object, &["name", "field", "state", "validation"])?
-            state :: JetDevtoolsFormState{if devtools_required_string(&object, "state")? == {
+            state: JetDevtoolsFormState{if devtools_required_string(&object, "state")? == {
                 "pristine" -> .Pristine
                 "dirty" -> .Dirty
                 "valid" -> .Valid
@@ -246,7 +246,7 @@ fn decode_devtools_body(kind: String, _entity: String, fields: &Dyn) -> JetDevto
         }
         "Trace" -> {
             devtools_exact_fields(&object, &["name", "kind", "request", "duration_ms", "status"])?
-            trace_kind :: JetDevtoolsTraceKind{if devtools_required_string(&object, "kind")? == {
+            trace_kind: JetDevtoolsTraceKind{if devtools_required_string(&object, "kind")? == {
                 "request" -> .Request
                 "render" -> .Render
                 "job" -> .Job
@@ -294,11 +294,11 @@ fn decode_devtools_body(kind: String, _entity: String, fields: &Dyn) -> JetDevto
         }
         "GameSwap" -> {
             devtools_exact_fields(&object, &["sequence", "path", "kind", "status", "old_schema_id", "new_schema_id", "migration", "reason"])?
-            kind :: devtools_required_string(&object, "kind")?
+            kind: devtools_required_string(&object, "kind")?
             if kind != "asset" && kind != "script" && kind != "world" -> return .Err("devtools GameSwap kind is not recognized")
-            status :: devtools_required_string(&object, "status")?
+            status: devtools_required_string(&object, "status")?
             if status != "applied" && status != "rejected" -> return .Err("devtools GameSwap status is not recognized")
-            migration :: devtools_required_string(&object, "migration")?
+            migration: devtools_required_string(&object, "migration")?
             if migration != "preserve" && migration != "migrate" && migration != "reset" && migration != "reject" -> return .Err("devtools GameSwap migration is not recognized")
             JetDevtoolsEventBody.GameSwap { sequence: devtools_required_u64(&object, "sequence")?, path: devtools_required_string(&object, "path")?, kind, status, old_schema_id: devtools_optional_string(&object, "old_schema_id")?, new_schema_id: devtools_optional_string(&object, "new_schema_id")?, migration, reason: devtools_required_string(&object, "reason")? }
         }
@@ -314,7 +314,7 @@ fn decode_devtools_body(kind: String, _entity: String, fields: &Dyn) -> JetDevto
     }
     return .Val(body)
 }
-fn devtools_expected_fields(kind: String) -> [String]? {
+devtools_expected_fields: fn(kind: String) -> [String]? {
     return if kind == {
         "Build" -> .Val(["status", "tier", "diagnostics", "kept", "reset"])
         "Route" -> .Val(["path", "matched", "render_mode", "reason"])
@@ -335,35 +335,35 @@ fn devtools_expected_fields(kind: String) -> [String]? {
         else -> .None
     }
 }
-fn object_map(value: Dyn) -> [String:Dyn]? {
+object_map: fn(value: Dyn) -> [String:Dyn]? {
     return if value == {
         .Object(fields) -> .Val(fields.iter().cloned().collect())
         else -> .None
     }
 }
-fn object_map_entries(fields: &[(String, Dyn)]) -> [String:Dyn] { return fields.iter().cloned().collect() }
-fn devtools_has_exact_fields(object: [String:Dyn], expected: [String]) -> Bool {
+object_map_entries: fn(fields: &[(String, Dyn)]) -> [String:Dyn] { return fields.iter().cloned().collect() }
+devtools_has_exact_fields: fn(object: [String:Dyn], expected: [String]) -> Bool {
     return object.len() == expected.len() && object.keys().all((key) -> expected.iter().any((name) -> name == key))
 }
-fn devtools_exact_fields(object: &[String:Dyn], expected: &[String]) Err! {
+devtools_exact_fields: fn(object: &[String:Dyn], expected: &[String]) Err! {
     if !devtools_has_exact_fields(object, expected) -> return .Err("devtools event fields do not match the typed body")
 }
-fn devtools_required_game_launch_phases(object: [String:Dyn], key: String) -> [JetDevtoolsGameLaunchPhase] Err! {
-    values :: if object.get(key) == {
+devtools_required_game_launch_phases: fn(object: [String:Dyn], key: String) -> [JetDevtoolsGameLaunchPhase] Err! {
+    values: if object.get(key) == {
         .Val(.Array(v)) -> v
         else -> { return .Err("devtools event `{key}` must be an array") }
     }
     if values.len() > 256 -> return .Err("devtools event `{key}` exceeds 256 entries")
     phases := [JetDevtoolsGameLaunchPhase]{}
     loop value in values {
-        phase :: object_map(value) ?? return .Err("devtools event `{key}` must contain objects")
+        phase: object_map(value) ?? return .Err("devtools event `{key}` must contain objects")
         devtools_exact_fields(&phase, &["phase", "status", "detail"])
         phases.push(JetDevtoolsGameLaunchPhase.new(devtools_required_string(&phase, "phase"), devtools_required_string(&phase, "status")?, devtools_required_string(&phase, "detail")?))
     }
     return phases
 }
-fn devtools_required_string_array(object: [String:Dyn], key: String) -> [String] Err! {
-    values :: if object.get(key) == {
+devtools_required_string_array: fn(object: [String:Dyn], key: String) -> [String] Err! {
+    values: if object.get(key) == {
         .Val(.Array(v)) -> v
         else -> { return .Err("devtools event `{key}` must be an array") }
     }
@@ -377,10 +377,10 @@ fn devtools_required_string_array(object: [String:Dyn], key: String) -> [String]
     }
     return strings
 }
-fn devtools_required_u16(object: [String:Dyn], key: String) -> U16 Err! {
+devtools_required_u16: fn(object: [String:Dyn], key: String) -> U16 Err! {
     return U16.try_from(devtools_required_u64(object, key)?) ?? return .Err("devtools event `{key}` is outside the u16 range")
 }
-fn devtools_optional_u64(object: [String:Dyn], key: String) -> U64? Err! {
+devtools_optional_u64: fn(object: [String:Dyn], key: String) -> U64? Err! {
     if object.get(key) == {
         .None | .Val(.Null) -> { return .None }
         .Val(.Int(v)) if v >= 0 -> { return .Val(U64.try_from(v) ?? return .Err("devtools event `{key}` must be non-negative")) }
@@ -388,31 +388,31 @@ fn devtools_optional_u64(object: [String:Dyn], key: String) -> U64? Err! {
         else -> { return .Err("devtools event `{key}` must be an integer or null") }
     }
 }
-fn devtools_required_function(object: [String:Dyn], key: String) -> JetDevtoolsFunctionIdentity Err! {
-    function :: object.get(key).and_then(object_map) ?? return .Err("devtools event `{key}` must be an object")
-    source :: function.get("source").and_then(object_map) ?? return .Err("devtools event `{key}.source` must be an object")
+devtools_required_function: fn(object: [String:Dyn], key: String) -> JetDevtoolsFunctionIdentity Err! {
+    function: object.get(key).and_then(object_map) ?? return .Err("devtools event `{key}` must be an object")
+    source: function.get("source").and_then(object_map) ?? return .Err("devtools event `{key}.source` must be an object")
     return JetDevtoolsFunctionIdentity.new(devtools_required_string(&function, "function_id"), devtools_required_string(&function, "name")?, JetDevtoolsSourceSpan.new(devtools_required_string(&source, "source_id")?, devtools_required_string(&source, "file")?, devtools_required_u32(&source, "start_line")?, devtools_required_u32(&source, "start_column")?, devtools_required_u32(&source, "end_line")?, devtools_required_u32(&source, "end_column")?))
 }
-fn devtools_optional_function(object: [String:Dyn], key: String) -> JetDevtoolsFunctionIdentity? Err! {
+devtools_optional_function: fn(object: [String:Dyn], key: String) -> JetDevtoolsFunctionIdentity? Err! {
     if object.get(key) == {
         .None | .Val(.Null) -> { return .None }
         .Val(.Object(_)) -> { return .Val(devtools_required_function(object, key)?) }
         else -> { return .Err("devtools event `{key}` must be an object or null") }
     }
 }
-fn devtools_required_u32(object: [String:Dyn], key: String) -> U32 Err! {
+devtools_required_u32: fn(object: [String:Dyn], key: String) -> U32 Err! {
     return U32.try_from(devtools_required_u64(object, key)?) ?? return .Err("devtools event `{key}` is outside the u32 range")
 }
-fn devtools_required_string(object: [String:Dyn], key: String) -> String Err! {
-    value :: object.get(key) ?? return .Err("devtools envelope missing `{key}`")
+devtools_required_string: fn(object: [String:Dyn], key: String) -> String Err! {
+    value: object.get(key) ?? return .Err("devtools envelope missing `{key}`")
     return devtools_required_value_string(value, key)
 }
-fn devtools_required_value_string(value: Dyn, key: String) -> String Err! {
+devtools_required_value_string: fn(value: Dyn, key: String) -> String Err! {
     if value == {
         .Text(v) -> { if v.is_empty() -> return .Err("devtools envelope `{key}` must not be empty"); return v.clone() } else -> { return .Err("devtools envelope `{key}` must be a string") }
     }
 }
-fn devtools_optional_string(object: [String:Dyn], key: String) -> String? Err! {
+devtools_optional_string: fn(object: [String:Dyn], key: String) -> String? Err! {
     if object.get(key) == {
         .None | .Val(.Null) -> { return .None }
         .Val(.Text(v)) if !v.is_empty() -> { return .Val(v.clone()) }
@@ -420,28 +420,28 @@ fn devtools_optional_string(object: [String:Dyn], key: String) -> String? Err! {
         else -> { return .Err("devtools envelope `{key}` must be a string or null") }
     }
 }
-fn devtools_required_u64(object: [String:Dyn], key: String) -> U64 Err! {
-    value :: object.get(key) ?? return .Err("devtools envelope missing `{key}`")
+devtools_required_u64: fn(object: [String:Dyn], key: String) -> U64 Err! {
+    value: object.get(key) ?? return .Err("devtools envelope missing `{key}`")
     if value == {
         .Int(v) -> { return U64.try_from(v) ?? return .Err("devtools envelope `{key}` must be non-negative") }
         else -> { return .Err("devtools envelope `{key}` must be an integer") }
     }
 }
-fn devtools_required_bool(object: [String:Dyn], key: String) -> Bool Err! {
+devtools_required_bool: fn(object: [String:Dyn], key: String) -> Bool Err! {
     if object.get(key) == {
         .Val(.Bool(v)) -> { return v }
         .Val(_) -> { return .Err("devtools envelope `{key}` must be a boolean") }
         .None -> { return .Err("devtools envelope missing `{key}`") }
     }
 }
-fn devtools_required_object_json(object: [String:Dyn], key: String) -> String Err! {
-    value :: object.get(key) ?? return .Err("devtools envelope missing `{key}`")
+devtools_required_object_json: fn(object: [String:Dyn], key: String) -> String Err! {
+    value: object.get(key) ?? return .Err("devtools envelope missing `{key}`")
     if value == {
         .Object(_) -> { return Session.render_json(value) }
         else -> { return .Err("devtools envelope `{key}` must be an object") }
     }
 }
-fn devtools_lifecycle(value: String) -> JetDevtoolsLifecycleState Err! {
+devtools_lifecycle: fn(value: String) -> JetDevtoolsLifecycleState Err! {
     return if value == {
         "starting" -> .Starting
         "building" -> .Building
@@ -452,7 +452,7 @@ fn devtools_lifecycle(value: String) -> JetDevtoolsLifecycleState Err! {
         else -> { return .Err("devtools envelope lifecycle is not recognized") }
     }
 }
-fn devtools_freshness_state(value: String) -> JetDevtoolsFreshnessState Err! {
+devtools_freshness_state: fn(value: String) -> JetDevtoolsFreshnessState Err! {
     return if value == {
         "fresh" -> .Fresh
         "stale" -> .Stale
@@ -460,17 +460,17 @@ fn devtools_freshness_state(value: String) -> JetDevtoolsFreshnessState Err! {
         else -> { return .Err("devtools envelope freshness state is not recognized") }
     }
 }
-fn terminal_style_adapter(file: String) -> Arc<TerminalStyleHostAdapter> Err! {
-    is_tty :: std.io.stderr().is_terminal()
-    capabilities :: TerminalCapabilityFacts.from_environment(std.env.var("TERM").ok().as_deref(), std.env.var("COLORTERM").ok().as_deref(), is_tty, std.env.var_os("NO_COLOR").is_some(), .Auto)
-    source :: TerminalStyleHostSource.new(file, capabilities) ?? return .Err("could not inject terminal style source: {err}")
-    adapter :: Arc.new(TerminalStyleHostAdapter.new())
+terminal_style_adapter: fn(file: String) -> Arc<TerminalStyleHostAdapter> Err! {
+    is_tty: std.io.stderr().is_terminal()
+    capabilities: TerminalCapabilityFacts.from_environment(std.env.var("TERM").ok().as_deref(), std.env.var("COLORTERM").ok().as_deref(), is_tty, std.env.var_os("NO_COLOR").is_some(), .Auto)
+    source: TerminalStyleHostSource.new(file, capabilities) ?? return .Err("could not inject terminal style source: {err}")
+    adapter: Arc.new(TerminalStyleHostAdapter.new())
     adapter.inject(^source)
     return adapter
 }
-struct DevRevisionFacts { accepted: U64?; candidate: U64?; diagnostic: U64? }
-struct DevStatusSnapshot { state: String; code: String; diagnostic: String; last_build_ms: U128; candidate: U64? }
-struct DevStatus {
+DevRevisionFacts: struct { accepted: U64?; candidate: U64?; diagnostic: U64? }
+DevStatusSnapshot: struct { state: String; code: String; diagnostic: String; last_build_ms: U128; candidate: U64? }
+DevStatus: struct {
     version: AtomicU64; clients: Mutex<[String:Instant]>; state: Mutex<DevStatusSnapshot>
     browser_relay: Mutex<BrowserTrace.Relay?>; browser_trace_enabled: AtomicBool; command_receipt: Mutex<String?>
     watched_file: String; web_root: OSPath; port: AtomicU64; canvas_port: AtomicU64; canvas_enabled: AtomicBool
@@ -479,17 +479,17 @@ struct DevStatus {
     term_lock: Mutex<Unit>; last_block_lines: Mutex<Usize>; header_started: Mutex<Bool>
 }
 impl DevStatus {
-    fn new(file: String, verbose: Bool) -> Self {
-        is_tty :: std.io.stderr().is_terminal()
-        color :: ColorChoice.Auto.resolve(is_tty)
+    new: fn(file: String, verbose: Bool) -> Self {
+        is_tty: std.io.stderr().is_terminal()
+        color: ColorChoice.Auto.resolve(is_tty)
         return Self.new_with_terminal(file, verbose, is_tty, color)
     }
-    fn new_with_root(file: String, verbose: Bool, web_root: &OSPath) -> Self {
+    new_with_root: fn(file: String, verbose: Bool, web_root: &OSPath) -> Self {
         status := Self.new(file, verbose)
         status.web_root = web_root.to_path_buf()
         return status
     }
-    fn new_with_terminal(file: String, verbose: Bool, is_tty: Bool, color: Bool) -> Self {
+    new_with_terminal: fn(file: String, verbose: Bool, is_tty: Bool, color: Bool) -> Self {
         return Self {
             version: AtomicU64.new(1), clients: Mutex.new({}),
             state: Mutex.new(DevStatusSnapshot { state: "ready", code: "", diagnostic: "", last_build_ms: 0, candidate: .None }),
@@ -500,31 +500,31 @@ impl DevStatus {
             term_lock: Mutex.new(_), last_block_lines: Mutex.new(0), header_started: Mutex.new(false)
         }
     }
-    fn set_port(self: Self, port: U16) -> Unit { self.port.store(U64{port}, .SeqCst) }
-    fn set_canvas_port(self: Self, port: U16) -> Unit { self.canvas_port.store(U64{port}, .SeqCst) }
-    fn set_canvas_enabled(self: Self, enabled: Bool) -> Unit { self.canvas_enabled.store(enabled, .SeqCst) }
-    fn port(self: Self) -> U16 { return U16{self.port.load(.SeqCst)} }
-    fn canvas_port(self: Self) -> U16 { return U16{self.canvas_port.load(.SeqCst)} }
-    fn header_text_for(self: Self, snap: DevStatusSnapshot) -> (String, String) {
+    set_port: fn(self: Self, port: U16) -> Unit { self.port.store(U64{port}, .SeqCst) }
+    set_canvas_port: fn(self: Self, port: U16) -> Unit { self.canvas_port.store(U64{port}, .SeqCst) }
+    set_canvas_enabled: fn(self: Self, enabled: Bool) -> Unit { self.canvas_enabled.store(enabled, .SeqCst) }
+    port: fn(self: Self) -> U16 { return U16{self.port.load(.SeqCst)} }
+    canvas_port: fn(self: Self) -> U16 { return U16{self.canvas_port.load(.SeqCst)} }
+    header_text_for: fn(self: Self, snap: DevStatusSnapshot) -> (String, String) {
         if self.reconnecting.load(.SeqCst) -> return (_0: "reconnecting", _1: "waiting for connection")
         return header_words(snap.state, self.watched_file, snap.code, self.port(), self.client_count(), snap.last_build_ms)
     }
-    fn format_line(self: Self, word: String, rest: String) -> String { return if self.color -> format_line_colored(word, rest) else -> format_line_plain(word, rest) }
-    fn dashboard_detail_line(self: Self) -> String {
+    format_line: fn(self: Self, word: String, rest: String) -> String { return if self.color -> format_line_colored(word, rest) else -> format_line_plain(word, rest) }
+    dashboard_detail_line: fn(self: Self) -> String {
         if self.canvas_enabled.load(.SeqCst) -> return "         watching {self.watched_file} · Canvas http://localhost:{self.canvas_port()}/canvas · v verbose"
         return "         watching {self.watched_file} · v verbose"
     }
-    fn refresh(self: Self) -> Unit {
+    refresh: fn(self: Self) -> Unit {
         if !self.active.load(.SeqCst) -> return
-        snap :: self.state.lock().unwrap().clone()
-        (word, rest) :: self.header_text_for(&snap)
-        line :: self.format_line(word, rest)
+        snap: self.state.lock().unwrap().clone()
+        (word, rest): self.header_text_for(&snap)
+        line: self.format_line(word, rest)
         if self.verbose() {
             if self.pin -> self.write_header_verbose(line) else {
-                guard :: self.term_lock.lock().unwrap()
+                guard: self.term_lock.lock().unwrap()
                 out := std.io.stderr()
-                _ :: out.write_all("{line}\n".as_bytes())
-                _ :: out.flush()
+                _: out.write_all("{line}\n".as_bytes())
+                _: out.flush()
             }
             return
         }
@@ -535,180 +535,180 @@ impl DevStatus {
             return
         }
         // CI floor prints the owned diagnostic verbatim, without a frame.
-        guard :: self.term_lock.lock().unwrap()
+        guard: self.term_lock.lock().unwrap()
         out := std.io.stderr()
-        _ :: out.write_all("{line}\n".as_bytes())
-        if snap.state == "error" -> _ :: out.write_all("{snap.diagnostic}\n".as_bytes())
-        _ :: out.flush()
+        _: out.write_all("{line}\n".as_bytes())
+        if snap.state == "error" -> _: out.write_all("{snap.diagnostic}\n".as_bytes())
+        _: out.flush()
     }
-    fn write_block(self: Self, lines: [String]) -> Unit {
-        guard :: self.term_lock.lock().unwrap()
+    write_block: fn(self: Self, lines: [String]) -> Unit {
+        guard: self.term_lock.lock().unwrap()
         out := std.io.stderr()
         prev := self.last_block_lines.lock().unwrap()
         if *prev > 0 {
-            if *prev > 1 -> _ :: out.write_all("{Char{27}}[{{*prev - 1}}A".as_bytes())
-            _ :: out.write_all("{Char{13}}{Char{27}}[0J".as_bytes())
+            if *prev > 1 -> _: out.write_all("{Char{27}}[{{*prev - 1}}A".as_bytes())
+            _: out.write_all("{Char{13}}{Char{27}}[0J".as_bytes())
         }
-        _ :: out.write_all(lines.join("\n").as_bytes())
-        _ :: out.flush()
+        _: out.write_all(lines.join("\n").as_bytes())
+        _: out.flush()
         *prev = lines.len()
     }
-    fn write_header_verbose(self: Self, line: String) -> Unit {
-        guard :: self.term_lock.lock().unwrap()
+    write_header_verbose: fn(self: Self, line: String) -> Unit {
+        guard: self.term_lock.lock().unwrap()
         out := std.io.stderr()
         // Check within the lock: never reinstall DECSTBM after EOF/Ctrl-C cleanup.
         if !self.controls_ready.load(.SeqCst) {
-            _ :: out.write_all("{line}\n".as_bytes())
-            _ :: out.flush()
+            _: out.write_all("{line}\n".as_bytes())
+            _: out.flush()
             return
         }
         started := self.header_started.lock().unwrap()
-        detail :: self.dashboard_detail_line()
+        detail: self.dashboard_detail_line()
         if !*started {
-            _ :: out.write_all("{Char{27}}[2J{Char{27}}[H{line}\n{detail}\n{Char{27}}[3r{Char{27}}[3;1H".as_bytes())
+            _: out.write_all("{Char{27}}[2J{Char{27}}[H{line}\n{detail}\n{Char{27}}[3r{Char{27}}[3;1H".as_bytes())
             *started = true
-        } else { _ :: out.write_all("{Char{27}}7{Char{27}}[1;1H{Char{27}}[2K{line}\n{Char{27}}[2K{detail}{Char{27}}8".as_bytes()) }
-        _ :: out.flush()
+        } else { _: out.write_all("{Char{27}}7{Char{27}}[1;1H{Char{27}}[2K{line}\n{Char{27}}[2K{detail}{Char{27}}8".as_bytes()) }
+        _: out.flush()
     }
-    fn log_line(self: Self, text: String) -> Unit {
+    log_line: fn(self: Self, text: String) -> Unit {
         if !self.active.load(.SeqCst) || !self.verbose() -> return
-        guard :: self.term_lock.lock().unwrap()
+        guard: self.term_lock.lock().unwrap()
         out := std.io.stderr()
-        if self.pin && self.controls_ready.load(.SeqCst) -> _ :: out.write_all("{text}{Char{13}}\n".as_bytes()) else -> _ :: out.write_all("{text}\n".as_bytes())
-        _ :: out.flush()
+        if self.pin && self.controls_ready.load(.SeqCst) -> _: out.write_all("{text}{Char{13}}\n".as_bytes()) else -> _: out.write_all("{text}\n".as_bytes())
+        _: out.flush()
     }
-    fn log_rebuild(self: Self, ok: Bool, detail: String) -> Unit {
-        arrow :: if ok -> "rebuilt" else -> "error"
+    log_rebuild: fn(self: Self, ok: Bool, detail: String) -> Unit {
+        arrow: if ok -> "rebuilt" else -> "error"
         self.log_line("{clock_time()}  save {self.watched_file}  →  {arrow} {detail}")
     }
-    fn log_request(self: Self, method: String, path: String, code: U16, elapsed: Duration) -> Unit {
+    log_request: fn(self: Self, method: String, path: String, code: U16, elapsed: Duration) -> Unit {
         self.log_line("{clock_time()}  {method}  {path:<20} {code}  {elapsed.as_millis()}ms")
     }
-    fn log_diagnostic(self: Self, code: String, diagnostic: String) -> Unit {
+    log_diagnostic: fn(self: Self, code: String, diagnostic: String) -> Unit {
         if !self.active.load(.SeqCst) || !self.verbose() -> return
-        guard :: self.term_lock.lock().unwrap()
+        guard: self.term_lock.lock().unwrap()
         out := std.io.stderr()
         if self.pin && self.controls_ready.load(.SeqCst) {
-            loop line in frame_lines(code, diagnostic) -> _ :: out.write_all("{line}{Char{13}}\n".as_bytes())
-        } else { _ :: out.write_all("{diagnostic}\n".as_bytes()) }
-        _ :: out.flush()
+            loop line in frame_lines(code, diagnostic) -> _: out.write_all("{line}{Char{13}}\n".as_bytes())
+        } else { _: out.write_all("{diagnostic}\n".as_bytes()) }
+        _: out.flush()
     }
-    fn verbose(self: Self) -> Bool { return self.verbose.load(.SeqCst) }
-    fn toggle_verbose(self: Self) -> Unit {
-        verbose :: !self.verbose.fetch_xor(true, .SeqCst)
+    verbose: fn(self: Self) -> Bool { return self.verbose.load(.SeqCst) }
+    toggle_verbose: fn(self: Self) -> Unit {
+        verbose: !self.verbose.fetch_xor(true, .SeqCst)
         if self.pin {
-            guard :: self.term_lock.lock().unwrap()
+            guard: self.term_lock.lock().unwrap()
             out := std.io.stderr()
             if verbose {
                 prev := self.last_block_lines.lock().unwrap()
-                if *prev > 1 -> _ :: out.write_all("{Char{27}}[{{*prev - 1}}A".as_bytes())
-                _ :: out.write_all("{Char{13}}{Char{27}}[0J".as_bytes())
+                if *prev > 1 -> _: out.write_all("{Char{27}}[{{*prev - 1}}A".as_bytes())
+                _: out.write_all("{Char{13}}{Char{27}}[0J".as_bytes())
                 *prev = 0
             } else {
-                _ :: out.write_all("{Char{27}}[r{Char{27}}[2J{Char{27}}[H".as_bytes())
+                _: out.write_all("{Char{27}}[r{Char{27}}[2J{Char{27}}[H".as_bytes())
                 *self.header_started.lock().unwrap() = false
             }
-            _ :: out.flush()
+            _: out.flush()
         }
         self.refresh()
         self.log_line(if verbose -> "verbose request/rebuild log enabled · press v to collapse" else -> "")
     }
-    fn disable_terminal_controls(self: Self) -> Unit {
+    disable_terminal_controls: fn(self: Self) -> Unit {
         if !self.pin { self.controls_ready.store(false, .SeqCst); return }
-        guard :: self.term_lock.lock().unwrap()
+        guard: self.term_lock.lock().unwrap()
         self.controls_ready.store(false, .SeqCst)
         out := std.io.stderr()
         started := self.header_started.lock().unwrap()
-        if *started -> _ :: out.write_all("{Char{27}}[r{Char{27}}[999;1H{Char{13}}\n".as_bytes()) else -> _ :: out.write_all("\n".as_bytes())
+        if *started -> _: out.write_all("{Char{27}}[r{Char{27}}[999;1H{Char{13}}\n".as_bytes()) else -> _: out.write_all("\n".as_bytes())
         *started = false
-        _ :: out.flush()
+        _: out.flush()
     }
-    fn mark_building(self: Self) -> Unit {
-        _ :: self.browser_relay.lock().unwrap().take()
+    mark_building: fn(self: Self) -> Unit {
+        _: self.browser_relay.lock().unwrap().take()
         state := self.state.lock().unwrap()
-        last_build_ms :: state.last_build_ms
+        last_build_ms: state.last_build_ms
         *state = DevStatusSnapshot { state: "building", code: "", diagnostic: "", last_build_ms, candidate: .Val(self.next_candidate()) }
         drop(^state)
         self.refresh()
     }
-    fn mark_ready(self: Self, elapsed_ms: U128, is_rebuild: Bool) -> Unit {
+    mark_ready: fn(self: Self, elapsed_ms: U128, is_rebuild: Bool) -> Unit {
         browser_relay := self.browser_relay.lock().unwrap()
         if self.browser_trace_enabled.load(.SeqCst) {
-            _ :: browser_relay.take()
+            _: browser_relay.take()
             *browser_relay = read_web_manifest(&self.web_root).and_then((manifest) -> BrowserTrace.Relay.new(manifest).ok())
         }
         drop(^browser_relay)
         state := self.state.lock().unwrap()
-        if is_rebuild -> _ :: self.version.fetch_add(1, .SeqCst)
+        if is_rebuild -> _: self.version.fetch_add(1, .SeqCst)
         self.published.store(true, .SeqCst)
         *state = DevStatusSnapshot { state: "ready", code: "", diagnostic: "", last_build_ms: elapsed_ms, candidate: .None }
         drop(^state)
         self.refresh()
         if is_rebuild -> self.log_rebuild(true, format_build_time(elapsed_ms))
     }
-    fn mark_error(self: Self, code: String, diagnostic: String, is_rebuild: Bool) -> Unit {
-        diagnostic_for_log :: diagnostic.clone()
+    mark_error: fn(self: Self, code: String, diagnostic: String, is_rebuild: Bool) -> Unit {
+        diagnostic_for_log: diagnostic.clone()
         state := self.state.lock().unwrap()
-        last_build_ms :: state.last_build_ms
-        candidate :: state.candidate.unwrap_or_else(() -> self.next_candidate())
+        last_build_ms: state.last_build_ms
+        candidate: state.candidate.unwrap_or_else(() -> self.next_candidate())
         *state = DevStatusSnapshot { state: "error", code: code.clone(), diagnostic: ^diagnostic, last_build_ms, candidate: .Val(candidate) }
         drop(^state)
         self.refresh()
         if is_rebuild { self.log_rebuild(false, code); self.log_diagnostic(code, diagnostic_for_log) }
     }
-    fn next_candidate(self: Self) -> U64 {
-        version :: self.version.load(.SeqCst)
+    next_candidate: fn(self: Self) -> U64 {
+        version: self.version.load(.SeqCst)
         return if self.published.load(.SeqCst) -> version + 1 else -> version
     }
-    fn revision_facts_for(self: Self, snap: DevStatusSnapshot) -> DevRevisionFacts {
+    revision_facts_for: fn(self: Self, snap: DevStatusSnapshot) -> DevRevisionFacts {
         return DevRevisionFacts { accepted: if self.published.load(.SeqCst) -> .Val(self.version.load(.SeqCst)) else -> .None, candidate: snap.candidate, diagnostic: if snap.state == "error" -> snap.candidate else -> .None }
     }
-    fn revision_facts(self: Self) -> DevRevisionFacts {
-        snap :: self.state.lock().unwrap()
+    revision_facts: fn(self: Self) -> DevRevisionFacts {
+        snap: self.state.lock().unwrap()
         return self.revision_facts_for(&snap)
     }
-    fn web_error_facts(self: Self) -> WebErrorDevStatusFacts {
-        snap :: self.state.lock().unwrap().clone()
+    web_error_facts: fn(self: Self) -> WebErrorDevStatusFacts {
+        snap: self.state.lock().unwrap().clone()
         return WebErrorDevStatusFacts.new(^snap.state, ^snap.code, ^snap.diagnostic)
     }
-    fn json(self: Self) -> String {
-        snap :: self.state.lock().unwrap().clone()
-        revisions :: self.revision_facts_for(&snap)
-        (word, rest) :: self.header_text_for(&snap)
-        message :: "{word} · {rest}"
-        number :: (value: U64?) -> value.map_or_else(() -> "null", (n) -> n.to_string())
+    json: fn(self: Self) -> String {
+        snap: self.state.lock().unwrap().clone()
+        revisions: self.revision_facts_for(&snap)
+        (word, rest): self.header_text_for(&snap)
+        message: "{word} · {rest}"
+        number: (value: U64?) -> value.map_or_else(() -> "null", (n) -> n.to_string())
         return "{{" + "\"version\":" + self.version.load(.SeqCst).to_string() + ",\"state\":\"" + foundation_json_escape(word) + "\",\"message\":\"" + foundation_json_escape(message) + "\",\"file\":\"" + foundation_json_escape(self.watched_file) + "\",\"code\":\"" + foundation_json_escape(snap.code) + "\",\"diagnostic\":\"" + foundation_json_escape(snap.diagnostic) + "\",\"clients\":" + self.client_count().to_string() + ",\"last_build_ms\":" + snap.last_build_ms.to_string() + ",\"candidate\":" + number(revisions.candidate) + ",\"diagnostic_revision\":" + number(revisions.diagnostic) + ",\"accepted_revision\":" + number(revisions.accepted) + ",\"last_good_revision\":" + number(revisions.accepted) + "}}"
     }
-    fn activate(self: Self) -> Unit { self.active.store(true, .SeqCst); self.refresh() }
-    fn client_count(self: Self) -> U64 { _ :: self.prune_expired_clients(); return U64{self.clients.lock().unwrap().len()} }
-    fn note_client(self: Self, id: String) -> Unit {
+    activate: fn(self: Self) -> Unit { self.active.store(true, .SeqCst); self.refresh() }
+    client_count: fn(self: Self) -> U64 { _: self.prune_expired_clients(); return U64{self.clients.lock().unwrap().len()} }
+    note_client: fn(self: Self, id: String) -> Unit {
         if !Session.client_id_is_valid(id) -> return
-        pruned :: self.prune_expired_clients()
+        pruned: self.prune_expired_clients()
         clients := self.clients.lock().unwrap()
-        is_new :: !clients.contains_key(id)
+        is_new: !clients.contains_key(id)
         if is_new && clients.len() >= MAX_CLIENTS -> return
-        changed :: clients.insert(id.to_string(), Instant.now()).is_none()
+        changed: clients.insert(id.to_string(), Instant.now()).is_none()
         drop(^clients)
-        recovered :: self.reconnecting.swap(false, .SeqCst)
+        recovered: self.reconnecting.swap(false, .SeqCst)
         if pruned || changed || recovered -> self.refresh()
     }
-    fn expire_clients(self: Self) -> Unit { if self.prune_expired_clients() -> self.refresh() }
-    fn prune_expired_clients(self: Self) -> Bool {
-        cutoff :: Duration.from_millis(CLIENT_TTL_MS)
-        now :: Instant.now()
+    expire_clients: fn(self: Self) -> Unit { if self.prune_expired_clients() -> self.refresh() }
+    prune_expired_clients: fn(self: Self) -> Bool {
+        cutoff: Duration.from_millis(CLIENT_TTL_MS)
+        now: Instant.now()
         clients := self.clients.lock().unwrap()
-        before :: clients.len()
+        before: clients.len()
         clients.retain((_, seen) -> now.saturating_duration_since(*seen) <= cutoff)
-        changed :: clients.len() != before
-        disconnected :: before > 0 && clients.is_empty()
+        changed: clients.len() != before
+        disconnected: before > 0 && clients.is_empty()
         drop(^clients)
         if disconnected -> self.reconnecting.store(true, .SeqCst)
         return changed
     }
-    fn drop_client(self: Self, id: String) -> Unit {
+    drop_client: fn(self: Self, id: String) -> Unit {
         if !Session.client_id_is_valid(id) -> return
         clients := self.clients.lock().unwrap()
-        changed :: clients.remove(id).is_some()
+        changed: clients.remove(id).is_some()
         drop(^clients)
         if changed {
             // pagehide is a clean close/reload, not a broken lease.
@@ -716,27 +716,27 @@ impl DevStatus {
             self.refresh()
         }
     }
-    fn record_command_receipt(self: Self, receipt: String) -> Unit { *self.command_receipt.lock().unwrap() = .Val(^receipt) }
-    fn command_receipt(self: Self) -> String? { return self.command_receipt.lock().unwrap().clone() }
-    fn activate_browser_trace(self: &Self, manifest: String) Err! {
-        relay :: BrowserTrace.Relay.new(manifest)
+    record_command_receipt: fn(self: Self, receipt: String) -> Unit { *self.command_receipt.lock().unwrap() = .Val(^receipt) }
+    command_receipt: fn(self: Self) -> String? { return self.command_receipt.lock().unwrap().clone() }
+    activate_browser_trace: fn(self: &Self, manifest: String) Err! {
+        relay: BrowserTrace.Relay.new(manifest)
         *self.browser_relay.lock().unwrap() = .Val(^relay)
         self.browser_trace_enabled.store(true, .SeqCst)
-        _ :: self.version.fetch_add(1, .SeqCst)
+        _: self.version.fetch_add(1, .SeqCst)
     }
-    fn activate_requested_browser_trace(self: Self) -> Unit {
+    activate_requested_browser_trace: fn(self: Self) -> Unit {
         if BrowserTrace.take_request() != .Ok(true) -> return
-        if read_web_manifest(&self.web_root) == .Val(manifest) -> _ :: self.activate_browser_trace(manifest)
+        if read_web_manifest(&self.web_root) == .Val(manifest) -> _: self.activate_browser_trace(manifest)
     }
 }
-struct CanvasHostOptions {
+CanvasHostOptions: struct {
     host: String; port: U16?; transport: String; authority: String
     audit: Bool; output: String?; target: String?
 }
 impl CanvasHostOptions.Default {
-    fn default() -> Self { return Self { host: "127.0.0.1", port: .None, transport: "http", authority: "loopback", audit: false, output: .None, target: .None } }
+    default: fn() -> Self { return Self { host: "127.0.0.1", port: .None, transport: "http", authority: "loopback", audit: false, output: .None, target: .None } }
 }
-struct WebHost {
+WebHost: struct {
     listener: Mutex<TcpListener?>; application_listener: Mutex<TcpListener?>; started: AtomicBool
     shutdown: Arc<AtomicBool>; server_threads: Mutex[[thread.JoinHandle[Unit]]]
     poll_thread: Mutex<thread.JoinHandle[Unit]?>; terminal_thread: Mutex<thread.JoinHandle[Unit]?>
@@ -747,20 +747,20 @@ struct WebHost {
     terminal_style: Arc<TerminalStyleHostAdapter>
 }
 impl WebHost {
-    fn bind_with_policy(file: String, static_root: &OSPath, verbose: Bool, port: U16?, release_policy: ReleaseDevtoolsPolicy) -> Self Err! {
+    bind_with_policy: fn(file: String, static_root: &OSPath, verbose: Bool, port: U16?, release_policy: ReleaseDevtoolsPolicy) -> Self Err! {
         return Self.bind_application_only_with_policy(file, verbose, port, static_root.to_path_buf(), release_policy, true)
     }
-    fn bind_static_with_policy(file: String, root: &OSPath, verbose: Bool, application_listener: TcpListener, session: Arc<ResidentDevSession>, release_policy: ReleaseDevtoolsPolicy) -> Self Err! {
-        static_root :: fs.canonicalize(root) ?? return .Err("error: couldn't open static output `{root.display()}`: {err}")
-        application_port :: application_listener.local_addr().map((address) -> address.port()).unwrap_or(0)
+    bind_static_with_policy: fn(file: String, root: &OSPath, verbose: Bool, application_listener: TcpListener, session: Arc<ResidentDevSession>, release_policy: ReleaseDevtoolsPolicy) -> Self Err! {
+        static_root: fs.canonicalize(root) ?? return .Err("error: couldn't open static output `{root.display()}`: {err}")
+        application_port: application_listener.local_addr().map((address) -> address.port()).unwrap_or(0)
         if session.application_port() != application_port -> return .Err("error: shared devtools session application port {session.application_port()} does not match static preview port {application_port}")
         return Self.bind_application_only_with_listener(file, verbose, ^static_root, release_policy, false, ^application_listener, ^session)
     }
-    fn bind_application_preview_listener(port: U16?) -> TcpListener Err! { return bind_application_server(port) }
-    fn bind_application_only_with_policy(file: String, verbose: Bool, port: U16?, static_root: OSPath, release_policy: ReleaseDevtoolsPolicy, web_swap_enabled: Bool) -> Self Err! {
-        application_listener :: bind_application_server(port)
-        application_port :: application_listener.local_addr().map((address) -> address.port()).unwrap_or(0)
-        session :: Arc.new(ResidentDevSession.new(file, 0, application_port))
+    bind_application_preview_listener: fn(port: U16?) -> TcpListener Err! { return bind_application_server(port) }
+    bind_application_only_with_policy: fn(file: String, verbose: Bool, port: U16?, static_root: OSPath, release_policy: ReleaseDevtoolsPolicy, web_swap_enabled: Bool) -> Self Err! {
+        application_listener: bind_application_server(port)
+        application_port: application_listener.local_addr().map((address) -> address.port()).unwrap_or(0)
+        session: Arc.new(ResidentDevSession.new(file, 0, application_port))
         return Self.bind_application_only_with_listener(file, verbose, ^static_root, release_policy, web_swap_enabled, ^application_listener, ^session)
     }
 }

@@ -1,29 +1,29 @@
 
 use {
-    files :: core.files
-    services :: core.service
-    testing :: core.testing
+    files: core.files
+    services: core.service
+    testing: core.testing
 }
 
-fn adapter_worker() {}
+adapter_worker: fn() {}
 
-fn run() {
+run: fn() {
     temp := testing.temp_dir("services-state-adapters")
 
-    snapshot_path :: Path.from(temp).join("snapshot.log").to_string()
+    snapshot_path: Path.from(temp).join("snapshot.log").to_string()
     snap_tree := services.tree("snap")
-    snap_store :: services.state_store(snapshot_path) ?? panic("snapshot store")
+    snap_store: services.state_store(snapshot_path) ?? panic("snapshot store")
     &snap_tree.set_state_snapshot(snap_store, "app-state", 1, "reversible") ?? panic("snapshot adapter")
-    _snap_worker :: &snap_tree.worker("a", adapter_worker, capacity: 2) ?? panic("snapshot worker")
+    _snap_worker: &snap_tree.worker("a", adapter_worker, capacity: 2) ?? panic("snapshot worker")
     &snap_tree.start() ?? panic("snapshot start")
     &snap_tree.commit_snapshot("state-v1") ?? panic("commit")
     print("restored:{snap_tree.restore_snapshot() ?? panic("restore")}")
 
-    event_path :: Path.from(temp).join("events.log").to_string()
+    event_path: Path.from(temp).join("events.log").to_string()
     log_tree := services.tree("log")
-    log_store :: services.state_store(event_path) ?? panic("event store")
+    log_store: services.state_store(event_path) ?? panic("event store")
     &log_tree.set_state_event_log(log_store, "app-events", 1, "reversible") ?? panic("event adapter")
-    _log_worker :: &log_tree.worker("a", adapter_worker, capacity: 2) ?? panic("event worker")
+    _log_worker: &log_tree.worker("a", adapter_worker, capacity: 2) ?? panic("event worker")
     &log_tree.start() ?? panic("event start")
     &log_tree.append_event("first") ?? panic("first event")
     &log_tree.append_event("second") ?? panic("second event")

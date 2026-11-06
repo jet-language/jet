@@ -1,27 +1,27 @@
 #Error
-struct ReadError {
+ReadError: struct {
     message: String
 }
 
-struct Source {
+Source: struct {
     items: [Int]
 }
 
 impl Source {
-    fn pick(&self, index: Int) -> Int ReadError! {
+    pick: fn(&self, index: Int) -> Int ReadError! {
         if index >= self.items.len() -> return Err(ReadError{message: "out of range"})
         Ok(self.items[index])
     }
 }
 
-fn run() {
+run: fn() {
     source := Source{items: [4, 5]}
-    x :: &source.pick(1) ? v -> v ! e -> {
+    x: &source.pick(1) ? v -> v ! e -> {
         print("failed {e.message}")
         0
     }
     print("{x}")
-    y :: &source.pick(5) ? v -> v ! e -> {
+    y: &source.pick(5) ? v -> v ! e -> {
         print("failed {e.message}")
         0
     }

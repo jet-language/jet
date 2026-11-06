@@ -1,29 +1,29 @@
 // D-CONC-FREEZE1=A: `freeze` makes one owned snapshot that any task may read.
 // The explicit `^` form gives a different owned value to one child.
-package {
+package: {
     name: "freeze_capture"
     authority: { allow: [IO, Time.Wait] }
 }
 
-struct Snapshot {
+Snapshot: struct {
     value: Int
 }
 
-fn run() {
+run: fn() {
     source := Snapshot{value: 41}
-    frozen :: freeze(source)
-    twice :: freeze(freeze(source))
+    frozen: freeze(source)
+    twice: freeze(freeze(source))
 
     task.group snapshots {
-        first :: task { frozen.value }
-        second :: task { frozen.value }
+        first: task { frozen.value }
+        second: task { frozen.value }
         print(^first.join() ?? panic("first task failed"))
         print(^second.join() ?? panic("second task failed"))
     }
 
     owned := Snapshot{value: 7}
     task.group moved {
-        child :: task ^owned { owned.value }
+        child: task ^owned { owned.value }
         print(^child.join() ?? panic("move task failed"))
     }
 

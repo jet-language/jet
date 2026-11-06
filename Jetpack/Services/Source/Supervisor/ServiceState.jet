@@ -3,20 +3,20 @@
 // allocated ports, the shutdown marker, supervisor errors, and captured logs.
 // Every state file is replaced whole, so a reader never sees half a record.
 
-SERVICES_MAX_SERVICE_NAME_BYTES :: 256
-SERVICES_MAX_STATE_BYTES :: 4096
-SERVICES_MAX_LIFECYCLE_BYTES :: 16384
-SERVICES_SUPERVISOR_ENV :: "JETPACK_SERVICE_SUPERVISOR"
+SERVICES_MAX_SERVICE_NAME_BYTES: 256
+SERVICES_MAX_STATE_BYTES: 4096
+SERVICES_MAX_LIFECYCLE_BYTES: 16384
+SERVICES_SUPERVISOR_ENV: "JETPACK_SERVICE_SUPERVISOR"
 
 // A service process's saved identity: the PID plus the platform-tagged start
 // token and optional containment name so a reused PID
 // can never authorize a liveness claim or a signal.
-struct ServiceProcessState {
+ServiceProcessState: struct {
     pid: Int
     start_identity: String
     containment: String?
 
-    fn encode(self) -> String Never! {
+    encode: fn(self) -> String Never! {
         text := "version=1\npid={self.pid}\nstart={self.start_identity}\n"
         if self.containment == .Val(name) -> text = "{text}containment={name}\n"
         text
@@ -24,7 +24,7 @@ struct ServiceProcessState {
 }
 
 // The `pid` record as found on disk.
-enum PersistedProcessState {
+PersistedProcessState: enum {
     Verified(ServiceProcessState)
     // Written by Jetpack versions that persisted only a PID. It may be
     // removed but never authorizes a liveness claim or a signal.
@@ -32,7 +32,7 @@ enum PersistedProcessState {
 }
 
 // The verified identity of a record; a legacy PID authorizes nothing.
-fn services_verified_state(record: PersistedProcessState) -> ServiceProcessState? Never! {
+services_verified_state: fn(record: PersistedProcessState) -> ServiceProcessState? Never! {
     if record == {
         .Verified(verified) -> Val(verified)
         .LegacyPID(_) -> None
@@ -40,14 +40,14 @@ fn services_verified_state(record: PersistedProcessState) -> ServiceProcessState
 }
 
 // The lifecycle phase of one supervised generation.
-enum ServicePhase {
+ServicePhase: enum {
     Starting
     Running
     Ready
     Failed
     Stopped
 
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         if self == {
             .Starting -> "starting"
             .Running -> "running"
@@ -57,7 +57,7 @@ enum ServicePhase {
         }
     }
 
-    fn parse(text: String) -> ServicePhase? Never! {
+    parse: fn(text: String) -> ServicePhase? Never! {
         if text == {
             "starting" -> Val(ServicePhase.Starting)
             "running" -> Val(ServicePhase.Running)
@@ -69,7 +69,7 @@ enum ServicePhase {
     }
 
     // Starting, running, and ready generations may still own processes.
-    fn is_live(self) -> Bool Never! {
+    is_live: fn(self) -> Bool Never! {
         if self == {
             .Starting | .Running | .Ready -> true
             else -> false
@@ -80,7 +80,7 @@ enum ServicePhase {
 // Durable facts for one supervised generation: the authority, containment,
 // phase, and recovery reason keep a record explainable after the supervisor
 // or the service has exited.
-struct LifecycleFacts {
+LifecycleFacts: struct {
     backend: String
     generation: Int
     phase: ServicePhase
@@ -93,7 +93,7 @@ struct LifecycleFacts {
 }
 
 // Which platform authority contains a service generation.
-enum ServiceAuthority {
+ServiceAuthority: enum {
     // The service's own process group (the in-process host).
     TestProcessGroup
     // A delegated `systemd-run --user --scope` unit on Linux.
@@ -102,7 +102,7 @@ enum ServiceAuthority {
     WindowsGuardianJobObject(guardian: String)
     Unsupported
 
-    fn backend(self) -> String Never! {
+    backend: fn(self) -> String Never! {
         if self == {
             .TestProcessGroup -> "test-process-group"
             .LinuxSystemdUser(_) -> "linux-systemd-user"
@@ -111,7 +111,7 @@ enum ServiceAuthority {
         }
     }
 
-    fn containment(self) -> String Never! {
+    containment: fn(self) -> String Never! {
         if self == {
             .TestProcessGroup -> "process-group"
             .LinuxSystemdUser(_) -> "delegated-cgroup"
@@ -120,21 +120,21 @@ enum ServiceAuthority {
         }
     }
 
-    fn unit(self) -> String? Never! {
+    unit: fn(self) -> String? Never! {
         if self == {
             .LinuxSystemdUser(unit) -> Val(unit)
             else -> None
         }
     }
 
-    fn guardian(self) -> String? Never! {
+    guardian: fn(self) -> String? Never! {
         if self == {
             .WindowsGuardianJobObject(guardian) -> Val(guardian)
             else -> None
         }
     }
 
-    fn uses_platform_authority(self) -> Bool Never! {
+    uses_platform_authority: fn(self) -> Bool Never! {
         if self == {
             .LinuxSystemdUser(_) | .WindowsGuardianJobObject(_) -> true
             else -> false
@@ -143,50 +143,50 @@ enum ServiceAuthority {
 }
 
 // The `.jet/services/<canonical-name>/` directory for `name`.
-fn services_service_dir(project_dir: String, name: String) -> String Never! {
-    root :: files.join(files.join(project_dir, CONFIG_DEFAULT_DIR), SERVICES_STATE_DIR)
-    canonical :: services_canonical_service_name(name)
+services_service_dir: fn(project_dir: String, name: String) -> String Never! {
+    root: files.join(files.join(project_dir, CONFIG_DEFAULT_DIR), SERVICES_STATE_DIR)
+    canonical: services_canonical_service_name(name)
     if canonical == "" -> return root
     files.join(root, canonical)
 }
 
-fn services_pid_path(dir: String) -> String Never! { files.join(dir, "pid") }
+services_pid_path: fn(dir: String) -> String Never! { files.join(dir, "pid") }
 
-fn services_stopping_path(dir: String) -> String Never! { files.join(dir, ".stopping") }
+services_stopping_path: fn(dir: String) -> String Never! { files.join(dir, ".stopping") }
 
-fn services_supervisor_error_path(dir: String) -> String Never! { files.join(dir, "supervisor.error") }
+services_supervisor_error_path: fn(dir: String) -> String Never! { files.join(dir, "supervisor.error") }
 
-fn services_ports_path(dir: String) -> String Never! { files.join(dir, "ports") }
+services_ports_path: fn(dir: String) -> String Never! { files.join(dir, "ports") }
 
-fn services_lifecycle_path(dir: String) -> String Never! { files.join(dir, "lifecycle") }
+services_lifecycle_path: fn(dir: String) -> String Never! { files.join(dir, "lifecycle") }
 
-fn services_stdout_path(dir: String) -> String Never! { files.join(dir, "stdout.log") }
+services_stdout_path: fn(dir: String) -> String Never! { files.join(dir, "stdout.log") }
 
-fn services_stderr_path(dir: String) -> String Never! { files.join(dir, "stderr.log") }
+services_stderr_path: fn(dir: String) -> String Never! { files.join(dir, "stderr.log") }
 
 // The recorded supervisor failure for `plan`, if any.
-fn services_supervisor_failure(project_dir: String, plan: DevServicePlan) -[FS]> String? Never! {
-    text :: services_read_text_bounded(services_supervisor_error_path(services_service_dir(project_dir, plan.name)), SERVICES_MAX_STATE_BYTES) ?? return None
-    error :: text.trim()
+services_supervisor_failure: fn(project_dir: String, plan: DevServicePlan) -[FS]> String? Never! {
+    text: services_read_text_bounded(services_supervisor_error_path(services_service_dir(project_dir, plan.name)), SERVICES_MAX_STATE_BYTES) ?? return None
+    error: text.trim()
     if error == "" -> return None
     Val(error)
 }
 
 // Publish a small state file as one complete replacement through a
 // create-new temporary beside it.
-fn services_write_atomic(path: String, contents: [U8]) IOError! -[FS, Env]> {
-    parent :: files.dirname(path)
-    directory :: if parent == "" -> "." else -> parent
+services_write_atomic: fn(path: String, contents: [U8]) IOError! -[FS, Env]> {
+    parent: files.dirname(path)
+    directory: if parent == "" -> "." else -> parent
     files.create_dir_all(directory)
-    name :: files.basename(path)
-    temporary :: files.join(directory, ".{if name == "" -> "state" else -> name}.tmp-{sys.pid()}")
+    name: files.basename(path)
+    temporary: files.join(directory, ".{if name == "" -> "state" else -> name}.tmp-{sys.pid()}")
     if services_replace_through(temporary, path, contents) == .Err(error) {
         files.remove(temporary).drop("the temporary is abandoned after a failed publish")
         return Err(error)
     }
 }
 
-fn services_replace_through(temporary: String, path: String, contents: [U8]) IOError! -[FS]> {
+services_replace_through: fn(temporary: String, path: String, contents: [U8]) IOError! -[FS]> {
     writer := files.create(temporary, if_exists: .Refuse)
     &writer.write_all(contents)
     &writer.fsync()
@@ -196,69 +196,69 @@ fn services_replace_through(temporary: String, path: String, contents: [U8]) IOE
 
 // Remove a state file; a missing file is fine and other failures are ignored
 // (Rust `let _ = fs::remove_file(..)`).
-fn services_remove_quiet(path: String) -[FS]> {
+services_remove_quiet: fn(path: String) -[FS]> {
     files.remove(path).drop("state cleanup is best-effort")
 }
 
 // Remove a state file, treating only a missing file as success.
-fn services_remove_existing(path: String) IOError! -[FS]> {
+services_remove_existing: fn(path: String) IOError! -[FS]> {
     if files.remove(path) == .Err(error) {
         if !services_is_not_found(error) -> return Err(error)
     }
 }
 
-fn services_is_not_found(error: IOError) -> Bool Never! {
+services_is_not_found: fn(error: IOError) -> Bool Never! {
     if error == {
         .NotFound(_) -> true
         else -> false
     }
 }
 
-fn services_state_error(path: String, cause: String) -> IOError Never! {
+services_state_error: fn(path: String, cause: String) -> IOError Never! {
     IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val(cause)})
 }
 
 // Read a bounded regular state file (never through a final link) as UTF-8.
-fn services_read_text_bounded(path: String, limit: Int) -[FS]> String IOError! {
-    info :: files.stat(path)
+services_read_text_bounded: fn(path: String, limit: Int) -[FS]> String IOError! {
+    info: files.stat(path)
     if info.is_symlink || !info.is_file || info.size > limit {
         return Err(services_state_error(path, "service state is not a bounded regular file"))
     }
-    bytes :: files.read_bytes(path)
+    bytes: files.read_bytes(path)
     if bytes.len() > limit -> return Err(services_state_error(path, "service state exceeded its bound while being read"))
     String.from_bytes(bytes) ?? return Err(services_state_error(path, "service state is not UTF-8"))
 }
 
 // Rust `str::lines`: split at LF and drop one trailing CR per line.
-fn services_lines(text: String) -> [String] Never! {
+services_lines: fn(text: String) -> [String] Never! {
     lines := [String]{}
     if text == "" -> return lines
-    pieces :: text.split("\n").to_list()
-    count :: if text.ends_with("\n") -> pieces.len() - 1 else -> pieces.len()
-    carriage_return :: env_shell_control(13)
+    pieces: text.split("\n").to_list()
+    count: if text.ends_with("\n") -> pieces.len() - 1 else -> pieces.len()
+    carriage_return: env_shell_control(13)
     loop index in 0..<count -> &lines.push(pieces[index].removesuffix(carriage_return))
     lines
 }
 
 // A PID is a non-zero `u32`.
-fn services_parse_pid(text: String) -> Int? Never! {
-    value :: Int.parse(text) ?? return None
+services_parse_pid: fn(text: String) -> Int? Never! {
+    value: Int.parse(text) ?? return None
     if value <= 0 || value > 4294967295 -> return None
     Val(value)
 }
 
 // The saved process identity, a legacy PID-only record, or None.
-fn services_read_process_state(dir: String) -[FS]> PersistedProcessState? ServicesError! {
-    path :: services_pid_path(dir)
-    invalid :: ServicesError.new("service process state `{path}` is invalid")
-    text :: if services_read_text_bounded(path, SERVICES_MAX_STATE_BYTES) == {
+services_read_process_state: fn(dir: String) -[FS]> PersistedProcessState? ServicesError! {
+    path: services_pid_path(dir)
+    invalid: ServicesError.new("service process state `{path}` is invalid")
+    text: if services_read_text_bounded(path, SERVICES_MAX_STATE_BYTES) == {
         .Ok(text) -> text
         .Err(error) -> {
             if services_is_not_found(error) -> return Ok(None)
             return Err(ServicesError.new("couldn't read service process state `{path}`: {error}"))
         }
     }
-    trimmed :: text.trim()
+    trimmed: text.trim()
     if Int.parse(trimmed) == .Ok(legacy) {
         if legacy <= 0 || legacy > 4294967295 -> return Err(invalid)
         return Ok(Val(PersistedProcessState.LegacyPID(legacy)))
@@ -269,9 +269,9 @@ fn services_read_process_state(dir: String) -[FS]> PersistedProcessState? Servic
     start := String?{None}
     containment := String?{None}
     seen := [String]{}
-    lines :: services_lines(trimmed)
+    lines: services_lines(trimmed)
     loop raw in lines {
-        pair :: raw.trim().split_once("=") ?? return Err(invalid)
+        pair: raw.trim().split_once("=") ?? return Err(invalid)
         if seen.contains(pair.before) -> return Err(invalid)
         &seen.push(pair.before)
         if pair.before == {
@@ -292,21 +292,21 @@ fn services_read_process_state(dir: String) -[FS]> PersistedProcessState? Servic
         }
     }
     if !version -> return Err(invalid)
-    found_pid :: pid ?? return Err(invalid)
-    found_start :: start ?? return Err(invalid)
+    found_pid: pid ?? return Err(invalid)
+    found_start: start ?? return Err(invalid)
     Ok(Val(PersistedProcessState.Verified(ServiceProcessState{pid: found_pid, start_identity: found_start, containment})))
 }
 
 // The authority a lifecycle record names.
-fn services_authority_from_lifecycle(facts: LifecycleFacts) -> ServiceAuthority ServicesError! {
+services_authority_from_lifecycle: fn(facts: LifecycleFacts) -> ServiceAuthority ServicesError! {
     if facts.backend == {
         "test-process-group" -> Ok(ServiceAuthority.TestProcessGroup)
         "linux-systemd-user" -> {
-            unit :: facts.unit ?? return Err(ServicesError.new("service lifecycle state is missing its systemd unit"))
+            unit: facts.unit ?? return Err(ServicesError.new("service lifecycle state is missing its systemd unit"))
             Ok(ServiceAuthority.LinuxSystemdUser{unit: unit})
         }
         "windows-guardian-job-object" -> {
-            guardian :: facts.guardian ?? return Err(ServicesError.new("service lifecycle state is missing its guardian"))
+            guardian: facts.guardian ?? return Err(ServicesError.new("service lifecycle state is missing its guardian"))
             Ok(ServiceAuthority.WindowsGuardianJobObject{guardian: guardian})
         }
         "unsupported" -> Ok(ServiceAuthority.Unsupported)
@@ -314,7 +314,7 @@ fn services_authority_from_lifecycle(facts: LifecycleFacts) -> ServiceAuthority 
     }
 }
 
-fn services_lifecycle_for(authority: ServiceAuthority, generation: Int, phase: ServicePhase, recovery: String, pid: Int?, dependencies: [String]) -> LifecycleFacts Never! {
+services_lifecycle_for: fn(authority: ServiceAuthority, generation: Int, phase: ServicePhase, recovery: String, pid: Int?, dependencies: [String]) -> LifecycleFacts Never! {
     LifecycleFacts{
         backend: authority.backend(),
         generation,
@@ -328,7 +328,7 @@ fn services_lifecycle_for(authority: ServiceAuthority, generation: Int, phase: S
     }
 }
 
-fn services_write_lifecycle(dir: String, facts: LifecycleFacts) IOError! -[FS, Env]> {
+services_write_lifecycle: fn(dir: String, facts: LifecycleFacts) IOError! -[FS, Env]> {
     encoded := "version=1\nbackend={facts.backend}\ngeneration={facts.generation}\nphase={facts.phase.as_str()}\ncontainment={facts.containment}\nrecovery={facts.recovery}\n"
     if facts.pid == .Val(pid) -> encoded = "{encoded}pid={pid}\n"
     if facts.unit == .Val(unit) -> encoded = "{encoded}unit={unit}\n"
@@ -338,15 +338,15 @@ fn services_write_lifecycle(dir: String, facts: LifecycleFacts) IOError! -[FS, E
 }
 
 // Best-effort lifecycle publication (Rust `let _ = write_lifecycle(..)`).
-fn services_write_lifecycle_quiet(dir: String, facts: LifecycleFacts) -[FS, Env]> {
+services_write_lifecycle_quiet: fn(dir: String, facts: LifecycleFacts) -[FS, Env]> {
     services_write_lifecycle(dir, facts).drop("lifecycle evidence is best-effort here")
 }
 
 // The lifecycle record in `dir`, validated against its authority.
-fn services_read_lifecycle(dir: String) -[FS]> LifecycleFacts? ServicesError! {
-    path :: services_lifecycle_path(dir)
-    invalid :: ServicesError.new("service lifecycle state `{path}` is invalid")
-    text :: if services_read_text_bounded(path, SERVICES_MAX_LIFECYCLE_BYTES) == {
+services_read_lifecycle: fn(dir: String) -[FS]> LifecycleFacts? ServicesError! {
+    path: services_lifecycle_path(dir)
+    invalid: ServicesError.new("service lifecycle state `{path}` is invalid")
+    text: if services_read_text_bounded(path, SERVICES_MAX_LIFECYCLE_BYTES) == {
         .Ok(text) -> text
         .Err(error) -> {
             if services_is_not_found(error) -> return Ok(None)
@@ -364,11 +364,11 @@ fn services_read_lifecycle(dir: String) -[FS]> LifecycleFacts? ServicesError! {
     guardian := String?{None}
     dependencies := [String]{}
     seen := [String]{}
-    lines :: services_lines(text)
+    lines: services_lines(text)
     loop line in lines {
-        pair :: line.split_once("=") ?? return Err(invalid)
-        key :: pair.before
-        value :: pair.after
+        pair: line.split_once("=") ?? return Err(invalid)
+        key: pair.before
+        value: pair.after
         if key != "dependency" {
             if seen.contains(key) -> return Err(invalid)
             &seen.push(key)
@@ -399,7 +399,7 @@ fn services_read_lifecycle(dir: String) -[FS]> LifecycleFacts? ServicesError! {
         }
     }
     if !version -> return Err(invalid)
-    facts :: LifecycleFacts{
+    facts: LifecycleFacts{
         backend: backend ?? return Err(invalid),
         generation: generation ?? return Err(invalid),
         phase: phase ?? return Err(invalid),
@@ -414,16 +414,16 @@ fn services_read_lifecycle(dir: String) -[FS]> LifecycleFacts? ServicesError! {
     Ok(Val(facts))
 }
 
-fn services_parse_generation(text: String) -> Int? Never! {
-    value :: Int.parse(text) ?? return None
+services_parse_generation: fn(text: String) -> Int? Never! {
+    value: Int.parse(text) ?? return None
     if value < 0 -> return None
     Val(value)
 }
 
 // The persisted backend, containment, unit, and guardian must be exactly the
 // facts their authority derives.
-fn services_validate_lifecycle_authority(facts: LifecycleFacts, path: String) ServicesError! {
-    authority :: services_authority_from_lifecycle(facts) ?? return Err(ServicesError.new("service lifecycle state `{path}` is invalid: {err.message}"))
+services_validate_lifecycle_authority: fn(facts: LifecycleFacts, path: String) ServicesError! {
+    authority: services_authority_from_lifecycle(facts) ?? return Err(ServicesError.new("service lifecycle state `{path}` is invalid: {err.message}"))
     if facts.backend != authority.backend() || facts.containment != authority.containment() || facts.unit != authority.unit() || facts.guardian != authority.guardian() {
         return Err(ServicesError.new("service lifecycle state `{path}` has inconsistent authority facts"))
     }
@@ -431,7 +431,7 @@ fn services_validate_lifecycle_authority(facts: LifecycleFacts, path: String) Se
 
 // E1262: the first unrecognized `services:` field. `extra` holds every
 // unknown key and every known key with the wrong shape.
-fn services_unknown_field(plan: DevServicePlan) -> String? Never! {
+services_unknown_field: fn(plan: DevServicePlan) -> String? Never! {
     if plan.extra.len() == 0 -> return None
     Val(plan.extra[0].name)
 }

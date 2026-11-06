@@ -1,13 +1,13 @@
 // D-SERVICE-AUTHORITY1=A: durable receipts use typed endpoint identity keys.
 use {
-    service :: core.service
-    testing :: core.testing
+    service: core.service
+    testing: core.testing
 }
 
-fn orders_worker() {}
+orders_worker: fn() {}
 
-fn state_label(delivery: ^Delivery) -> String {
-    state :: delivery.status() ?? panic("status")
+state_label: fn(delivery: ^Delivery) -> String {
+    state: delivery.status() ?? panic("status")
     if state == {
         .Pending -> "pending"
         .Accepted -> "accepted"
@@ -19,21 +19,21 @@ fn state_label(delivery: ^Delivery) -> String {
     }
 }
 
-fn run() {
-    temp :: testing.temp_dir("service-authority")
-    store :: Path.from(temp).join("authority.log").to_string()
+run: fn() {
+    temp: testing.temp_dir("service-authority")
+    store: Path.from(temp).join("authority.log").to_string()
     tree := service.tree("orders")
     &tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
-    state :: service.state_store(store) ?? panic("state store")
+    state: service.state_store(store) ?? panic("state store")
     &tree.set_state_event_log(state, "authority-events", 1, "reversible") ?? panic("state")
-    endpoint :: &tree.worker("orders", orders_worker, capacity: 2) ?? panic("worker")
+    endpoint: &tree.worker("orders", orders_worker, capacity: 2) ?? panic("worker")
     &tree.start() ?? panic("start")
 
-    first :: &tree.send_durable(endpoint, "order", key: "order-1") ?? panic("first")
+    first: &tree.send_durable(endpoint, "order", key: "order-1") ?? panic("first")
     print("first:{state_label(^first)}")
-    duplicate :: &tree.send_durable(endpoint, "order", key: "order-1") ?? panic("duplicate")
+    duplicate: &tree.send_durable(endpoint, "order", key: "order-1") ?? panic("duplicate")
     print("duplicate:{state_label(^duplicate)}")
-    delivered :: &tree.receive(endpoint) ?? panic("deliver")
+    delivered: &tree.receive(endpoint) ?? panic("deliver")
     print("delivered:{delivered}")
     &tree.append_event("committed") ?? panic("event")
     print("events:{tree.event_count()}")

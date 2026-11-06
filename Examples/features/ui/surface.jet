@@ -1,4 +1,4 @@
-package {
+package: {
     name: "ui_surface"
     version: "0.1.0"
     authority: {
@@ -10,19 +10,19 @@ package {
 // vocabulary.  The null backend keeps the tree executable without inventing a
 // platform adapter; host calls retain their typed cancellation/error results.
 use {
-    font :: core.font
-    tui :: core.tui
-    ui :: core.ui
+    font: core.font
+    tui: core.tui
+    ui: core.ui
     core.ui.[previews, playgrounds]
-    host :: core.ui.host
-    accessibility :: core.ui.host.accessibility
-    clipboard :: core.ui.host.clipboard
-    drag_drop :: core.ui.host.drag_drop
-    ime :: core.ui.host.ime
-    shortcuts :: core.ui.host.shortcuts
+    host: core.ui.host
+    accessibility: core.ui.host.accessibility
+    clipboard: core.ui.host.clipboard
+    drag_drop: core.ui.host.drag_drop
+    ime: core.ui.host.ime
+    shortcuts: core.ui.host.shortcuts
 }
 
-fn preview_body() -> UINode Never! {
+preview_body: fn() -> UINode Never! {
     ui.box(
     [
         ui.node_role("Preview label", 160.0, 24.0, ui.aria_role_label()),
@@ -31,31 +31,31 @@ fn preview_body() -> UINode Never! {
     )
 }
 
-fn playground_body() -> UINode Never! { ui.text_input("Try the playground", .Native) }
+playground_body: fn() -> UINode Never! { ui.text_input("Try the playground", .Native) }
 
-fn save_command() -> UIShortcut { UIShortcut.cmd("s") }
+save_command: fn() -> UIShortcut { UIShortcut.cmd("s") }
 
-fn run() {
-    point :: ui.point(8.0, 12.0)
-    size :: ui.size(640.0, 360.0)
-    area :: ui.rect(point.x, point.y, size.width, size.height)
-    bounds :: ui.constraint(0.0, 0.0, size.width, size.height)
+run: fn() {
+    point: ui.point(8.0, 12.0)
+    size: ui.size(640.0, 360.0)
+    area: ui.rect(point.x, point.y, size.width, size.height)
+    bounds: ui.constraint(0.0, 0.0, size.width, size.height)
 
-    label_role :: ui.aria_role_label()
-    container_role :: ui.aria_role_container()
-    button_role :: ui.aria_role_button()
-    input_role :: ui.aria_role_text_input()
-    label :: ui.node_role("Surface", 120.0, 24.0, label_role)
-    container :: ui.node_role("Panel", 240.0, 120.0, container_role)
-    button :: ui.node_shortcut(ui.node_role("Save", 96.0, 28.0, button_role), save_command())
-    input :: ui.text_input("Draft", .Native)
-    colored :: ui.node_color("Accent", 120.0, 28.0, "#3366ff")
-    plain :: ui.node("Plain node", 80.0, 20.0)
-    text :: ui.text("Unicode: café — العربية")
-    tree :: ui.box([label, container, button, input, colored, plain, text])
+    label_role: ui.aria_role_label()
+    container_role: ui.aria_role_container()
+    button_role: ui.aria_role_button()
+    input_role: ui.aria_role_text_input()
+    label: ui.node_role("Surface", 120.0, 24.0, label_role)
+    container: ui.node_role("Panel", 240.0, 120.0, container_role)
+    button: ui.node_shortcut(ui.node_role("Save", 96.0, 28.0, button_role), save_command())
+    input: ui.text_input("Draft", .Native)
+    colored: ui.node_color("Accent", 120.0, 28.0, "#3366ff")
+    plain: ui.node("Plain node", 80.0, 20.0)
+    text: ui.text("Unicode: café — العربية")
+    tree: ui.box([label, container, button, input, colored, plain, text])
 
-    preview :: ui.preview("surface-preview", () -> preview_body(), viewport: ui.phone())
-    playground :: ui.playground("surface-playground", () -> playground_body(), viewport: ui.tablet())
+    preview: ui.preview("surface-preview", () -> preview_body(), viewport: ui.phone())
+    playground: ui.playground("surface-playground", () -> playground_body(), viewport: ui.tablet())
     if previews([preview]) == {
         .Ok(registry) -> print("previews {registry.entries.len()}")
         .Err(error) -> print("previews failed: {error}")
@@ -64,74 +64,74 @@ fn run() {
         .Ok(registry) -> print("playgrounds {registry.entries.len()}")
         .Err(error) -> print("playgrounds failed: {error}")
     }
-    _phone :: ui.phone()
-    _tablet :: ui.tablet()
-    _desktop :: ui.desktop()
+    _phone: ui.phone()
+    _tablet: ui.tablet()
+    _desktop: ui.desktop()
 
-    null_backend :: ui.null_backend()
+    null_backend: ui.null_backend()
     ui.mount(null_backend, tree, bounds)
-    tui_backend :: ui.tui_backend()
+    tui_backend: ui.tui_backend()
     ui.mount(tui_backend, ui.box([tree]), bounds)
 
-    key :: ui.key_event("Enter")
-    resize :: ui.resize_event(size.width, size.height)
-    _events :: [InputEvent]{key, resize}
-    _input_role :: input_role
+    key: ui.key_event("Enter")
+    resize: ui.resize_event(size.width, size.height)
+    _events: [InputEvent]{key, resize}
+    _input_role: input_role
 
-    face :: font.system(.Body)
-    shaped :: font.shape("Arabic العربية and emoji 👨‍👩‍👦", face)
+    face: font.system(.Body)
+    shaped: font.shape("Arabic العربية and emoji 👨‍👩‍👦", face)
     print("font glyphs={shaped.glyphs.len()}")
 
-    capabilities :: tui.capabilities()
-    _ascii :: tui.ascii("box ─ café")
-    _width :: tui.display_width("表面")
-    ansi16 :: tui.color_ansi16(4)
-    ansi256 :: tui.color_ansi256(42)
-    rgb :: tui.color_rgb(51, 102, 255)
-    style0 :: tui.style()
-    style1 :: tui.style_foreground(style0, ansi16)
-    style2 :: tui.style_background(style1, ansi256)
-    style3 :: tui.style_bold(style2, true)
-    style4 :: tui.style_dim(style3, false)
-    style5 :: tui.style_underline(style4, true)
-    _styled :: tui.style_text("styled text", style5, capabilities)
+    capabilities: tui.capabilities()
+    _ascii: tui.ascii("box ─ café")
+    _width: tui.display_width("表面")
+    ansi16: tui.color_ansi16(4)
+    ansi256: tui.color_ansi256(42)
+    rgb: tui.color_rgb(51, 102, 255)
+    style0: tui.style()
+    style1: tui.style_foreground(style0, ansi16)
+    style2: tui.style_background(style1, ansi256)
+    style3: tui.style_bold(style2, true)
+    style4: tui.style_dim(style3, false)
+    style5: tui.style_underline(style4, true)
+    _styled: tui.style_text("styled text", style5, capabilities)
 
-    horizontal :: tui.horizontal()
-    vertical :: tui.vertical()
-    constraints :: [TUIConstraint]{
+    horizontal: tui.horizontal()
+    vertical: tui.vertical()
+    constraints: [TUIConstraint]{
         tui.length(24.0),
         tui.min(8.0),
         tui.max(400.0),
         tui.percent(50.0),
         tui.fill(1.0),
     }
-    _columns :: tui.layout(area, horizontal, constraints)
-    _rows :: tui.layout(area, vertical, [TUIConstraint]{tui.fill(1.0), tui.length(2.0)})
-    _list :: tui.list(["one", "two", "three"])
-    _table :: tui.table(["Name", "State"], [["Ada", "ready"], ["Grace", "paused"]])
-    state0 :: tui.list_state()
-    state1 :: tui.list_state_select(state0, 1)
-    state2 :: tui.list_state_offset(state1, 2)
-    _selected :: tui.list_state_selected(state2)
+    _columns: tui.layout(area, horizontal, constraints)
+    _rows: tui.layout(area, vertical, [TUIConstraint]{tui.fill(1.0), tui.length(2.0)})
+    _list: tui.list(["one", "two", "three"])
+    _table: tui.table(["Name", "State"], [["Ada", "ready"], ["Grace", "paused"]])
+    state0: tui.list_state()
+    state1: tui.list_state_select(state0, 1)
+    state2: tui.list_state_offset(state1, 2)
+    _selected: tui.list_state_selected(state2)
 
-    _key :: tui.key_event("Enter")
-    _modified_key :: tui.key_event_modifiers("S", 2)
-    _resize :: tui.resize_event(80.0, 24.0)
-    _timer :: tui.timer_event("refresh", 16)
-    _io :: tui.io_event("stdin", [])
-    _focus :: tui.focus_event(true)
-    _interrupt :: tui.interrupt_event()
-    _close :: tui.close_event()
+    _key: tui.key_event("Enter")
+    _modified_key: tui.key_event_modifiers("S", 2)
+    _resize: tui.resize_event(80.0, 24.0)
+    _timer: tui.timer_event("refresh", 16)
+    _io: tui.io_event("stdin", [])
+    _focus: tui.focus_event(true)
+    _interrupt: tui.interrupt_event()
+    _close: tui.close_event()
 
-    filter :: host.file_filter("Source", ["jet", "html"], ["text/plain", "text/html"])
-    _text_filter :: host.file_filter_text()
-    read_rights :: host.fs_rights_read()
-    write_rights :: host.fs_rights_write()
-    read_write_rights :: host.fs_rights_read_write()
-    grant_result :: host.fs_grant(".", read_write_rights)
-    facts :: host.capabilities()
+    filter: host.file_filter("Source", ["jet", "html"], ["text/plain", "text/html"])
+    _text_filter: host.file_filter_text()
+    read_rights: host.fs_rights_read()
+    write_rights: host.fs_rights_write()
+    read_write_rights: host.fs_rights_read_write()
+    grant_result: host.fs_grant(".", read_write_rights)
+    facts: host.capabilities()
     loop fact in facts.facts -> print("capability {fact.capability}: {fact.available}")
-    metadata :: host.accessibility("Surface", "Portable UI surface")
+    metadata: host.accessibility("Surface", "Portable UI surface")
     if clipboard.read_text() == {
         .Ok(read) -> print("clipboard read: {read.text}")
         .Err(error) -> print("clipboard read: {error}")
@@ -149,9 +149,9 @@ fn run() {
         .Err(error) -> print("drag/drop: {error}")
     }
 
-    command :: save_command()
-    _host_shortcut :: host.shortcut("s", command.modifiers)
-    binding :: shortcuts.binding(command, "save")
+    command: save_command()
+    _host_shortcut: host.shortcut("s", command.modifiers)
+    binding: shortcuts.binding(command, "save")
     if shortcuts.register(binding) == {
         .Ok(registered) -> print("shortcut registered: {registered.action}")
         .Err(error) -> print("shortcut register: {error}")
@@ -161,9 +161,9 @@ fn run() {
         .Err(error) -> print("shortcut dispatch: {error}")
     }
 
-    grant :: grant_result
-    open_request :: host.open_request(grant.copy())
-    save_request :: host.save_request(grant.copy())
+    grant: grant_result
+    open_request: host.open_request(grant.copy())
+    save_request: host.save_request(grant.copy())
     if host.open_file(open_request) == {
         .Ok(selection) -> print("open: {selection.files.len()} files")
         .Err(error) -> print("open: {error}")
@@ -173,7 +173,7 @@ fn run() {
         .Err(error) -> print("save: {error}")
     }
 
-    accessible :: ui.node_accessibility(tree, metadata.copy())
+    accessible: ui.node_accessibility(tree, metadata.copy())
     if accessibility.attach(accessible.copy(), metadata) == {
         .Ok(_) -> print("accessibility attached")
         .Err(error) -> print("accessibility attach: {error}")

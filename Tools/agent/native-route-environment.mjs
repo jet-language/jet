@@ -35,12 +35,12 @@ export function nativeEnvironmentRoutes(routes, exports, signatures) {
 
 export function emitNativeEnvironmentRoutes(rows) {
   return [
-    'enum IREnvironmentOp { Bytes Set Remove Columns Compare Seed Text }',
-    'struct IREnvironmentRoute { symbol: String, export: String, op: IREnvironmentOp, arity: Int }',
-    'IR_ENVIRONMENT_ROUTES :: comptime { [IREnvironmentRoute]{',
+    'IREnvironmentOp: enum { Bytes Set Remove Columns Compare Seed Text }',
+    'IREnvironmentRoute: struct { symbol: String, export: String, op: IREnvironmentOp, arity: Int }',
+    'IR_ENVIRONMENT_ROUTES: comptime { [IREnvironmentRoute]{',
     ...rows.map(row => `    IREnvironmentRoute{symbol: "${row.symbol}", export: "${row.name}", op: IREnvironmentOp.${row.op}, arity: ${row.arity}},`),
     '} }',
-    'fn ir_environment_route(symbol: String) -> IREnvironmentRoute? {',
+    'ir_environment_route: fn(symbol: String) -> IREnvironmentRoute? {',
     '    loop route in IR_ENVIRONMENT_ROUTES { if route.symbol == symbol -> return Val(route.copy()) }',
     '    None',
     '}',

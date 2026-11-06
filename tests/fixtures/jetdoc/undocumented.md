@@ -17,7 +17,7 @@ required effects: none; granted effects: none; denied effects: none; authority: 
 Undocumented public item.
 
 ```jet
-fn undocumented()
+undocumented: fn()
 failure: !Err (implicit default Err!)
 ```
 

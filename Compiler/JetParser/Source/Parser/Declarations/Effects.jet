@@ -1,5 +1,5 @@
 // Effect types (a struct's or enum's `impl Effect { … }` block) and the
-// `effect Root.Leaf` package leaf declaration.
+// `Root.Leaf: effect` package leaf declaration.
 use {
     jet_foundation.[
         AccessConvention,
@@ -25,7 +25,7 @@ use {
 
 // What a struct or enum declares beside itself: its marker, then its effect
 // names.
-fn parser_type_companions(marker: MarkerDecl?, effect_impl: EffectImpl?) -> [Item] Never! {
+parser_type_companions: fn(marker: MarkerDecl?, effect_impl: EffectImpl?) -> [Item] Never! {
     items := [Item]{}
     if marker == .Val(declaration) -> &items.push(Item.MarkerDecl{value: declaration})
     if effect_impl == .Val(declared) {
@@ -35,13 +35,13 @@ fn parser_type_companions(marker: MarkerDecl?, effect_impl: EffectImpl?) -> [Ite
 }
 
 // `impl Effect { … }` in a struct or enum body: empty, or the one method
-// `fn irreversible(self) -> Bool { … }` whose body is `true`, `false`,
+// `irreversible: fn(self) -> Bool { … }` whose body is `true`, `false`,
 // `self == .Case` or an `||` of those. The effect names are built when the
 // type closes (parser_finish_effect_type), once an enum's cases are known.
 // A `repeated` block is reported and parsed for recovery; it yields None so
 // the type keeps its first block.
-fn parser_parse_effect_impl(state: &JetParserState, type_name: String, repeated: Bool) -> EffectImpl? {
-    start :: parser_bump(&state)
+parser_parse_effect_impl: fn(state: &JetParserState, type_name: String, repeated: Bool) -> EffectImpl? {
+    start: parser_bump(&state)
     if repeated -> parser_add_error_code(&state, "E0908", start.span, "`{type_name}` has a second `impl Effect` block", "a type declares one effect, so its one method shares one block", "move these members into the first `impl Effect` block")
     parser_bump(&state)
     parser_expect(&state, TOKEN_LBRACE, "`{{` to open the `impl Effect` body")
@@ -50,24 +50,24 @@ fn parser_parse_effect_impl(state: &JetParserState, type_name: String, repeated:
     loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF && !parser_aborting(&state) {
         parser_skip_semicolons(&state)
         if parser_current_kind(&state) == TOKEN_RBRACE -> break
-        token :: parser_current(&state)
+        token: parser_current(&state)
         if !parser_method_starts_here(&state) {
-            found :: parser_describe_token(state, token)
-            parser_add_error(&state, token.span, "expected `fn irreversible` in `impl Effect`, found {found}", "an `impl Effect` block is empty or holds the one method `fn irreversible(self) -> Bool`", "write `fn irreversible(self) -> Bool {{ true }}`, or leave the block empty for an effect a rollback can undo")
+            found: parser_describe_token(state, token)
+            parser_add_error(&state, token.span, "expected `irreversible: fn` in `impl Effect`, found {found}", "an `impl Effect` block is empty or holds the one method `irreversible: fn(self) -> Bool`", "write `irreversible: fn(self) -> Bool {{ true }}`, or leave the block empty for an effect a rollback can undo")
             break
         }
-        method :: parser_parse_type_method(&state)
+        method: parser_parse_type_method(&state)
         returns_bool := false
         if method.return_type == .Val(returned) && returned == .Bool -> returns_bool = true
         if method.return_type == .Val(returned) && returned == .Named(returned_name) && returned_name == "Bool" -> returns_bool = true
-        shaped :: method.name == "irreversible" && method.type_params.len() == 0 && method.params.len() == 1 && method.params[0].name == "self" && method.params[0].convention == AccessConvention.Read && returns_bool && method.declared_effects == None
+        shaped: method.name == "irreversible" && method.type_params.len() == 0 && method.params.len() == 1 && method.params[0].name == "self" && method.params[0].convention == AccessConvention.Read && returns_bool && method.declared_effects == None
         if !shaped {
-            what :: if method.name == "irreversible" -> "`fn irreversible` doesn't match the `Effect` contract" else -> "`{method.name}` is not a method of `Effect`"
-            parser_add_error_code(&state, "E0907", method.name_span, what, "`impl Effect` has one method, which says whether the effect's work can be rolled back", "write `fn irreversible(self) -> Bool {{ … }}`")
+            what: if method.name == "irreversible" -> "`irreversible: fn` doesn't match the `Effect` contract" else -> "`{method.name}` is not a method of `Effect`"
+            parser_add_error_code(&state, "E0907", method.name_span, what, "`impl Effect` has one method, which says whether the effect's work can be rolled back", "write `irreversible: fn(self) -> Bool {{ … }}`")
             next
         }
         if method_span != None {
-            parser_add_error_code(&state, "E0105", method.name_span, "`fn irreversible` is defined twice in `impl Effect`", "an effect says once whether its work can be rolled back", "remove one of the definitions")
+            parser_add_error_code(&state, "E0105", method.name_span, "`irreversible: fn` is defined twice in `impl Effect`", "an effect says once whether its work can be rolled back", "remove one of the definitions")
             next
         }
         method_span = Val(method.span)
@@ -84,14 +84,14 @@ fn parser_parse_effect_impl(state: &JetParserState, type_name: String, repeated:
     Val(EffectImpl{span: start.span, irreversible: irreversible, method_span: method_span, decls: [EffectDecl]{}})
 }
 
-fn parser_report_effect_body(state: &JetParserState, span: Span, type_name: String) {
-    parser_add_error_code(&state, "E0633", span, "this `fn irreversible` body is not an effect fact", "the compiler reads `irreversible` without running it, so its body is `true`, `false`, `self == .Case` or an `||` of those, naming cases of `{type_name}`", "write `{{ true }}`, `{{ false }}` or `{{ self == .Write }}`")
+parser_report_effect_body: fn(state: &JetParserState, span: Span, type_name: String) {
+    parser_add_error_code(&state, "E0633", span, "this `irreversible: fn` body is not an effect fact", "the compiler reads `irreversible` without running it, so its body is `true`, `false`, `self == .Case` or an `||` of those, naming cases of `{type_name}`", "write `{{ true }}`, `{{ false }}` or `{{ self == .Write }}`")
 }
 
 // At the type's close the effect names are built: a struct declares its own
 // name; an enum declares each case `T.Case` and its root `T`, which is
 // irreversible when any case is.
-fn parser_finish_effect_type(state: &JetParserState, type_name: String, name_span: Span, effect_impl: EffectImpl?, cases: [Variant]) -> EffectImpl? {
+parser_finish_effect_type: fn(state: &JetParserState, type_name: String, name_span: Span, effect_impl: EffectImpl?, cases: [Variant]) -> EffectImpl? {
     declared := effect_impl ?? return None
     names := [String]{}
     loop member in cases {
@@ -112,11 +112,11 @@ fn parser_finish_effect_type(state: &JetParserState, type_name: String, name_spa
     any := false
     loop member in cases {
         if !names.contains(member.name) -> next
-        irreversible :: parser_effect_fact_value(body, Val(member.name))
+        irreversible: parser_effect_fact_value(body, Val(member.name))
         if irreversible -> any = true
         &case_decls.push(EffectDecl{name: "{type_name}.{member.name}", name_span: member.name_span, irreversible: irreversible, span: member.name_span})
     }
-    root :: if cases.len() == 0 -> parser_effect_fact_value(body, None) else -> any
+    root: if cases.len() == 0 -> parser_effect_fact_value(body, None) else -> any
     decls := [EffectDecl]{EffectDecl{name: type_name, name_span: name_span, irreversible: root, span: name_span}}
     loop declaration in case_decls -> &decls.push(declaration)
     declared.decls = decls
@@ -126,15 +126,15 @@ fn parser_finish_effect_type(state: &JetParserState, type_name: String, name_spa
 
 // A written body's value for one case; no body says the effect's work can be
 // rolled back.
-fn parser_effect_fact_value(body: Expr?, member: String?) -> Bool Never! {
-    value :: body ?? return false
+parser_effect_fact_value: fn(body: Expr?, member: String?) -> Bool Never! {
+    value: body ?? return false
     parser_effect_fact_holds(value, member)
 }
 
 // The first part of an `irreversible` body outside the effect fact form, or
 // None when the whole body is `true`, `false`, `self == .Case` (a case of
 // this enum) or an `||` of those.
-fn parser_effect_fact_problem(expr: Expr, cases: [String], family: Bool) -> Span? Never! {
+parser_effect_fact_problem: fn(expr: Expr, cases: [String], family: Bool) -> Span? Never! {
     if expr == {
         .Bool(_, _, _) -> return None
         .Paren(value, _, _) -> return parser_effect_fact_problem(value, cases, family)
@@ -146,14 +146,14 @@ fn parser_effect_fact_problem(expr: Expr, cases: [String], family: Bool) -> Span
         }
         else -> {}
     }
-    named :: parser_effect_fact_case(expr) ?? return Val(expr_span(expr))
+    named: parser_effect_fact_case(expr) ?? return Val(expr_span(expr))
     if !family || !cases.contains(named) -> return Val(expr_span(expr))
     None
 }
 
 // The case `self == .Case` names; the parser reads that comparison as a
 // pattern test of `self` against the case.
-fn parser_effect_fact_case(expr: Expr) -> String? Never! {
+parser_effect_fact_case: fn(expr: Expr) -> String? Never! {
     if expr == .PatternTest(subject, pattern, _, _) && pattern == .Variant(variant, bindings, leading_dot, _) && leading_dot && bindings.len() == 0 && !variant.contains(".") {
         if subject == .Ident(name, _, _) && name == "self" -> return Val(variant)
     }
@@ -162,7 +162,7 @@ fn parser_effect_fact_case(expr: Expr) -> String? Never! {
 
 // The body's value for one case (None for a struct); the body has passed
 // parser_effect_fact_problem.
-fn parser_effect_fact_holds(expr: Expr, member: String?) -> Bool Never! {
+parser_effect_fact_holds: fn(expr: Expr, member: String?) -> Bool Never! {
     if expr == {
         .Bool(value, _, _) -> return value
         .Paren(value, _, _) -> return parser_effect_fact_holds(value, member)
@@ -171,20 +171,20 @@ fn parser_effect_fact_holds(expr: Expr, member: String?) -> Bool Never! {
         }
         else -> {}
     }
-    named :: parser_effect_fact_case(expr) ?? return false
+    named: parser_effect_fact_case(expr) ?? return false
     if member == .Val(case_name) -> return case_name == named
     false
 }
 
-// `effect Root.Leaf` declares a package leaf. A root effect is a type with an
+// `Root.Leaf: effect` declares a package leaf. A root effect is a type with an
 // `impl Effect { … }` block, and a Prelude effect is already declared.
-fn parser_parse_effect_word(state: &JetParserState) -> EffectDecl? {
-    start :: parser_bump(&state)
-    name :: parser_effect_path_name(&state)
+parser_parse_effect_word: fn(state: &JetParserState) -> EffectDecl? {
+    start: parser_bump(&state)
+    name: parser_effect_path_name(&state)
     parser_finish_statement(&state)
-    head :: parser_cover(start.span, name.span)
+    head: parser_cover(start.span, name.span)
     if !name.name.contains(".") {
-        parser_add_error_code(&state, "E0003", head, "`effect {name.name}` names no effect leaf", "an `effect` line declares a package leaf, `effect Root.Leaf`; a root effect is a struct or enum with an `impl Effect {{ … }}` block", "write `effect {name.name}.Leaf`, or declare `struct {name.name} {{ impl Effect {{}} }}`")
+        parser_add_error_code(&state, "E0003", head, "`{name.name}: effect` names no effect leaf", "an `effect` line declares a package leaf, `Root.Leaf: effect`; a root effect is a struct or enum with an `impl Effect {{ … }}` block", "write `{name.name}.Leaf: effect`, or declare `{name.name}: struct {{ impl Effect {{}} }}`")
         return None
     }
     loop row in EFFECT_VOCABULARY_ROWS {
@@ -196,13 +196,13 @@ fn parser_parse_effect_word(state: &JetParserState) -> EffectDecl? {
     Val(EffectDecl{name: name.name, name_span: name.span, irreversible: false, span: head})
 }
 
-fn parser_effect_path_name(state: &JetParserState) -> NamedSpan {
-    first :: parser_expect_name(&state, "after the `effect` declaration keyword")
+parser_effect_path_name: fn(state: &JetParserState) -> NamedSpan {
+    first: parser_expect_name(&state, "after the `effect` declaration keyword")
     name := parser_value(state, first)
     end := first.span
     loop parser_current_kind(&state) == TOKEN_DOT {
         parser_bump(&state)
-        segment :: parser_expect_name(&state, "for an effect path segment after `.`")
+        segment: parser_expect_name(&state, "for an effect path segment after `.`")
         name = "{name}.{parser_value(state, segment)}"
         end = segment.span
     }

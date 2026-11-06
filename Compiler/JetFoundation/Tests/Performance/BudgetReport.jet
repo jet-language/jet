@@ -21,12 +21,12 @@ use jet_foundation.[
     perf_verify_wire_evaluation,
 ]
 
-fn br_f(key: String, value: CanonicalJSON) -> CanonicalJSONField Never! { CanonicalJSONField{key: key, value: value} }
-fn br_o(fields: [CanonicalJSONField]) -> CanonicalJSON Never! { perf_report_object_new(fields) }
-fn br_s(value: String) -> CanonicalJSON Never! { CanonicalJSON.String(value) }
-fn br_i(value: Int) -> CanonicalJSON Never! { CanonicalJSON.Integer("{value}") }
-fn br_q(value: Int) -> CanonicalJSON Never! { perf_rational_to_json(perf_rational_integer(value)) }
-fn br_set(value: CanonicalJSON, key: String, replacement: CanonicalJSON) -> CanonicalJSON Never! {
+br_f: fn(key: String, value: CanonicalJSON) -> CanonicalJSONField Never! { CanonicalJSONField{key: key, value: value} }
+br_o: fn(fields: [CanonicalJSONField]) -> CanonicalJSON Never! { perf_report_object_new(fields) }
+br_s: fn(value: String) -> CanonicalJSON Never! { CanonicalJSON.String(value) }
+br_i: fn(value: Int) -> CanonicalJSON Never! { CanonicalJSON.Integer("{value}") }
+br_q: fn(value: Int) -> CanonicalJSON Never! { perf_rational_to_json(perf_rational_integer(value)) }
+br_set: fn(value: CanonicalJSON, key: String, replacement: CanonicalJSON) -> CanonicalJSON Never! {
     if value == .Object(f) {
         out := [CanonicalJSONField]{}
         loop field in f { if field.key != key -> &out.push(field.copy()) }
@@ -35,123 +35,123 @@ fn br_set(value: CanonicalJSON, key: String, replacement: CanonicalJSON) -> Cano
     }
     panic("test object required")
 }
-fn br_get(value: CanonicalJSON, key: String) -> CanonicalJSON Never! {
+br_get: fn(value: CanonicalJSON, key: String) -> CanonicalJSON Never! {
     if value == .Object(f) -> return f[perf_report_index(f, key)].value.copy()
     panic("test object required")
 }
-fn br_error(result: () PerfBudgetError!, message: String) Never! {
+br_error: fn(result: () PerfBudgetError!, message: String) Never! {
     if result == {
         .Ok(_) -> panic("expected reader error")
         .Err(error) -> assert_eq(error.message, message)
     }
 }
-fn br_r_error(value: CanonicalJSON, quantity: Bool, message: String) Never! {
+br_r_error: fn(value: CanonicalJSON, quantity: Bool, message: String) Never! {
     if perf_validate_rational(value, quantity, "q") == {
         .Ok(_) -> panic("accepted invalid rational")
         .Err(error) -> assert_eq(error.message, message)
     }
 }
-fn br_read_error(value: CanonicalJSON, message: String) Never! {
+br_read_error: fn(value: CanonicalJSON, message: String) Never! {
     if perf_verify_budget_report(canonical_json_bytes(value)) == {
         .Ok(_) -> panic("accepted invalid report")
         .Err(error) -> assert_eq(error.message, message)
     }
 }
-fn br_zero_hash() -> String Never! { "0".repeat(64) }
-fn br_policy() -> CanonicalJSON Never! {
+br_zero_hash: fn() -> String Never! { "0".repeat(64) }
+br_policy: fn() -> CanonicalJSON Never! {
     br_o([CanonicalJSONField]{br_f("min_candidate_samples", br_i(1)), br_f("min_baseline_samples", br_i(1)), br_f("baseline_generations", br_i(5)), br_f("bootstrap_resamples", br_i(100)), br_f("lower_rank", br_i(50)), br_f("upper_rank", br_i(51)), br_f("stale_after_seconds", br_i(2592000)), br_f("trend_generations", br_i(5))})
 }
-fn br_history() -> CanonicalJSON Never! {
+br_history: fn() -> CanonicalJSON Never! {
     br_o([CanonicalJSONField]{br_f("state_id", br_s("4".repeat(64))), br_f("report_ids", CanonicalJSON.Array([CanonicalJSON]{br_s("3".repeat(64))}))})
 }
-fn br_trend() -> CanonicalJSON Never! {
+br_trend: fn() -> CanonicalJSON Never! {
     br_o([CanonicalJSONField]{br_f("label", br_s("insufficient")), br_f("report_ids", CanonicalJSON.Array([CanonicalJSON]{})), br_f("estimators", CanonicalJSON.Array([CanonicalJSON]{})), br_f("score", CanonicalJSON.Null)})
 }
-fn br_decision(actual: PerfEvaluation) -> CanonicalJSON Never! {
-    evidence :: if actual.evidence == {
+br_decision: fn(actual: PerfEvaluation) -> CanonicalJSON Never! {
+    evidence: if actual.evidence == {
         .Pass -> "pass"
         .Regression -> "regression"
         .Inconclusive -> "inconclusive"
         .Unavailable -> "unavailable"
     }
-    outcome :: if actual.outcome == {
+    outcome: if actual.outcome == {
         .Pass -> "pass"
         .Warn -> "warn"
         .Fail -> "fail"
     }
-    lower :: if actual.lower95 == {
+    lower: if actual.lower95 == {
         .Val(q) -> perf_rational_to_json(q)
         else -> CanonicalJSON.Null
     }
-    upper :: if actual.upper95 == {
+    upper: if actual.upper95 == {
         .Val(q) -> perf_rational_to_json(q)
         else -> CanonicalJSON.Null
     }
     br_o([CanonicalJSONField]{br_f("evidence", br_s(evidence)), br_f("reason", CanonicalJSON.Null), br_f("point", perf_rational_to_json(actual.point)), br_f("lower95", lower), br_f("upper95", upper), br_f("trend", br_trend()), br_f("policy_outcome", br_s(outcome))})
 }
-fn br_wire() -> CanonicalJSON Never! {
-    samples :: [PerfRational]{perf_rational_integer(1), perf_rational_integer(10), perf_rational_integer(100), perf_rational_integer(1000)}
-    actual :: perf_evaluate("1".repeat(64), "2".repeat(64), [String]{"3".repeat(64)}, samples, [PerfRational]{}, Val(PerfPercentile.P50), PerfComparison.AbsoluteFrom{limit: perf_rational_integer(50), direction: PerfLimitDirection.AtMost}, PerfDirection.LowerIsBetter, PerfEnforcement.Fail, Val(PerfMeasurementPolicy{bootstrap_resamples: 100, lower_rank: 50, upper_rank: 51})) ?? panic(err.message)
+br_wire: fn() -> CanonicalJSON Never! {
+    samples: [PerfRational]{perf_rational_integer(1), perf_rational_integer(10), perf_rational_integer(100), perf_rational_integer(1000)}
+    actual: perf_evaluate("1".repeat(64), "2".repeat(64), [String]{"3".repeat(64)}, samples, [PerfRational]{}, Val(PerfPercentile.P50), PerfComparison.AbsoluteFrom{limit: perf_rational_integer(50), direction: PerfLimitDirection.AtMost}, PerfDirection.LowerIsBetter, PerfEnforcement.Fail, Val(PerfMeasurementPolicy{bootstrap_resamples: 100, lower_rank: 50, upper_rank: 51})) ?? panic(err.message)
     br_o([CanonicalJSONField]{br_f("decision", br_decision(actual)), br_f("direction", br_s("lower_is_better")), br_f("enforcement", br_s("fail")), br_f("comparison", br_o([CanonicalJSONField]{br_f("kind", br_s("absolute_from")), br_f("baseline", br_s("main")), br_f("limit", br_q(50)), br_f("direction", br_s("at_most"))})), br_f("policy", br_policy()), br_f("samples", CanonicalJSON.Array([CanonicalJSON]{br_q(1), br_q(10), br_q(100), br_q(1000)})), br_f("baseline", CanonicalJSON.Null), br_f("history", br_history()), br_f("metric", br_o([CanonicalJSONField]{br_f("name", br_s("BenchTime")), br_f("percentile", br_s("p50"))})), br_f("context_key", br_s("2".repeat(64)))})
 }
-fn br_verify_wire(value: CanonicalJSON) PerfBudgetError! {
+br_verify_wire: fn(value: CanonicalJSON) PerfBudgetError! {
     if value == .Object(f) -> perf_verify_wire_evaluation("1".repeat(64), f)
 }
-fn br_statistics() -> CanonicalJSON Never! {
+br_statistics: fn() -> CanonicalJSON Never! {
     br_o([CanonicalJSONField]{br_f("count", br_i(3)), br_f("sorted_samples", CanonicalJSON.Array([CanonicalJSON]{br_q(1), br_q(2), br_q(3)})), br_f("p50", br_q(2)), br_f("p90", br_q(3)), br_f("p95", br_q(3)), br_f("p99", br_q(3)), br_f("p999", br_q(3)), br_f("mean", br_q(2)), br_f("mad", br_q(1))})
 }
-fn br_provider(kind: String) -> CanonicalJSON Never! {
-    unhashed :: br_o([CanonicalJSONField]{br_f("kind", br_s(kind)), br_f("identity", br_s("fixture")), br_f("version", br_s("1")), br_f("isolation", br_s("process")), br_f("cpu_arch", br_s("x64")), br_f("cpu_model", br_s("fixture")), br_f("logical_cpus", br_i(8)), br_f("memory_bytes", br_i(1000)), br_f("os", br_s("linux")), br_f("kernel", br_s("fixture")), br_f("power_governor", br_s("fixture"))})
+br_provider: fn(kind: String) -> CanonicalJSON Never! {
+    unhashed: br_o([CanonicalJSONField]{br_f("kind", br_s(kind)), br_f("identity", br_s("fixture")), br_f("version", br_s("1")), br_f("isolation", br_s("process")), br_f("cpu_arch", br_s("x64")), br_f("cpu_model", br_s("fixture")), br_f("logical_cpus", br_i(8)), br_f("memory_bytes", br_i(1000)), br_f("os", br_s("linux")), br_f("kernel", br_s("fixture")), br_f("power_governor", br_s("fixture"))})
     br_set(unhashed, "hardware_fingerprint", br_s(perf_stable_id(unhashed)))
 }
-fn br_measurement() -> CanonicalJSON Never! {
-    spec :: br_o([CanonicalJSONField]{})
+br_measurement: fn() -> CanonicalJSON Never! {
+    spec: br_o([CanonicalJSONField]{})
     br_o([CanonicalJSONField]{br_f("budget_id", br_s("b")), br_f("budget_spec", spec), br_f("budget_spec_sha256", br_s(perf_stable_id(spec))), br_f("source", br_s("fixture.jet")), br_f("metric", br_o([CanonicalJSONField]{br_f("name", br_s("BenchTime")), br_f("percentile", CanonicalJSON.Null)})), br_f("target_class", br_s("native")), br_f("unit", br_s("Duration")), br_f("direction", br_s("lower_is_better")), br_f("provider", br_provider("Fixture")), br_f("comparison", br_o([CanonicalJSONField]{br_f("kind", br_s("absolute")), br_f("limit", br_q(10)), br_f("direction", br_s("at_most"))})), br_f("enforcement", br_s("fail")), br_f("context_key", br_s(br_zero_hash())), br_f("policy", CanonicalJSON.Null), br_f("samples", CanonicalJSON.Array([CanonicalJSON]{br_q(9)})), br_f("statistics", CanonicalJSON.Null), br_f("history", CanonicalJSON.Null), br_f("baseline", CanonicalJSON.Null), br_f("decision", CanonicalJSON.Null)})
 }
-fn br_content() -> CanonicalJSON Never! {
-    subject :: br_o([CanonicalJSONField]{br_f("target_id", br_s("fixture")), br_f("member_sources", CanonicalJSON.Array([CanonicalJSON]{})), br_f("target_triple", br_s("x64-linux")), br_f("target_class", br_s("native")), br_f("profile", br_s("debug")), br_f("artifact", CanonicalJSON.Null), br_f("measured_start", br_s("start")), br_f("measured_end", br_s("end"))})
-    tool_unhashed :: br_o([CanonicalJSONField]{br_f("jet_version", br_s("1")), br_f("compiler_build_id", br_s("compiler")), br_f("stdlib_id", br_s("core")), br_f("runner_id", br_s("runner"))})
-    tool :: br_set(tool_unhashed, "digest", br_s(perf_stable_id(tool_unhashed)))
+br_content: fn() -> CanonicalJSON Never! {
+    subject: br_o([CanonicalJSONField]{br_f("target_id", br_s("fixture")), br_f("member_sources", CanonicalJSON.Array([CanonicalJSON]{})), br_f("target_triple", br_s("x64-linux")), br_f("target_class", br_s("native")), br_f("profile", br_s("debug")), br_f("artifact", CanonicalJSON.Null), br_f("measured_start", br_s("start")), br_f("measured_end", br_s("end"))})
+    tool_unhashed: br_o([CanonicalJSONField]{br_f("jet_version", br_s("1")), br_f("compiler_build_id", br_s("compiler")), br_f("stdlib_id", br_s("core")), br_f("runner_id", br_s("runner"))})
+    tool: br_set(tool_unhashed, "digest", br_s(perf_stable_id(tool_unhashed)))
     measurement := br_measurement()
     if subject == .Object(s) {
         if tool == .Object(t) {
             if measurement == .Object(m) { measurement = br_set(measurement, "context_key", br_s(perf_budget_context_key(s, t, m) ?? panic(err.message))) }
         }
     }
-    sanitized :: br_o([CanonicalJSONField]{br_f("subject", subject), br_f("toolchain", tool), br_f("measurements", CanonicalJSON.Array([CanonicalJSON]{perf_sanitize_measurement(measurement) ?? panic(err.message)}))})
+    sanitized: br_o([CanonicalJSONField]{br_f("subject", subject), br_f("toolchain", tool), br_f("measurements", CanonicalJSON.Array([CanonicalJSON]{perf_sanitize_measurement(measurement) ?? panic(err.message)}))})
     br_o([CanonicalJSONField]{br_f("subject", subject), br_f("toolchain", tool), br_f("evidence_id", br_s(perf_stable_id(sanitized))), br_f("measurements", CanonicalJSON.Array([CanonicalJSON]{measurement})), br_f("summary", br_o([CanonicalJSONField]{br_f("outcome", br_s("pass")), br_f("pass", br_i(1)), br_f("warn", br_i(0)), br_f("fail", br_i(0))})), br_f("privacy", br_o([CanonicalJSONField]{br_f("schema", br_i(1)), br_f("workspace_paths_only", CanonicalJSON.Bool(true)), br_f("retained", CanonicalJSON.Array([CanonicalJSON]{br_s("source")})), br_f("excluded", CanonicalJSON.Array([CanonicalJSON]{br_s("secret")}))}))})
 }
-fn br_phases(ns: Int) -> CanonicalJSON Never! { CanonicalJSON.Array([CanonicalJSON]{br_o([CanonicalJSONField]{br_f("name", br_s("check")), br_f("ns", br_i(ns))})}) }
-fn br_compile() -> CanonicalJSON Never! {
-    identity :: [CanonicalJSONField]{br_f("backend", br_s("fixture")), br_f("cache_state", br_s("Clean")), br_f("clock", br_s("process_cpu")), br_f("compiler_digest", br_s(br_zero_hash())), br_f("core_digest", br_s(br_zero_hash())), br_f("edit_bytes", br_i(0)), br_f("host", br_s("linux")), br_f("linker", br_s("fixture")), br_f("profile", br_s("debug")), br_f("source_tree_sha256", br_s(br_zero_hash())), br_f("target", br_s("native")), br_f("workload_bytes", br_i(100))}
+br_phases: fn(ns: Int) -> CanonicalJSON Never! { CanonicalJSON.Array([CanonicalJSON]{br_o([CanonicalJSONField]{br_f("name", br_s("check")), br_f("ns", br_i(ns))})}) }
+br_compile: fn() -> CanonicalJSON Never! {
+    identity: [CanonicalJSONField]{br_f("backend", br_s("fixture")), br_f("cache_state", br_s("Clean")), br_f("clock", br_s("process_cpu")), br_f("compiler_digest", br_s(br_zero_hash())), br_f("core_digest", br_s(br_zero_hash())), br_f("edit_bytes", br_i(0)), br_f("host", br_s("linux")), br_f("linker", br_s("fixture")), br_f("profile", br_s("debug")), br_f("source_tree_sha256", br_s(br_zero_hash())), br_f("target", br_s("native")), br_f("workload_bytes", br_i(100))}
     record_fields := identity.copy()
     &record_fields.push(br_f("elapsed_ns", br_i(9)))
     &record_fields.push(br_f("peak_rss_bytes", br_i(10)))
     &record_fields.push(br_f("phase_totals", br_phases(8)))
-    record :: br_o(record_fields)
+    record: br_o(record_fields)
     records := [CanonicalJSON]{}
     loop _ in 0..<20 -> &records.push(record.copy())
     root := identity.copy()
-    additions :: [CanonicalJSONField]{br_f("edit_sha256", br_s(br_zero_hash())), br_f("peak_rss_bytes", br_i(10)), br_f("phase_totals", br_phases(160)), br_f("sample_records", CanonicalJSON.Array(records)), br_f("samples", br_i(20)), br_f("variance", br_q(0)), br_f("warmups", br_i(1))}
+    additions: [CanonicalJSONField]{br_f("edit_sha256", br_s(br_zero_hash())), br_f("peak_rss_bytes", br_i(10)), br_f("phase_totals", br_phases(160)), br_f("sample_records", CanonicalJSON.Array(records)), br_f("samples", br_i(20)), br_f("variance", br_q(0)), br_f("warmups", br_i(1))}
     loop field in additions -> &root.push(field)
     br_o(root)
 }
-fn br_compile_samples() -> CanonicalJSON Never! {
+br_compile_samples: fn() -> CanonicalJSON Never! {
     samples := [CanonicalJSON]{}
     loop _ in 0..<20 -> &samples.push(br_q(9))
     CanonicalJSON.Array(samples)
 }
 #Test("canonical_json_sorts_keys_escapes_and_hashes_lf_terminated_content reader") {
-    value :: br_o([CanonicalJSONField]{br_f("z", br_s("é\n")), br_f("a", br_i(123))})
-    bytes :: "{{\"a\":123,\"z\":\"é\\n\"}}\n".bytes()
+    value: br_o([CanonicalJSONField]{br_f("z", br_s("é\n")), br_f("a", br_i(123))})
+    bytes: "{{\"a\":123,\"z\":\"é\\n\"}}\n".bytes()
     assert_eq(canonical_json_bytes(value), bytes)
     assert_eq(perf_stable_id(value), sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()])))
     perf_verify_stable_id(value, perf_stable_id(value)) ?? panic(err.message)
-    actual :: perf_stable_id(value)
+    actual: perf_stable_id(value)
     br_error(perf_verify_stable_id(value, "bad"), "content hash mismatch: claimed bad, recomputed {actual}")
 }
 #Test("bootstrap_is_deterministic_and_reader_recomputes_every_outcome reader") {
-    inputs :: PerfEvaluationInputs{evidence_id: "1".repeat(64), context_key: "2".repeat(64), baseline_report_ids: [String]{br_zero_hash()}, candidate: [PerfRational]{perf_rational_integer(90), perf_rational_integer(91), perf_rational_integer(92)}, baseline: [PerfRational]{perf_rational_integer(100), perf_rational_integer(101), perf_rational_integer(102)}, percentile: Val(PerfPercentile.P50), comparison: PerfComparison.RelativeTo{limit_basis_points: 500, goal: PerfRelativeGoal.RegressionAtMost}, direction: PerfDirection.LowerIsBetter, enforcement: PerfEnforcement.Fail, policy: Val(PerfMeasurementPolicy{bootstrap_resamples: 20, lower_rank: 1, upper_rank: 20})}
+    inputs: PerfEvaluationInputs{evidence_id: "1".repeat(64), context_key: "2".repeat(64), baseline_report_ids: [String]{br_zero_hash()}, candidate: [PerfRational]{perf_rational_integer(90), perf_rational_integer(91), perf_rational_integer(92)}, baseline: [PerfRational]{perf_rational_integer(100), perf_rational_integer(101), perf_rational_integer(102)}, percentile: Val(PerfPercentile.P50), comparison: PerfComparison.RelativeTo{limit_basis_points: 500, goal: PerfRelativeGoal.RegressionAtMost}, direction: PerfDirection.LowerIsBetter, enforcement: PerfEnforcement.Fail, policy: Val(PerfMeasurementPolicy{bootstrap_resamples: 20, lower_rank: 1, upper_rank: 20})}
     actual := perf_evaluate(inputs.evidence_id, inputs.context_key, inputs.baseline_report_ids, inputs.candidate, inputs.baseline, inputs.percentile, inputs.comparison, inputs.direction, inputs.enforcement, inputs.policy) ?? panic(err.message)
     assert(actual.evidence == PerfEvidence.Pass)
     perf_verify_evaluation(actual, inputs) ?? panic(err.message)
@@ -159,11 +159,11 @@ fn br_compile_samples() -> CanonicalJSON Never! {
     br_error(perf_verify_evaluation(actual, inputs), "persisted budget evaluation does not match independent recomputation")
 }
 #Test("report_reader_rejects_noncanonical_unknown_and_hash_corrupt_artifacts") {
-    report :: perf_budget_report(br_o([CanonicalJSONField]{br_f("summary", br_s("pass"))}))
+    report: perf_budget_report(br_o([CanonicalJSONField]{br_f("summary", br_s("pass"))}))
     br_read_error(report, "report content has missing or unknown fields")
-    bytes :: canonical_json_bytes(report)
-    text :: String.from_bytes(bytes) ?? panic("UTF8")
-    spaced :: text.replace("{{\"content\"", "{{ \"content\"")
+    bytes: canonical_json_bytes(report)
+    text: String.from_bytes(bytes) ?? panic("UTF8")
+    spaced: text.replace("{{\"content\"", "{{ \"content\"")
     if perf_verify_budget_report(spaced.bytes()) == {
         .Err(_) -> {}
         else -> panic("accepted noncanonical report")
@@ -182,10 +182,10 @@ fn br_compile_samples() -> CanonicalJSON Never! {
     br_error(perf_validate_statistics(br_set(br_statistics(), "p50", br_q(3))), "statistics.p50 does not match independent recomputation")
 }
 #Test("wire_reader_recomputes_decision_confidence_trend_and_history") {
-    wire :: br_wire()
+    wire: br_wire()
     br_verify_wire(wire) ?? panic(err.message)
-    original :: br_get(wire, "decision")
-    message :: "persisted decision does not match independent evaluator recomputation"
+    original: br_get(wire, "decision")
+    message: "persisted decision does not match independent evaluator recomputation"
     br_error(br_verify_wire(br_set(wire, "decision", br_set(original, "upper95", br_q(999)))), message)
     br_error(br_verify_wire(br_set(wire, "decision", br_set(original, "policy_outcome", br_s("warn")))), message)
     br_error(perf_validate_history(br_set(br_history(), "report_ids", CanonicalJSON.Array([CanonicalJSON]{br_s("forged")}))), "history report id is not lowercase Hex64")
@@ -193,23 +193,23 @@ fn br_compile_samples() -> CanonicalJSON Never! {
     br_error(br_verify_wire(br_set(wire, "decision", br_set(original, "trend", br_set(br_trend(), "score", br_q(0))))), "persisted trend does not match independent recomputation")
 }
 #Test("wire unavailable short circuit checks enforcement and still recomputes trend") {
-    wire :: br_wire()
-    unavailable :: br_set(br_set(br_get(wire, "decision"), "evidence", br_s("unavailable")), "policy_outcome", br_s("fail"))
+    wire: br_wire()
+    unavailable: br_set(br_set(br_get(wire, "decision"), "evidence", br_s("unavailable")), "policy_outcome", br_s("fail"))
     br_verify_wire(br_set(wire, "decision", unavailable)) ?? panic(err.message)
     br_error(br_verify_wire(br_set(wire, "decision", br_set(unavailable, "policy_outcome", br_s("warn")))), "unavailable decision policy outcome mismatch")
     br_verify_wire(br_set(br_set(wire, "decision", br_set(unavailable, "policy_outcome", br_s("warn"))), "enforcement", br_s("warn"))) ?? panic(err.message)
     br_verify_wire(br_set(wire, "decision", CanonicalJSON.Null)) ?? panic(err.message)
 }
 #Test("valid complete report round trips and wrapper ID validation is last") {
-    content :: br_content()
-    report :: perf_budget_report(content)
+    content: br_content()
+    report: perf_budget_report(content)
     assert_eq(perf_verify_budget_report(canonical_json_bytes(report)) ?? panic(err.message), report)
     br_read_error(br_set(report, "report_id", br_i(1)), "budget report_id is not text")
     br_read_error(br_set(report, "report_id", br_s("A".repeat(64))), "budget report_id is not lowercase Hex64")
-    hash :: perf_stable_id(content)
+    hash: perf_stable_id(content)
     br_read_error(br_set(report, "report_id", br_s(br_zero_hash())), "content hash mismatch: claimed {br_zero_hash()}, recomputed {hash}")
     br_error(perf_validate_report_content(br_set(content, "evidence_id", br_s(br_zero_hash()))), "evidence_id mismatch")
-    tool :: br_get(content, "toolchain")
+    tool: br_get(content, "toolchain")
     br_error(perf_validate_report_content(br_set(content, "toolchain", br_set(tool, "digest", br_s(br_zero_hash())))), "toolchain digest mismatch")
 }
 #Test("primitive reader errors and exact unsigned resource boundaries") {
@@ -242,7 +242,7 @@ fn br_compile_samples() -> CanonicalJSON Never! {
         else -> panic("expected error")
     }
     assert_eq(perf_report_unsigned(br_i((10).pow(100)), "x") ?? panic(err.message), (10).pow(100))
-    bad :: [String]{"A".repeat(64), "g".repeat(64), "é".repeat(32), "0".repeat(63), "0".repeat(65)}
+    bad: [String]{"A".repeat(64), "g".repeat(64), "é".repeat(32), "0".repeat(63), "0".repeat(65)}
     loop value in bad {
         if perf_report_hex64(br_s(value), "x") == {
             .Err(e) -> assert_eq(e.message, "x is not lowercase Hex64")
@@ -259,16 +259,16 @@ fn br_compile_samples() -> CanonicalJSON Never! {
     assert_eq(perf_validate_rational(br_q(-1), false, "q") ?? panic(err.message), perf_rational_integer(-1))
 }
 #Test("statistics recomputes every statistic count sort and empty input") {
-    stats :: br_statistics()
+    stats: br_statistics()
     perf_validate_statistics(stats) ?? panic(err.message)
     br_error(perf_validate_statistics(br_set(stats, "count", br_i(4))), "statistics.count does not match sorted_samples")
     br_error(perf_validate_statistics(br_set(stats, "sorted_samples", CanonicalJSON.Array([CanonicalJSON]{br_q(3), br_q(2), br_q(1)}))), "statistics.sorted_samples is not sorted")
     br_error(perf_validate_statistics(br_set(br_set(stats, "count", br_i(0)), "sorted_samples", CanonicalJSON.Array([CanonicalJSON]{}))), "statistics require at least one sample")
-    keys :: [String]{"p50", "p90", "p95", "p99", "p999", "mean", "mad"}
+    keys: [String]{"p50", "p90", "p95", "p99", "p999", "mean", "mad"}
     loop key in keys -> br_error(perf_validate_statistics(br_set(stats, key, br_q(999))), "statistics.{key} does not match independent recomputation")
 }
 #Test("schema validators preserve errors and optional shape boundaries") {
-    policy :: br_policy()
+    policy: br_policy()
     perf_validate_policy(policy) ?? panic(err.message)
     br_error(perf_validate_policy(br_set(policy, "lower_rank", br_i(-1))), "measurement policy.lower_rank is negative")
     br_error(perf_validate_trend(br_set(br_trend(), "estimators", CanonicalJSON.Array([CanonicalJSON]{br_q(1)}))), "trend inputs are not index-aligned")
@@ -287,8 +287,8 @@ fn br_compile_samples() -> CanonicalJSON Never! {
     br_error(perf_validate_measurement(br_set(br_measurement(), "compile", br_compile())), "compile metadata requires the CompilerProbe provider, CompileTime percentile, and Duration unit")
 }
 #Test("compile metadata fully validates 20 records aggregates and population variance") {
-    compile :: br_compile()
-    samples :: br_compile_samples()
+    compile: br_compile()
+    samples: br_compile_samples()
     perf_validate_compile_metadata(compile, samples) ?? panic(err.message)
     measurement := br_measurement()
     measurement = br_set(measurement, "provider", br_provider("CompilerProbe"))
@@ -306,16 +306,16 @@ fn br_compile_samples() -> CanonicalJSON Never! {
     br_error(perf_validate_compile_metadata(compile, CanonicalJSON.Array(bad_samples)), "measurement.samples does not match compile.sample_records")
     br_error(perf_validate_compile_metadata(br_set(compile, "phase_totals", br_phases(159)), samples), "compile.phase_totals does not equal the per-sample phase totals")
     br_error(perf_validate_compile_metadata(br_set(compile, "variance", br_q(1)), samples), "compile.variance does not match elapsed samples")
-    keys :: [String]{"backend", "host", "linker", "profile", "target"}
+    keys: [String]{"backend", "host", "linker", "profile", "target"}
     loop key in keys -> br_error(perf_validate_compile_metadata(br_set(compile, key, br_s("")), samples), "compile.{key} is empty")
 }
 #Test("compile record row identity and phase sort boundaries") {
-    compile :: br_compile()
-    records :: br_get(compile, "sample_records")
+    compile: br_compile()
+    records: br_get(compile, "sample_records")
     if compile == .Object(root) {
         if records == .Array(values) {
             aggregate := PerfCompileAggregate{phases: [String:Int]{}, elapsed: [PerfRational]{}, peak_rss_bytes: 0}
-            keys :: [String]{"backend", "cache_state", "clock", "compiler_digest", "core_digest", "edit_bytes", "host", "linker", "profile", "source_tree_sha256", "target", "workload_bytes"}
+            keys: [String]{"backend", "cache_state", "clock", "compiler_digest", "core_digest", "edit_bytes", "host", "linker", "profile", "source_tree_sha256", "target", "workload_bytes"}
             loop key in keys -> br_error(perf_validate_compile_record(br_set(values[0], key, CanonicalJSON.Null), root, &aggregate), "compile sample record `{key}` does not match its row identity")
         }
     }
@@ -327,22 +327,22 @@ fn br_compile_samples() -> CanonicalJSON Never! {
         .Err(e) -> assert_eq(e.message, "phase is not sorted by phase name")
         else -> panic("expected error")
     }
-    duplicate :: CanonicalJSON.Array([CanonicalJSON]{br_o([CanonicalJSONField]{br_f("name", br_s("a")), br_f("ns", br_i(1))}), br_o([CanonicalJSONField]{br_f("name", br_s("a")), br_f("ns", br_i(1))})})
+    duplicate: CanonicalJSON.Array([CanonicalJSON]{br_o([CanonicalJSONField]{br_f("name", br_s("a")), br_f("ns", br_i(1))}), br_o([CanonicalJSONField]{br_f("name", br_s("a")), br_f("ns", br_i(1))})})
     if perf_validate_phase_totals(duplicate, "phase") == {
         .Err(e) -> assert_eq(e.message, "phase is not sorted by phase name")
         else -> panic("expected error")
     }
 }
 #Test("report sort privacy and framing semantics") {
-    content :: br_content()
-    subject :: br_get(content, "subject")
-    source_a :: br_o([CanonicalJSONField]{br_f("path", br_s("a")), br_f("sha256", br_s(br_zero_hash()))})
-    source_z :: br_o([CanonicalJSONField]{br_f("path", br_s("z")), br_f("sha256", br_s(br_zero_hash()))})
+    content: br_content()
+    subject: br_get(content, "subject")
+    source_a: br_o([CanonicalJSONField]{br_f("path", br_s("a")), br_f("sha256", br_s(br_zero_hash()))})
+    source_z: br_o([CanonicalJSONField]{br_f("path", br_s("z")), br_f("sha256", br_s(br_zero_hash()))})
     br_error(perf_validate_report_content(br_set(content, "subject", br_set(subject, "member_sources", CanonicalJSON.Array([CanonicalJSON]{source_z, source_a})))), "member_sources is not sorted")
-    privacy :: br_get(content, "privacy")
+    privacy: br_get(content, "privacy")
     br_error(perf_validate_report_content(br_set(content, "privacy", br_set(privacy, "schema", br_i(2)))), "unsupported privacy schema/policy")
     br_error(perf_validate_report_content(br_set(content, "privacy", br_set(privacy, "workspace_paths_only", CanonicalJSON.Bool(false)))), "unsupported privacy schema/policy")
-    keys :: [String]{"retained", "excluded"}
+    keys: [String]{"retained", "excluded"}
     loop key in keys -> br_error(perf_validate_report_content(br_set(content, "privacy", br_set(privacy, key, CanonicalJSON.Array([CanonicalJSON]{br_s("z"), br_s("a")})))), "privacy.{key} is not sorted")
     input := [U8]{}
     perf_report_frame(&input, "é")
@@ -350,7 +350,7 @@ fn br_compile_samples() -> CanonicalJSON Never! {
     assert_eq(perf_report_wire_text(CanonicalJSON.Null), "")
     assert_eq(perf_report_wire_text(br_i(10)), "10")
     assert_eq(perf_report_wire_text(CanonicalJSON.Array([CanonicalJSON]{br_i(1)})), "[1]")
-    sanitized :: perf_sanitize_measurement(br_wire()) ?? panic(err.message)
+    sanitized: perf_sanitize_measurement(br_wire()) ?? panic(err.message)
     assert(br_get(sanitized, "decision") == .Null)
     assert(br_get(sanitized, "history") == .Null)
     assert(br_get(sanitized, "baseline") == .Null)
@@ -417,57 +417,57 @@ fn br_compile_samples() -> CanonicalJSON Never! {
 }
 
 #Test("full report independently checks decisions context and measurement ordering") {
-    content :: br_content()
-    measurements :: br_get(content, "measurements")
+    content: br_content()
+    measurements: br_get(content, "measurements")
     if measurements == .Array(rows) {
-        decision :: br_decision(perf_finish(perf_rational_integer(9), None, None, PerfEvidence.Pass, PerfEnforcement.Fail, [PerfRational]{}))
-        with_decision :: br_set(content, "measurements", CanonicalJSON.Array([CanonicalJSON]{br_set(rows[0], "decision", decision)}))
+        decision: br_decision(perf_finish(perf_rational_integer(9), None, None, PerfEvidence.Pass, PerfEnforcement.Fail, [PerfRational]{}))
+        with_decision: br_set(content, "measurements", CanonicalJSON.Array([CanonicalJSON]{br_set(rows[0], "decision", decision)}))
         perf_verify_budget_report(canonical_json_bytes(perf_budget_report(with_decision))) ?? panic(err.message)
-        forged :: br_set(rows[0], "decision", br_set(decision, "point", br_q(10)))
+        forged: br_set(rows[0], "decision", br_set(decision, "point", br_q(10)))
         br_error(perf_validate_report_content(br_set(content, "measurements", CanonicalJSON.Array([CanonicalJSON]{forged}))), "persisted decision does not match independent evaluator recomputation")
-        changed_context :: br_set(rows[0], "context_key", br_s(br_zero_hash()))
+        changed_context: br_set(rows[0], "context_key", br_s(br_zero_hash()))
         br_error(perf_validate_report_content(br_set(content, "measurements", CanonicalJSON.Array([CanonicalJSON]{changed_context}))), "measurement context_key mismatch")
-        second :: br_set(rows[0], "budget_id", br_s("a"))
+        second: br_set(rows[0], "budget_id", br_s("a"))
         br_error(perf_validate_report_content(br_set(content, "measurements", CanonicalJSON.Array([CanonicalJSON]{rows[0].copy(), second}))), "measurements is not sorted by budget_id then source")
-        second_source :: br_set(rows[0], "source", br_s("a.jet"))
+        second_source: br_set(rows[0], "source", br_s("a.jet"))
         br_error(perf_validate_report_content(br_set(content, "measurements", CanonicalJSON.Array([CanonicalJSON]{rows[0].copy(), second_source}))), "measurements is not sorted by budget_id then source")
     }
 }
 #Test("nonzero compile variance uses population denominator and sample order") {
-    root :: br_compile()
-    records :: br_get(root, "sample_records")
+    root: br_compile()
+    records: br_get(root, "sample_records")
     if records == .Array(values) {
         changed := [CanonicalJSON]{}
         samples := [CanonicalJSON]{}
         loop index in 0..<20 {
-            elapsed :: if { index % 2 == 0 -> 8 else -> 10 }
+            elapsed: if { index % 2 == 0 -> 8 else -> 10 }
             &changed.push(br_set(values[index], "elapsed_ns", br_i(elapsed)))
             &samples.push(br_q(elapsed))
         }
-        compile :: br_set(br_set(root, "sample_records", CanonicalJSON.Array(changed)), "variance", br_q(1))
+        compile: br_set(br_set(root, "sample_records", CanonicalJSON.Array(changed)), "variance", br_q(1))
         perf_validate_compile_metadata(compile, CanonicalJSON.Array(samples)) ?? panic(err.message)
         br_error(perf_validate_compile_metadata(br_set(compile, "variance", br_q(2)), CanonicalJSON.Array(samples)), "compile.variance does not match elapsed samples")
     }
 }
 #Test("comparison parsing and nullable validator dispatch preserve all enum errors") {
-    absolute :: br_o([CanonicalJSONField]{br_f("kind", br_s("absolute")), br_f("limit", br_q(10)), br_f("direction", br_s("wat"))})
+    absolute: br_o([CanonicalJSONField]{br_f("kind", br_s("absolute")), br_f("limit", br_q(10)), br_f("direction", br_s("wat"))})
     if perf_report_parse_comparison(absolute) == {
         .Err(e) -> assert_eq(e.message, "unknown limit direction")
         else -> panic("accepted invalid limit direction")
     }
-    relative :: br_o([CanonicalJSONField]{br_f("kind", br_s("relative_to")), br_f("baseline", br_s("main")), br_f("limit_basis_points", br_i(500)), br_f("goal", br_s("wat")), br_f("direction", br_s("lower_is_better"))})
+    relative: br_o([CanonicalJSONField]{br_f("kind", br_s("relative_to")), br_f("baseline", br_s("main")), br_f("limit_basis_points", br_i(500)), br_f("goal", br_s("wat")), br_f("direction", br_s("lower_is_better"))})
     if perf_report_parse_comparison(relative) == {
         .Err(e) -> assert_eq(e.message, "unknown relative goal")
         else -> panic("accepted invalid relative goal")
     }
     br_error(perf_validate_comparison(absolute), "comparison.direction has unknown value `wat`")
     br_error(perf_validate_comparison(relative), "comparison.goal has unknown value `wat`")
-    valid_relative :: br_set(relative, "goal", br_s("regression_at_most"))
+    valid_relative: br_set(relative, "goal", br_s("regression_at_most"))
     perf_validate_comparison(valid_relative) ?? panic(err.message)
-    relative_expected :: PerfComparison.RelativeTo{limit_basis_points: 500, goal: PerfRelativeGoal.RegressionAtMost}
+    relative_expected: PerfComparison.RelativeTo{limit_basis_points: 500, goal: PerfRelativeGoal.RegressionAtMost}
     assert_eq(perf_report_parse_comparison(valid_relative) ?? panic(err.message), relative_expected)
-    valid_absolute :: br_set(absolute, "direction", br_s("at_least"))
-    absolute_expected :: PerfComparison.Absolute{limit: perf_rational_integer(10), direction: PerfLimitDirection.AtLeast}
+    valid_absolute: br_set(absolute, "direction", br_s("at_least"))
+    absolute_expected: PerfComparison.Absolute{limit: perf_rational_integer(10), direction: PerfLimitDirection.AtLeast}
     assert_eq(perf_report_parse_comparison(valid_absolute) ?? panic(err.message), absolute_expected)
     br_error(perf_report_nullable(CanonicalJSON.Bool(false), (v: CanonicalJSON) -> perf_validate_history(v)), "history selection is not an object")
     perf_report_nullable(CanonicalJSON.Null, (v: CanonicalJSON) -> perf_validate_history(v)) ?? panic(err.message)

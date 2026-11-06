@@ -3,10 +3,10 @@
 // this file infers records from the tree. Objects become records, arrays keep
 // their element type, and null or missing values add optionality. A number
 // spelled with a fraction or exponent is a Float; a whole number is an Int.
-use json :: core.encoding.json
+use json: core.encoding.json
 
 
-fn pkg_data_bind_json(input: String, root_name: String) -> SchemaBuilder DataBindError! {
+pkg_data_bind_json: fn(input: String, root_name: String) -> SchemaBuilder DataBindError! {
     value := Dyn.Null
     if json.parse(input) == {
         .Ok(parsed) -> value = parsed
@@ -14,12 +14,12 @@ fn pkg_data_bind_json(input: String, root_name: String) -> SchemaBuilder DataBin
     }
     if pkg_data_json_kind(value) != JSONBindKind.Object -> return Err(DataBindError{message: "JSON schema root must be an object"})
     builder := SchemaBuilder.new()
-    _ :: pkg_data_add_json_record(&builder, root_name, [Dyn]{value})
+    _: pkg_data_add_json_record(&builder, root_name, [Dyn]{value})
     Ok(builder)
 }
 
 // The JSON kinds schema inference distinguishes.
-enum JSONBindKind {
+JSONBindKind: enum {
     Null
     Bool
     Number
@@ -29,7 +29,7 @@ enum JSONBindKind {
     Other
 }
 
-fn pkg_data_json_kind(value: Dyn) -> JSONBindKind Never! {
+pkg_data_json_kind: fn(value: Dyn) -> JSONBindKind Never! {
     if value == {
         .Null -> JSONBindKind.Null
         .Bool(_) -> JSONBindKind.Bool
@@ -45,14 +45,14 @@ fn pkg_data_json_kind(value: Dyn) -> JSONBindKind Never! {
 // Core's JSON parser keeps every number as its exact lexeme in a private Dyn
 // carrier, which renders back as that lexeme: the number's spelling, or None
 // for any other value.
-fn pkg_data_json_number_lexeme(value: Dyn) -> String? Never! {
-    text :: json.dumps(value) ?? return None
+pkg_data_json_number_lexeme: fn(value: Dyn) -> String? Never! {
+    text: json.dumps(value) ?? return None
     if text == "" || !"-0123456789".contains(text.slice(0..<1)) -> return None
     Val(text)
 }
 
 // The one type every value shares, and whether any value is null.
-fn pkg_data_json_values_type(builder: &SchemaBuilder, values: [Dyn], hint: String) -> (ty: BoundType, nullable: Bool) DataBindError! {
+pkg_data_json_values_type: fn(builder: &SchemaBuilder, values: [Dyn], hint: String) -> (ty: BoundType, nullable: Bool) DataBindError! {
     nullable := false
     nonnull := [Dyn]{}
     loop value in values {
@@ -63,13 +63,13 @@ fn pkg_data_json_values_type(builder: &SchemaBuilder, values: [Dyn], hint: Strin
         }
     }
     if nonnull.len() == 0 -> return Ok((nullable: true, ty: BoundType.Dynamic))
-    first :: pkg_data_json_kind(nonnull[0])
+    first: pkg_data_json_kind(nonnull[0])
     uniform := true
     loop value in nonnull {
         if pkg_data_json_kind(value) != first -> uniform = false
     }
     if !uniform -> return Ok((nullable: nullable, ty: BoundType.Dynamic))
-    ty :: if first == {
+    ty: if first == {
         .Object -> BoundType.Named(pkg_data_add_json_record(&builder, hint, nonnull))
         .Array -> pkg_data_json_array_type(&builder, nonnull, hint)
         .Bool -> BoundType.Scalar("Bool")
@@ -82,26 +82,26 @@ fn pkg_data_json_values_type(builder: &SchemaBuilder, values: [Dyn], hint: Strin
 
 // A list over every element of every array; a nullable element type becomes
 // an optional element.
-fn pkg_data_json_array_type(builder: &SchemaBuilder, arrays: [Dyn], hint: String) -> BoundType DataBindError! {
+pkg_data_json_array_type: fn(builder: &SchemaBuilder, arrays: [Dyn], hint: String) -> BoundType DataBindError! {
     elements := [Dyn]{}
     loop value in arrays {
-        items :: pkg_json_array(value) ?? next
+        items: pkg_json_array(value) ?? next
         loop item in items -> &elements.push(item)
     }
     if elements.len() == 0 -> return Ok(BoundType.Array(BoundType.Dynamic))
-    element :: pkg_data_json_values_type(&builder, elements, "{pkg_data_type_name(hint)}Item")
+    element: pkg_data_json_values_type(&builder, elements, "{pkg_data_type_name(hint)}Item")
     if element.nullable -> return Ok(BoundType.Array(BoundType.Optional(element.ty)))
     Ok(BoundType.Array(element.ty))
 }
 
 // Float when any number was spelled with a fraction or exponent, else Int.
-fn pkg_data_json_number_type(numbers: [Dyn]) -> BoundType Never! {
+pkg_data_json_number_type: fn(numbers: [Dyn]) -> BoundType Never! {
     loop value in numbers {
         if value == {
             .Float(_) -> return BoundType.Scalar("Float")
             else -> {}
         }
-        lexeme :: pkg_data_json_number_lexeme(value) ?? next
+        lexeme: pkg_data_json_number_lexeme(value) ?? next
         if lexeme.contains(".") || lexeme.contains("e") || lexeme.contains("E") -> return BoundType.Scalar("Float")
     }
     BoundType.Scalar("Int")
@@ -109,12 +109,12 @@ fn pkg_data_json_number_type(numbers: [Dyn]) -> BoundType Never! {
 
 // One record over every object: the union of their keys in sorted order, a
 // key missing from any object is optional.
-fn pkg_data_add_json_record(builder: &SchemaBuilder, preferred: String, objects: [Dyn]) -> String DataBindError! {
-    record :: &builder.begin_record(preferred)
+pkg_data_add_json_record: fn(builder: &SchemaBuilder, preferred: String, objects: [Dyn]) -> String DataBindError! {
+    record: &builder.begin_record(preferred)
     maps := [[String: Dyn]]{}
     keys := [String]{}
     loop value in objects {
-        object :: pkg_json_object(value) ?? return Err(DataBindError{message: "JSON schema contains a non-object where an object was inferred"})
+        object: pkg_json_object(value) ?? return Err(DataBindError{message: "JSON schema contains a non-object where an object was inferred"})
         loop entry in object {
             if !keys.contains(entry.key) -> &keys.push(entry.key)
         }
@@ -131,7 +131,7 @@ fn pkg_data_add_json_record(builder: &SchemaBuilder, preferred: String, objects:
                 .None -> optional = true
             }
         }
-        inferred :: pkg_data_json_values_type(&builder, values, "{record.name}{pkg_data_type_name(key)}")
+        inferred: pkg_data_json_values_type(&builder, values, "{record.name}{pkg_data_type_name(key)}")
         &fields.push(FieldSeed{wire_name: key, ty: inferred.ty, optional: optional || inferred.nullable, note: None})
     }
     &builder.set_fields(record.index, fields)

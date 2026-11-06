@@ -1,12 +1,12 @@
 use {
-    auth :: core.auth
-    db :: core.db
-    json :: core.encoding.json
-    server :: core.http.server
-    core_web :: core.web
-    forms :: core.web.forms
-    query :: core.web.query
-    router :: core.web.router
+    auth: core.auth
+    db: core.db
+    json: core.encoding.json
+    server: core.http.server
+    core_web: core.web
+    forms: core.web.forms
+    query: core.web.query
+    router: core.web.router
 }
 
 // Web battery contract:
@@ -15,50 +15,50 @@ use {
 // - database helpers always establish the named policy before reads or writes;
 // - SSR emits serializable island props; the browser package owns reactive state.
     #Codable
-    struct NewOrder {
+    NewOrder: struct {
         item: String
         quantity: Int
     }
 
     #Codable
-    struct IslandProps {
+    IslandProps: struct {
         priv order_count: Int
         priv signed_in: String
     }
 
 
-    struct FormView {
+    FormView: struct {
         valid: Bool
         priv html: String
         errors: String
     }
 
-    fn order_list_path(limit: Int) -> String {
+    order_list_path: fn(limit: Int) -> String {
         bounded := limit
         if bounded < 1 -> bounded = 1
         if bounded > 100 -> bounded = 100
         return "/orders?limit={bounded}"
     }
 
-    fn order_detail_path(id: Int) -> String {
+    order_detail_path: fn(id: Int) -> String {
         if id < 1 -> return "/orders/1"
         return "/orders/{id}"
     }
 
     // The order routes as a typed Router graph: `/orders/:id` with an `Int`
     // id and an optional `limit` search field.
-    fn order_router() -> WebRouter? {
-        fields :: [WebRouterField]{WebRouterField{name: "id", value: "Int"}}
-        search :: [WebRouterField]{WebRouterField{name: "limit", value: "Int"}}
-        built :: router.route(router.new(), "/orders/:id", fields, search, (navigation: WebNavigation) -> "order {navigation.path}") ?? return None
+    order_router: fn() -> WebRouter? {
+        fields: [WebRouterField]{WebRouterField{name: "id", value: "Int"}}
+        search: [WebRouterField]{WebRouterField{name: "limit", value: "Int"}}
+        built: router.route(router.new(), "/orders/:id", fields, search, (navigation: WebNavigation) -> "order {navigation.path}") ?? return None
         return Val(built)
     }
 
     // The Router owns typed query decoding: the limit is read from the
     // matched navigation's search fields.
-    fn decode_limit(url: String) -> Int? {
-        routes :: order_router() ?? return None
-        navigation :: router.navigate(routes, url) ?? return None
+    decode_limit: fn(url: String) -> Int? {
+        routes: order_router() ?? return None
+        navigation: router.navigate(routes, url) ?? return None
         loop field in navigation.search {
             if field.name == "limit" -> return Val(field.value.to_int() ?? return None)
         }
@@ -67,36 +67,36 @@ use {
 
     // Preloading a URL reports the matched route, its path parameters, the
     // navigation status and the cache entry it leaves behind.
-    fn route_report(url: String) -> String {
+    route_report: fn(url: String) -> String {
         routes := order_router() ?? return "router unavailable"
-        navigation :: router.preload(&routes, url) ?? return "navigation failed"
-        params :: navigation.params.map(field -> "{field.name}={field.value}").join(",")
+        navigation: router.preload(&routes, url) ?? return "navigation failed"
+        params: navigation.params.map(field -> "{field.name}={field.value}").join(",")
         return "route={navigation.name} params={params} status={router.current(routes).status} cache={router.cache_show(routes)}"
     }
 
-    fn status_response(status: Int, body: String) -> HTTPResponse { server.response(status, body) }
+    status_response: fn(status: Int, body: String) -> HTTPResponse { server.response(status, body) }
 
-    fn ok_response(body: String) -> HTTPResponse { server.response(200, body) }
+    ok_response: fn(body: String) -> HTTPResponse { server.response(200, body) }
 
-    fn created_response(body: String) -> HTTPResponse { server.response(201, body) }
+    created_response: fn(body: String) -> HTTPResponse { server.response(201, body) }
 
-    fn invalid_response(body: String) -> HTTPResponse { server.response(422, body) }
+    invalid_response: fn(body: String) -> HTTPResponse { server.response(422, body) }
 
-    fn not_found_response(body: String) -> HTTPResponse { server.response(404, body) }
+    not_found_response: fn(body: String) -> HTTPResponse { server.response(404, body) }
 
-    fn redirect_response(location: String) -> HTTPResponse {
-        response :: server.response(303, "")
+    redirect_response: fn(location: String) -> HTTPResponse {
+        response: server.response(303, "")
         return response.header("location", location)
     }
 
-    fn order_form() -> WebForm {
-        draft :: forms.new("/orders")
-        with_item :: forms.field(draft, "item", "string", true) ?? draft
+    order_form: fn() -> WebForm {
+        draft: forms.new("/orders")
+        with_item: forms.field(draft, "item", "string", true) ?? draft
         return forms.field(with_item, "quantity", "int", true) ?? with_item
     }
 
     // The first error of each invalid field, as `name: error`.
-    fn form_field_errors(form: WebForm) -> String {
+    form_field_errors: fn(form: WebForm) -> String {
         errors := [String]{}
         loop field in form.fields {
             if field.errors.len() > 0 -> &errors.push("{field.name}: {field.errors[0]}")
@@ -104,12 +104,12 @@ use {
         return errors.join("; ")
     }
 
-    fn validate_order_form(item: String, quantity: String) -> FormView {
+    validate_order_form: fn(item: String, quantity: String) -> FormView {
         form := order_form()
         forms.set(&form, "item", item) ?? return FormView{valid: false, html: forms.html(form), errors: "item field unavailable"}
         forms.set(&form, "quantity", quantity) ?? return FormView{valid: false, html: forms.html(form), errors: "quantity field unavailable"}
         forms.validate(&form) ?? return FormView{valid: false, html: forms.html(form), errors: form_field_errors(form)}
-        numeric :: Int.parse(quantity) ?? return FormView{
+        numeric: Int.parse(quantity) ?? return FormView{
             valid: false,
             html: forms.html(form),
             errors: "quantity must be an integer"
@@ -124,30 +124,30 @@ use {
         return FormView{valid: true, html: forms.html(form), errors: ""}
     }
 
-    fn form_error_display(item: String, quantity: String) -> String {
-        view :: validate_order_form(item, quantity)
+    form_error_display: fn(item: String, quantity: String) -> String {
+        view: validate_order_form(item, quantity)
         return "{view.errors}\n{view.html}"
     }
 
-    fn island_props(order_count: Int, signed_in: String) -> String {
+    island_props: fn(order_count: Int, signed_in: String) -> String {
         return json.to_string(IslandProps{order_count: order_count, signed_in: signed_in})
     }
 
-    fn ssr_orders_page(order_count: Int, signed_in: String) -> WebPage {
-        props :: island_props(order_count, signed_in)
-        body :: "<main data-island=\"orders\" data-props='{props}'><h1>Orders</h1><p>orders={order_count}</p><div id=\"orders-island\"></div></main>"
+    ssr_orders_page: fn(order_count: Int, signed_in: String) -> WebPage {
+        props: island_props(order_count, signed_in)
+        body: "<main data-island=\"orders\" data-props='{props}'><h1>Orders</h1><p>orders={order_count}</p><div id=\"orders-island\"></div></main>"
         return core_web.page("Orders", body)
     }
 
-    fn scoped_orders(path: String) -> DBScope? {
-        conn :: db.open(path)
-        policy :: db.policy("orders", "true") ?? return None
+    scoped_orders: fn(path: String) -> DBScope? {
+        conn: db.open(path)
+        policy: db.policy("orders", "true") ?? return None
         return Val(conn.with_policy(policy, "web-battery"))
     }
 
-    fn migrate_orders(path: String) -> Int? {
-        scope :: scoped_orders(path) ?? return None
-        version :: db.migrate(
+    migrate_orders: fn(path: String) -> Int? {
+        scope: scoped_orders(path) ?? return None
+        version: db.migrate(
             scope,
             "orders-v1",
             [SQL{"CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY, item TEXT NOT NULL, quantity INTEGER NOT NULL)"}]
@@ -156,89 +156,89 @@ use {
         return Val(version)
     }
 
-    fn count_orders(path: String) -> Int? {
-        scope :: scoped_orders(path) ?? return None
-        rows :: scope.query(SQL{"SELECT id FROM orders ORDER BY id"}) ?? return None
-        count :: rows.len()
+    count_orders: fn(path: String) -> Int? {
+        scope: scoped_orders(path) ?? return None
+        rows: scope.query(SQL{"SELECT id FROM orders ORDER BY id"}) ?? return None
+        count: rows.len()
         scope.close()
         return Val(count)
     }
 
-    fn insert_order(path: String, item: String, quantity: Int) -> Int? {
-        scope :: scoped_orders(path) ?? return None
-        inserted :: scope.execute(SQL{"INSERT INTO orders (item, quantity) VALUES ({item}, {quantity})"}) ?? return None
+    insert_order: fn(path: String, item: String, quantity: Int) -> Int? {
+        scope: scoped_orders(path) ?? return None
+        inserted: scope.execute(SQL{"INSERT INTO orders (item, quantity) VALUES ({item}, {quantity})"}) ?? return None
         scope.close()
         return Val(inserted)
     }
 
-    fn reset_orders(path: String) -> Int? {
-        scope :: scoped_orders(path) ?? return None
-        deleted :: scope.execute(SQL{"DELETE FROM orders"}) ?? return None
+    reset_orders: fn(path: String) -> Int? {
+        scope: scoped_orders(path) ?? return None
+        deleted: scope.execute(SQL{"DELETE FROM orders"}) ?? return None
         scope.close()
         return Val(deleted)
     }
 
-    fn seed_orders(path: String) -> Int? {
-        current :: count_orders(path) ?? return None
+    seed_orders: fn(path: String) -> Int? {
+        current: count_orders(path) ?? return None
         if current == 0 {
-            _inserted :: insert_order(path, "book", 2) ?? return None
+            _inserted: insert_order(path, "book", 2) ?? return None
         }
         return count_orders(path)
     }
 
     // The order list as a live query seeded from the database row count.
-    fn live_orders(path: String) -> WebQuery? {
-        count :: count_orders(path) ?? return None
+    live_orders: fn(path: String) -> WebQuery? {
+        count: count_orders(path) ?? return None
         return Val(query.new("orders.list", WebQuerySeed{data: "count={count}", generation: 1, subscribers: 1}))
     }
 
-    fn invalidate_orders(orders: &WebQuery) -> Int { query.invalidate(&orders) }
+    invalidate_orders: fn(orders: &WebQuery) -> Int { query.invalidate(&orders) }
 
-    fn query_report(path: String) -> String {
+    query_report: fn(path: String) -> String {
         orders := live_orders(path) ?? return "orders unavailable"
-        before :: query.state_signal(orders)
-        generation :: invalidate_orders(&orders)
+        before: query.state_signal(orders)
+        generation: invalidate_orders(&orders)
         query.refresh(&orders) ?? return "refresh failed"
-        after :: query.state_signal(orders)
+        after: query.state_signal(orders)
         return "before={before} invalidated={generation} after={after} data={query.show(orders)}"
     }
 
-    fn register_demo_user() -> Bool {
-        _registered :: auth.register_user("alice", "argon2id:demo")
-        _session :: auth.password_login("alice", "argon2id:demo", 1_700_000_000_000, 3_600_000) ?? return false
+    register_demo_user: fn() -> Bool {
+        _registered: auth.register_user("alice", "argon2id:demo")
+        _session: auth.password_login("alice", "argon2id:demo", 1_700_000_000_000, 3_600_000) ?? return false
         return true
     }
-    struct LoginState {
+    LoginState: struct {
         session_id: String
         cookie: String
     }
 
-    fn login_state(user: String, password: String) -> LoginState? {
-        session :: auth.password_login(user, password, 1_700_000_000_000, 3_600_000) ?? return None
+    login_state: fn(user: String, password: String) -> LoginState? {
+        session: auth.password_login(user, password, 1_700_000_000_000, 3_600_000) ?? return None
         return Val(LoginState{
             session_id: auth.session_id(session),
             cookie: auth.session_cookie(session)
         })
     }
 
-    fn login_session(user: String, password: String) -> String? {
-        state :: login_state(user, password) ?? return None
+    login_session: fn(user: String, password: String) -> String? {
+        state: login_state(user, password) ?? return None
         return Val(state.session_id)
     }
 
-    fn login_cookie(user: String, password: String) -> String? {
-        state :: login_state(user, password) ?? return None
+    login_cookie: fn(user: String, password: String) -> String? {
+        state: login_state(user, password) ?? return None
         return Val(state.cookie)
     }
 
-    fn login_status(user: String, password: String) -> Int {
-        _session :: auth.password_login(user, password, 1_700_000_000_000, 3_600_000) ?? return 401
+    login_status: fn(user: String, password: String) -> Int {
+        _session: auth.password_login(user, password, 1_700_000_000_000, 3_600_000) ?? return 401
         return 200
     }
-    fn protected_status(session_id: String, cookie: String) -> Int {
+    protected_status: fn(session_id: String, cookie: String) -> Int {
         if cookie == "" -> return 401
-        expected :: "jet_session={session_id}"
+        expected: "jet_session={session_id}"
         if !cookie.starts_with(expected) -> return 401
-        _validated :: auth.session_validate(session_id, 1_700_000_000_001) ?? return 401
+        _validated: auth.session_validate(session_id, 1_700_000_000_001) ?? return 401
         return 200
     }

@@ -1,17 +1,17 @@
 
-use browser :: core.web.browser
+use browser: core.web.browser
 
-fn run() {
-    profile :: browser.profile("bidi-2024.11") ?? panic("profile")
-    timeout :: browser.timeout(500) ?? panic("timeout")
-    session :: browser.connect_profile("ws://127.0.0.1:{free-port:forced}/session", profile, timeout) ?? panic("connect")
+run: fn() {
+    profile: browser.profile("bidi-2024.11") ?? panic("profile")
+    timeout: browser.timeout(500) ?? panic("timeout")
+    session: browser.connect_profile("ws://127.0.0.1:{free-port:forced}/session", profile, timeout) ?? panic("connect")
     print(session.abilities().profile())
-    bidi :: session.protocol("bidi") ?? panic("protocol")
-    blocked :: bidi.send("webExtension.install", "{{}}") ?? "blocked"
+    bidi: session.protocol("bidi") ?? panic("protocol")
+    blocked: bidi.send("webExtension.install", "{{}}") ?? "blocked"
     print(blocked)
-    unknown :: bidi.send("network.futureCommand", "{{}}") ?? "blocked"
+    unknown: bidi.send("network.futureCommand", "{{}}") ?? "blocked"
     print(unknown)
-    raw_cdp :: bidi.send("goog:cdp.sendCommand", "{{}}") ?? "blocked"
+    raw_cdp: bidi.send("goog:cdp.sendCommand", "{{}}") ?? "blocked"
     print(raw_cdp)
     session.close() ?? panic("close")
 }

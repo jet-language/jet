@@ -1,4 +1,4 @@
-package {
+package: {
     name: "memory_shared_weak_cycle"
     version: "0.1.0"
     authority: { allow: [Exec, IO, Mem.Alloc, Mem.Rc, Time.Wait] }
@@ -12,12 +12,12 @@ package {
 // step, so the back-edges are plain assignments. Reading the WHOLE value (not
 // one field) is the expert guard's job — the guard is the one form that keeps a
 // lock across a helper call.
-struct Node {
+Node: struct {
     label: String
     peer: Shared.Weak<Node>?
 }
 
-fn peer_label(n: Node) -> String {
+peer_label: fn(n: Node) -> String {
     if n.peer == .None -> return "none"
     if n.peer == .Val(weak) {
         if weak.upgrade() == .None -> return "gone"
@@ -27,12 +27,12 @@ fn peer_label(n: Node) -> String {
 }
 
 // One whole-value read under one lock, in the smallest possible scope.
-fn label_of(handle: Shared<Node>) -> String {
-    guard :: handle.guard_read()
+label_of: fn(handle: Shared<Node>) -> String {
+    guard: handle.guard_read()
     return peer_label(guard.value.copy())
 }
 
-fn run() {
+run: fn() {
     a := shared Node{label: "a", peer: None}
     b := shared Node{label: "b", peer: None}
     // Downgrade before the writes so the strong handles are not moved.
@@ -40,9 +40,9 @@ fn run() {
     wb := b.downgrade()
     a.peer = Val(wb.copy())
     b.peer = Val(wa.copy())
-    alive :: label_of(a)
+    alive: label_of(a)
     print("while-alive:{alive}")
-    count :: a.strong_count()
+    count: a.strong_count()
     print("strong:{count}")
     // Fresh weak — wa/wb were moved into the back-edges above.
     up := a.downgrade()

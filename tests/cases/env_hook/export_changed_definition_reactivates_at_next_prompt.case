@@ -1,9 +1,14 @@
 # Port of tests/env_hook.rs::export_changed_definition_reactivates_at_next_prompt.
 # The captured CLI-emitted assignment is sourced unchanged; no hash computation/helper.
-# PENDING-GRAMMAR: capture/write, tool token and step unset.
+# A `module env.dev` env is typed, so the hook activates it only after an env
+# grant (trust law; same setup as export_runs_typed_lifecycle_jobs...).
 requires: tool:bash
 fixture: activation-reload.fixture
 env: PATH=/usr/bin:/bin
+env: HOME={work}/home
+mkdir: home
+step: jetpack trust grant env:{work} --scope user
+exit: 0
 step: jetpack env export bash
 unset: JET_ENV_DISABLE
 unset: JETPACK_ENV
@@ -23,6 +28,8 @@ unset: JETPACK_ENV_HASH
 unset: JETPACK_ENV_OLD_PATH
 unset: JETPACK_REF
 exit: 0
-stdout: ~ "changed" # original predicate; entails nonempty output
-stdout: !~ "smoke" # original predicate
-stdout: ~ "export JETPACK_ENV_HASH='" # original predicate
+# The Rust original's "changed" matched its scratch directory name; the live
+# meaning is a replacement activation under a new definition hash.
+stdout: ~ "export JETPACK_ENV_DIR='{work}'"
+stdout: ~ "export JETPACK_ENV_HASH='"
+stdout: !~ "{cap:hash}"

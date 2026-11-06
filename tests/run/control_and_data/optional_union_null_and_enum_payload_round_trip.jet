@@ -1,23 +1,23 @@
 
-use json :: core.encoding.json
+use json: core.encoding.json
 
 #Codable
-struct MaybeRow {
+MaybeRow: struct {
     value: Int? | String
 }
 
 #Codable
-enum Envelope {
+Envelope: enum {
     Value(Int | String)
 }
 
-fn run() {
-    decoded :: json.decode<MaybeRow>("{{\"value\":null}}") ?? panic("row")
+run: fn() {
+    decoded: json.decode<MaybeRow>("{{\"value\":null}}") ?? panic("row")
     print(json.to_string(decoded))
 
-    envelope :: Envelope.Value(7)
-    envelope_wire :: json.to_string(envelope)
+    envelope: Envelope.Value(7)
+    envelope_wire: json.to_string(envelope)
     print(envelope_wire)
-    back :: json.decode<Envelope>(envelope_wire) ?? panic("envelope")
+    back: json.decode<Envelope>(envelope_wire) ?? panic("envelope")
     print(json.to_string(back))
 }

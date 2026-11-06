@@ -1,11 +1,11 @@
-enum Conn {
+Conn: enum {
     Active(Int)
     Reconnecting(Int)
     Blocked(String)
     Idle(Int)
     Closed
 }
-fn describe(c: Conn) -> String {
+describe: fn(c: Conn) -> String {
     if c == {
         .Active(id) | .Reconnecting(id) -> { return "live:{id}" }
         .Blocked(id) -> { return "blocked:{id}" }
@@ -14,7 +14,7 @@ fn describe(c: Conn) -> String {
     }
     return "unknown"
 }
-fn run() {
+run: fn() {
     print(describe(Conn.Active(42)))
     print(describe(Conn.Reconnecting(7)))
     print(describe(Conn.Blocked("waiting")))

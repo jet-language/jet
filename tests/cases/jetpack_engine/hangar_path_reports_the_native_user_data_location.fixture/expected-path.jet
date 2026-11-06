@@ -1,13 +1,13 @@
 // ORIGINAL-EXPRESSION oracle: jetpack_engine.rs:99-108. No assertions.
 use {
-    files :: core.files
-    sys :: core.sys
-    process :: core.process
-    json :: core.encoding.json
+    files: core.files
+    sys: core.sys
+    process: core.process
+    json: core.encoding.json
 }
-fn run() {
-    data :: process.args()[0]
-    home :: sys.get("USERPROFILE") ?? sys.get("HOME") ?? panic("home directory environment variable")
-    expected :: if sys.is_macos() -> files.join(home, "Library/Application Support/Jet/Hangar") else if sys.is_windows() -> files.join(home, "AppData/Local/Jet/Hangar") else -> files.join(data, "jet/hangar")
+run: fn() {
+    data: process.args()[0]
+    home: sys.get("USERPROFILE") ?? sys.get("HOME") ?? panic("home directory environment variable")
+    expected: if sys.is_macos() -> files.join(home, "Library/Application Support/Jet/Hangar") else if sys.is_windows() -> files.join(home, "AppData/Local/Jet/Hangar") else -> files.join(data, "jet/hangar")
     print(json.to_string(Dyn.Text(expected)))
 }

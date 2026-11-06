@@ -1,9 +1,9 @@
 
-use process :: core.process
+use process: core.process
 
-fn run() {
-    policy :: process.workspace()
-    spec :: process.cmd(["sh", "-c", "while true; do sleep 1; done"])
+run: fn() {
+    policy: process.workspace()
+    spec: process.cmd(["sh", "-c", "while true; do sleep 1; done"])
         .stdout(.Capture)
         .stderr(.Capture)
         .cwd("/tmp")
@@ -11,7 +11,7 @@ fn run() {
     if spec.spawn() == {
         .Ok(child) -> {
             child.kill() ?? panic("authority-bound cancellation failed")
-            receipt :: child.wait() ?? panic("cancelled child did not reap")
+            receipt: child.wait() ?? panic("cancelled child did not reap")
             print(receipt.success)
             print(receipt.timed_out)
             print(receipt.descendants)

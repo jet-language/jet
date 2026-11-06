@@ -1,55 +1,55 @@
 
-struct Counter {
+Counter: struct {
     value: Int
 }
 
-struct Holder {
+Holder: struct {
     counter: Counter
 }
 
-struct GenericHolder<T> {
+GenericHolder: struct<T> {
     value: T
     step: fn(Int) -> Int
 }
 
 impl GenericHolder {
-    fn new(value: ^T) -> GenericHolder<T> {
+    new: fn(value: ^T) -> GenericHolder<T> {
         return GenericHolder<T>{ value: value, step: (n: Int) -> n + 9 }
     }
 
-    fn marker(self) -> Int {
+    marker: fn(self) -> Int {
         return self.step(0)
     }
 }
 
 impl Counter {
-    fn new(value: Int) -> Counter {
+    new: fn(value: Int) -> Counter {
         return Counter{ value: value }
     }
 }
 
-fn fresh(value: Int) -> Counter {
+fresh: fn(value: Int) -> Counter {
     return .new(value)
 }
 
-fn read(counter: Counter) -> Int {
+read: fn(counter: Counter) -> Int {
     return counter.value
 }
 
-fn increment(value: Int) -> Int {
+increment: fn(value: Int) -> Int {
     return value + 1
 }
 
-fn run() {
-    bound :: Counter.new(1)
-    holder :: Holder{ counter: .new(2) }
-    pool :: Pool<Holder>.new()
-    nested_pool :: Pool<Pool<Holder>>.new()
-    nested :: GenericHolder<GenericHolder<Int>>.new(.new(7))
-    nested_explicit :: GenericHolder<GenericHolder<Int>>.new(GenericHolder<Int>.new(8))
-    callback :: increment
-    callback_holder :: GenericHolder<fn(Int) -> Int>.new(^callback)
-    explicit :: Counter.new(4)
+run: fn() {
+    bound: Counter.new(1)
+    holder: Holder{ counter: .new(2) }
+    pool: Pool<Holder>.new()
+    nested_pool: Pool<Pool<Holder>>.new()
+    nested: GenericHolder<GenericHolder<Int>>.new(.new(7))
+    nested_explicit: GenericHolder<GenericHolder<Int>>.new(GenericHolder<Int>.new(8))
+    callback: increment
+    callback_holder: GenericHolder<fn(Int) -> Int>.new(^callback)
+    explicit: Counter.new(4)
     print(read(.new(5)))
     print("{bound.value}{holder.counter.value}{explicit.value}")
     print(fresh(6).value)

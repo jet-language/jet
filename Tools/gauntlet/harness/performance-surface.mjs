@@ -62,7 +62,7 @@ export const HISTORICAL_RECEIPTS = Object.freeze([
 
 export const SURFACE_SOURCE = [
   `// Real paired workload: ${PAIR_ID} surface spelling`,
-  "fn run() {",
+  "run: fn() {",
   "    total := 0",
   `    loop i in ${INPUT_RANGE} {`,
   "        total += i",
@@ -73,7 +73,7 @@ export const SURFACE_SOURCE = [
 
 export const PLAIN_SOURCE = [
   `// Real paired workload: ${PAIR_ID} plain spelling`,
-  "fn run() {",
+  "run: fn() {",
   "    total := 0",
   `    loop i in ${INPUT_RANGE} {`,
   "        total = total + i",

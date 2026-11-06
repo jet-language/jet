@@ -1,16 +1,16 @@
 // D-DBPOOL1: the bounded DB pool exposes acquire, readiness, receipt, and drain.
-package {
+package: {
     name: "db_pool"
     authority: { allow: [DB, IO, Mem.Alloc, Time.Wait] }
 }
 
-use db :: core.db
+use db: core.db
 
-fn run() {
-    pool :: db.pool(":memory:", max: 1) ?? return
+run: fn() {
+    pool: db.pool(":memory:", max: 1) ?? return
     print("ready:{pool.ready() ?? false}")
     print("receipt:{pool.receipt()}")
-    lease :: pool.acquire(deadline: 100ms) ?? return
+    lease: pool.acquire(deadline: 100ms) ?? return
     print("lease:{lease}")
     lease.close() ?? return
     print("drain:{pool.drain() ?? return}")

@@ -117,9 +117,11 @@ export function runtimeStopExports(sources, addresses = new Map()) {
       if (exports.has(name)) throw new Error(`duplicate runtime #Export(c) ${name}`);
       exports.add(name);
     }
-    const declarations = [...code.matchAll(/\bfn\s+([A-Za-z_]\w*)\s*/g)];
+    // A declaration `name: fn(…)` starts its line; a nested local function
+    // is `name: fn(…)`.
+    const declarations = [...code.matchAll(/^[ \t]*(?:(?:pub|priv)\s+)?(?:#[A-Za-z_]\w*(?:\([^)\n]*\))?\s+)*([A-Za-z_]\w*):\s*fn\s*|\bfn\s+([A-Za-z_]\w*)\s*/gm)];
     for (let index = 0; index < declarations.length; ++index) {
-      const declaration = declarations[index], name = declaration[1];
+      const declaration = declarations[index], name = declaration[1] ?? declaration[2];
       const limit = declarations[index + 1]?.index ?? code.length;
       let opener = declaration.index + declaration[0].length;
       if (code[opener] !== "(") throw new Error(`${path}: unsupported function declaration ${name}`);
@@ -146,7 +148,7 @@ export function runtimeStopExports(sources, addresses = new Map()) {
       const body = code.slice(start, at - 1);
       const boundNames = new Set([
         ...[...parameters.matchAll(/\b([A-Za-z_]\w*)\s*:/g)].map((match) => match[1]),
-        ...[...body.matchAll(/\b([A-Za-z_]\w*)\s*(?::=|::)/g)].map((match) => match[1]),
+        ...[...body.matchAll(/^[ \t]*([A-Za-z_]\w*)[ \t]*:/gm)].map((match) => match[1]),
       ]);
       const calls = [];
       for (const call of body.matchAll(/\b([A-Za-z_]\w*)[^\S\n]*\(/g)) {
@@ -158,7 +160,7 @@ export function runtimeStopExports(sources, addresses = new Map()) {
       const words = new Set();
       for (const match of body.matchAll(/\b(?:coll|os)_call\w*\s*\(\s*([A-Za-z_]\w*)\b/g)) {
         if (match[1].endsWith("_rail_code")) { words.add(match[1]); continue; }
-        for (const bound of body.matchAll(new RegExp(`\\b${match[1]}\\s*(?::=|::)\\s*([A-Za-z_]\\w*_rail_code)\\b`, "g"))) words.add(bound[1]);
+        for (const bound of body.matchAll(new RegExp(`\\b${match[1]}\\s*:=?\\s*([A-Za-z_]\\w*_rail_code)\\b`, "g"))) words.add(bound[1]);
       }
       functions.set(name, calls);
       if (words.size) hookCalls.set(name, words);
@@ -202,10 +204,10 @@ export function generatedRuntimeStopRegistry(symbols) {
 // Direct named calls and stop-rail hooks (_rail_code words) only; other foreign/dynamic callback effects are separate.
 // Both compiler halves consume these Panic stop facts, not returned Results.
 // The symbols land as literal data: no compile-time execution host is needed.
-RUNTIME_STOP_EXPORTS :: comptime { [String]{
+RUNTIME_STOP_EXPORTS: comptime { [String]{
 ${symbols.map((symbol) => `    "${symbol}",\n`).join("")}} }
 
-fn runtime_export_can_stop(symbol: String) -> Bool Never! {
+runtime_export_can_stop: fn(symbol: String) -> Bool Never! {
     loop candidate in RUNTIME_STOP_EXPORTS {
         if candidate == symbol -> return true
     }

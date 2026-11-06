@@ -128,7 +128,7 @@ The left `My Canvas` rail is one source-backed tree over the project:
 - `Files` selects a source file and keeps its file revision visible.
 - `Functions` selects a projected function graph; `New` uses the checked
   function transaction.
-- `Callback` creates an ordinary handler such as `fn on_start() -> Void { }`
+- `Callback` creates an ordinary handler such as `on_start: fn() -> Void { }`
   through that same transaction. A projected `on_*` function is marked as a
   framework-callback view; selecting its `handler` row opens its source-backed
   graph.

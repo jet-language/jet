@@ -7,33 +7,33 @@ use {
     jet_parser.[parse_generated_source]
 }
 
-struct SemaMarkerModuleResolution {
+SemaMarkerModuleResolution: struct {
     status: String
     declaring_module_identity: String
     declaration: MarkerDecl?
     exported: Bool { false }
 }
 
-struct SemaMarkerModuleTarget {
+SemaMarkerModuleTarget: struct {
     status: String
     module_identity: String
     name: String
     require_export: Bool
 }
 
-struct SemaMarkerModuleBinding {
+SemaMarkerModuleBinding: struct {
     name: String
     application_span: Span
     module_identity: String
     declaration_span: Span
 }
 
-struct SemaMarkerModuleCandidate {
+SemaMarkerModuleCandidate: struct {
     declaration: MarkerDecl
     exported: Bool
 }
 
-struct SemaMarkerModuleMatches {
+SemaMarkerModuleMatches: struct {
     candidate: SemaMarkerModuleCandidate?
     ambiguous: Bool
 }
@@ -42,11 +42,11 @@ struct SemaMarkerModuleMatches {
 // Selective imports still require the module name, never their member alias.
 // `name` carries the PascalCase library part (`Server.Get`); a scope prefix
 // is spelled by sema_marker_module_scoped_name.
-fn sema_marker_module_target(edges: [SemaRegistrationImportEdge], module_identity: String, name: String) -> SemaMarkerModuleTarget {
+sema_marker_module_target: fn(edges: [SemaRegistrationImportEdge], module_identity: String, name: String) -> SemaMarkerModuleTarget {
     sema_marker_module_target_in_scope(edges, module_identity, name, "")
 }
 
-fn sema_marker_module_target_in_scope(edges: [SemaRegistrationImportEdge], module_identity: String, name: String, scope: String) -> SemaMarkerModuleTarget {
+sema_marker_module_target_in_scope: fn(edges: [SemaRegistrationImportEdge], module_identity: String, name: String, scope: String) -> SemaMarkerModuleTarget {
     target := String?{None}
     ambiguous := false
     private := false
@@ -58,7 +58,7 @@ fn sema_marker_module_target_in_scope(edges: [SemaRegistrationImportEdge], modul
         if edge.declaration.kind == .Unqualified(module_alias, _, _, _, _) -> alias = module_alias
         if edge.source_scope != "" -> alias = "{edge.source_scope}.{alias}"
         alias = sema_casing_marker_qualifier(alias)
-        prefix :: "{alias}."
+        prefix: "{alias}."
         if !name.starts_with(prefix) -> next
         if alias.len() > length {
             target = None
@@ -70,7 +70,7 @@ fn sema_marker_module_target_in_scope(edges: [SemaRegistrationImportEdge], modul
         if alias.len() == length {
             if target == .Val(identity) && identity != edge.target_module_identity -> ambiguous = true
             else if target == None -> target = Val(edge.target_module_identity)
-            lexical :: edge.source_scope == "" || scope == edge.source_scope || scope.starts_with("{edge.source_scope}.")
+            lexical: edge.source_scope == "" || scope == edge.source_scope || scope.starts_with("{edge.source_scope}.")
             if !lexical && !edge.source_scope_exported -> private = true
         }
     }
@@ -82,7 +82,7 @@ fn sema_marker_module_target_in_scope(edges: [SemaRegistrationImportEdge], modul
 
 // A marker name as written inside the code-module `scope`: the scope's
 // module path takes its PascalCase marker spelling.
-fn sema_marker_module_scoped_name(scope: String, name: String) -> String Never! {
+sema_marker_module_scoped_name: fn(scope: String, name: String) -> String Never! {
     if scope == "" -> return name.copy()
     "{sema_casing_marker_qualifier(scope)}.{name}"
 }
@@ -90,19 +90,19 @@ fn sema_marker_module_scoped_name(scope: String, name: String) -> String Never! 
 // D-MARKER-CASE1=A: a qualified marker whose library part is not PascalCase
 // (`#server.Get`) is E0087, with the PascalCase spelling as its edit. Only the
 // library part is respelled; the marker's own name keeps its checks.
-fn sema_marker_module_case_error(name: String, span: Span) -> Diagnostic? {
-    parts :: name.split(".").to_list()
+sema_marker_module_case_error: fn(name: String, span: Span) -> Diagnostic? {
+    parts: name.split(".").to_list()
     if parts.len() < 2 -> return None
-    written :: parts.slice(0, parts.len() - 1).join(".")
-    spelled :: sema_casing_marker_qualifier(written)
+    written: parts.slice(0, parts.len() - 1).join(".")
+    spelled: sema_casing_marker_qualifier(written)
     if spelled == written -> return None
-    marker_name :: parts[parts.len() - 1]
-    diagnostic :: sema_error("E0087", span, "the library part of `#{name}` must be PascalCase", "markers are PascalCase after `#`, including the library part, which spells the import's local name in PascalCase", "write `#{spelled}.{marker_name}`")
+    marker_name: parts[parts.len() - 1]
+    diagnostic: sema_error("E0087", span, "the library part of `#{name}` must be PascalCase", "markers are PascalCase after `#`, including the library part, which spells the import's local name in PascalCase", "write `#{spelled}.{marker_name}`")
     if span.end - span.start != name.bytes().len() -> return Val(diagnostic)
     Val(diagnostic_with_edit(diagnostic, TextEdit{span: Span{start: span.start, end: span.start + written.bytes().len()}, new_text: spelled}))
 }
 
-fn sema_marker_module_items(items: [Item], segments: [String], position: Int, exported: Bool, rows: &SemaMarkerModuleMatches) {
+sema_marker_module_items: fn(items: [Item], segments: [String], position: Int, exported: Bool, rows: &SemaMarkerModuleMatches) {
     if position >= segments.len() -> return
     loop item in items {
         if item == {
@@ -120,25 +120,25 @@ fn sema_marker_module_items(items: [Item], segments: [String], position: Int, ex
     }
 }
 
-fn sema_marker_module_resolve_items(items: [Item], target: SemaMarkerModuleTarget) -> SemaMarkerModuleResolution {
-    unknown :: SemaMarkerModuleResolution{status: "unknown", declaring_module_identity: target.module_identity, declaration: None}
+sema_marker_module_resolve_items: fn(items: [Item], target: SemaMarkerModuleTarget) -> SemaMarkerModuleResolution {
+    unknown: SemaMarkerModuleResolution{status: "unknown", declaring_module_identity: target.module_identity, declaration: None}
     if target.status != "found" -> return SemaMarkerModuleResolution{status: target.status, declaring_module_identity: target.module_identity, declaration: None}
     rows := SemaMarkerModuleMatches{candidate: None, ambiguous: false}
     sema_marker_module_items(items, target.name.split(".").to_list(), 0, true, &rows)
     if rows.ambiguous -> return SemaMarkerModuleResolution{status: "ambiguous", declaring_module_identity: target.module_identity, declaration: None}
-    candidate :: rows.candidate ?? return unknown
+    candidate: rows.candidate ?? return unknown
     if target.require_export && !candidate.exported -> return SemaMarkerModuleResolution{status: "private", declaring_module_identity: target.module_identity, declaration: None}
     SemaMarkerModuleResolution{status: "found", declaring_module_identity: target.module_identity, declaration: Val(candidate.declaration), exported: candidate.exported}
 }
 
-fn sema_marker_module_resolve(graph: SemaRegistrationGraph, module_identity: String, name: String) -> SemaMarkerModuleResolution {
-    target :: sema_marker_module_target(graph.edges, module_identity, name)
+sema_marker_module_resolve: fn(graph: SemaRegistrationGraph, module_identity: String, name: String) -> SemaMarkerModuleResolution {
+    target: sema_marker_module_target(graph.edges, module_identity, name)
     if target.status != "found" -> return SemaMarkerModuleResolution{status: target.status, declaring_module_identity: target.module_identity, declaration: None}
-    module_index :: sema_registration_module_index(graph, target.module_identity) ?? return SemaMarkerModuleResolution{status: "unknown", declaring_module_identity: target.module_identity, declaration: None}
+    module_index: sema_registration_module_index(graph, target.module_identity) ?? return SemaMarkerModuleResolution{status: "unknown", declaring_module_identity: target.module_identity, declaration: None}
     sema_marker_module_resolve_items(graph.modules[module_index].program.items, target)
 }
 
-fn sema_marker_module_declaration_by_span(items: [Item], span: Span) -> MarkerDecl? Never! {
+sema_marker_module_declaration_by_span: fn(items: [Item], span: Span) -> MarkerDecl? Never! {
     loop item in items {
         if item == {
             .MarkerDecl(declaration) -> {
@@ -146,7 +146,7 @@ fn sema_marker_module_declaration_by_span(items: [Item], span: Span) -> MarkerDe
             }
             .CodeModule(code_module) -> {
                 if code_module.body == .Val(body) {
-                    declaration :: sema_marker_module_declaration_by_span(body, span)
+                    declaration: sema_marker_module_declaration_by_span(body, span)
                     if declaration != None -> return declaration
                 }
             }
@@ -156,31 +156,31 @@ fn sema_marker_module_declaration_by_span(items: [Item], span: Span) -> MarkerDe
     None
 }
 
-fn sema_marker_module_candidate_by_span(items: [Item], span: Span, exported: Bool) -> SemaMarkerModuleCandidate? Never! {
+sema_marker_module_candidate_by_span: fn(items: [Item], span: Span, exported: Bool) -> SemaMarkerModuleCandidate? Never! {
     loop item in items {
         if item == .MarkerDecl(declaration) && declaration.name_span.start == span.start && declaration.name_span.end == span.end -> return Val(SemaMarkerModuleCandidate{declaration: declaration, exported: exported && declaration.is_pub})
         if item == .CodeModule(code_module) && code_module.body == .Val(body) {
-            candidate :: sema_marker_module_candidate_by_span(body, span, exported && code_module.is_pub)
+            candidate: sema_marker_module_candidate_by_span(body, span, exported && code_module.is_pub)
             if candidate != None -> return candidate
         }
     }
     None
 }
 
-fn sema_marker_module_scope(items: [Item], span: Span, prefix: String) -> String Never! {
+sema_marker_module_scope: fn(items: [Item], span: Span, prefix: String) -> String Never! {
     loop item in items {
         if item == .CodeModule(code_module) && code_module.span.start <= span.start && span.end <= code_module.span.end && code_module.body == .Val(body) {
-            name :: if prefix == "" -> code_module.name else -> "{prefix}.{code_module.name}"
+            name: if prefix == "" -> code_module.name else -> "{prefix}.{code_module.name}"
             return sema_marker_module_scope(body, span, name)
         }
     }
     prefix.copy()
 }
 
-fn sema_marker_module_import_declared(items: [Item], scope: String, span: Span, prefix: String) -> Bool Never! {
+sema_marker_module_import_declared: fn(items: [Item], scope: String, span: Span, prefix: String) -> Bool Never! {
     loop item in items {
         if item == .CodeModule(code_module) && code_module.body == .Val(body) {
-            path :: if prefix == "" -> code_module.name else -> "{prefix}.{code_module.name}"
+            path: if prefix == "" -> code_module.name else -> "{prefix}.{code_module.name}"
             if path == scope {
                 loop declaration in code_module.imports {
                     if declaration.span.start == span.start && declaration.span.end == span.end -> return true
@@ -192,34 +192,34 @@ fn sema_marker_module_import_declared(items: [Item], scope: String, span: Span, 
     false
 }
 
-fn sema_marker_module_resolve_scoped(graph: SemaRegistrationGraph, module_identity: String, name: String, scope: String) -> SemaMarkerModuleResolution {
+sema_marker_module_resolve_scoped: fn(graph: SemaRegistrationGraph, module_identity: String, name: String, scope: String) -> SemaMarkerModuleResolution {
     prefix := scope
     loop {
-        candidate :: sema_marker_module_scoped_name(prefix, name)
-        target :: sema_marker_module_target_in_scope(graph.edges, module_identity, candidate, scope)
+        candidate: sema_marker_module_scoped_name(prefix, name)
+        target: sema_marker_module_target_in_scope(graph.edges, module_identity, candidate, scope)
         if target.status != "found" -> return SemaMarkerModuleResolution{status: target.status, declaring_module_identity: target.module_identity, declaration: None}
-        index :: sema_registration_module_index(graph, target.module_identity) ?? return SemaMarkerModuleResolution{status: "unknown", declaring_module_identity: target.module_identity, declaration: None}
-        resolved :: sema_marker_module_resolve_items(graph.modules[index].program.items, target)
+        index: sema_registration_module_index(graph, target.module_identity) ?? return SemaMarkerModuleResolution{status: "unknown", declaring_module_identity: target.module_identity, declaration: None}
+        resolved: sema_marker_module_resolve_items(graph.modules[index].program.items, target)
         if resolved.status != "unknown" || target.require_export || prefix == "" -> return resolved
-        parts :: prefix.split(".").to_list()
+        parts: prefix.split(".").to_list()
         prefix = parts.slice(0, parts.len() - 1).join(".")
     }
 }
 
-fn sema_marker_module_resolve_application(graph: SemaRegistrationGraph, module_identity: String, marker: Marker) -> SemaMarkerModuleResolution {
+sema_marker_module_resolve_application: fn(graph: SemaRegistrationGraph, module_identity: String, marker: Marker) -> SemaMarkerModuleResolution {
     if marker.declaration_module == .Val(identity) && marker.declaration_span == .Val(span) {
         if sema_registration_module_index(graph, identity) == .Val(index) {
-            candidate :: sema_marker_module_candidate_by_span(graph.modules[index].program.items, span, true)
+            candidate: sema_marker_module_candidate_by_span(graph.modules[index].program.items, span, true)
             if candidate == .Val(row) -> return SemaMarkerModuleResolution{status: "found", declaring_module_identity: identity, declaration: Val(row.declaration), exported: row.exported}
         }
         return SemaMarkerModuleResolution{status: "unknown", declaring_module_identity: identity, declaration: None}
     }
-    index :: sema_registration_module_index(graph, module_identity) ?? return SemaMarkerModuleResolution{status: "unknown", declaring_module_identity: module_identity, declaration: None}
-    scope :: sema_marker_module_scope(graph.modules[index].program.items, marker.name_span, "")
+    index: sema_registration_module_index(graph, module_identity) ?? return SemaMarkerModuleResolution{status: "unknown", declaring_module_identity: module_identity, declaration: None}
+    scope: sema_marker_module_scope(graph.modules[index].program.items, marker.name_span, "")
     sema_marker_module_resolve_scoped(graph, module_identity, marker.name, scope)
 }
 
-fn sema_marker_module_declarations(items: [Item], prefix: String, exported_only: Bool) -> [MarkerDecl] Never! {
+sema_marker_module_declarations: fn(items: [Item], prefix: String, exported_only: Bool) -> [MarkerDecl] Never! {
     declarations := [MarkerDecl]{}
     loop item in items {
         if item == {
@@ -232,8 +232,8 @@ fn sema_marker_module_declarations(items: [Item], prefix: String, exported_only:
             .CodeModule(code_module) -> {
                 if exported_only && !code_module.is_pub -> next
                 if code_module.body == .Val(body) {
-                    spelled :: sema_casing_marker_qualifier(code_module.name)
-                    name :: if prefix == "" -> spelled else -> "{prefix}.{spelled}"
+                    spelled: sema_casing_marker_qualifier(code_module.name)
+                    name: if prefix == "" -> spelled else -> "{prefix}.{spelled}"
                     loop row in sema_marker_module_declarations(body, name, exported_only) -> &declarations.push(row)
                 }
             }
@@ -243,12 +243,12 @@ fn sema_marker_module_declarations(items: [Item], prefix: String, exported_only:
     declarations
 }
 
-fn sema_marker_module_visible_declarations(graph: SemaRegistrationGraph, module_identity: String) -> [MarkerDecl] {
+sema_marker_module_visible_declarations: fn(graph: SemaRegistrationGraph, module_identity: String) -> [MarkerDecl] {
     declarations := [MarkerDecl]{}
     seen := [String]{}
     loop edge_index in 0..<graph.edges.len() {
         if graph.edges[edge_index].source_module_identity != module_identity -> next
-        target :: sema_registration_module_index(graph, graph.edges[edge_index].target_module_identity) ?? next
+        target: sema_registration_module_index(graph, graph.edges[edge_index].target_module_identity) ?? next
         alias := graph.edges[edge_index].declaration.alias
         if graph.edges[edge_index].declaration.kind == .Unqualified(module_alias, _, _, _, _) -> alias = module_alias
         if graph.edges[edge_index].source_scope != "" -> alias = "{graph.edges[edge_index].source_scope}.{alias}"
@@ -261,7 +261,7 @@ fn sema_marker_module_visible_declarations(graph: SemaRegistrationGraph, module_
     declarations
 }
 
-fn sema_marker_module_bind_marker(marker: Marker, bindings: [SemaMarkerModuleBinding]) -> Marker Never! {
+sema_marker_module_bind_marker: fn(marker: Marker, bindings: [SemaMarkerModuleBinding]) -> Marker Never! {
     value := marker
     loop binding in bindings {
         if binding.name == marker.name && binding.application_span.start == marker.name_span.start && binding.application_span.end == marker.name_span.end {
@@ -273,13 +273,13 @@ fn sema_marker_module_bind_marker(marker: Marker, bindings: [SemaMarkerModuleBin
     value
 }
 
-fn sema_marker_module_bind_markers(markers: [Marker], bindings: [SemaMarkerModuleBinding]) -> [Marker] Never! {
+sema_marker_module_bind_markers: fn(markers: [Marker], bindings: [SemaMarkerModuleBinding]) -> [Marker] Never! {
     bound := [Marker]{}
     loop marker in markers -> &bound.push(sema_marker_module_bind_marker(marker, bindings))
     bound
 }
 
-fn sema_marker_module_bind_functions(functions: [Func], bindings: [SemaMarkerModuleBinding]) -> [Func] Never! {
+sema_marker_module_bind_functions: fn(functions: [Func], bindings: [SemaMarkerModuleBinding]) -> [Func] Never! {
     bound := [Func]{}
     loop function in functions {
         value := function
@@ -289,7 +289,7 @@ fn sema_marker_module_bind_functions(functions: [Func], bindings: [SemaMarkerMod
     bound
 }
 
-fn sema_marker_module_bind_items(items: [Item], bindings: [SemaMarkerModuleBinding]) -> [Item] Never! {
+sema_marker_module_bind_items: fn(items: [Item], bindings: [SemaMarkerModuleBinding]) -> [Item] Never! {
     bound := [Item]{}
     loop item in items {
         value := item
@@ -342,7 +342,7 @@ fn sema_marker_module_bind_items(items: [Item], bindings: [SemaMarkerModuleBindi
 
 // Both direct uses and replayed group members feed this single AST projection.
 // The program is rewritten in place; with no binding it is left untouched.
-fn sema_marker_module_bind_program(program: &Program, bindings: [SemaMarkerModuleBinding]) Never! {
+sema_marker_module_bind_program: fn(program: &Program, bindings: [SemaMarkerModuleBinding]) Never! {
     if bindings.len() == 0 -> return
     program.items = sema_marker_module_bind_items(program.items, bindings)
     loop index in 0..<program.rule_facts.len() -> program.rule_facts[index].marker = sema_marker_module_bind_marker(program.rule_facts[index].marker, bindings)
@@ -351,16 +351,16 @@ fn sema_marker_module_bind_program(program: &Program, bindings: [SemaMarkerModul
 
 // The marker bindings of `input`: each directly used imported marker binds to
 // its declaring module. Every input is read in place.
-fn sema_marker_module_bindings(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], input: SemaRegistrationModuleInput) -> [SemaMarkerModuleBinding] {
+sema_marker_module_bindings: fn(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], input: SemaRegistrationModuleInput) -> [SemaMarkerModuleBinding] {
     bindings := [SemaMarkerModuleBinding]{}
     loop marker in sema_marker_rules_collect_program(input.program) {
         if marker.declaration_module != None -> next
         scope := sema_marker_module_scope(input.program.items, marker.name_span, "")
-        lexical_scope :: scope
+        lexical_scope: scope
         resolved := SemaMarkerModuleResolution{status: "unknown", declaring_module_identity: input.module_identity, declaration: None}
         loop {
-            name :: sema_marker_module_scoped_name(scope, marker.name)
-            target :: sema_marker_module_target_in_scope(edges, input.module_identity, name, lexical_scope)
+            name: sema_marker_module_scoped_name(scope, marker.name)
+            target: sema_marker_module_target_in_scope(edges, input.module_identity, name, lexical_scope)
             if target.status != "found" -> break
             loop source in inputs {
                 if source.module_identity == target.module_identity {
@@ -369,7 +369,7 @@ fn sema_marker_module_bindings(inputs: [SemaRegistrationModuleInput], edges: [Se
                 }
             }
             if resolved.status != "unknown" || target.require_export || scope == "" -> break
-            parts :: scope.split(".").to_list()
+            parts: scope.split(".").to_list()
             scope = parts.slice(0, parts.len() - 1).join(".")
         }
         if resolved.status == "found" && resolved.declaration == .Val(declaration) -> &bindings.push(SemaMarkerModuleBinding{name: marker.name, application_span: marker.name_span, module_identity: resolved.declaring_module_identity, declaration_span: declaration.name_span})
@@ -377,23 +377,23 @@ fn sema_marker_module_bindings(inputs: [SemaRegistrationModuleInput], edges: [Se
     ^bindings
 }
 
-fn sema_marker_module_check_groups(graph: SemaRegistrationGraph, module_identity: String, items: [Item], scope: String, exported: Bool, catalog: SemaScopeMembersMarkerRegistry, diagnostics: &[Diagnostic]) {
+sema_marker_module_check_groups: fn(graph: SemaRegistrationGraph, module_identity: String, items: [Item], scope: String, exported: Bool, catalog: SemaScopeMembersMarkerRegistry, diagnostics: &[Diagnostic]) {
     loop item in items {
         if item == .CodeModule(code_module) && code_module.body == .Val(body) {
-            prefix :: if scope == "" -> code_module.name else -> "{scope}.{code_module.name}"
+            prefix: if scope == "" -> code_module.name else -> "{scope}.{code_module.name}"
             sema_marker_module_check_groups(graph, module_identity, body, prefix, exported && code_module.is_pub, catalog, &diagnostics)
         }
         if item == .MarkerDecl(declaration) {
-            members :: declaration.group ?? next
+            members: declaration.group ?? next
             loop member in members {
                 if sema_marker_module_case_error(member.name, member.span) == .Val(error) {
                     &diagnostics.push(error)
                     next
                 }
                 forbidden := member.negated || member.name == "Unsafe" || member.name == "Impure" || member.name == "Nondeterministic" || member.name == "Allow" || member.name == "Scrub" || member.name == "FX"
-                builtin :: sema_marker_rules_catalog_rule_index(catalog.applied_rules, member.name)
+                builtin: sema_marker_rules_catalog_rule_index(catalog.applied_rules, member.name)
                 if builtin == None {
-                    resolved :: sema_marker_module_resolve_scoped(graph, module_identity, member.name, scope)
+                    resolved: sema_marker_module_resolve_scoped(graph, module_identity, member.name, scope)
                     if exported && declaration.is_pub && (resolved.status == "private" || (resolved.status == "found" && !resolved.exported)) {
                         &diagnostics.push(sema_error("E0605", member.span, "public marker group `{declaration.name}` contains private marker `#{member.name}`", "a public group cannot publish a module-private marker through expansion", "make the member public by removing `priv`, or make the group private"))
                         next
@@ -411,8 +411,8 @@ fn sema_marker_module_check_groups(graph: SemaRegistrationGraph, module_identity
 // Core.jet's core.compiler.lang `types { … }` leaves, with `Effect` naming the
 // canonical effect declaration roots (Rust EFFECT_ROOTS: the undotted rows of
 // the pinned Prelude effect module) and `TaintKind` the builtin taint tags.
-fn sema_marker_module_argument_menus(graph: SemaRegistrationGraph) -> [TAppliedRuleArgumentMenu]? {
-    effect_index :: sema_registration_module_index(graph, graph.canonical_effect_module_identity) ?? return None
+sema_marker_module_argument_menus: fn(graph: SemaRegistrationGraph) -> [TAppliedRuleArgumentMenu]? {
+    effect_index: sema_registration_module_index(graph, graph.canonical_effect_module_identity) ?? return None
     effect_roots := [String]{}
     loop item_index in 0..<graph.modules[effect_index].program.items.len() {
         if graph.modules[effect_index].program.items[item_index] == .EffectDecl(declaration) && !declaration.name.contains(".") -> &effect_roots.push(declaration.name)
@@ -421,15 +421,15 @@ fn sema_marker_module_argument_menus(graph: SemaRegistrationGraph) -> [TAppliedR
 }
 
 // The prelude's applied-rule catalog (MARKER_SOURCE) with its argument menus.
-fn sema_marker_module_applied_catalog(graph: SemaRegistrationGraph) -> TAppliedRuleCatalog? {
-    parsed :: parse_generated_source(MARKER_SOURCE.bytes())
+sema_marker_module_applied_catalog: fn(graph: SemaRegistrationGraph) -> TAppliedRuleCatalog? {
+    parsed: parse_generated_source(MARKER_SOURCE.bytes())
     if parsed.diagnostics.len() > 0 -> return None
-    argument_menus :: sema_marker_module_argument_menus(graph) ?? return None
+    argument_menus: sema_marker_module_argument_menus(graph) ?? return None
     sema_marker_rules_build_catalog(parsed.program, MARKER_SOURCE, argument_menus)
 }
 
 // The registry of the builtin applied rules alone, without source-declared markers.
-fn sema_marker_module_catalog_registry(applied: TAppliedRuleCatalog) -> SemaScopeMembersMarkerRegistry? {
+sema_marker_module_catalog_registry: fn(applied: TAppliedRuleCatalog) -> SemaScopeMembersMarkerRegistry? {
     catalog := SemaScopeMembersMarkerRegistry{applied_rules: applied.rows, argument_menus: applied.argument_menus, marker_rules: [SemaScopeMembersMarkerRule]{}, known_marker_names: [String]{}, function_allowed_markers: [String]{}, block_allowed_markers: [String]{}, derive_provider_names: [String]{}}
     if !sema_scope_members_registry_add_applied_catalog(&catalog, applied) -> return None
     Val(catalog)
@@ -439,17 +439,17 @@ fn sema_marker_module_catalog_registry(applied: TAppliedRuleCatalog) -> SemaScop
 // derive provider names (E0927) is returned per module row in `unknown_rules`,
 // apart from the other reports: it does not stop registration, and the
 // module's declaration check reports it beside the body errors.
-fn sema_marker_module_check(graph: SemaRegistrationGraph, applied: TAppliedRuleCatalog, catalog: SemaScopeMembersMarkerRegistry, unknown_rules: &[[Diagnostic]]) -> [Diagnostic] {
+sema_marker_module_check: fn(graph: SemaRegistrationGraph, applied: TAppliedRuleCatalog, catalog: SemaScopeMembersMarkerRegistry, unknown_rules: &[[Diagnostic]]) -> [Diagnostic] {
     diagnostics := [Diagnostic]{}
     loop module_row_index in 0..<graph.modules.len() {
-        start :: diagnostics.len()
+        start: diagnostics.len()
         unknown := [Diagnostic]{}
-        markers :: sema_marker_rules_collect_program(graph.modules[module_row_index].program)
+        markers: sema_marker_rules_collect_program(graph.modules[module_row_index].program)
         seen := [String:Bool]{}
         unresolved := [Marker]{}
         source_declared := false
         loop marker in markers {
-            occurrence :: sema_marker_rules_occurrence_key(marker)
+            occurrence: sema_marker_rules_occurrence_key(marker)
             if seen.get(occurrence) != None -> next
             seen[occurrence] = true
             if marker.declaration_module != None -> source_declared = true
@@ -458,7 +458,7 @@ fn sema_marker_module_check(graph: SemaRegistrationGraph, applied: TAppliedRuleC
                 &diagnostics.push(error)
                 next
             }
-            resolved :: sema_marker_module_resolve_application(graph, graph.modules[module_row_index].module_identity, marker)
+            resolved: sema_marker_module_resolve_application(graph, graph.modules[module_row_index].module_identity, marker)
             if marker.name.contains(".") || marker.declaration_module != None {
                 if {
                     resolved.status == "private" -> &diagnostics.push(sema_error("E0605", marker.name_span, "marker `#{marker.name}` is private to its declaring module", "a marker declared inside a `priv module` is usable only by that module's parent and its other children", "use a marker from a public module, or remove `priv` from the module"))
@@ -468,12 +468,12 @@ fn sema_marker_module_check(graph: SemaRegistrationGraph, applied: TAppliedRuleC
                 }
             } else if resolved.status == "unknown" {
                 qualified_elsewhere := false
-                scope :: sema_marker_module_scope(graph.modules[module_row_index].program.items, marker.name_span, "")
+                scope: sema_marker_module_scope(graph.modules[module_row_index].program.items, marker.name_span, "")
                 loop edge_index in 0..<graph.edges.len() {
                     if graph.edges[edge_index].source_module_identity != graph.modules[module_row_index].module_identity -> next
                     if graph.edges[edge_index].source_scope != "" && scope != graph.edges[edge_index].source_scope && !scope.starts_with("{graph.edges[edge_index].source_scope}.") -> next
-                    target :: sema_registration_module_index(graph, graph.edges[edge_index].target_module_identity) ?? next
-                    imported :: sema_marker_module_resolve_items(graph.modules[target].program.items, SemaMarkerModuleTarget{status: "found", module_identity: graph.edges[edge_index].target_module_identity, name: marker.name, require_export: false})
+                    target: sema_registration_module_index(graph, graph.edges[edge_index].target_module_identity) ?? next
+                    imported: sema_marker_module_resolve_items(graph.modules[target].program.items, SemaMarkerModuleTarget{status: "found", module_identity: graph.edges[edge_index].target_module_identity, name: marker.name, require_export: false})
                     if imported.status == "found" {
                         &diagnostics.push(sema_error("E0085", marker.name_span, "library marker `#{marker.name}` must be qualified", "markers from another module must name their import; a module's own markers may stay bare", "write `#{sema_casing_marker_qualifier(graph.edges[edge_index].declaration.alias)}.{marker.name}` through its import's local name"))
                         qualified_elsewhere = true
@@ -491,7 +491,7 @@ fn sema_marker_module_check(graph: SemaRegistrationGraph, applied: TAppliedRuleC
         // builtin rows, so it judges both kinds.
         repeat_checked := false
         if (unresolved.len() > 0 || source_declared) && !sema_module_is_core_source(graph.modules[module_row_index].module_identity) {
-            program_registry :: sema_scope_members_build_marker_registry(graph, graph.modules[module_row_index].module_identity, graph.modules[module_row_index].program, applied)
+            program_registry: sema_scope_members_build_marker_registry(graph, graph.modules[module_row_index].module_identity, graph.modules[module_row_index].program, applied)
             if program_registry == .Val(registry) {
                 if unresolved.len() > 0 -> sema_marker_rules_validate_vocabulary(registry, graph.modules[module_row_index].program, unresolved, &unknown)
                 if source_declared -> sema_marker_rules_validate_user_sites(registry, graph.modules[module_row_index].program, &diagnostics)
@@ -515,16 +515,16 @@ fn sema_marker_module_check(graph: SemaRegistrationGraph, applied: TAppliedRuleC
 
 // Compiler derive spellings that are not owned traits (Rust `DERIVE_RULES`
 // beyond the OWNED_TRAITS rows and families).
-SEMA_MARKER_COMPILER_DERIVES :: [String]{"CLI", "Patchable", "UnitFamily"}
+SEMA_MARKER_COMPILER_DERIVES: [String]{"CLI", "Patchable", "UnitFamily"}
 
 // A trait name becomes its `#Trait` derive spelling, so a trait may share a
 // name with a type-site marker only when that marker is the trait's derive
-// (`trait Equatable` → `#Equatable`). Any other type marker (`#Layout`) owns
-// its name: `trait Layout` is E0106 (Rust `register_trait`).
-fn sema_marker_module_check_trait_collisions(catalog: SemaScopeMembersMarkerRegistry, items: [Item], diagnostics: &[Diagnostic]) {
+// (`Equatable: trait` → `#Equatable`). Any other type marker (`#Layout`) owns
+// its name: `Layout: trait` is E0106 (Rust `register_trait`).
+sema_marker_module_check_trait_collisions: fn(catalog: SemaScopeMembersMarkerRegistry, items: [Item], diagnostics: &[Diagnostic]) {
     loop item in items {
         if item == .Trait(definition) {
-            index :: sema_marker_rules_catalog_rule_index(catalog.applied_rules, definition.name) ?? next
+            index: sema_marker_rules_catalog_rule_index(catalog.applied_rules, definition.name) ?? next
             if !catalog.applied_rules[index].sites.contains(sema_marker_rules_site_name(RuleSite.Type)) -> next
             if owned_trait(definition.name) != None || owned_trait_auto_derive_marker(definition.name) || SEMA_MARKER_COMPILER_DERIVES.contains(definition.name) -> next
             &diagnostics.push(sema_error("E0106", definition.name_span, "the name `{definition.name}` is a non-derive type marker", "trait names become their matching `#Trait` derive spelling, while this marker has different semantics", "choose a trait name that does not collide with a registered type marker"))
@@ -537,15 +537,15 @@ fn sema_marker_module_check_trait_collisions(catalog: SemaScopeMembersMarkerRegi
 // at a legal site it is a ratified program form whose Jet implementation has
 // not landed (E2104, card #6078). An unknown or source-declared marker is
 // reported by the vocabulary and site checks above.
-fn sema_marker_module_check_unbuilt_rules(catalog: SemaScopeMembersMarkerRegistry, program: Program, diagnostics: &[Diagnostic]) {
-    unbuilt :: sema_policy_unsupported_applications(program)
+sema_marker_module_check_unbuilt_rules: fn(catalog: SemaScopeMembersMarkerRegistry, program: Program, diagnostics: &[Diagnostic]) {
+    unbuilt: sema_policy_unsupported_applications(program)
     if unbuilt.len() == 0 -> return
-    applications :: sema_marker_rules_applications(program)
+    applications: sema_marker_rules_applications(program)
     reported := [String:Bool]{}
     loop application in unbuilt {
         if application.marker.declaration_module != None -> next
-        index :: sema_marker_rules_builtin_index(catalog, application.marker) ?? next
-        key :: sema_marker_rules_application_key(application)
+        index: sema_marker_rules_builtin_index(catalog, application.marker) ?? next
+        key: sema_marker_rules_application_key(application)
         if reported.get(key) != None -> next
         reported[key] = true
         if application.site == .Val(site) {
@@ -565,22 +565,22 @@ fn sema_marker_module_check_unbuilt_rules(catalog: SemaScopeMembersMarkerRegistr
 // Without this refusal `#FX` above a `fn` reached body checking as an
 // internal fault, and a misplaced rule such as `#Job` on a method checked
 // clean.
-fn sema_marker_module_check_builtin_sites(catalog: SemaScopeMembersMarkerRegistry, program: Program, diagnostics: &[Diagnostic]) {
+sema_marker_module_check_builtin_sites: fn(catalog: SemaScopeMembersMarkerRegistry, program: Program, diagnostics: &[Diagnostic]) {
     reported := [String:Bool]{}
     loop application in sema_policy_unsupported_applications(program) -> reported[sema_marker_rules_application_key(application)] = true
-    applications :: sema_marker_rules_applications(program)
+    applications: sema_marker_rules_applications(program)
     loop application in applications {
-        site :: application.site ?? next
+        site: application.site ?? next
         // A lint allowance is placed by its own check
         // (sema_marker_rules_validate_allow), not by its registry row.
         if application.marker.name == "Allow" -> next
-        index :: sema_marker_rules_builtin_index(catalog, application.marker) ?? next
-        key :: sema_marker_rules_application_key(application)
+        index: sema_marker_rules_builtin_index(catalog, application.marker) ?? next
+        key: sema_marker_rules_application_key(application)
         if reported.get(key) != None -> next
         reported[key] = true
         if sema_marker_rules_fact_allows(catalog.applied_rules[index], application, applications) -> next
         if application.marker.name == "FX" && (site == RuleSite.Function || site == RuleSite.Method) {
-            &diagnostics.push(sema_error("E0355", application.marker.span, "`#FX` cannot attach to a function", "`#FX(…)` caps a block or a module; a function states its limit in its effect row", "write the limit in the function's row, such as `fn show() -[IO]> {{ … }}`, or put `#FX(…)` on a block inside it"))
+            &diagnostics.push(sema_error("E0355", application.marker.span, "`#FX` cannot attach to a function", "`#FX(…)` caps a block or a module; a function states its limit in its effect row", "write the limit in the function's row, such as `show: fn() -[IO]> {{ … }}`, or put `#FX(…)` on a block inside it"))
             next
         }
         &diagnostics.push(sema_marker_rules_applied_site_error(application.marker, catalog.applied_rules[index], site))
@@ -589,9 +589,9 @@ fn sema_marker_module_check_builtin_sites(catalog: SemaScopeMembersMarkerRegistr
 
 // The prelude's applied-rule rows (Rust `Policy::applied_rule`), read from the
 // one marker vocabulary source; empty when that source does not parse.
-fn sema_marker_module_prelude_rules() -> [TAppliedRule] {
+sema_marker_module_prelude_rules: fn() -> [TAppliedRule] {
     rows := [TAppliedRule]{}
-    parsed :: parse_generated_source(MARKER_SOURCE.bytes())
+    parsed: parse_generated_source(MARKER_SOURCE.bytes())
     if parsed.diagnostics.len() > 0 -> return rows
     loop item in parsed.program.items {
         if item == .MarkerDecl(declaration) {
@@ -607,11 +607,11 @@ fn sema_marker_module_prelude_rules() -> [TAppliedRule] {
 // a duration unit literal are read as written, so the first argument of such
 // a marker stages no compile-time value. A marker no applied rule names keeps
 // its first argument.
-fn sema_marker_module_first_argument_evaluates(rules: [TAppliedRule], marker: Marker) -> Bool {
+sema_marker_module_first_argument_evaluates: fn(rules: [TAppliedRule], marker: Marker) -> Bool {
     if marker.declaration_module != None -> return true
-    index :: sema_marker_rules_catalog_rule_index(rules, marker.name) ?? return true
-    argument :: sema_marker_rules_marker_expression(marker, 0) ?? return true
-    bindings :: sema_marker_rules_marker_signature_bindings(marker, rules[index].signature) ?? return true
+    index: sema_marker_rules_catalog_rule_index(rules, marker.name) ?? return true
+    argument: sema_marker_rules_marker_expression(marker, 0) ?? return true
+    bindings: sema_marker_rules_marker_signature_bindings(marker, rules[index].signature) ?? return true
     loop binding in bindings {
         if binding.source_index != 0 -> next
         if binding.kind == {

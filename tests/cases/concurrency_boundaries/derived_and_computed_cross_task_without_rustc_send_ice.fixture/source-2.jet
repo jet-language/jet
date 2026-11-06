@@ -1,13 +1,13 @@
 
 use {
-    reactive :: core.reactive
-    tasks :: core.tasks
+    reactive: core.reactive
+    tasks: core.tasks
 }
-fn run() {
+run: fn() {
     base := reactive.signal(1)
     twice := reactive.computed(() -> (base.get() * 2))
-    { sender: tx, receiver: rx } :: channel<Computed<Int>>()
+    { sender: tx, receiver: rx }: channel<Computed<Int>>()
     tx.send(twice.copy())
-    got :: rx.receive() ?? panic("recv")
+    got: rx.receive() ?? panic("recv")
     print(got.get())
 }

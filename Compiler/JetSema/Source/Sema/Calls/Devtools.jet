@@ -19,33 +19,33 @@ use jet_foundation.[
     type_name,
 ]
 
-struct SemaDevtoolsPanelIdentity {
+SemaDevtoolsPanelIdentity: struct {
     package: String
     module_name: String
     panel: String
 }
 
-fn sema_call_devtools_is_publish(target: SemaCallDirectTarget, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+sema_call_devtools_is_publish: fn(target: SemaCallDirectTarget, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     target.symbol.name == "publish" && sema_call_core_module_identity(environment, program, "core.devtools") == (Val(target.symbol.module_name))
 }
 
 // The checked publication arguments in Core's source parameter order, or None
 // after reporting why the call is not a gated publication.
-fn sema_call_devtools_publish_args(args: [CallArg], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> [CallArg]? {
+sema_call_devtools_publish_args: fn(args: [CallArg], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> [CallArg]? {
     if args.len() != 2 || sema_call_devtools_label(args[0]) != "field" || sema_call_devtools_label(args[1]) != "value" {
         &diagnostics.push(sema_error("E1404", span, "this published value has no gate", "a published value must name itself with `field:` and `value:`", "write `devtools.publish(field: .state_field, value: <expr>)`"))
         return None
     }
-    field :: sema_call_devtools_field_name(args[0].expr) ?? {
+    field: sema_call_devtools_field_name(args[0].expr) ?? {
         &diagnostics.push(sema_error("E1412", args[0].span, "devtools panel `publish` is invalid", "the `field:` argument must be a leading-dot state field selector", "write `field: .state_field` for a field in the marked panel state"))
         return None
     }
-    identity :: sema_call_devtools_panel_for_field(environment, program, field) ?? {
+    identity: sema_call_devtools_panel_for_field(environment, program, field) ?? {
         &diagnostics.push(sema_error("E1412", args[0].span, "devtools panel `publish` is invalid", "the package has no uniquely identified panel field `{field}`", "publish a field declared by the package's marked `panel` state"))
         return None
     }
     // copy: the rebuilt call owns its value argument; the source call keeps its own.
-    value :: args[1].copy()
+    value: args[1].copy()
     [CallArg]{
         sema_call_devtools_text_arg("package", identity.package, span),
         sema_call_devtools_text_arg("module_name", identity.module_name, span),
@@ -55,14 +55,14 @@ fn sema_call_devtools_publish_args(args: [CallArg], span: Span, environment: Sem
     }
 }
 
-fn sema_call_devtools_label(argument: CallArg) -> String Never! {
+sema_call_devtools_label: fn(argument: CallArg) -> String Never! {
     if argument.label == .Val(label) -> return label.name
     ""
 }
 
 // A lower-case `.field` parses as a bare member chain, an upper-case one as a
 // leading-dot enum literal without payload.
-fn sema_call_devtools_field_name(expr: Expr) -> String? Never! {
+sema_call_devtools_field_name: fn(expr: Expr) -> String? Never! {
     if expr == .Field(base, member, _, _) {
         if sema_expr_is_bare_subject(base) -> return Val(member)
         return None
@@ -73,7 +73,7 @@ fn sema_call_devtools_field_name(expr: Expr) -> String? Never! {
     None
 }
 
-fn sema_call_devtools_text_arg(label: String, text: String, span: Span) -> CallArg Never! {
+sema_call_devtools_text_arg: fn(label: String, text: String, span: Span) -> CallArg Never! {
     CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: text}}, span: span, id: AST_NODE_GENERATED},
         span: span, flags: ast_empty_call_arg_flags(), label: Val(CallLabel{name: label, span: span}), spread: false}
 }
@@ -81,10 +81,10 @@ fn sema_call_devtools_text_arg(label: String, text: String, span: Span) -> CallA
 // Rust `panel_for_field(package, module, field)` then
 // `unique_panel_for_field(package, field)`: a panel of the calling module wins,
 // otherwise exactly one panel of the package must declare the field.
-fn sema_call_devtools_panel_for_field(environment: SemaScopeEnvironment, program: SemaProgramTables, field: String) -> SemaDevtoolsPanelIdentity? {
+sema_call_devtools_panel_for_field: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, field: String) -> SemaDevtoolsPanelIdentity? {
     if program.registration_graph == .Val(graph) {
-        caller :: sema_scope_caller_index(environment, graph) ?? return None
-        package :: graph.modules[caller].package_identity
+        caller: sema_scope_caller_index(environment, graph) ?? return None
+        package: graph.modules[caller].package_identity
         found := SemaDevtoolsPanelIdentity?{None}
         count := 0
         loop module_index in 0..<graph.modules.len() {
@@ -93,7 +93,7 @@ fn sema_call_devtools_panel_for_field(environment: SemaScopeEnvironment, program
                 if graph.modules[module_index].program.items[item_index] == .Func(function) {
                     if !sema_call_devtools_marks_panel(function) -> next
                     if !sema_call_devtools_state_declares(graph, package, function, field) -> next
-                    identity :: SemaDevtoolsPanelIdentity{package: package, module_name: graph.modules[module_index].module_path, panel: function.name}
+                    identity: SemaDevtoolsPanelIdentity{package: package, module_name: graph.modules[module_index].module_path, panel: function.name}
                     if module_index == caller -> return Val(identity)
                     count += 1
                     found = Val(identity)
@@ -105,7 +105,7 @@ fn sema_call_devtools_panel_for_field(environment: SemaScopeEnvironment, program
     None
 }
 
-fn sema_call_devtools_marks_panel(function: Func) -> Bool Never! {
+sema_call_devtools_marks_panel: fn(function: Func) -> Bool Never! {
     loop marker in function.markers {
         if marker.name == "DevPanel" -> return true
     }
@@ -114,7 +114,7 @@ fn sema_call_devtools_marks_panel(function: Func) -> Bool Never! {
 
 // The panel's one `state` parameter names a struct of the same package that
 // declares `field`.
-fn sema_call_devtools_state_declares(graph: SemaRegistrationGraph, package: String, function: Func, field: String) -> Bool Never! {
+sema_call_devtools_state_declares: fn(graph: SemaRegistrationGraph, package: String, function: Func, field: String) -> Bool Never! {
     if function.params.len() != 1 -> return false
     state_name := ""
     if function.params[0].ty == .Named(name) -> state_name = name.copy() else -> return false
@@ -136,7 +136,7 @@ fn sema_call_devtools_state_declares(graph: SemaRegistrationGraph, package: Stri
 // `panel(state: State) -> UINode`, marked once with a bare marker, whose state
 // struct gives every field a value before its first publication (a default, or
 // an optional type).
-fn sema_check_devtools_panel(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
+sema_check_devtools_panel: fn(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
     marker_span := Span?{None}
     marker_valid := true
     marker_count := 0
@@ -148,7 +148,7 @@ fn sema_check_devtools_panel(func: Func, environment: SemaScopeEnvironment, prog
         }
         marker_count += 1
     }
-    span :: marker_span ?? return
+    span: marker_span ?? return
     if marker_count != 1 {
         &diagnostics.push(sema_devtools_panel_error("E1410", func.name, "a devtools panel is registered once per function", "keep one `#DevPanel` marker on the public `panel` function", span))
         return
@@ -158,14 +158,14 @@ fn sema_check_devtools_panel(func: Func, environment: SemaScopeEnvironment, prog
         return
     }
     if !func.is_pub || func.is_package_pub {
-        &diagnostics.push(sema_devtools_panel_error("E1411", func.name, "a devtools panel is a public package entry point", "write `fn panel(state: State) -> UINode {{ ... }}` outside any `priv module`", func.name_span))
+        &diagnostics.push(sema_devtools_panel_error("E1411", func.name, "a devtools panel is a public package entry point", "write `panel: fn(state: State) -> UINode {{ ... }}` outside any `priv module`", func.name_span))
         return
     }
     if func.name != "panel" || func.type_params.len() > 0 || func.params.len() != 1 || func.params[0].name != "state" || func.params[0].default != None || func.params[0].variadic {
         &diagnostics.push(sema_devtools_panel_error("E1411", func.name, "a devtools panel must be the public `panel(state: State)` function", "write one non-generic `state` parameter without a default or variadic marker", func.name_span))
         return
     }
-    return_type :: func.return_type ?? {
+    return_type: func.return_type ?? {
         &diagnostics.push(sema_devtools_panel_error("E1411", func.name, "a devtools panel must return a `UINode` tree", "declare `UINode` before the function body arrow", func.name_span))
         return
     }
@@ -175,8 +175,8 @@ fn sema_check_devtools_panel(func: Func, environment: SemaScopeEnvironment, prog
     }
     state_name := ""
     if func.params[0].ty == .Named(name) -> state_name = name.copy() else -> return
-    state :: sema_devtools_package_struct(environment, program, state_name) ?? {
-        &diagnostics.push(sema_devtools_panel_error("E1411", func.name, "panel state type `{state_name}` is not a declared struct", "declare `struct {state_name}` in the same package", func.params[0].ty_span))
+    state: sema_devtools_package_struct(environment, program, state_name) ?? {
+        &diagnostics.push(sema_devtools_panel_error("E1411", func.name, "panel state type `{state_name}` is not a declared struct", "declare `{state_name}: struct` in the same package", func.params[0].ty_span))
         return
     }
     loop field in state.fields {
@@ -186,15 +186,15 @@ fn sema_check_devtools_panel(func: Func, environment: SemaScopeEnvironment, prog
     }
 }
 
-fn sema_devtools_panel_error(code: String, panel: String, why: String, fix: String, span: Span) -> Diagnostic {
+sema_devtools_panel_error: fn(code: String, panel: String, why: String, fix: String, span: Span) -> Diagnostic {
     sema_error(code, span, "devtools panel `{panel}` is invalid", why, fix)
 }
 
 // The struct `name` declared by a module of the caller's package.
-fn sema_devtools_package_struct(environment: SemaScopeEnvironment, program: SemaProgramTables, name: String) -> StructDef? {
+sema_devtools_package_struct: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, name: String) -> StructDef? {
     if program.registration_graph == .Val(graph) {
-        caller :: sema_scope_caller_index(environment, graph) ?? return None
-        package :: graph.modules[caller].package_identity
+        caller: sema_scope_caller_index(environment, graph) ?? return None
+        package: graph.modules[caller].package_identity
         loop module_index in 0..<graph.modules.len() {
             if graph.modules[module_index].package_identity != package -> next
             loop item_index in 0..<graph.modules[module_index].program.items.len() {

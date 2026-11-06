@@ -4,7 +4,7 @@
 // be committed.
 use jet_pkg_model.[pkg_overlay_sorted_unique]
 
-enum ValidationIssue {
+ValidationIssue: enum {
     InputCycle(String)
     MissingFollows(input: String, follows: String)
     MissingHash(semantic_key: String)
@@ -13,7 +13,7 @@ enum ValidationIssue {
     SourceAuthority(package: String, source: String, allowed: [String])
     OfflineIncomplete(semantic_key: String)
 
-    fn message(self) -> String Never! {
+    message: fn(self) -> String Never! {
         if self == {
             .InputCycle(name) -> "lock input `{name}` participates in a follows cycle"
             .MissingFollows(input, follows) -> "lock input `{input}` follows unknown input `{follows}`"
@@ -28,7 +28,7 @@ enum ValidationIssue {
 
 // Every issue that blocks a write, in check order: input graph, records,
 // then source maps.
-fn trust_semantic_lock_issues(lock: SemanticLockFile) -> [ValidationIssue] Never! {
+trust_semantic_lock_issues: fn(lock: SemanticLockFile) -> [ValidationIssue] Never! {
     issues := trust_lock_input_issues(lock.inputs)
     loop issue in trust_lock_record_issues(lock) -> &issues.push(issue)
     loop issue in trust_lock_source_map_issues(lock) -> &issues.push(issue)
@@ -36,15 +36,15 @@ fn trust_semantic_lock_issues(lock: SemanticLockFile) -> [ValidationIssue] Never
 }
 
 // Rust `revalidate`: the lock may be written, or `Rejected` with every issue.
-fn trust_revalidate_semantic_lock(lock: SemanticLockFile) TrustError! {
-    issues :: trust_semantic_lock_issues(lock)
+trust_revalidate_semantic_lock: fn(lock: SemanticLockFile) TrustError! {
+    issues: trust_semantic_lock_issues(lock)
     if issues.len() > 0 -> return Err(TrustError.Rejected(issues))
 }
 
 // The pure half of `merge_revalidate_commit`: merge three ways, refuse
 // conflicts as domain conflicts, and revalidate the result before any write.
-fn trust_merge_for_commit(base: SemanticLockFile, left: SemanticLockFile, right: SemanticLockFile) -> SemanticLockFile TrustError! {
-    outcome :: trust_merge_semantic_locks(base, left, right)
+trust_merge_for_commit: fn(base: SemanticLockFile, left: SemanticLockFile, right: SemanticLockFile) -> SemanticLockFile TrustError! {
+    outcome: trust_merge_semantic_locks(base, left, right)
     if outcome.conflicts.len() > 0 {
         issues := [ValidationIssue]{}
         loop conflict in outcome.conflicts {
@@ -56,7 +56,7 @@ fn trust_merge_for_commit(base: SemanticLockFile, left: SemanticLockFile, right:
     Ok(outcome.merged)
 }
 
-fn trust_lock_input_issues(inputs: [LockInput]) -> [ValidationIssue] Never! {
+trust_lock_input_issues: fn(inputs: [LockInput]) -> [ValidationIssue] Never! {
     names := [String]{}
     loop input in inputs -> &names.push(input.name)
     names = pkg_overlay_sorted_unique(names)
@@ -72,7 +72,7 @@ fn trust_lock_input_issues(inputs: [LockInput]) -> [ValidationIssue] Never! {
     }
     reported := [String]{}
     loop name in names {
-        cycle_node :: trust_lock_cycle_from(name, edges) ?? next
+        cycle_node: trust_lock_cycle_from(name, edges) ?? next
         if reported.contains(cycle_node) -> next
         &reported.push(cycle_node)
         &issues.push(ValidationIssue.InputCycle(cycle_node))
@@ -82,22 +82,22 @@ fn trust_lock_input_issues(inputs: [LockInput]) -> [ValidationIssue] Never! {
 
 // Floyd's walk along `follows` edges; the meeting node when `start`
 // reaches a cycle.
-fn trust_lock_cycle_from(start: String, edges: [String: String]) -> String? Never! {
+trust_lock_cycle_from: fn(start: String, edges: [String: String]) -> String? Never! {
     slow := start
     fast := start
     loop {
         slow = edges.get(slow) ?? return None
-        fast_step :: edges.get(fast) ?? return None
+        fast_step: edges.get(fast) ?? return None
         fast = edges.get(fast_step) ?? return None
         if slow == fast -> return Val(slow.copy())
     }
 }
 
-fn trust_lock_record_issues(lock: SemanticLockFile) -> [ValidationIssue] Never! {
+trust_lock_record_issues: fn(lock: SemanticLockFile) -> [ValidationIssue] Never! {
     issues := [ValidationIssue]{}
     seen_platform := [String: String]{}
     loop record in lock.records {
-        key :: record.identity.semantic_key()
+        key: record.identity.semantic_key()
         if record.identity.hash == "" {
             &issues.push(ValidationIssue.MissingHash{semantic_key: key.copy()})
             &issues.push(ValidationIssue.OfflineIncomplete{semantic_key: key.copy()})
@@ -120,16 +120,16 @@ fn trust_lock_record_issues(lock: SemanticLockFile) -> [ValidationIssue] Never! 
     issues
 }
 
-fn trust_lock_source_map_issues(lock: SemanticLockFile) -> [ValidationIssue] Never! {
+trust_lock_source_map_issues: fn(lock: SemanticLockFile) -> [ValidationIssue] Never! {
     issues := [ValidationIssue]{}
     if lock.source_maps.len() == 0 -> return issues
     loop record in lock.records {
         if record.identity.kind != LockRecordKind.Package -> next
-        package :: trust_lock_source_package(record.identity.key)
-        map :: trust_lock_matching_source_map(lock.source_maps, package) ?? next
-        source :: if record.rationales.len() == 0 -> "" else -> if record.rationales[0].source_ref != "" -> record.rationales[0].source_ref else -> record.rationales[0].provider
+        package: trust_lock_source_package(record.identity.key)
+        map: trust_lock_matching_source_map(lock.source_maps, package) ?? next
+        source: if record.rationales.len() == 0 -> "" else -> if record.rationales[0].source_ref != "" -> record.rationales[0].source_ref else -> record.rationales[0].provider
         if source == "" -> next
-        authority :: trust_lock_source_authority(source)
+        authority: trust_lock_source_authority(source)
         allowed := false
         loop candidate in map.sources {
             if trust_lock_source_matches(candidate, source) || trust_lock_source_matches(candidate, authority) {
@@ -145,7 +145,7 @@ fn trust_lock_source_map_issues(lock: SemanticLockFile) -> [ValidationIssue] Nev
 }
 
 // `registry:<source>:<package>` names its package after the last `:`.
-fn trust_lock_source_package(key: String) -> String Never! {
+trust_lock_source_package: fn(key: String) -> String Never! {
     if !key.starts_with("registry:") -> return key.copy()
     if trust_text_split_last(key.removeprefix("registry:"), TRUST_COLON) == {
         .Val(parts) -> parts.after
@@ -154,9 +154,9 @@ fn trust_lock_source_package(key: String) -> String Never! {
 }
 
 // A `registry:` source's authority is its text before the first `;`.
-fn trust_lock_source_authority(source: String) -> String Never! {
+trust_lock_source_authority: fn(source: String) -> String Never! {
     if !source.starts_with("registry:") -> return source.copy()
-    rest :: source.removeprefix("registry:")
+    rest: source.removeprefix("registry:")
     if trust_text_split_first(rest, TRUST_SEMICOLON) == {
         .Val(parts) -> parts.before
         .None -> rest
@@ -165,17 +165,17 @@ fn trust_lock_source_authority(source: String) -> String Never! {
 
 // The most specific map for `package`: the longest literal prefix, an exact
 // pattern over a `*` pattern of the same length, and the last on a tie.
-fn trust_lock_matching_source_map(maps: [SourceMapEntry], package: String) -> SourceMapEntry? Never! {
+trust_lock_matching_source_map: fn(maps: [SourceMapEntry], package: String) -> SourceMapEntry? Never! {
     best := -1
     best_length := -1
     best_exact := false
     loop index in 0..<maps.len() {
-        pattern :: maps[index].pattern
+        pattern: maps[index].pattern
         if !trust_lock_pattern_matches(pattern, package) -> next
-        wildcard :: pattern.ends_with("*")
-        length :: if wildcard -> pattern.removesuffix("*").bytes().len() else -> pattern.bytes().len()
-        exact :: !wildcard
-        better :: best < 0 || length > best_length || (length == best_length && (exact || !best_exact))
+        wildcard: pattern.ends_with("*")
+        length: if wildcard -> pattern.removesuffix("*").bytes().len() else -> pattern.bytes().len()
+        exact: !wildcard
+        better: best < 0 || length > best_length || (length == best_length && (exact || !best_exact))
         if better {
             best = index
             best_length = length
@@ -186,11 +186,11 @@ fn trust_lock_matching_source_map(maps: [SourceMapEntry], package: String) -> So
     Val(maps[best])
 }
 
-fn trust_lock_pattern_matches(pattern: String, package: String) -> Bool Never! {
+trust_lock_pattern_matches: fn(pattern: String, package: String) -> Bool Never! {
     if pattern.ends_with("*") -> return package.starts_with(pattern.removesuffix("*"))
     pattern == package
 }
 
-fn trust_lock_source_matches(allowed: String, source: String) -> Bool Never! {
+trust_lock_source_matches: fn(allowed: String, source: String) -> Bool Never! {
     source == allowed || source.starts_with(allowed) || allowed.starts_with(source)
 }

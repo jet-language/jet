@@ -5,15 +5,15 @@
 // stays dependency-free (I6).
 
 // The bridge for the host target (`JET_BUILD_TARGET` or rustc's host).
-fn pkg_ffi_prepare(program: RustBridgeProgram) -[FS, Env, Exec, Time, Time.Wait]> FFILink? RustBridgeError! {
+pkg_ffi_prepare: fn(program: RustBridgeProgram) -[FS, Env, Exec, Time, Time.Wait]> FFILink? RustBridgeError! {
     pkg_ffi_prepare_for_target(program, pkg_ffi_host_target())
 }
 
 // The bridge for the driver's selected target. Native source, inline asm,
 // cache identity, Cargo, and the final rustc link agree on this exact triple.
-fn pkg_ffi_prepare_for_target(program: RustBridgeProgram, target: String) -[FS, Env, Exec, Time, Time.Wait]> FFILink? RustBridgeError! {
-    record_defs :: pkg_ffi_collect_c_record_definitions(program)
-    collected :: pkg_ffi_collect_externs(program, target)
+pkg_ffi_prepare_for_target: fn(program: RustBridgeProgram, target: String) -[FS, Env, Exec, Time, Time.Wait]> FFILink? RustBridgeError! {
+    record_defs: pkg_ffi_collect_c_record_definitions(program)
+    collected: pkg_ffi_collect_externs(program, target)
     // Stale or cross-target assembly contracts are refused before any
     // target-specific link discovery. Web has no native provider either: a
     // wasm build reports the same checked-target diagnostic rather than
@@ -22,7 +22,7 @@ fn pkg_ffi_prepare_for_target(program: RustBridgeProgram, target: String) -[FS, 
     // Native inline bodies have no Web lowering; keep them out of the wasm
     // bridge instead of handing an inapplicable row to a native emitter.
     entries := [ExternEntry]{}
-    wasm :: target.split("-").to_list()[0] == "wasm32"
+    wasm: target.split("-").to_list()[0] == "wasm32"
     loop entry in collected {
         if wasm && entry.inline != None -> next
         &entries.push(entry)
@@ -41,8 +41,8 @@ fn pkg_ffi_prepare_for_target(program: RustBridgeProgram, target: String) -[FS, 
     loop entry in entries {
         if entry.c_abi -> uses_c_abi = true
     }
-    native_link_args :: if uses_c_abi -> c_link_args else -> [String]{}
-    link :: pkg_ffi_build_bridge_full(RustBridgeBuild{
+    native_link_args: if uses_c_abi -> c_link_args else -> [String]{}
+    link: pkg_ffi_build_bridge_full(RustBridgeBuild{
         entries: entries,
         handle_facts: program.cffi.handle_facts,
         record_defs: record_defs,

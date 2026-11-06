@@ -5,27 +5,27 @@
 // index is computed from the table at build time (ir_key_index).
 
 // The runtime ABI atom projection; nominal identities stay unchanged.
-fn runtime_abi_atom(name: String) -> String Never! {
-    bytes :: name.bytes()
+runtime_abi_atom: fn(name: String) -> String Never! {
+    bytes: name.bytes()
     out := [U8]{}
     loop index in 0..<bytes.len() {
-        code :: Int.from_u8(bytes[index])
+        code: Int.from_u8(bytes[index])
         if code == 46 || code == 95 {
             if out.len() > 0 && out[out.len() - 1] != (U8{95}) -> &out.push(U8{95})
             next
         }
-        upper :: code >= 65 && code <= 90
+        upper: code >= 65 && code <= 90
         if upper && index > 0 && out.len() > 0 && out[out.len() - 1] != (U8{95}) {
-            previous :: Int.from_u8(bytes[index - 1])
-            next_code :: if index + 1 < bytes.len() -> Int.from_u8(bytes[index + 1]) else -> 0
-            previous_upper :: previous >= 65 && previous <= 90
-            next_lower :: next_code >= 97 && next_code <= 122
+            previous: Int.from_u8(bytes[index - 1])
+            next_code: if index + 1 < bytes.len() -> Int.from_u8(bytes[index + 1]) else -> 0
+            previous_upper: previous >= 65 && previous <= 90
+            next_lower: next_code >= 97 && next_code <= 122
             if !previous_upper || next_lower -> &out.push(U8{95})
         }
         &out.push(U8{if upper -> code + 32 else -> code})
     }
     if out.len() > 0 && out[out.len() - 1] == (U8{95}) {
-        _ :: &out.pop() ?? panic("a nonempty runtime ABI atom failed to pop")
+        _: &out.pop() ?? panic("a nonempty runtime ABI atom failed to pop")
     }
     String.from_bytes(out) ?? panic("runtime ABI atom is not ASCII")
 }
@@ -38,18 +38,18 @@ fn runtime_abi_atom(name: String) -> String Never! {
 // checked tuple's member order. `ListMut` lends a `&` List argument's
 // 24-byte header in place (one word): the route rewrites its length inside
 // the buffer it already has, never growing it.
-enum IRRouteCarrier { Word Flag Float Text Unit Handle(name: String) HandleMut(name: String) List(elem: IRRouteCarrier) ListMut(elem: IRRouteCarrier) Option(some: IRRouteCarrier) Tag(name: String, variants: String) Tuple(items: [IRRouteCarrier]) }
+IRRouteCarrier: enum { Word Flag Float Text Unit Handle(name: String) HandleMut(name: String) List(elem: IRRouteCarrier) ListMut(elem: IRRouteCarrier) Option(some: IRRouteCarrier) Tag(name: String, variants: String) Tuple(items: [IRRouteCarrier]) }
 
-enum IRRouteResult {
+IRRouteResult: enum {
     Plain(carrier: IRRouteCarrier)
     Option(some: IRRouteCarrier)
     Result(ok: IRRouteCarrier, err: IRRouteCarrier)
     Tuple(items: [IRRouteCarrier])
 }
 
-struct IRRoute { symbol: String, export: String, native_lists: Bool, params: [IRRouteCarrier], result: IRRouteResult }
+IRRoute: struct { symbol: String, export: String, native_lists: Bool, params: [IRRouteCarrier], result: IRRouteResult }
 
-IR_RUNTIME_ROUTES :: comptime { [IRRoute]{
+IR_RUNTIME_ROUTES: comptime { [IRRoute]{
     IRRoute{symbol: "jet_app_auth", export: "jet_app_auth", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Text}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "JetAuthApp"}}},
     IRRoute{symbol: "jet_app_auth_oauth", export: "jet_app_auth_oauth", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "JetAuthApp"}, IRRouteCarrier.Text}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "JetAuthApp"}}},
     IRRoute{symbol: "jet_auth_store_load", export: "jet_auth_store_load", native_lists: true, params: [IRRouteCarrier]{}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.List{elem: IRRouteCarrier.Word}}},
@@ -925,6 +925,7 @@ IR_RUNTIME_ROUTES :: comptime { [IRRoute]{
     IRRoute{symbol: "jet_ui_host_dialog_request", export: "jet_ui_host_dialog_request", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Word, IRRouteCarrier.Text}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Word}},
     IRRoute{symbol: "jet_ui_host_dialog_result", export: "jet_ui_host_dialog_result", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Word}, result: IRRouteResult.Option{some: IRRouteCarrier.Text}},
     IRRoute{symbol: "jet_ui_host_event_pop", export: "jet_ui_host_event_pop", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Word}, result: IRRouteResult.Option{some: IRRouteCarrier.Text}},
+    IRRoute{symbol: "jet_ui_host_key_claim", export: "jet_ui_host_key_claim", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Text}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Flag}},
     IRRoute{symbol: "jet_ui_null", export: "jet_ui_null", native_lists: false, params: [IRRouteCarrier]{}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "JetNullBackend"}}},
     IRRoute{symbol: "jet_ui_raw_accessibility_transfer", export: "jet_ui_raw_accessibility_transfer", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "JetUiNode"}, IRRouteCarrier.Handle{name: "JetUiAccessibility"}, IRRouteCarrier.Flag}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "JetUiNode"}}},
     IRRoute{symbol: "jet_ui_raw_node_transfer", export: "jet_ui_raw_node_transfer", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Text, IRRouteCarrier.Float, IRRouteCarrier.Float, IRRouteCarrier.Word, IRRouteCarrier.Word, IRRouteCarrier.List{elem: IRRouteCarrier.Handle{name: "JetUiNode"}}, IRRouteCarrier.Flag, IRRouteCarrier.Text, IRRouteCarrier.Word, IRRouteCarrier.Flag, IRRouteCarrier.Word, IRRouteCarrier.Word, IRRouteCarrier.Word, IRRouteCarrier.Word, IRRouteCarrier.Word}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "JetUiNode"}}},
@@ -1336,11 +1337,11 @@ IR_RUNTIME_ROUTES :: comptime { [IRRoute]{
 // Each table below is read in place, and its lookup is keyed: the table's
 // distinct keys in ascending byte order with each key's first row, frozen
 // at build time, searched by halving instead of a scan of every row.
-fn ir_key_row(keys: [String], rows: [Int], key: String) -> Int? Never! {
+ir_key_row: fn(keys: [String], rows: [Int], key: String) -> Int? Never! {
     low := 0
     high := keys.len()
     loop low < high {
-        middle :: low + (high - low) /% 2
+        middle: low + (high - low) /% 2
         if {
             keys[middle] == key -> return Val(rows[middle])
             keys[middle] < key -> low = middle + 1
@@ -1353,7 +1354,7 @@ fn ir_key_row(keys: [String], rows: [Int], key: String) -> Int? Never! {
 // The rows of the index ir_key_row searches, computed at build time from a
 // table's per-row `keys`: the rows ordered by key (ascending bytes; a stable
 // merge sort, so equal keys keep table order), keeping each key's first row.
-fn ir_key_index(keys: [String]) -> [Int] Never! {
+ir_key_index: fn(keys: [String]) -> [Int] Never! {
     order := [Int]{}
     loop index in 0..<keys.len() -> &order.push(index)
     width := 1
@@ -1361,8 +1362,8 @@ fn ir_key_index(keys: [String]) -> [Int] Never! {
         merged := [Int]{}
         start := 0
         loop start < order.len() {
-            middle :: if start + width < order.len() -> start + width else -> order.len()
-            end :: if start + 2 * width < order.len() -> start + 2 * width else -> order.len()
+            middle: if start + width < order.len() -> start + width else -> order.len()
+            end: if start + 2 * width < order.len() -> start + 2 * width else -> order.len()
             left := start
             right := middle
             loop left < middle || right < end {
@@ -1388,19 +1389,19 @@ fn ir_key_index(keys: [String]) -> [Int] Never! {
 }
 
 // The keys of an ir_key_index, in its order.
-fn ir_key_index_keys(keys: [String], rows: [Int]) -> [String] Never! {
+ir_key_index_keys: fn(keys: [String], rows: [Int]) -> [String] Never! {
     loop row in rows -> keys[row].copy() // copy: the index owns its keys; `keys` stays the caller's
 }
 
-fn ir_runtime_route_keys() -> [String] Never! {
+ir_runtime_route_keys: fn() -> [String] Never! {
     loop route in IR_RUNTIME_ROUTES -> route.symbol.copy() // copy: the global route table can't be moved from
 }
 
-IR_RUNTIME_ROUTE_KEY_ROWS :: comptime { ir_key_index(ir_runtime_route_keys()) }
-IR_RUNTIME_ROUTE_KEYS :: comptime { ir_key_index_keys(ir_runtime_route_keys(), IR_RUNTIME_ROUTE_KEY_ROWS) }
+IR_RUNTIME_ROUTE_KEY_ROWS: comptime { ir_key_index(ir_runtime_route_keys()) }
+IR_RUNTIME_ROUTE_KEYS: comptime { ir_key_index_keys(ir_runtime_route_keys(), IR_RUNTIME_ROUTE_KEY_ROWS) }
 
-fn ir_runtime_route(symbol: String) -> IRRoute? {
-    position :: ir_key_row(IR_RUNTIME_ROUTE_KEYS, IR_RUNTIME_ROUTE_KEY_ROWS, symbol) ?? return None
+ir_runtime_route: fn(symbol: String) -> IRRoute? {
+    position: ir_key_row(IR_RUNTIME_ROUTE_KEYS, IR_RUNTIME_ROUTE_KEY_ROWS, symbol) ?? return None
     // copy: the caller gets an owned route row, while the row stays in the global
     // IR_RUNTIME_ROUTES table, which can't be moved from.
     Val(IR_RUNTIME_ROUTES[position].copy())
@@ -1415,9 +1416,9 @@ fn ir_runtime_route(symbol: String) -> IRRoute? {
 // `jet_rt_handle_display_<runtime>` / `jet_rt_handle_show_<runtime>` /
 // `jet_rt_handle_debug_<runtime>` when `display` / `show` / `debug`; compared
 // by `jet_rt_handle_eq_<runtime>` when `eq`.
-struct IRRuntimeHandle { jet_name: String, runtime: String, clone: Bool, display: Bool, show: Bool, debug: Bool, eq: Bool }
+IRRuntimeHandle: struct { jet_name: String, runtime: String, clone: Bool, display: Bool, show: Bool, debug: Bool, eq: Bool }
 
-IR_RUNTIME_HANDLES :: comptime { [IRRuntimeHandle]{
+IR_RUNTIME_HANDLES: comptime { [IRRuntimeHandle]{
     IRRuntimeHandle{jet_name: "__EvidenceRead", runtime: "JetTestingEvidenceRead", clone: true, display: false, show: false, debug: false, eq: true},
     IRRuntimeHandle{jet_name: "__JetcRaw", runtime: "JetCryptoJetcRaw", clone: false, display: false, show: false, debug: false, eq: false},
     IRRuntimeHandle{jet_name: "__JetcStat", runtime: "JetCryptoJetcStat", clone: false, display: false, show: false, debug: false, eq: false},
@@ -1906,7 +1907,7 @@ IR_RUNTIME_HANDLES :: comptime { [IRRuntimeHandle]{
 // Opaque native providers: physical ownership ABI only, no Rust schema. A
 // Core-declared shape here crosses a route as a heap shell of its declared
 // bytes (ir_route_shell): `KeyRef<T>` from jet_vault_current_impl.
-IR_NATIVE_PROVIDER_HANDLES :: comptime { [IRRuntimeHandle]{
+IR_NATIVE_PROVIDER_HANDLES: comptime { [IRRuntimeHandle]{
     IRRuntimeHandle{jet_name: "<corelib>/core.crypto.vault::KeyRef", runtime: "JetVaultKeyRef", clone: false, display: false, show: false, debug: false, eq: false},
     IRRuntimeHandle{jet_name: "<corelib>/core.process::ProcessStdoutStream", runtime: "ProcessStdoutStream", clone: true, display: false, show: false, debug: false, eq: false},
     IRRuntimeHandle{jet_name: "ProcessStdoutStream", runtime: "ProcessStdoutStream", clone: true, display: false, show: false, debug: false, eq: false},
@@ -1916,23 +1917,23 @@ IR_NATIVE_PROVIDER_HANDLES :: comptime { [IRRuntimeHandle]{
     IRRuntimeHandle{jet_name: "ProcessStderrStream", runtime: "ProcessStderrStream", clone: true, display: false, show: false, debug: false, eq: false},
 } }
 
-fn ir_runtime_handle_keys(handles: [IRRuntimeHandle]) -> [String] Never! {
+ir_runtime_handle_keys: fn(handles: [IRRuntimeHandle]) -> [String] Never! {
     loop handle in handles -> handle.jet_name.copy() // copy: the global handle tables can't be moved from
 }
 
-IR_RUNTIME_HANDLE_KEY_ROWS :: comptime { ir_key_index(ir_runtime_handle_keys(IR_RUNTIME_HANDLES)) }
-IR_RUNTIME_HANDLE_KEYS :: comptime { ir_key_index_keys(ir_runtime_handle_keys(IR_RUNTIME_HANDLES), IR_RUNTIME_HANDLE_KEY_ROWS) }
-IR_NATIVE_PROVIDER_HANDLE_KEY_ROWS :: comptime { ir_key_index(ir_runtime_handle_keys(IR_NATIVE_PROVIDER_HANDLES)) }
-IR_NATIVE_PROVIDER_HANDLE_KEYS :: comptime { ir_key_index_keys(ir_runtime_handle_keys(IR_NATIVE_PROVIDER_HANDLES), IR_NATIVE_PROVIDER_HANDLE_KEY_ROWS) }
+IR_RUNTIME_HANDLE_KEY_ROWS: comptime { ir_key_index(ir_runtime_handle_keys(IR_RUNTIME_HANDLES)) }
+IR_RUNTIME_HANDLE_KEYS: comptime { ir_key_index_keys(ir_runtime_handle_keys(IR_RUNTIME_HANDLES), IR_RUNTIME_HANDLE_KEY_ROWS) }
+IR_NATIVE_PROVIDER_HANDLE_KEY_ROWS: comptime { ir_key_index(ir_runtime_handle_keys(IR_NATIVE_PROVIDER_HANDLES)) }
+IR_NATIVE_PROVIDER_HANDLE_KEYS: comptime { ir_key_index_keys(ir_runtime_handle_keys(IR_NATIVE_PROVIDER_HANDLES), IR_NATIVE_PROVIDER_HANDLE_KEY_ROWS) }
 
-fn ir_runtime_handle(name: String) -> IRRuntimeHandle? {
+ir_runtime_handle: fn(name: String) -> IRRuntimeHandle? {
     if ir_key_row(IR_RUNTIME_HANDLE_KEYS, IR_RUNTIME_HANDLE_KEY_ROWS, name) == .Val(position) {
         // copy: the caller gets an owned handle row, while the row stays in the global
         // IR_RUNTIME_HANDLES table, which can't be moved from.
         return Val(IR_RUNTIME_HANDLES[position].copy())
     }
     // Existing Rust rows win in seed mode; absent nominals may use a provider.
-    position :: ir_key_row(IR_NATIVE_PROVIDER_HANDLE_KEYS, IR_NATIVE_PROVIDER_HANDLE_KEY_ROWS, name) ?? return None
+    position: ir_key_row(IR_NATIVE_PROVIDER_HANDLE_KEYS, IR_NATIVE_PROVIDER_HANDLE_KEY_ROWS, name) ?? return None
     // copy: the caller gets an owned handle row, while the row stays in the global
     // IR_NATIVE_PROVIDER_HANDLES table, which can't be moved from.
     Val(IR_NATIVE_PROVIDER_HANDLES[position].copy())
@@ -1943,7 +1944,7 @@ fn ir_runtime_handle(name: String) -> IRRuntimeHandle? {
 // variants in index order, each `name=kind` when it carries a member (Text,
 // Int, U64, Flag, Float, Tag.<enum>, Rec.<record>, Opt<kind>; a variant's
 // named members joined by `+`).
-IR_GENERATED_RECORDS :: comptime { [IRRecordSchema]{
+IR_GENERATED_RECORDS: comptime { [IRRecordSchema]{
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dcrypto_dvault_c_cKeyStatus", variants: "Active,Retired,Revoked", fields: ""},
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dcrypto_dvault_c_cVaultError", variants: "InvalidName,NotFound,WrongType,Revoked,Locked,AuthorityDenied,Conflict,UnsupportedProvider,InvalidEncoding,DurabilityUnknown,Crypto=Tag.CryptoError,IO=Text+Text,Internal=Text", fields: ""},
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dcrypto_dvault_c_cWrappedVaultKey", variants: "", fields: "encoded=List.Byte,mode=Int,key_type=Int,origin_name=Text,origin_generation=Int,header_len=Int"},
@@ -2183,8 +2184,8 @@ IR_GENERATED_RECORDS :: comptime { [IRRecordSchema]{
     IRRecordSchema{jet_name: "XMLRenderOptions", variants: "", fields: "encoding=Tag.XMLEncoding,lexical=Tag.XMLLexicalPolicy"},
 } }
 // Declaration-proven scalar records; the IR builder still proves the actual native field.
-struct IRRuntimeWordRecord { runtime: String, field: String }
-IR_WORD_RECORDS :: comptime { [IRRuntimeWordRecord]{
+IRRuntimeWordRecord: struct { runtime: String, field: String }
+IR_WORD_RECORDS: comptime { [IRRuntimeWordRecord]{
     IRRuntimeWordRecord{runtime: "__jet__x3ccorelib_x3e_score_dtime_c_cInstant", field: "start_ns"},
     IRRuntimeWordRecord{runtime: "__jet__x3ccorelib_x3e_score_dtime_c_cStopwatch", field: "start_ns"},
     IRRuntimeWordRecord{runtime: "Duration", field: "ns"},
@@ -2196,9 +2197,9 @@ IR_WORD_RECORDS :: comptime { [IRRuntimeWordRecord]{
 // write read-only caller stack headers, never owned/freeable field values.
 // A "Text.Owned" field the carrier derives (no stored text) returns a fresh
 // String the read owns.
-struct IRHandleField { runtime: String, field: String, kind: String, header_bytes: Int }
+IRHandleField: struct { runtime: String, field: String, kind: String, header_bytes: Int }
 
-IR_HANDLE_FIELDS :: comptime { [IRHandleField]{
+IR_HANDLE_FIELDS: comptime { [IRHandleField]{
     IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_ddb_dsql_c_cJetSQLQuery", field: "__jet_source", kind: "Text", header_bytes: 0},
     IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_dencoding_dcsv_c_cCSVReader", field: "__jet_input", kind: "Handle.JetFileReader", header_bytes: 0},
     IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_dencoding_dcsv_c_cCSVReader", field: "__jet_limits", kind: "Handle.__jet__x3ccorelib_x3e_score_dencoding_c_cEncodingLimits", header_bytes: 0},
@@ -2379,22 +2380,22 @@ IR_HANDLE_FIELDS :: comptime { [IRHandleField]{
     IRHandleField{runtime: "ProcessChild", field: "terminal", kind: "Option.Handle.TerminalSession", header_bytes: 0},
 } }
 
-fn ir_handle_field_keys() -> [String] Never! {
+ir_handle_field_keys: fn() -> [String] Never! {
     loop row in IR_HANDLE_FIELDS -> "{row.runtime} {row.field}"
 }
 
-IR_HANDLE_FIELD_KEY_ROWS :: comptime { ir_key_index(ir_handle_field_keys()) }
-IR_HANDLE_FIELD_KEYS :: comptime { ir_key_index_keys(ir_handle_field_keys(), IR_HANDLE_FIELD_KEY_ROWS) }
+IR_HANDLE_FIELD_KEY_ROWS: comptime { ir_key_index(ir_handle_field_keys()) }
+IR_HANDLE_FIELD_KEYS: comptime { ir_key_index_keys(ir_handle_field_keys(), IR_HANDLE_FIELD_KEY_ROWS) }
 
-fn ir_runtime_handle_field(runtime: String, field: String) -> IRHandleField? {
-    position :: ir_key_row(IR_HANDLE_FIELD_KEYS, IR_HANDLE_FIELD_KEY_ROWS, "{runtime} {field}") ?? return None
+ir_runtime_handle_field: fn(runtime: String, field: String) -> IRHandleField? {
+    position: ir_key_row(IR_HANDLE_FIELD_KEYS, IR_HANDLE_FIELD_KEY_ROWS, "{runtime} {field}") ?? return None
     // copy: the caller gets an owned field row, while the row stays in the global
     // IR_HANDLE_FIELDS table, which can't be moved from.
     Val(IR_HANDLE_FIELDS[position].copy())
 }
-enum IREnvironmentOp { Bytes Set Remove Columns Compare Seed Text }
-struct IREnvironmentRoute { symbol: String, export: String, op: IREnvironmentOp, arity: Int }
-IR_ENVIRONMENT_ROUTES :: comptime { [IREnvironmentRoute]{
+IREnvironmentOp: enum { Bytes Set Remove Columns Compare Seed Text }
+IREnvironmentRoute: struct { symbol: String, export: String, op: IREnvironmentOp, arity: Int }
+IR_ENVIRONMENT_ROUTES: comptime { [IREnvironmentRoute]{
     IREnvironmentRoute{symbol: "jet_sys_env_value_raw", export: "jet_rt_logical_env_get_os", op: IREnvironmentOp.Bytes, arity: 1},
     IREnvironmentRoute{symbol: "jet_std_env_try_set", export: "jet_rt_logical_env_set", op: IREnvironmentOp.Set, arity: 2},
     IREnvironmentRoute{symbol: "jet_std_env_unset", export: "jet_rt_logical_env_unset", op: IREnvironmentOp.Remove, arity: 1},
@@ -2404,7 +2405,7 @@ IR_ENVIRONMENT_ROUTES :: comptime { [IREnvironmentRoute]{
     IREnvironmentRoute{symbol: "jet_std_env_init", export: "jet_rt_logical_env_seed", op: IREnvironmentOp.Seed, arity: 0},
     IREnvironmentRoute{symbol: "jet_rt_logical_env_get", export: "jet_rt_logical_env_get", op: IREnvironmentOp.Text, arity: 1},
 } }
-fn ir_environment_route(symbol: String) -> IREnvironmentRoute? {
+ir_environment_route: fn(symbol: String) -> IREnvironmentRoute? {
     // copy: the caller gets an owned route row, while the row stays in the global
     // IR_ENVIRONMENT_ROUTES table, which can't be moved from.
     loop route in IR_ENVIRONMENT_ROUTES { if route.symbol == symbol -> return Val(route.copy()) }
@@ -2412,8 +2413,8 @@ fn ir_environment_route(symbol: String) -> IREnvironmentRoute? {
 }
 
 // Candidate source identities; the backend validates against the actual native layout.
-struct IRNativeType { jet_name: String, declaration: String, arguments: String }
-IR_NATIVE_TYPES :: comptime { [IRNativeType]{
+IRNativeType: struct { jet_name: String, declaration: String, arguments: String }
+IR_NATIVE_TYPES: comptime { [IRNativeType]{
     IRNativeType{jet_name: "<corelib>/core.crypto.vault::ExpiryCloseProbe", declaration: "<corelib>/core.crypto.vault::ExpiryCloseProbe", arguments: ""},
     IRNativeType{jet_name: "<corelib>/core.crypto.vault::KeyRef", declaration: "<corelib>/core.crypto.vault::KeyRef", arguments: "T"},
     IRNativeType{jet_name: "<corelib>/core.crypto.vault::KeyStatus", declaration: "<corelib>/core.crypto.vault::KeyStatus", arguments: ""},
@@ -2512,15 +2513,15 @@ IR_NATIVE_TYPES :: comptime { [IRNativeType]{
     IRNativeType{jet_name: "<corelib>/core.time::ZonedDateTime", declaration: "<corelib>/core.time::ZonedDateTime", arguments: ""},
 } }
 
-fn ir_native_type_keys() -> [String] Never! {
+ir_native_type_keys: fn() -> [String] Never! {
     loop row in IR_NATIVE_TYPES -> row.jet_name.copy() // copy: the global native type table can't be moved from
 }
 
-IR_NATIVE_TYPE_KEY_ROWS :: comptime { ir_key_index(ir_native_type_keys()) }
-IR_NATIVE_TYPE_KEYS :: comptime { ir_key_index_keys(ir_native_type_keys(), IR_NATIVE_TYPE_KEY_ROWS) }
+IR_NATIVE_TYPE_KEY_ROWS: comptime { ir_key_index(ir_native_type_keys()) }
+IR_NATIVE_TYPE_KEYS: comptime { ir_key_index_keys(ir_native_type_keys(), IR_NATIVE_TYPE_KEY_ROWS) }
 
-fn ir_native_type(name: String) -> IRNativeType? {
-    position :: ir_key_row(IR_NATIVE_TYPE_KEYS, IR_NATIVE_TYPE_KEY_ROWS, name) ?? return None
+ir_native_type: fn(name: String) -> IRNativeType? {
+    position: ir_key_row(IR_NATIVE_TYPE_KEYS, IR_NATIVE_TYPE_KEY_ROWS, name) ?? return None
     // copy: the caller gets an owned type row, while the row stays in the global IR_NATIVE_TYPES
     // table, which can't be moved from.
     Val(IR_NATIVE_TYPES[position].copy())

@@ -1,29 +1,29 @@
-enum Shape {
+Shape: enum {
     Leaf(name: String)
     Fn(ret: Shape?)
 }
 
-fn is_unit(shape: Shape) -> Bool Never! {
+is_unit: fn(shape: Shape) -> Bool Never! {
     if shape == {
         .Leaf(name) -> name == "Unit"
         .Fn(_) -> false
     }
 }
 
-fn describe(shape: Shape) -> String Never! {
+describe: fn(shape: Shape) -> String Never! {
     if shape == {
         .Leaf(name) -> name
         .Fn(ret) -> {
-            marker :: if {
+            marker: if {
                 ret.map(value -> !is_unit(value)) ?? false -> "fn*"
                 else -> "fn"
             }
-            result :: ret.map(value -> " => {describe(value)}") ?? ""
+            result: ret.map(value -> " => {describe(value)}") ?? ""
             "{marker}{result}"
         }
     }
 }
 
-fn run() {
+run: fn() {
     print(describe(Shape.Fn{ret: Val(Shape.Leaf{name: "Int"})}))
 }

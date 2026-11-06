@@ -4,20 +4,20 @@ use jet_pkg_model.[
     pkg_strip_overlay_policy,
 ]
 
-fn pkg_test_overlay_error(src: String) -> OverlayError {
+pkg_test_overlay_error: fn(src: String) -> OverlayError {
     if pkg_parse_workspace_policy(src) == {
         .Ok(_) -> panic("expected workspace policy to fail closed")
         .Err(error) -> error
     }
 }
 
-fn pkg_test_policy(src: String) -> OverlayPolicy {
+pkg_test_policy: fn(src: String) -> OverlayPolicy {
     pkg_parse_workspace_policy(src) ?? panic("workspace policy should parse")
 }
 
 #Test("build deny uses exact balanced policy fields") {
-    policy :: pkg_test_policy(`
-module workspace {
+    policy: pkg_test_policy(`
+workspace: module {
     policy_note: { deny: #(Exec) }
     policy: { deny: #(Exec, FS) }
 }
@@ -26,8 +26,8 @@ module workspace {
 }
 
 #Test("build grants are subject scoped and quote aware") {
-    policy :: pkg_test_policy(`
-module workspace {
+    policy: pkg_test_policy(`
+workspace: module {
     policy: {
         grants: { "native:tools": #(Net, Exec), "app": #(FS) },
         deny: #(Time)
@@ -42,14 +42,14 @@ module workspace {
 }
 
 #Test("malformed build grants fail closed") {
-    error :: pkg_test_overlay_error(`module workspace { policy: { grants: { "app": [Net] } } }`)
+    error: pkg_test_overlay_error(`workspace: module { policy: { grants: { "app": [Net] } } }`)
     assert(error.message().contains("policy.grants"))
 }
 
 #Test("unsupported workspace policy allow fails closed") {
-    sources :: [String]{
-        `module workspace { policy: { allow: #(Exec) } }`,
-        `module workspace { policy.allow: #(Exec) }`
+    sources: [String]{
+        `workspace: module { policy: { allow: #(Exec) } }`,
+        `workspace: module { policy.allow: #(Exec) }`
     }
     loop source in sources {
         if pkg_test_overlay_error(source) == {
@@ -60,17 +60,17 @@ module workspace {
 }
 
 #Test("workspace policy fields fail closed") {
-    sources :: [String]{
-        `module workspace { policy: { deny: #(Exec), unknown: #(FS) } }`,
-        `module workspace { policy.unknown: #(FS) }`,
-        `module workspace { policy.allowUnfree: ["a"]
+    sources: [String]{
+        `workspace: module { policy: { deny: #(Exec), unknown: #(FS) } }`,
+        `workspace: module { policy.unknown: #(FS) }`,
+        `workspace: module { policy.allowUnfree: ["a"]
  policy.allowUnfree: ["b"] }`,
-        `module workspace { policy: { deny: #(Exec), deny: #(FS) } }`,
-        `module workspace { policy: { deny: #(Exec) } policy: { grants: { "app": #(FS) } } }`,
-        `module workspace { policy: { grants: { "app": #(FS), "app": #(Net) } } }`
+        `workspace: module { policy: { deny: #(Exec), deny: #(FS) } }`,
+        `workspace: module { policy: { deny: #(Exec) } policy: { grants: { "app": #(FS) } } }`,
+        `workspace: module { policy: { grants: { "app": #(FS), "app": #(Net) } } }`
     }
     loop source in sources {
-        rejected :: if pkg_parse_workspace_policy(source) == {
+        rejected: if pkg_parse_workspace_policy(source) == {
             .Ok(_) -> false
             .Err(_) -> true
         }
@@ -79,13 +79,13 @@ module workspace {
 }
 
 #Test("unknown build effects fail closed") {
-    error :: pkg_test_overlay_error(`module workspace { policy: { deny: #(Teleport) } }`)
+    error: pkg_test_overlay_error(`workspace: module { policy: { deny: #(Teleport) } }`)
     assert(error.message().contains("unknown build effect"))
 }
 
 #Test("parses workspace overlay policy") {
-    policy :: pkg_test_policy(`
-module workspace {
+    policy: pkg_test_policy(`
+workspace: module {
     members: ["./packages/app"]
     policy.allowUnfree: ["discord"]
     overlay plasma_beta {
@@ -97,36 +97,36 @@ module workspace {
 }
 `)
     assert_eq(policy.allow_unfree, [String]{"discord"})
-    overlay :: policy.overlay("plasma_beta") ?? panic("overlay plasma_beta")
-    provider :: overlay.provider ?? panic("provider override")
+    overlay: policy.overlay("plasma_beta") ?? panic("overlay plasma_beta")
+    provider: overlay.provider ?? panic("provider override")
     assert_eq(provider.provider, "nixpkgs")
     assert_eq(provider.channel, Val("plasma-beta"))
-    desktop :: policy.package_override("plasma_beta", "kdePackages.plasma-desktop") ?? panic("plasma-desktop override")
+    desktop: policy.package_override("plasma_beta", "kdePackages.plasma-desktop") ?? panic("plasma-desktop override")
     assert_eq(desktop.patches, [String]{"patches/focus.patch"})
     assert_eq(desktop.flags, [String]{"wayland"})
     assert(policy.allows_unfree("discord"))
 }
 
 #Test("patches keep append order and duplicates in identity") {
-    policy :: pkg_test_policy(`
-module workspace {
+    policy: pkg_test_policy(`
+workspace: module {
     overlay ordered {
         package("app").patches += [patch("b.patch")]
         package("app").patches += [patch("a.patch"), patch("c.patch")]
     }
 }
 `)
-    app :: policy.package_override("ordered", "app") ?? panic("app override")
+    app: policy.package_override("ordered", "app") ?? panic("app override")
     assert_eq(app.patches, [String]{"b.patch", "a.patch", "c.patch"})
     reversed := app.copy()
     reversed.patches = [String]{"c.patch", "a.patch", "b.patch"}
-    overlay :: policy.overlay("ordered") ?? panic("overlay ordered")
+    overlay: policy.overlay("ordered") ?? panic("overlay ordered")
     assert(app.policy_fingerprint(overlay) != reversed.policy_fingerprint(overlay))
 }
 
 #Test("strips overlay policy before workspace eval") {
-    stripped :: pkg_strip_overlay_policy(`
-module workspace {
+    stripped: pkg_strip_overlay_policy(`
+workspace: module {
     members: ["./packages/app"]
     overlay test {
         package("foo").patches += [patch("patches/foo.patch")]
@@ -140,8 +140,8 @@ module workspace {
 }
 
 #Test("keyed overrides merge typed environment by priority") {
-    policy :: pkg_test_policy(`
-module workspace {
+    policy: pkg_test_policy(`
+workspace: module {
     overlay dev {
         overrides: {
             "app": { version: Priority(10: "2"), env: { CC: "clang", CFLAGS: "-O2" }, flags: { lto: true } }
@@ -151,7 +151,7 @@ module workspace {
     }
 }
 `)
-    app :: policy.package_override("dev", "app") ?? panic("app override")
+    app: policy.package_override("dev", "app") ?? panic("app override")
     assert_eq(app.version, Val("2"))
     assert_eq(app.env, [OverrideEnv]{
         {key: "CC", value: "clang"},
@@ -163,15 +163,15 @@ module workspace {
 }
 
 #Test("field priority does not bleed between package facts") {
-    policy :: pkg_test_policy(`
-module workspace {
+    policy: pkg_test_policy(`
+workspace: module {
     overlay dev {
         package("app").version: Force("2")
         package("app").source: "local"
     }
 }
 `)
-    app :: if policy.resolve_package_override_checked("app") == {
+    app: if policy.resolve_package_override_checked("app") == {
         .Ok(found) -> found ?? panic("app has an override")
         .Err(_) -> panic("app resolves")
     }
@@ -182,8 +182,8 @@ module workspace {
 }
 
 #Test("equal priority scalar conflicts keep both overlay origins") {
-    message :: pkg_test_overlay_error(`
-module workspace {
+    message: pkg_test_overlay_error(`
+workspace: module {
     overlay base { package("app").version: "1" }
     overlay local { package("app").version: "2" }
 }
@@ -194,8 +194,8 @@ module workspace {
 }
 
 #Test("resolves overlays by priority then declaration order with provenance") {
-    policy :: pkg_test_policy(`
-module workspace {
+    policy: pkg_test_policy(`
+workspace: module {
     overlay base {
         package("app").version: Priority(10: "1")
         package("app").env += { CC: "gcc" }
@@ -208,7 +208,7 @@ module workspace {
     }
 }
 `)
-    app :: policy.resolve_package_override("app") ?? panic("app resolves")
+    app: policy.resolve_package_override("app") ?? panic("app resolves")
     assert_eq(app.version, Val("1"))
     assert_eq(app.env, [OverrideEnv]{
         {key: "CC", value: "gcc"},
@@ -227,8 +227,8 @@ module workspace {
 }
 
 #Test("malformed or duplicate environment facts fail closed") {
-    invalid :: pkg_test_overlay_error(`module workspace { overlay dev { overrides: { app: { env: { 1BAD: "x" } } } } }`)
+    invalid: pkg_test_overlay_error(`workspace: module { overlay dev { overrides: { app: { env: { 1BAD: "x" } } } } }`)
     assert(invalid.message().contains("variable name"))
-    duplicate :: pkg_test_overlay_error(`module workspace { overlay dev { overrides: { app: { version: "1" }, app: { version: "2" } } } }`)
+    duplicate: pkg_test_overlay_error(`workspace: module { overlay dev { overrides: { app: { version: "1" }, app: { version: "2" } } } }`)
     assert(duplicate.message().contains("declared more than once"))
 }

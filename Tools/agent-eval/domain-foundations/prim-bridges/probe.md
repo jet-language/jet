@@ -45,7 +45,7 @@ Output: `bound 2 C++ members from \`reader.hpp\` → .jet/bindings/cpp/reader.je
 - `jet run zlib_run.jet` returned E0956 (`Extern call ... has no prepared bridge`) even though the documented path is native `jet build`; the diagnostic says “Report this as a compiler bug” rather than explaining that resident run does not prepare native FFI.
 - The C++ binder emitted `Reader.[ value: value ]`. `jet check cpp_run.jet` rejected it with E0320: `Struct construction uses Reader{…}, not Reader.{…}` (D-LIT-DOT1), at the generated wrapper's imported source.
 - A low-level C++ attempt (`jet build cpp_low.jet`) then returned E3208: `Local C++ archive inventory is missing bound symbol(s): TLS_MODULE_BASE_`. `nm -g .jet/bindings/cpp/libjet_cpp_reader.a` showed `_TLS_MODULE_BASE_` as an undefined C++ shim symbol. The validator's ignorable list covers C++ runtime names but not this symbol, so a generated C++ shim is rejected before linking.
-- The C++ generated source uses `#Import module c.jet_cpp_reader` and safe opaque-handle APIs, but the generated wrapper's syntax defect prevents importing it without a manual edit. The low-level overlay passed `jet check`, isolating the failure to generated/bridge assembly rather than the user program.
+- The C++ generated source uses `#Import c.jet_cpp_reader: module` and safe opaque-handle APIs, but the generated wrapper's syntax defect prevents importing it without a manual edit. The low-level overlay passed `jet check`, isolating the failure to generated/bridge assembly rather than the user program.
 
 ## Cross-domain reading
 

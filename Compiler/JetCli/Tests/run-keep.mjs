@@ -27,7 +27,7 @@ symlinkSync(realpathSync(join(dirname(given), 'jet-runtime')), join(bin, 'jet-ru
 cpSync(join(repo, 'Core'), join(root, 'Core'), { recursive: true });
 const kept = join(cache, 'jet/scripts');
 const file = join(work, 'greet.jet');
-const source = word => `fn run() {\n    print("hello ${word}")\n}\n`;
+const source = word => `run: fn() {\n    print("hello ${word}")\n}\n`;
 
 const runRaw = (target = file, xdg = cache) => {
   const result = spawnSync(jet, ['run', target], { cwd: work, encoding: 'utf8', env: { ...process.env, JET_TOOLCHAIN_ROOT: root, XDG_CACHE_HOME: xdg, NO_COLOR: '1' } });
@@ -106,7 +106,7 @@ check('rerun after the compiler change', run(), 'hello two\n');
 state = reused('rerun after the compiler change', state);
 
 // A program that stops: the kept run reports it as the compiling run did.
-writeFileSync(file, 'fn run() {\n    print("before")\n    panic("run-keep stop")\n}\n');
+writeFileSync(file, 'run: fn() {\n    print("before")\n    panic("run-keep stop")\n}\n');
 const compiled = runRaw();
 state = rebuilt('stopping program', state);
 const rerun = runRaw();
@@ -130,7 +130,7 @@ const capNames = () => {
   if (records.length !== programs.length) throw new Error(`cap: ${records.length} records beside ${programs.length} programs: ${JSON.stringify(names)}`);
   return programs;
 };
-for (let index = 0; index <= 64; index++) writeFileSync(entry(index), `fn run() {\n    print("entry ${index}")\n}\n`);
+for (let index = 0; index <= 64; index++) writeFileSync(entry(index), `run: fn() {\n    print("entry ${index}")\n}\n`);
 for (let index = 0; index < 64; index++) capRun(index);
 if (capNames().length !== 64) throw new Error(`cap: ${capNames().length} programs kept after 64 entries`);
 let capBefore = capNames();

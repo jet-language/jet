@@ -14,7 +14,7 @@ test('every shape is deterministic and grows with N', () => {
     const small = entry.kind === 'domain' ? 800 : Math.max(8, entry.base / 8);
     assert.equal(corpus(shape, small).source_sha256, corpus(shape, small).source_sha256, shape);
     assert.ok(corpus(shape, small * 2).code_lines > corpus(shape, small).code_lines, shape);
-    assert.ok(corpus(shape, small).files['main.jet'].includes('fn run()'), shape);
+    assert.ok(corpus(shape, small).files['main.jet'].includes('run: fn()'), shape);
   }
   assert.equal(corpus('diagnostics', 5).expect.diagnostics, 5);
   assert.throws(() => corpus('unknown', 1), /Unknown shape/);
@@ -27,7 +27,7 @@ test('large packed items and single-file domains do not expand lines into call a
   assert.equal(files['large_0.jet'], `${lines.join('\n')}\n`);
   const large = corpus('generic-lib', 200000, 1, 'single');
   assert.ok(large.code_lines >= 200000);
-  assert.ok(large.files['main.jet'].includes('fn run()'));
+  assert.ok(large.files['main.jet'].includes('run: fn()'));
 });
 
 test('counter parsing fails closed', () => {

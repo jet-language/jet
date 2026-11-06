@@ -1,43 +1,43 @@
 use {
-    build_api :: core.build
-    compiler :: core.compiler
+    build_api: core.build
+    compiler: core.compiler
 }
 
-SOURCE :: comptime { "fn old_name(value: Int) -> Int {{ 41 }}\nfn run() -> Int {{ 2 }}\n" }
+SOURCE: comptime { "old_name: fn(value: Int) -> Int {{ 41 }}\nrun: fn() -> Int {{ 2 }}\n" }
 
-LEXED :: comptime { compiler.lex(SOURCE) ?? panic("compiler lex failed") }
+LEXED: comptime { compiler.lex(SOURCE) ?? panic("compiler lex failed") }
 
-PARSED :: comptime { compiler.parse(SOURCE) ?? panic("compiler parse failed") }
+PARSED: comptime { compiler.parse(SOURCE) ?? panic("compiler parse failed") }
 
-CHECKED :: comptime { compiler.check(PARSED) ?? panic("compiler check failed") }
+CHECKED: comptime { compiler.check(PARSED) ?? panic("compiler check failed") }
 
-TOKENS :: comptime { LEXED.tokens().len() }
+TOKENS: comptime { LEXED.tokens().len() }
 
-ITEMS :: comptime { PARSED.items().len() }
+ITEMS: comptime { PARSED.items().len() }
 
-FUNCTIONS :: comptime { CHECKED.functions().len() }
+FUNCTIONS: comptime { CHECKED.functions().len() }
 
-fn build(b: Build) {
+build: fn(b: Build) {
     b.generate("facts") {
-        fn tooling_facts() -> String { "tokens={TOKENS}; items={ITEMS}; functions={FUNCTIONS}" }
+        tooling_facts: fn() -> String { "tokens={TOKENS}; items={ITEMS}; functions={FUNCTIONS}" }
     }
 
-    before :: b.add_executable(
+    before: b.add_executable(
     "tooling_before",
     ["run.jet", ".jet/generated/tooling_foundation/facts.jet"],
     [],
     )
-    before_plan :: b.plan(before)
-    before_graph :: build_api.graph(before_plan)
+    before_plan: b.plan(before)
+    before_graph: build_api.graph(before_plan)
 
-    after :: b.add_executable(
+    after: b.add_executable(
     "tooling_after",
     ["run.jet", "input.jet", ".jet/generated/tooling_foundation/facts.jet"],
     [],
     )
-    after_plan :: b.plan(after)
-    after_graph :: build_api.graph(after_plan)
-    diff :: build_api.receipt_diff(before_graph, after_graph)
+    after_plan: b.plan(after)
+    after_graph: build_api.graph(after_plan)
+    diff: build_api.receipt_diff(before_graph, after_graph)
 
     if before_graph.targets.len() == 0 -> panic("build graph query returned no target")
     if after_graph.files.len() <= before_graph.files.len() {
@@ -50,7 +50,7 @@ fn build(b: Build) {
     b.default(after)
 }
 
-fn run() {
+run: fn() {
     print("compiler facts: tokens={TOKENS}; items={ITEMS}; functions={FUNCTIONS}")
     print("build graph: graph=checked; diff=checked")
 }

@@ -3,17 +3,17 @@
 // typed EncodingError (kind, byte offset, reason), never a silently coerced value.
 // Every rejected error is dropped at the end of its handler, so each row also
 // proves the error carrier is released cleanly on every tier.
-use cbor :: core.encoding.cbor
+use cbor: core.encoding.cbor
 
-fn show(label: String, data: [U8]) {
-    value :: cbor.parse(data) ?? {
+show: fn(label: String, data: [U8]) {
+    value: cbor.parse(data) ?? {
         print("{label}: rejected @{err.byte_offset}: {err.reason}")
         return
     }
     print("{label}: accepted {value}")
 }
 
-fn run() {
+run: fn() {
     // Accepted: major types 0-5, simple values, and every float width.
     show("uint 0", [U8]{0})
     show("uint 24 (1-byte head)", [U8]{24, 24})
@@ -38,6 +38,6 @@ fn run() {
     show("truncated text", [U8]{99, 106})
 
     // Canonical encode keeps shortest heads and sorted keys.
-    tree :: cbor.parse([U8]{162, 97, 98, 24, 24, 97, 97, 1}) ?? panic("parse failed")
+    tree: cbor.parse([U8]{162, 97, 98, 24, 24, 97, 97, 1}) ?? panic("parse failed")
     print("canonical: {cbor.to_bytes_canonical(tree)}")
 }

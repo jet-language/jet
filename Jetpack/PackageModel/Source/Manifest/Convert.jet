@@ -5,16 +5,16 @@ use jet_foundation.[Diagnostic, diagnostic_from_registry]
 // Convert composed facts; `raw` is kept for comment-preserving edits.
 // Native C links (`c@…`) are link dependencies, never Jet packages, and are
 // skipped.
-fn pkg_to_manifest(facts: PackageFacts, raw: String) -> Manifest ManifestError! {
+pkg_to_manifest: fn(facts: PackageFacts, raw: String) -> Manifest ManifestError! {
     dependencies := [String: DepSpec]{}
     loop name in pkg_manifest_sorted(facts.deps.keys().to_list()) {
-        is_clib :: if facts.deps[name] == {
+        is_clib: if facts.deps[name] == {
             .CLib(_) -> true
             else -> false
         }
         if !pkg_validate_dependency_name(name) && !is_clib -> return Err(pkg_bad_dep_error(name, "dependency names must be one safe path component without `/`, `\\`, or `:`"))
         if is_clib -> next
-        spec :: if facts.deps[name] == {
+        spec: if facts.deps[name] == {
             .Foreign(language, reference) -> DepSpec.Foreign{language: language, reference: reference}
             .Version(version) -> DepSpec.Registry(version)
             // copy: `selector` is a payload of read parameter `facts`, which keeps the original; field `selector` of the new DepSpec.Git owns this one
@@ -49,22 +49,22 @@ fn pkg_to_manifest(facts: PackageFacts, raw: String) -> Manifest ManifestError! 
 
 // A bare path is a path dependency; `owner/repo/rev@github` is a pinned git
 // rev; every other provider is refused for a Jet library dependency.
-fn pkg_provider_dep_spec(name: String, provider: RefSource, target: String) -> DepSpec ManifestError! {
+pkg_provider_dep_spec: fn(name: String, provider: RefSource, target: String) -> DepSpec ManifestError! {
     if provider == {
         .Path -> Ok(DepSpec.Path{path: target})
         .Github -> {
-            parts :: target.cut_last("/") ?? return Err(pkg_bad_dep_error(name, "an `owner/repo/rev@github` dependency needs a pinned rev as its last segment; use the inline `{{ git: \"...\", branch/tag: \"...\" }}` form to track a moving branch or tag"))
+            parts: target.cut_last("/") ?? return Err(pkg_bad_dep_error(name, "an `owner/repo/rev@github` dependency needs a pinned rev as its last segment; use the inline `{{ git: \"...\", branch/tag: \"...\" }}` form to track a moving branch or tag"))
             Ok(DepSpec.Git{url: "https://github.com/{parts.before}", selector: GitSelector.Rev(parts.after)})
         }
         else -> Err(pkg_bad_dep_error(name, "`{provider.label()}` is not a valid source for a Jet library dependency — use a bare local path, `owner/repo/rev@github`, or an inline git struct"))
     }
 }
 
-fn pkg_bad_dep_error(name: String, why: String) -> ManifestError Never! {
+pkg_bad_dep_error: fn(name: String, why: String) -> ManifestError Never! {
     ManifestError{diagnostic: pkg_bad_dep_shape(name, why)}
 }
 
-fn pkg_bad_dep_shape(name: String, why: String) -> Diagnostic Never! {
+pkg_bad_dep_shape: fn(name: String, why: String) -> Diagnostic Never! {
     diagnostic_from_registry("E1215", None,
         "dependency `{name}` has an invalid shape",
         why,
@@ -72,8 +72,8 @@ fn pkg_bad_dep_shape(name: String, why: String) -> Diagnostic Never! {
 }
 
 // The canonical `package.jet` template for `jet new`.
-fn pkg_new_template(name: String, annotated: Bool) -> String Never! {
-    head :: "name: \"{name}\"\nversion: \"0.1.0\"\njet: \"{COMPILER_VERSION}\"\ndescription: \"\"\nlicense: \"MIT OR Apache-2.0\"\nrepository: \"\"\nauthority: {{ allow: [IO, Mem.Alloc] }}\n\n"
+pkg_new_template: fn(name: String, annotated: Bool) -> String Never! {
+    head: "name: \"{name}\"\nversion: \"0.1.0\"\njet: \"{COMPILER_VERSION}\"\ndescription: \"\"\nlicense: \"MIT OR Apache-2.0\"\nrepository: \"\"\nauthority: {{ allow: [IO, Mem.Alloc] }}\n\n"
     if annotated -> return "{head}// Jet package dependencies:\n// deps: {{\n//     helpers:  ../helpers,\n//     parsekit: {{ git: \"https://github.com/acme/parsekit\", tag: \"v0.4.1\" }},\n// }}\n"
     "{head}deps: {{}}\n"
 }

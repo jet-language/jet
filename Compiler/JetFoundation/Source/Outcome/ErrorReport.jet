@@ -1,35 +1,35 @@
 // Typed error report: the `jet.err/v1` wire built from typed error facts, never
 // reconstructed from rendered text. The private execution journey
 // (thread-local) stays with the runtime host.
-use error_report_json :: core.encoding.json
+use error_report_json: core.encoding.json
 
 // The Rust original reports wire failures as the Rust error string.
 #Error
-struct JetErrorReportError { message: String }
+JetErrorReportError: struct { message: String }
 
-fn jet_error_report_error(message: String) -> JetErrorReportError Never! { JetErrorReportError{message: message} }
+jet_error_report_error: fn(message: String) -> JetErrorReportError Never! { JetErrorReportError{message: message} }
 
-struct JetErrorContextFrame { text: String, file: String, line: Int }
-struct JetErrorConversion { source: String, target: String }
+JetErrorContextFrame: struct { text: String, file: String, line: Int }
+JetErrorConversion: struct { source: String, target: String }
 // `value` is raw canonical JSON, never a quoted rendering of the typed field.
-struct JetErrorField { name: String, value: String }
-struct JetErrorSpan { start: Int, end: Int }
-struct JetErrorDetails {
+JetErrorField: struct { name: String, value: String }
+JetErrorSpan: struct { start: Int, end: Int }
+JetErrorDetails: struct {
     variant: String
     fields: [JetErrorField]
     source_span: JetErrorSpan?{None}
 
-    fn to_json(self) -> String Never! {
+    to_json: fn(self) -> String Never! {
         fields := [String]{}
         loop field in self.fields -> &fields.push("{foundation_json_quote(field.name)}:{field.value}")
-        span :: if self.source_span == {
+        span: if self.source_span == {
             .Val(value) -> "{{\"start\":{value.start},\"end\":{value.end}}}"
             .None -> "null"
         }
         "{{\"variant\":{foundation_json_quote(self.variant)},\"fields\":{{{fields.join(",")}}},\"source_span\":{span}}}"
     }
 }
-struct JetErrorJourneyFrame {
+JetErrorJourneyFrame: struct {
     fn_name: String
     file: String
     line: Int
@@ -37,7 +37,7 @@ struct JetErrorJourneyFrame {
     note: String
     hops: Int
 }
-struct JetErrorReport {
+JetErrorReport: struct {
     code: String?{None}
     message: String
     typed_identity: String?{None}
@@ -48,14 +48,14 @@ struct JetErrorReport {
     conversion_history: [JetErrorConversion]{[JetErrorConversion]{}}
     details: JetErrorDetails?{None}
 
-    fn to_json(self) -> String Never! {
-        code :: if self.code == {
+    to_json: fn(self) -> String Never! {
+        code: if self.code == {
             .Val(value) -> foundation_json_quote(value)
             .None -> "null"
         }
         causes := [String]{}
         loop cause in self.causes -> &causes.push(cause.to_json())
-        cause :: if {
+        cause: if {
             causes.len() == 0 -> "null"
             causes.len() == 1 -> causes[0]
             else -> "[{causes.join(",")}]"
@@ -84,95 +84,95 @@ struct JetErrorReport {
 
     // JetErrorReport::from_json: strict JSON (duplicate keys refused), then
     // the typed decode, then the canonical round trip.
-    fn from_json(text: String) -> JetErrorReport JetErrorReportError! {
-        value :: if error_report_json.parse(text) == {
+    from_json: fn(text: String) -> JetErrorReport JetErrorReportError! {
+        value: if error_report_json.parse(text) == {
             .Ok(value) -> value
             .Err(error) -> { return Err(jet_error_report_error("invalid error report: {error.reason}")) }
         }
-        report :: jet_error_report_from_json(value)
+        report: jet_error_report_from_json(value)
         if report.to_json() != text -> return Err(jet_error_report_error("error report is not canonical"))
         Ok(report)
     }
 }
 
-fn jet_error_journey_json(frame: JetErrorJourneyFrame) -> String Never! {
+jet_error_journey_json: fn(frame: JetErrorJourneyFrame) -> String Never! {
     "{{\"fn_name\":{foundation_json_quote(frame.fn_name)},\"file\":{foundation_json_quote(frame.file)},\"line\":{frame.line},\"column\":{frame.column},\"note\":{foundation_json_quote(frame.note)},\"hops\":{frame.hops}}}"
 }
 
-fn jet_error_json_object(value: Dyn, name: String) -> [(key: String, value: Dyn)] JetErrorReportError! {
+jet_error_json_object: fn(value: Dyn, name: String) -> [(key: String, value: Dyn)] JetErrorReportError! {
     if value == {
         .Object(fields) -> Ok(fields)
         else -> Err(jet_error_report_error("error report {name} is not an object"))
     }
 }
-fn jet_error_json_lookup(fields: [(key: String, value: Dyn)], name: String) -> Dyn? Never! {
+jet_error_json_lookup: fn(fields: [(key: String, value: Dyn)], name: String) -> Dyn? Never! {
     loop field in fields {
         if field.key == name -> return Val(field.value)
     }
     None
 }
-fn jet_error_json_field(fields: [(key: String, value: Dyn)], name: String) -> Dyn JetErrorReportError! {
+jet_error_json_field: fn(fields: [(key: String, value: Dyn)], name: String) -> Dyn JetErrorReportError! {
     Ok(jet_error_json_lookup(fields, name) ?? return Err(jet_error_report_error("error report lacks {name}")))
 }
-fn jet_error_json_text(value: Dyn, name: String) -> String JetErrorReportError! {
+jet_error_json_text: fn(value: Dyn, name: String) -> String JetErrorReportError! {
     if value == {
         .Text(text) -> Ok(text)
         else -> Err(jet_error_report_error("error report {name} is not text"))
     }
 }
-fn jet_error_json_optional_text(fields: [(key: String, value: Dyn)], name: String) -> String? JetErrorReportError! {
+jet_error_json_optional_text: fn(fields: [(key: String, value: Dyn)], name: String) -> String? JetErrorReportError! {
     if jet_error_json_lookup(fields, name) == {
         .Val(value) -> Ok(Val(jet_error_json_text(value, name)))
         .None -> Ok(None)
     }
 }
-fn jet_error_json_optional_array(fields: [(key: String, value: Dyn)], name: String) -> [Dyn] JetErrorReportError! {
-    value :: jet_error_json_lookup(fields, name) ?? return Ok([Dyn]{})
+jet_error_json_optional_array: fn(fields: [(key: String, value: Dyn)], name: String) -> [Dyn] JetErrorReportError! {
+    value: jet_error_json_lookup(fields, name) ?? return Ok([Dyn]{})
     if value == {
         .Array(values) -> Ok(values)
         else -> Err(jet_error_report_error("error report {name} is not an array"))
     }
 }
-fn jet_error_json_u32(value: Dyn, name: String) -> Int JetErrorReportError! {
-    number :: foundation_json_integer(value) ?? return Err(jet_error_report_error("error report {name} is not an integer"))
+jet_error_json_u32: fn(value: Dyn, name: String) -> Int JetErrorReportError! {
+    number: foundation_json_integer(value) ?? return Err(jet_error_report_error("error report {name} is not an integer"))
     // Rust's JSON Int is i64; wider tokens are not an integer.
     if number < -9223372036854775808 || number > 9223372036854775807 -> return Err(jet_error_report_error("error report {name} is not an integer"))
     if number < 0 || number > 4294967295 -> return Err(jet_error_report_error("error report {name} is not a u32"))
     Ok(number)
 }
-fn jet_error_context_from_json(value: Dyn) -> JetErrorContextFrame JetErrorReportError! {
-    fields :: jet_error_json_object(value, "context frame")
+jet_error_context_from_json: fn(value: Dyn) -> JetErrorContextFrame JetErrorReportError! {
+    fields: jet_error_json_object(value, "context frame")
     Ok(JetErrorContextFrame{text: jet_error_json_text(jet_error_json_field(fields, "text"), "context text"), file: jet_error_json_text(jet_error_json_field(fields, "file"), "context file"), line: jet_error_json_u32(jet_error_json_field(fields, "line"), "context line")})
 }
-fn jet_error_journey_from_json(value: Dyn) -> JetErrorJourneyFrame JetErrorReportError! {
-    fields :: jet_error_json_object(value, "journey frame")
+jet_error_journey_from_json: fn(value: Dyn) -> JetErrorJourneyFrame JetErrorReportError! {
+    fields: jet_error_json_object(value, "journey frame")
     Ok(JetErrorJourneyFrame{fn_name: jet_error_json_text(jet_error_json_field(fields, "fn_name"), "journey function"), file: jet_error_json_text(jet_error_json_field(fields, "file"), "journey file"), line: jet_error_json_u32(jet_error_json_field(fields, "line"), "journey line"), column: jet_error_json_u32(jet_error_json_field(fields, "column"), "journey column"), note: jet_error_json_text(jet_error_json_field(fields, "note"), "journey note"), hops: jet_error_json_u32(jet_error_json_field(fields, "hops"), "journey hops")})
 }
-fn jet_error_conversion_from_json(value: Dyn) -> JetErrorConversion JetErrorReportError! {
-    fields :: jet_error_json_object(value, "conversion")
+jet_error_conversion_from_json: fn(value: Dyn) -> JetErrorConversion JetErrorReportError! {
+    fields: jet_error_json_object(value, "conversion")
     Ok(JetErrorConversion{source: jet_error_json_text(jet_error_json_field(fields, "source"), "conversion source"), target: jet_error_json_text(jet_error_json_field(fields, "target"), "conversion target")})
 }
-fn jet_error_details_from_json(value: Dyn) -> JetErrorDetails JetErrorReportError! {
-    fields :: jet_error_json_object(value, "details")
+jet_error_details_from_json: fn(value: Dyn) -> JetErrorDetails JetErrorReportError! {
+    fields: jet_error_json_object(value, "details")
     field_values := [JetErrorField]{}
     loop entry in jet_error_json_object(jet_error_json_field(fields, "fields"), "detail fields") -> &field_values.push(JetErrorField{name: entry.key, value: jet_error_json_encode_value(entry.value)})
-    span_value :: jet_error_json_field(fields, "source_span")
-    source_span :: if span_value == {
+    span_value: jet_error_json_field(fields, "source_span")
+    source_span: if span_value == {
         .Null -> None
         else -> {
-            span :: jet_error_json_object(span_value, "source span")
+            span: jet_error_json_object(span_value, "source span")
             // The Rust original writes every usize but reads back only a u32.
             Val(JetErrorSpan{start: jet_error_json_u32(jet_error_json_field(span, "start"), "span start"), end: jet_error_json_u32(jet_error_json_field(span, "end"), "span end")})
         }
     }
     Ok(JetErrorDetails{variant: jet_error_json_text(jet_error_json_field(fields, "variant"), "detail variant"), fields: field_values, source_span: source_span})
 }
-fn jet_error_report_from_json(value: Dyn) -> JetErrorReport JetErrorReportError! {
-    fields :: jet_error_json_object(value, "report")
+jet_error_report_from_json: fn(value: Dyn) -> JetErrorReport JetErrorReportError! {
+    fields: jet_error_json_object(value, "report")
     if jet_error_json_text(jet_error_json_field(fields, "schema"), "schema") != "jet.err/v1" -> return Err(jet_error_report_error("unsupported error report schema"))
-    message :: jet_error_json_text(jet_error_json_field(fields, "message"), "message")
-    code_value :: jet_error_json_field(fields, "code")
-    code :: if code_value == {
+    message: jet_error_json_text(jet_error_json_field(fields, "message"), "message")
+    code_value: jet_error_json_field(fields, "code")
+    code: if code_value == {
         .Null -> None
         else -> Val(jet_error_json_text(code_value, "code"))
     }
@@ -183,10 +183,10 @@ fn jet_error_report_from_json(value: Dyn) -> JetErrorReport JetErrorReportError!
         .Array(values) -> { loop cause_value in values -> &causes.push(jet_error_report_from_json(cause_value)) }
         else -> return Err(jet_error_report_error("error report cause is not null, an object, or an array"))
     }
-    typed_identity :: jet_error_json_optional_text(fields, "typed_identity")
+    typed_identity: jet_error_json_optional_text(fields, "typed_identity")
     context := [JetErrorContextFrame]{}
     loop context_value in jet_error_json_optional_array(fields, "context_frames") -> &context.push(jet_error_context_from_json(context_value))
-    origin :: if jet_error_json_lookup(fields, "origin") == {
+    origin: if jet_error_json_lookup(fields, "origin") == {
         .Val(origin_value) -> Val(jet_error_journey_from_json(origin_value))
         .None -> None
     }
@@ -194,7 +194,7 @@ fn jet_error_report_from_json(value: Dyn) -> JetErrorReport JetErrorReportError!
     loop journey_value in jet_error_json_optional_array(fields, "source_journey") -> &journey.push(jet_error_journey_from_json(journey_value))
     conversions := [JetErrorConversion]{}
     loop conversion_value in jet_error_json_optional_array(fields, "conversion_history") -> &conversions.push(jet_error_conversion_from_json(conversion_value))
-    details :: if jet_error_json_lookup(fields, "details") == {
+    details: if jet_error_json_lookup(fields, "details") == {
         .Val(details_value) -> Val(jet_error_details_from_json(details_value))
         .None -> None
     }
@@ -202,7 +202,7 @@ fn jet_error_report_from_json(value: Dyn) -> JetErrorReport JetErrorReportError!
 }
 // `jet_error_json_encode_value`: protocol quoting (every Unicode control
 // escaped) and Rust f64 Display, in the object's own field order.
-fn jet_error_json_encode_value(value: Dyn) -> String Never! {
+jet_error_json_encode_value: fn(value: Dyn) -> String Never! {
     if value == {
         .Null -> "null"
         .Bool(flag) -> if flag -> "true" else -> "false"

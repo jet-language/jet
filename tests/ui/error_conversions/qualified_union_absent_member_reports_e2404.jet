@@ -1,19 +1,19 @@
 // A failure outside a module-qualified error union has no route into it
 // (#6303): only a genuine member, however its type is spelled, widens.
-use net :: core.net
+use net: core.net
 
 #Error
-enum ParseErr { Bad }
+ParseErr: enum { Bad }
 
-fn parse() -> Int ParseErr! {
+parse: fn() -> Int ParseErr! {
     return Err(ParseErr.Bad)
 }
 
-fn serve() -> Int (net.NetError | TaskFailure)! {
-    value :: parse()
+serve: fn() -> Int (net.NetError | TaskFailure)! {
+    value: parse()
     return Ok(value)
 }
 
-fn run() {
+run: fn() {
     print(serve() ?? 0)
 }

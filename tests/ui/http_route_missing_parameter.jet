@@ -1,13 +1,13 @@
-use server :: core.http.server
+use server: core.http.server
 
-struct Jokes {
+Jokes: struct {
     #Server.Get("/jokes/:id")
-    fn joke(self) -> HTTPResponse HTTPError! {
+    joke: fn(self) -> HTTPResponse HTTPError! {
         Ok(server.response(200, "joke"))
     }
 }
 
-fn run() {
-    mux :: server.mux()
+run: fn() {
+    mux: server.mux()
     mux.mount(Jokes{})
 }

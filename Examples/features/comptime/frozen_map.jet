@@ -2,52 +2,52 @@
 // sit in static data in key order, and every read borrows them instead of
 // building the Map again. A copy shares the frozen entries; the first write
 // to the copy gives it entries of its own, so the constant never changes.
-PRICES :: [String:Int]{"pear": 3, "apple": 1, "fig": 2}
+PRICES: [String:Int]{"pear": 3, "apple": 1, "fig": 2}
 
-SIGNS :: [Int:String]{3: "three", -7: "minus seven", 0: "zero"}
+SIGNS: [Int:String]{3: "three", -7: "minus seven", 0: "zero"}
 
-NESTED :: [String:[Int]]{"b": [3], "a": [1, 2]}
+NESTED: [String:[Int]]{"b": [3], "a": [1, 2]}
 
-LETTERS :: [Char:Bool]{'z': true, 'a': false}
+LETTERS: [Char:Bool]{'z': true, 'a': false}
 
-struct Shelf {
+Shelf: struct {
     name: String
     stock: [String:Int]
     tags: [String]
 }
 
-SHELF :: Shelf{name: "front", stock: ["kiwi": 4, "date": 9], tags: ["new", "sale"]}
+SHELF: Shelf{name: "front", stock: ["kiwi": 4, "date": 9], tags: ["new", "sale"]}
 
 // Built by running Jet at compile time, in insertion order; the frozen Map
 // still keeps its keys in order.
-fn make_index() -> [String:Int] {
+make_index: fn() -> [String:Int] {
     index := [String:Int]{}
     loop (position, word) in ["delta", "alpha", "charlie", "bravo"] -> index[word] = position
     index
 }
 
-INDEX :: comptime { make_index() }
+INDEX: comptime { make_index() }
 
 // Compile-time code reads the same frozen Map, and a write there copies too.
-fn bumped_fig() -> Int {
+bumped_fig: fn() -> Int {
     prices := PRICES
     prices["fig"] = 50
     prices["fig"] + PRICES["fig"]
 }
 
-BUMPED :: comptime { bumped_fig() }
+BUMPED: comptime { bumped_fig() }
 
-fn raise(prices: &[String:Int]) {
+raise: fn(prices: &[String:Int]) {
     prices["apple"] = 100
 }
 
-fn total(prices: [String:Int]) -> Int {
+total: fn(prices: [String:Int]) -> Int {
     sum := 0
     loop (_, price) in prices -> sum += price
     sum
 }
 
-fn run() {
+run: fn() {
     print("{PRICES} {SIGNS} {NESTED} {LETTERS} {INDEX}")
     print("{SHELF.name} {SHELF.stock} {SHELF.tags}")
     print("fig {PRICES["fig"]} kiwi {PRICES.get("kiwi") ?? -1} has pear {PRICES.has_key("pear")} len {PRICES.len()}")
@@ -57,9 +57,9 @@ fn run() {
     prices := PRICES
     prices["kiwi"] = 5
     prices["fig"] = PRICES["fig"] + 10
-    old :: &prices.add("pear", 30)
-    gone :: &prices.pop("apple")
-    fresh :: &prices.add_new("plum", 6)
+    old: &prices.add("pear", 30)
+    gone: &prices.pop("apple")
+    fresh: &prices.add_new("plum", 6)
     print("copy {prices} old pear {old ?? -1} popped {gone ?? -1} fresh plum {fresh}")
     raised := PRICES
     raise(&raised)
@@ -69,7 +69,7 @@ fn run() {
     shelf := SHELF
     shelf.stock["date"] = 0
     &shelf.tags.push("last")
-    merged :: PRICES.merge(["fig": 7])
+    merged: PRICES.merge(["fig": 7])
     print("{nested} {shelf.stock} {shelf.tags} {merged}")
 
     print("constants {PRICES} {NESTED} {SHELF.stock} {SHELF.tags}")

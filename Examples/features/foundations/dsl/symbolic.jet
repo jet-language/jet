@@ -1,4 +1,4 @@
-enum Node {
+Node: enum {
     Const(Float)
     Var(String)
     Add
@@ -7,43 +7,43 @@ enum Node {
     Neg
 }
 
-struct Expr {
+Expr: struct {
     priv code: [Node]
 }
 
-fn atom(node: Node) -> Expr { return Expr{code: [Node]{node}} }
+atom: fn(node: Node) -> Expr { return Expr{code: [Node]{node}} }
 
-fn zero() -> Expr { return atom(Node.Const(Float{0.0})) }
+zero: fn() -> Expr { return atom(Node.Const(Float{0.0})) }
 
-fn one() -> Expr { return atom(Node.Const(Float{1.0})) }
+one: fn() -> Expr { return atom(Node.Const(Float{1.0})) }
 
-fn emit_operator(operator: String, code: &[Node]) {
+emit_operator: fn(operator: String, code: &[Node]) {
     if operator == "+" -> &code.push(Node.Add) else if operator == "-" -> &code.push(Node.Sub) else if operator == "*" {
         &code.push(Node.Mul)
     } else if operator == "neg" -> &code.push(Node.Neg)
 }
 
-fn precedence(operator: String) -> Int {
+precedence: fn(operator: String) -> Int {
     if operator == "neg" -> return 3
     if operator == "*" -> return 2
     return 1
 }
 
-fn drain_operators(
+drain_operators: fn(
 operator: String,
 operators: &[String],
 code: &[Node],
 ) {
     loop operators.len() > 0 {
-        top :: operators[operators.len() - 1]
+        top: operators[operators.len() - 1]
         if top == "(" || precedence(top) < precedence(operator) -> break
-        popped :: &operators.pop() ?? ""
+        popped: &operators.pop() ?? ""
         emit_operator(popped, &code)
     }
 }
 
-fn parse(source: String) -> Expr? {
-    tokens :: source.trim().split(" ").to_list()
+parse: fn(source: String) -> Expr? {
+    tokens: source.trim().split(" ").to_list()
     if tokens.len() == 0 -> return None
 
     code := [Node]{}
@@ -68,7 +68,7 @@ fn parse(source: String) -> Expr? {
             if expect_value -> return None
             found_open := false
             loop operators.len() > 0 {
-                popped :: &operators.pop() ?? return None
+                popped: &operators.pop() ?? return None
                 if popped == "(" {
                     found_open = true
                     break
@@ -92,30 +92,30 @@ fn parse(source: String) -> Expr? {
     if expect_value -> return None
 
     loop operators.len() > 0 {
-        popped :: &operators.pop() ?? return None
+        popped: &operators.pop() ?? return None
         if popped == "(" -> return None
         emit_operator(popped, &code)
     }
     return Val(Expr{code: code})
 }
 
-fn constant_value(expr: Expr) -> Float? {
+constant_value: fn(expr: Expr) -> Float? {
     if expr.code.len() != 1 -> return None
     if expr.code[0] == .Const(value) -> return Val(value)
     return None
 }
 
-fn is_zero(expr: Expr) -> Bool {
-    value :: constant_value(expr.copy()) ?? return false
+is_zero: fn(expr: Expr) -> Bool {
+    value: constant_value(expr.copy()) ?? return false
     return value == 0.0
 }
 
-fn is_one(expr: Expr) -> Bool {
-    value :: constant_value(expr.copy()) ?? return false
+is_one: fn(expr: Expr) -> Bool {
+    value: constant_value(expr.copy()) ?? return false
     return value == 1.0
 }
 
-fn append_binary(left: Expr, right: Expr, operator: Node) -> Expr {
+append_binary: fn(left: Expr, right: Expr, operator: Node) -> Expr {
     code := [Node]{}
     &code.extend(left.code.copy())
     &code.extend(right.code.copy())
@@ -123,37 +123,37 @@ fn append_binary(left: Expr, right: Expr, operator: Node) -> Expr {
     return Expr{code: code}
 }
 
-fn negate(expr: Expr) -> Expr {
+negate: fn(expr: Expr) -> Expr {
     code := [Node]{}
     &code.extend(expr.code.copy())
     &code.push(Node.Neg)
     return Expr{code: code}
 }
 
-fn add(left: Expr, right: Expr) -> Expr { return append_binary(left, right, Node.Add) }
+add: fn(left: Expr, right: Expr) -> Expr { return append_binary(left, right, Node.Add) }
 
-fn subtract(left: Expr, right: Expr) -> Expr { return append_binary(left, right, Node.Sub) }
+subtract: fn(left: Expr, right: Expr) -> Expr { return append_binary(left, right, Node.Sub) }
 
-fn multiply(left: Expr, right: Expr) -> Expr { return append_binary(left, right, Node.Mul) }
+multiply: fn(left: Expr, right: Expr) -> Expr { return append_binary(left, right, Node.Mul) }
 
-fn simplify(expr: Expr) -> Expr {
+simplify: fn(expr: Expr) -> Expr {
     stack := [Expr]{}
     loop token in expr.code {
         if token == {
             .Const(value) -> { &stack.push(atom(Node.Const(value))) }
             .Var(name) -> { &stack.push(atom(Node.Var(name))) }
             .Neg -> {
-                value :: &stack.pop() ?? zero()
-                reduced :: simplify(value)
+                value: &stack.pop() ?? zero()
+                reduced: simplify(value)
                 if is_zero(reduced.copy()) -> &stack.push(zero()) else if constant_value(reduced.copy()) == .Val(number) {
                     &stack.push(atom(Node.Const(Float{0.0} - number)))
                 } else { &stack.push(negate(reduced)) }
             }
             .Add -> {
-                right :: &stack.pop() ?? zero()
-                left :: &stack.pop() ?? zero()
-                left_reduced :: simplify(left)
-                right_reduced :: simplify(right)
+                right: &stack.pop() ?? zero()
+                left: &stack.pop() ?? zero()
+                left_reduced: simplify(left)
+                right_reduced: simplify(right)
                 if is_zero(left_reduced.copy()) -> &stack.push(right_reduced) else if is_zero(right_reduced.copy()) {
                     &stack.push(left_reduced)
                 } else if constant_value(left_reduced.copy()) == .Val(left_value) && constant_value(right_reduced.copy()) == .Val(right_value) {
@@ -161,10 +161,10 @@ fn simplify(expr: Expr) -> Expr {
                 } else { &stack.push(add(left_reduced, right_reduced)) }
             }
             .Sub -> {
-                right :: &stack.pop() ?? zero()
-                left :: &stack.pop() ?? zero()
-                left_reduced :: simplify(left)
-                right_reduced :: simplify(right)
+                right: &stack.pop() ?? zero()
+                left: &stack.pop() ?? zero()
+                left_reduced: simplify(left)
+                right_reduced: simplify(right)
                 if is_zero(right_reduced.copy()) -> &stack.push(left_reduced) else if is_zero(left_reduced.copy()) {
                     &stack.push(negate(right_reduced))
                 } else if constant_value(left_reduced.copy()) == .Val(left_value) && constant_value(right_reduced.copy()) == .Val(right_value) {
@@ -172,10 +172,10 @@ fn simplify(expr: Expr) -> Expr {
                 } else { &stack.push(subtract(left_reduced, right_reduced)) }
             }
             .Mul -> {
-                right :: &stack.pop() ?? zero()
-                left :: &stack.pop() ?? zero()
-                left_reduced :: simplify(left)
-                right_reduced :: simplify(right)
+                right: &stack.pop() ?? zero()
+                left: &stack.pop() ?? zero()
+                left_reduced: simplify(left)
+                right_reduced: simplify(right)
                 if is_zero(left_reduced.copy()) || is_zero(right_reduced.copy()) -> &stack.push(zero()) else if is_one(left_reduced.copy()) {
                     &stack.push(right_reduced)
                 } else if is_one(right_reduced.copy()) -> &stack.push(left_reduced) else if constant_value(left_reduced.copy()) == .Val(left_value) && constant_value(right_reduced.copy()) == .Val(right_value) {
@@ -187,7 +187,7 @@ fn simplify(expr: Expr) -> Expr {
     return &stack.pop() ?? zero()
 }
 
-fn differentiate(expr: Expr, variable: String) -> Expr {
+differentiate: fn(expr: Expr, variable: String) -> Expr {
     expressions := [Expr]{}
     derivatives := [Expr]{}
     loop token in expr.code {
@@ -201,32 +201,32 @@ fn differentiate(expr: Expr, variable: String) -> Expr {
                 if name == variable -> &derivatives.push(one()) else -> &derivatives.push(zero())
             }
             .Neg -> {
-                value :: &expressions.pop() ?? zero()
-                derivative :: &derivatives.pop() ?? zero()
+                value: &expressions.pop() ?? zero()
+                derivative: &derivatives.pop() ?? zero()
                 &expressions.push(negate(value))
                 &derivatives.push(negate(derivative))
             }
             .Add -> {
-                right :: &expressions.pop() ?? zero()
-                left :: &expressions.pop() ?? zero()
-                right_derivative :: &derivatives.pop() ?? zero()
-                left_derivative :: &derivatives.pop() ?? zero()
+                right: &expressions.pop() ?? zero()
+                left: &expressions.pop() ?? zero()
+                right_derivative: &derivatives.pop() ?? zero()
+                left_derivative: &derivatives.pop() ?? zero()
                 &expressions.push(add(left, right))
                 &derivatives.push(add(left_derivative, right_derivative))
             }
             .Sub -> {
-                right :: &expressions.pop() ?? zero()
-                left :: &expressions.pop() ?? zero()
-                right_derivative :: &derivatives.pop() ?? zero()
-                left_derivative :: &derivatives.pop() ?? zero()
+                right: &expressions.pop() ?? zero()
+                left: &expressions.pop() ?? zero()
+                right_derivative: &derivatives.pop() ?? zero()
+                left_derivative: &derivatives.pop() ?? zero()
                 &expressions.push(subtract(left, right))
                 &derivatives.push(subtract(left_derivative, right_derivative))
             }
             .Mul -> {
-                right :: &expressions.pop() ?? zero()
-                left :: &expressions.pop() ?? zero()
-                right_derivative :: &derivatives.pop() ?? zero()
-                left_derivative :: &derivatives.pop() ?? zero()
+                right: &expressions.pop() ?? zero()
+                left: &expressions.pop() ?? zero()
+                right_derivative: &derivatives.pop() ?? zero()
+                left_derivative: &derivatives.pop() ?? zero()
                 &expressions.push(multiply(left.copy(), right.copy()))
                 &derivatives.push(
                 add(
@@ -240,32 +240,32 @@ fn differentiate(expr: Expr, variable: String) -> Expr {
     return &derivatives.pop() ?? zero()
 }
 
-fn evaluate(expr: Expr, environment: [String:Float]) -> Float? {
+evaluate: fn(expr: Expr, environment: [String:Float]) -> Float? {
     stack := [Float]{}
     loop token in expr.code {
         if token == {
             .Const(value) -> { &stack.push(value) }
             .Var(name) -> {
-                value :: environment.get(name.copy()) ?? return None
+                value: environment.get(name.copy()) ?? return None
                 &stack.push(value)
             }
             .Neg -> {
-                value :: &stack.pop() ?? return None
+                value: &stack.pop() ?? return None
                 &stack.push(Float{0.0} - value)
             }
             .Add -> {
-                right :: &stack.pop() ?? return None
-                left :: &stack.pop() ?? return None
+                right: &stack.pop() ?? return None
+                left: &stack.pop() ?? return None
                 &stack.push(left + right)
             }
             .Sub -> {
-                right :: &stack.pop() ?? return None
-                left :: &stack.pop() ?? return None
+                right: &stack.pop() ?? return None
+                left: &stack.pop() ?? return None
                 &stack.push(left - right)
             }
             .Mul -> {
-                right :: &stack.pop() ?? return None
-                left :: &stack.pop() ?? return None
+                right: &stack.pop() ?? return None
+                left: &stack.pop() ?? return None
                 &stack.push(left * right)
             }
         }
@@ -274,29 +274,29 @@ fn evaluate(expr: Expr, environment: [String:Float]) -> Float? {
     return Val(&stack.pop() ?? 0.0)
 }
 
-fn show(expr: Expr) -> String {
+show: fn(expr: Expr) -> String {
     stack := [String]{}
     loop token in expr.code {
         if token == {
             .Const(value) -> { &stack.push("{value}") }
             .Var(name) -> { &stack.push(name) }
             .Neg -> {
-                value :: &stack.pop() ?? "?"
+                value: &stack.pop() ?? "?"
                 &stack.push("(-{value})")
             }
             .Add -> {
-                right :: &stack.pop() ?? "?"
-                left :: &stack.pop() ?? "?"
+                right: &stack.pop() ?? "?"
+                left: &stack.pop() ?? "?"
                 &stack.push("({left} + {right})")
             }
             .Sub -> {
-                right :: &stack.pop() ?? "?"
-                left :: &stack.pop() ?? "?"
+                right: &stack.pop() ?? "?"
+                left: &stack.pop() ?? "?"
                 &stack.push("({left} - {right})")
             }
             .Mul -> {
-                right :: &stack.pop() ?? "?"
-                left :: &stack.pop() ?? "?"
+                right: &stack.pop() ?? "?"
+                left: &stack.pop() ?? "?"
                 &stack.push("({left} * {right})")
             }
         }

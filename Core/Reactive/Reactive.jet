@@ -1,4 +1,4 @@
-package {
+package: {
     name: "core.reactive"
     version: "0.0.1"
     edition: "2026"
@@ -8,81 +8,81 @@ package {
         reactive: .Library{ entry: reactive }
     }
 }
-module loadable
+loadable: module
 
 // Reactive values are immutable Jet carriers. `signal` builds a fresh cell at
 // version 0; the runtime provider owns the retained `computed`, `derived` and
 // `effect` closures, which return shared, dependency-tracked cells; keeping
 // the transition rules here makes the source-level API deterministic as well.
-struct Signal<T> {
+Signal: struct<T> {
     value: T
     version: Int
 }
 
-struct Computed<T> {
+Computed: struct<T> {
     value: T
     version: Int
 }
 
-struct Derived<T> {
+Derived: struct<T> {
     value: T
     version: Int
 }
 
-struct Effect {
+Effect: struct {
     last: Int
     active: Bool
 }
 
-fn unsubscribe(e: Effect) -> Effect Never! {
+unsubscribe: fn(e: Effect) -> Effect Never! {
     Effect{last: e.last, active: false}
 }
 
-fn is_active(e: Effect) -> Bool Never! { e.active }
+is_active: fn(e: Effect) -> Bool Never! { e.active }
 
-fn signal<T>(value: T) -> Signal<T> Never! {
+signal: fn<T>(value: T) -> Signal<T> Never! {
     Signal<T>{value: value, version: 0}
 }
 
-fn set<T>(sig: Signal<T>, value: T) -> Signal<T> Never! {
+set: fn<T>(sig: Signal<T>, value: T) -> Signal<T> Never! {
     Signal<T>{value: value, version: sig.version + 1}
 }
 
-fn set_if_changed(sig: Signal<Int>, value: Int) -> Signal<Int> Never! {
+set_if_changed: fn(sig: Signal<Int>, value: Int) -> Signal<Int> Never! {
     if sig.value == value -> return sig.copy()
     set(sig, value)
 }
 
-fn changed(sig: Signal<Int>, value: Int) -> Bool Never! { sig.value != value }
+changed: fn(sig: Signal<Int>, value: Int) -> Bool Never! { sig.value != value }
 
-fn computed_update(c: Computed<Int>, delta: Int) -> Computed<Int> Never! {
+computed_update: fn(c: Computed<Int>, delta: Int) -> Computed<Int> Never! {
     computed_set(c, c.value + delta)
 }
 
-fn computed_version<T>(c: Computed<T>) -> Int Never! { c.version }
+computed_version: fn<T>(c: Computed<T>) -> Int Never! { c.version }
 
-fn effect_run_if(e: Effect, value: Int) -> Effect Never! {
+effect_run_if: fn(e: Effect, value: Int) -> Effect Never! {
     if e.active && e.last == value -> return e.copy()
     effect_run(e, value)
 }
 
-fn effect_changed(e: Effect, value: Int) -> Bool Never! { !e.active || e.last != value }
+effect_changed: fn(e: Effect, value: Int) -> Bool Never! { !e.active || e.last != value }
 
-fn get<T>(sig: Signal<T>) -> T Never! { sig.value }
+get: fn<T>(sig: Signal<T>) -> T Never! { sig.value }
 
-fn version<T>(sig: Signal<T>) -> Int Never! { sig.version }
+version: fn<T>(sig: Signal<T>) -> Int Never! { sig.version }
 
-fn update(sig: Signal<Int>, delta: Int) -> Signal<Int> Never! { set(sig, sig.value + delta) }
+update: fn(sig: Signal<Int>, delta: Int) -> Signal<Int> Never! { set(sig, sig.value + delta) }
 
-fn computed_get<T>(c: Computed<T>) -> T Never! { c.value }
+computed_get: fn<T>(c: Computed<T>) -> T Never! { c.value }
 
-fn computed_set<T>(c: Computed<T>, value: T) -> Computed<T> Never! {
+computed_set: fn<T>(c: Computed<T>, value: T) -> Computed<T> Never! {
     Computed<T>{value: value, version: c.version + 1}
 }
 
-fn effect_run(e: Effect, value: Int) -> Effect Never! {
+effect_run: fn(e: Effect, value: Int) -> Effect Never! {
     if !e.active || e.last != value -> return Effect{last: value, active: true}
     e.copy()
 }
 
-fn effect_last(e: Effect) -> Int Never! { e.last }
+effect_last: fn(e: Effect) -> Int Never! { e.last }

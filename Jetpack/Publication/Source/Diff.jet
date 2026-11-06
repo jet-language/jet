@@ -14,14 +14,14 @@ use {
     jet_pkg_model.[PackageCapabilitySnapshot, pkg_api_snapshot_line_name]
 }
 
-struct PublicationBreakingChange {
+PublicationBreakingChange: struct {
     description: String
     item_name: String
 }
 
 // A registry snapshot's rows; publication_read_api_snapshot has checked every
 // line names its kind.
-fn publication_api_snapshot_items(snapshot: PackageCapabilitySnapshot) -> [PublicAPIItem] Never! {
+publication_api_snapshot_items: fn(snapshot: PackageCapabilitySnapshot) -> [PublicAPIItem] Never! {
     items := [PublicAPIItem]{}
     loop line in snapshot.signatures {
         if pkg_api_snapshot_line_name(line) == .Val(row) -> &items.push(PublicAPIItem{kind: row.kind, name: row.name, signature: line.copy()})
@@ -32,11 +32,11 @@ fn publication_api_snapshot_items(snapshot: PackageCapabilitySnapshot) -> [Publi
 // The published entry a new release's API is compared with: the highest
 // version below it, yanked or not, so a backport to 1.4.x is held to 1.4's
 // API and not to a later 2.0.
-fn publication_api_baseline(entries: [PublicationIndexEntry], version: PublicationSemVer) -> PublicationIndexEntry? Never! {
+publication_api_baseline: fn(entries: [PublicationIndexEntry], version: PublicationSemVer) -> PublicationIndexEntry? Never! {
     best := PublicationIndexEntry?{None}
     best_version := publication_ver(0, 0, 0)
     loop entry in entries {
-        published :: publication_parse_semver(entry.version) ?? next
+        published: publication_parse_semver(entry.version) ?? next
         if publication_precedence(published, version) != Ordering.Less -> next
         if best != None && publication_precedence(published, best_version) != Ordering.Greater -> next
         best = Val(entry)
@@ -47,13 +47,13 @@ fn publication_api_baseline(entries: [PublicationIndexEntry], version: Publicati
 
 // Match the first unused full triple before the first unused kind/name pair.
 // Duplicate legacy names therefore retain signature-multiset semantics.
-fn publication_diff_public_api(old: [PublicAPIItem], new: [PublicAPIItem]) -> [PublicationBreakingChange] Never! {
+publication_diff_public_api: fn(old: [PublicAPIItem], new: [PublicAPIItem]) -> [PublicationBreakingChange] Never! {
     changes := [PublicationBreakingChange]{}
     matched := (loop _ in new -> false)
     loop old_item in old {
         exact := -1
         loop index in 0..<new.len() {
-            item :: new[index]
+            item: new[index]
             if !matched[index] && item.kind == old_item.kind && item.name == old_item.name && item.signature == old_item.signature {
                 exact = index
                 break
@@ -65,7 +65,7 @@ fn publication_diff_public_api(old: [PublicAPIItem], new: [PublicAPIItem]) -> [P
         }
         replacement := -1
         loop index in 0..<new.len() {
-            item :: new[index]
+            item: new[index]
             if !matched[index] && item.kind == old_item.kind && item.name == old_item.name {
                 replacement = index
                 break
@@ -73,7 +73,7 @@ fn publication_diff_public_api(old: [PublicAPIItem], new: [PublicAPIItem]) -> [P
         }
         if replacement >= 0 {
             matched[replacement] = true
-            item :: new[replacement]
+            item: new[replacement]
             if publication_api_effects_narrowed(old_item, item) -> next
             &changes.push(PublicationBreakingChange{
                 description: "public {old_item.kind} `{old_item.name}` changed signature\n   | was: {old_item.signature}\n   | now: {item.signature}",
@@ -87,7 +87,7 @@ fn publication_diff_public_api(old: [PublicAPIItem], new: [PublicAPIItem]) -> [P
         }
     }
     loop index in 0..<new.len() {
-        item :: new[index]
+        item: new[index]
         if matched[index] || !publication_api_addition_breaks(old, new, item) -> next
         &changes.push(PublicationBreakingChange{
             description: "public {item.kind} `{item.name}` was added to an existing type\n   | (absent)\n   | {item.signature}",
@@ -98,7 +98,7 @@ fn publication_diff_public_api(old: [PublicAPIItem], new: [PublicAPIItem]) -> [P
 }
 
 // The row of kind `kind` that `member` (`Owner.member`) belongs to.
-fn publication_api_owner(items: [PublicAPIItem], kind: String, member: String) -> PublicAPIItem? Never! {
+publication_api_owner: fn(items: [PublicAPIItem], kind: String, member: String) -> PublicAPIItem? Never! {
     loop item in items {
         if item.kind == kind && member.starts_with("{item.name}.") && !member.removeprefix("{item.name}.").contains(".") -> return Val(item)
     }
@@ -108,41 +108,41 @@ fn publication_api_owner(items: [PublicAPIItem], kind: String, member: String) -
 // A new variant breaks every exhaustive match, a new required member every
 // implementation, and a new field without a default every literal of a
 // struct dependents can build. Members of a new owner are new API.
-fn publication_api_addition_breaks(old: [PublicAPIItem], new: [PublicAPIItem], item: PublicAPIItem) -> Bool Never! {
+publication_api_addition_breaks: fn(old: [PublicAPIItem], new: [PublicAPIItem], item: PublicAPIItem) -> Bool Never! {
     if item.kind == {
         "variant" -> publication_api_owner(old, "enum", item.name) != None
         "require" -> publication_api_owner(old, "trait", item.name) != None
         "field" -> {
             if item.signature.ends_with(" = _") || publication_api_owner(old, "struct", item.name) == None -> return false
-            owner :: publication_api_owner(new, "struct", item.name) ?? return true
+            owner: publication_api_owner(new, "struct", item.name) ?? return true
             !owner.signature.ends_with("{{ .. }}")
         }
         else -> false
     }
 }
 
-struct PublicationAPIEffects {
+PublicationAPIEffects: struct {
     // The signature with its effect row cut out.
     rest: String
     effects: [String]
 }
 
-// `fn f(x: Int) Int -[IO, Net]> = _` as `fn f(x: Int) Int = _` and [IO, Net].
-fn publication_api_effects(signature: String) -> PublicationAPIEffects? Never! {
-    parts :: signature.split(" -[").to_list()
+// `f: fn(x: Int) Int -[IO, Net]> = _` as `f: fn(x: Int) Int = _` and [IO, Net].
+publication_api_effects: fn(signature: String) -> PublicationAPIEffects? Never! {
+    parts: signature.split(" -[").to_list()
     if parts.len() < 2 -> return None
-    tail :: parts[parts.len() - 1].split_once("]>") ?? return None
-    head :: (loop index in 0..<(parts.len() - 1) -> parts[index].copy()).join(" -[")
-    effects :: if tail.before == "" -> [String]{} else -> (loop name in tail.before.split(", ") -> name.copy())
+    tail: parts[parts.len() - 1].split_once("]>") ?? return None
+    head: (loop index in 0..<(parts.len() - 1) -> parts[index].copy()).join(" -[")
+    effects: if tail.before == "" -> [String]{} else -> (loop name in tail.before.split(", ") -> name.copy())
     Val(PublicationAPIEffects{rest: "{head}{tail.after}", effects: effects})
 }
 
 // A fn whose effect row only lost effects still runs in every caller's
 // context; a widened row (or a newly maximal `*` one) does not.
-fn publication_api_effects_narrowed(old: PublicAPIItem, new: PublicAPIItem) -> Bool Never! {
+publication_api_effects_narrowed: fn(old: PublicAPIItem, new: PublicAPIItem) -> Bool Never! {
     if old.kind != "fn" -> return false
-    before :: publication_api_effects(old.signature) ?? return false
-    after :: publication_api_effects(new.signature) ?? return false
+    before: publication_api_effects(old.signature) ?? return false
+    after: publication_api_effects(new.signature) ?? return false
     if before.rest != after.rest -> return false
     if before.effects.contains("*") -> return true
     loop name in after.effects {
@@ -151,8 +151,8 @@ fn publication_api_effects_narrowed(old: PublicAPIItem, new: PublicAPIItem) -> B
     true
 }
 
-fn publication_e2601(version: String, bump_kind: PublicationBumpKind, change: PublicationBreakingChange, next_major: Int) -> Diagnostic Never! {
-    bump :: if bump_kind == {
+publication_e2601: fn(version: String, bump_kind: PublicationBumpKind, change: PublicationBreakingChange, next_major: Int) -> Diagnostic Never! {
+    bump: if bump_kind == {
         .Minor -> "minor"
         .Patch -> "patch"
         else -> "non-breaking"
@@ -160,15 +160,15 @@ fn publication_e2601(version: String, bump_kind: PublicationBumpKind, change: Pu
     // split('.').next() is always present, including the empty version.
     // Core find is a byte offset while slice is character-indexed, so take the
     // text prefix directly; mixing them corrupts non-ASCII text before the dot.
-    major :: if version.split_once(".") == .Val(parts) -> parts.before else -> version
+    major: if version.split_once(".") == .Val(parts) -> parts.before else -> version
     diagnostic_from_registry("E2601", None,
         "this release is tagged {version} but removes public API",
         "{version} is a {bump} bump, which promises no breaking changes. Callers pinned to ^{major}.0 would stop compiling.\n  {change.description}",
         "bump to {next_major}.0.0, or restore `{change.item_name}` (a deprecated shim counts). Use `jet registry publish --force` to override with a warning banner.")
 }
 
-fn publication_e1218(old_version: String, new_version: String, bump: PublicationBumpKind, change: PublicationBreakingChange, next_major: Int) -> Diagnostic Never! {
-    label :: if bump == {
+publication_e1218: fn(old_version: String, new_version: String, bump: PublicationBumpKind, change: PublicationBreakingChange, next_major: Int) -> Diagnostic Never! {
+    label: if bump == {
         .Minor -> "minor"
         .Patch -> "patch"
         .Same -> "unchanged"
@@ -182,7 +182,7 @@ fn publication_e1218(old_version: String, new_version: String, bump: Publication
     diagnostic
 }
 
-struct PublicationPrePublishGate {
+PublicationPrePublishGate: struct {
     build_ok: Bool
     tests_ok: Bool
     breaking: [PublicationBreakingChange]
@@ -190,11 +190,11 @@ struct PublicationPrePublishGate {
     bump_kind: PublicationBumpKind
     next_major: Int
 
-    fn is_blocked(self) -> Bool Never! {
+    is_blocked: fn(self) -> Bool Never! {
         !self.build_ok || !self.tests_ok || (self.breaking.len() != 0 && self.bump_kind != .Major)
     }
 
-    fn semver_errors(self) -> [Diagnostic] Never! {
+    semver_errors: fn(self) -> [Diagnostic] Never! {
         if self.bump_kind == .Major -> return [Diagnostic]{}
         loop change in self.breaking -> publication_e2601(self.version, self.bump_kind, change, self.next_major)
     }

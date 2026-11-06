@@ -9,12 +9,12 @@ use {
 }
 
 // The closed fields of a package generation.
-enum ProfileField {
+ProfileField: enum {
     Extends
     Packages
     Collisions
 
-    fn parse(name: String) -> ProfileField? Never! {
+    parse: fn(name: String) -> ProfileField? Never! {
         if name == {
             PROFILE_FIELD_EXTENDS -> Val(ProfileField.Extends)
             PROFILE_FIELD_PACKAGES -> Val(ProfileField.Packages)
@@ -25,7 +25,7 @@ enum ProfileField {
 }
 
 // A `profile.<name>: Profile{ … }` contribution written as an expression.
-fn envmodel_evaluate_package_profile_expr(name: String, value: Expr, src: String, scope: ModuleEvalScope, globals: [String: CtValue], module_name: String) -> PackageProfileSpec EnvModelEvalError! {
+envmodel_evaluate_package_profile_expr: fn(name: String, value: Expr, src: String, scope: ModuleEvalScope, globals: [String: CtValue], module_name: String) -> PackageProfileSpec EnvModelEvalError! {
     if envmodel_record_literal(value) == .Val(record) -> return Ok(envmodel_evaluate_package_profile_expr(name, record, src, scope, globals, module_name))
     if value == {
         .StructLit(type_name, _, _, _, fields, _, _, _) -> {
@@ -38,7 +38,7 @@ fn envmodel_evaluate_package_profile_expr(name: String, value: Expr, src: String
     }
 }
 
-fn envmodel_evaluate_package_profile_fields(name: String, fields: [NamedExpr], src: String, scope: ModuleEvalScope, globals: [String: CtValue], module_name: String) -> PackageProfileSpec EnvModelEvalError! {
+envmodel_evaluate_package_profile_fields: fn(name: String, fields: [NamedExpr], src: String, scope: ModuleEvalScope, globals: [String: CtValue], module_name: String) -> PackageProfileSpec EnvModelEvalError! {
     seen := [String]{}
     loop field in fields {
         if ProfileField.parse(field.name) == None {
@@ -53,16 +53,16 @@ fn envmodel_evaluate_package_profile_fields(name: String, fields: [NamedExpr], s
     loop field in fields {
         if field.name == PROFILE_FIELD_EXTENDS -> field_map[field.name] = NamedFieldExpr{span: field.name_span, expr: field.value}
     }
-    computed :: envmodel_evaluate_named_fields(field_map, globals, scope, Val(src), "package generation fields are pure computed values; a cycle has no deterministic evaluation order", "break the cycle by making one generation field a literal or by moving the shared computation into a pure function")
-    resolved :: computed.values
+    computed: envmodel_evaluate_named_fields(field_map, globals, scope, Val(src), "package generation fields are pure computed values; a cycle has no deterministic evaluation order", "break the cycle by making one generation field a literal or by moving the shared computation into a pure function")
+    resolved: computed.values
     packages := [String]{}
     extends := [String]{}
     collisions := [String: String]{}
     loop field in fields {
         if field.name != PROFILE_FIELD_PACKAGES -> next
-        extracted :: envmodel_extract_packages(field.value, src)
+        extracted: envmodel_extract_packages(field.value, src)
         loop package in extracted.packages {
-            raw :: envmodel_pkg_ref(package)
+            raw: envmodel_pkg_ref(package)
             if !packages.contains(raw) { &packages.push(raw) }
         }
         if extracted.adapters.len() > 0 {
@@ -85,7 +85,7 @@ fn envmodel_evaluate_package_profile_fields(name: String, fields: [NamedExpr], s
 }
 
 // The name span of field `name`, or an empty span at 0.
-fn envmodel_value_span(fields: [NamedExpr], name: String) -> Span Never! {
+envmodel_value_span: fn(fields: [NamedExpr], name: String) -> Span Never! {
     loop field in fields {
         if field.name == name -> return field.name_span
     }
@@ -93,27 +93,27 @@ fn envmodel_value_span(fields: [NamedExpr], name: String) -> Span Never! {
 }
 
 // Lower a general `[String]` value (package-generation inheritance).
-fn envmodel_string_names_from(value: CtValue) -> [String]? Never! {
+envmodel_string_names_from: fn(value: CtValue) -> [String]? Never! {
     envmodel_strings_from(value)
 }
 
-fn envmodel_invalid_collisions(name: String, span: Span) -> EnvModelEvalError Never! {
+envmodel_invalid_collisions: fn(name: String, span: Span) -> EnvModelEvalError Never! {
     envmodel_error("E1333", "package generation `{name}` has invalid `collisions`", "collision policy is an exact string path-to-provider map", "write `collisions: {{ \"bin/editor\": \"editor@jetpack\" }}`", Val(span))
 }
 
 // `collisions: { "path": "provider", … }` read from its exact source text, so
 // the paths and provider identities stay byte-exact.
-fn envmodel_package_profile_collisions_source(src: String, name: String, span: Span) -> [String: String] EnvModelEvalError! {
-    source_bytes :: src.bytes()
+envmodel_package_profile_collisions_source: fn(src: String, name: String, span: Span) -> [String: String] EnvModelEvalError! {
+    source_bytes: src.bytes()
     if span.start < 0 || span.end > source_bytes.len() || span.start > span.end -> return Err(envmodel_invalid_collisions(name, span))
-    fragment :: String.from_bytes(source_bytes[span.start..<span.end]) ?? return Err(envmodel_invalid_collisions(name, span))
-    values :: envmodel_quoted_collision_values(fragment)
+    fragment: String.from_bytes(source_bytes[span.start..<span.end]) ?? return Err(envmodel_invalid_collisions(name, span))
+    values: envmodel_quoted_collision_values(fragment)
     if values.len() == 0 || values.len() % 2 != 0 -> return Err(envmodel_invalid_collisions(name, span))
     out := [String: String]{}
     index := 0
     loop index + 1 < values.len() {
-        path :: values[index]
-        provider :: values[index + 1]
+        path: values[index]
+        provider: values[index + 1]
         index += 2
         if path.trim() == "" || provider.trim() == "" || path.bytes().contains(U8{0}) {
             return Err(envmodel_error("E1333", "package generation `{name}` has an invalid collision entry", "exact collision paths and provider identities cannot be empty or contain NUL", "name the path and the exact package provider", Val(span)))
@@ -128,22 +128,22 @@ fn envmodel_package_profile_collisions_source(src: String, name: String, span: S
 
 // Every double-quoted string in `fragment`, decoded; empty when a string is
 // left unterminated.
-fn envmodel_quoted_collision_values(fragment: String) -> [String] Never! {
+envmodel_quoted_collision_values: fn(fragment: String) -> [String] Never! {
     values := [String]{}
-    characters :: fragment.chars()
+    characters: fragment.chars()
     index := 0
     loop index < characters.len() {
-        character :: characters[index]
+        character: characters[index]
         index += 1
         if character != '"' -> next
         value := ""
         escaped := false
         closed := false
         loop index < characters.len() {
-            next_character :: characters[index]
+            next_character: characters[index]
             index += 1
             if escaped {
-                decoded :: if next_character == {
+                decoded: if next_character == {
                     'n' -> "\n"
                     'r' -> String.from_bytes([U8]{U8{13}}) ?? ""
                     't' -> "\t"

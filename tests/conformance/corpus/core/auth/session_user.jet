@@ -1,14 +1,14 @@
 // core-conformance: core.auth.session_user
-package {
+package: {
     name: "conformance_auth_session_user"
     version: "0.1.0"
     authority: { allow: [DB, IO, Mem.Alloc, Rand] }
 }
-use auth :: core.auth
+use auth: core.auth
 
-fn run() {
+run: fn() {
     auth.register_user("alice", "argon2id:demo") ?? panic("register")
-    session :: auth.password_login("alice", "argon2id:demo", 1_700_000_000_000, 3_600_000) ?? panic("login")
-    result :: auth.session_user(session)
+    session: auth.password_login("alice", "argon2id:demo", 1_700_000_000_000, 3_600_000) ?? panic("login")
+    result: auth.session_user(session)
     print(result)
 }

@@ -1,15 +1,15 @@
 
 use {
-    encoding :: core.encoding
-    json :: core.encoding.json
-    jsonl :: core.encoding.jsonl
-    files :: core.files
+    encoding: core.encoding
+    json: core.encoding.json
+    jsonl: core.encoding.jsonl
+    files: core.files
 }
 
-fn run() {
+run: fn() {
     text_limits := encoding.EncodingLimits.safe()
     text_limits.max_total_bytes = Val(5)
-    text_output :: files.create("{work}/text.json") ?? panic("create text")
+    text_output: files.create("{work}/text.json") ?? panic("create text")
     text_writer := json.writer(^text_output, text_limits) ?? panic("text writer")
     &text_writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
     if &text_writer.write(encoding.DataEvent.Text("abcd")) == {
@@ -24,21 +24,21 @@ fn run() {
 
     key_limits := encoding.EncodingLimits.safe()
     key_limits.max_total_bytes = Val(5)
-    key_output :: files.create("{work}/key.json") ?? panic("create key")
+    key_output: files.create("{work}/key.json") ?? panic("create key")
     key_writer := json.writer(^key_output, key_limits) ?? panic("key writer")
     &key_writer.write(encoding.DataEvent.ObjectStart) ?? panic("object")
     if &key_writer.write(encoding.DataEvent.Key("abc")) == { .Ok(_) -> { print("key-limit-missed") } .Err(_) -> { print(true) } }
 
     depth_limits := encoding.EncodingLimits.safe()
     depth_limits.max_depth = 1
-    depth_output :: files.create("{work}/depth.json") ?? panic("create depth")
+    depth_output: files.create("{work}/depth.json") ?? panic("create depth")
     depth_writer := json.writer(^depth_output, depth_limits) ?? panic("depth writer")
     &depth_writer.write(encoding.DataEvent.ArrayStart) ?? panic("outer")
     if &depth_writer.write(encoding.DataEvent.ArrayStart) == { .Ok(_) -> { print("depth-limit-missed") } .Err(_) -> { print(true) } }
 
     record_limits := encoding.EncodingLimits.safe()
     record_limits.max_total_bytes = Val(5)
-    record_output :: files.create("{work}/record.jsonl") ?? panic("create record")
+    record_output: files.create("{work}/record.jsonl") ?? panic("create record")
     record_writer := jsonl.writer(^record_output, record_limits) ?? panic("record writer")
     if &record_writer.write(Dyn.Array([Dyn.Int(1), Dyn.Text("abcd")])) == {
         .Ok(_) -> { print("record-limit-missed") }
@@ -47,7 +47,7 @@ fn run() {
         }
     }
 
-    nonfinite_output :: files.create("{work}/nonfinite.jsonl") ?? panic("create nonfinite")
+    nonfinite_output: files.create("{work}/nonfinite.jsonl") ?? panic("create nonfinite")
     nonfinite_writer := jsonl.writer(^nonfinite_output) ?? panic("nonfinite writer")
     if &nonfinite_writer.write(Dyn.Array([Dyn.Int(1), Dyn.Float(0.0 / 0.0)])) == { .Ok(_) -> { print("nonfinite-missed") } .Err(_) -> { print(true) } }
 }

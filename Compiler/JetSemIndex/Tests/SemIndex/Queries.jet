@@ -1,6 +1,6 @@
 // Pure algorithms: genuine typed input records, not a fabricated checked-source
 // producer. Full checked oracles below require S4/C4.
-fn semindex_query_test_member(name: String, kind: MemberKind, origin: MemberOrigin, module_path: String, start: Int, identity: String) -> MemberFact Never! {
+semindex_query_test_member: fn(name: String, kind: MemberKind, origin: MemberOrigin, module_path: String, start: Int, identity: String) -> MemberFact Never! {
     MemberFact{owner: "Widget", name: name, identity: identity, kind: kind, origin: origin, signature: "retained", module_path: module_path, span: SourceSpan{start: start, end: start + 1}}
 }
 #Test("semindex_member_sort_preserves_rank_location_and_stable_ties") {
@@ -22,25 +22,25 @@ fn semindex_query_test_member(name: String, kind: MemberKind, origin: MemberOrig
 }
 
 #Test("semindex_structural_signature_ignores_parameter_spelling_but_keeps_contract") {
-    before :: SemIndexSymbolKind.Function{params: [SemIndexNameTypeFact]{SemIndexNameTypeFact{name: "name", ty: "String"}}, call_contract: [SemIndexCallContractEntry]{}, ret: Val("Int")}
-    renamed :: SemIndexSymbolKind.Function{params: [SemIndexNameTypeFact]{SemIndexNameTypeFact{name: "other", ty: "String"}}, call_contract: [SemIndexCallContractEntry]{}, ret: Val("Int")}
+    before: SemIndexSymbolKind.Function{params: [SemIndexNameTypeFact]{SemIndexNameTypeFact{name: "name", ty: "String"}}, call_contract: [SemIndexCallContractEntry]{}, ret: Val("Int")}
+    renamed: SemIndexSymbolKind.Function{params: [SemIndexNameTypeFact]{SemIndexNameTypeFact{name: "other", ty: "String"}}, call_contract: [SemIndexCallContractEntry]{}, ret: Val("Int")}
     assert_eq(semindex_structural_signature(before, [ViewProvenanceFact]{}), semindex_structural_signature(renamed, [ViewProvenanceFact]{}))
     assert_eq(semindex_structural_signature(before, [ViewProvenanceFact]{}), "fn(String);call_contract=[]=>Int;view_source=")
-    contract :: SemIndexSymbolKind.Function{params: [SemIndexNameTypeFact]{SemIndexNameTypeFact{name: "name", ty: "String"}}, call_contract: [SemIndexCallContractEntry]{SemIndexCallContractEntry{label: "timeout", zone: "named", variadic: true}}, ret: Val("Int")}
+    contract: SemIndexSymbolKind.Function{params: [SemIndexNameTypeFact]{SemIndexNameTypeFact{name: "name", ty: "String"}}, call_contract: [SemIndexCallContractEntry]{SemIndexCallContractEntry{label: "timeout", zone: "named", variadic: true}}, ret: Val("Int")}
     assert(semindex_structural_signature(before, [ViewProvenanceFact]{}) != semindex_structural_signature(contract, [ViewProvenanceFact]{}))
     assert_eq(semindex_structural_signature(contract, [ViewProvenanceFact]{}), "fn(String);call_contract=[timeout:named:true]=>Int;view_source=")
-    void :: SemIndexSymbolKind.Function{params: [SemIndexNameTypeFact]{}, call_contract: [SemIndexCallContractEntry]{}, ret: None}
+    void: SemIndexSymbolKind.Function{params: [SemIndexNameTypeFact]{}, call_contract: [SemIndexCallContractEntry]{}, ret: None}
     assert_eq(semindex_structural_signature(void, [ViewProvenanceFact]{}), "fn();call_contract=[]=>();view_source=")
 }
 #Test("semindex_structural_signature_keeps_returned_view_sources") {
-    kind :: SemIndexSymbolKind.Function{params: [SemIndexNameTypeFact]{}, call_contract: [SemIndexCallContractEntry]{}, ret: Val("View<Int>")}
-    left :: ViewProvenanceFact{output_path: [String]{}, sources: [ViewSourcePathFact]{ViewSourcePathFact{source: .Parameter{index: 0}, projections: [ViewProjectionFact]{.Range}}}, mutable: false}
-    right :: ViewProvenanceFact{output_path: [String]{}, sources: [ViewSourcePathFact]{ViewSourcePathFact{source: .Parameter{index: 1}, projections: [ViewProjectionFact]{.Range}}}, mutable: false}
+    kind: SemIndexSymbolKind.Function{params: [SemIndexNameTypeFact]{}, call_contract: [SemIndexCallContractEntry]{}, ret: Val("View<Int>")}
+    left: ViewProvenanceFact{output_path: [String]{}, sources: [ViewSourcePathFact]{ViewSourcePathFact{source: .Parameter{index: 0}, projections: [ViewProjectionFact]{.Range}}}, mutable: false}
+    right: ViewProvenanceFact{output_path: [String]{}, sources: [ViewSourcePathFact]{ViewSourcePathFact{source: .Parameter{index: 1}, projections: [ViewProjectionFact]{.Range}}}, mutable: false}
     assert(semindex_structural_signature(kind, [ViewProvenanceFact]{left}) != semindex_structural_signature(kind, [ViewProvenanceFact]{right}))
     assert_eq(semindex_structural_signature(kind, [ViewProvenanceFact]{left}), "fn();call_contract=[]=>View<Int>;view_source=slot:$;parameter:0;access:read;path:range")
 }
 #Test("semindex_structural_signature_keeps_all_noncallable_shapes") {
-    kinds :: [SemIndexSymbolKind]{
+    kinds: [SemIndexSymbolKind]{
         .Module,
         .Struct{fields: [SemIndexNameTypeFact]{SemIndexNameTypeFact{name: "x", ty: "Int"}, SemIndexNameTypeFact{name: "y", ty: "Float"}}},
         .Enum{variants: [String]{"A", "B"}}, .Trait, .Tag, .Type, .Const,
@@ -49,13 +49,13 @@ fn semindex_query_test_member(name: String, kind: MemberKind, origin: MemberOrig
     signatures := [String]{}
     loop kind in kinds -> &signatures.push(semindex_structural_signature(kind, ([ViewProvenanceFact]{})))
     assert_eq(signatures, [String]{"module", "struct{{x:Int,y:Float}}", "enum{{A,B}}", "trait", "tag", "type", "const", "variant:E", "field:S:Int", "local:true:?", "local:false:String", "param:Bool"})
-    reversed :: SemIndexSymbolKind.Enum{variants: [String]{"B", "A"}}
+    reversed: SemIndexSymbolKind.Enum{variants: [String]{"B", "A"}}
     assert(semindex_structural_signature(kinds[2], [ViewProvenanceFact]{}) != semindex_structural_signature(reversed, [ViewProvenanceFact]{}))
 }
 
 // Algorithm fixtures are input to the retained-fact query layer, not checked
 // verdicts about source text. Shared compiler producer tests remain separate.
-fn semindex_query_test_definition(identity: String, name: String, kind: SemIndexSymbolKind) -> SymbolDef Never! {
+semindex_query_test_definition: fn(identity: String, name: String, kind: SemIndexSymbolKind) -> SymbolDef Never! {
     SymbolDef{
         identity: identity,
         declaration_identity_unavailable: CallableFactUnavailable{required_stage: CompilerStage.Resolved, reason: "query algorithm input"},
@@ -65,11 +65,11 @@ fn semindex_query_test_definition(identity: String, name: String, kind: SemIndex
         derives: [String]{}, nominal_base: None, trait_contracts: [TraitContractFact]{},
     }
 }
-fn semindex_query_test_index(defs: ^[SymbolDef], refs: ^[SymbolRef], calls: ^[CallEdge], members: ^[MemberFact]) -> SemIndex Never! {
+semindex_query_test_index: fn(defs: ^[SymbolDef], refs: ^[SymbolRef], calls: ^[CallEdge], members: ^[MemberFact]) -> SemIndex Never! {
     SemIndex.new(^defs, ^refs, ^calls, [EffectFact]{}, ^members, [StructuralNode]{}, [DefinitionFact]{})
 }
 #Test("semindex_queries_keep_first_match_and_exact_reference_spelling") {
-    index :: semindex_query_test_index(
+    index: semindex_query_test_index(
         [SymbolDef]{
             semindex_query_test_definition("first", "score", .Const),
             semindex_query_test_definition("second", "score", .Type),
@@ -97,11 +97,11 @@ fn semindex_query_test_index(defs: ^[SymbolDef], refs: ^[SymbolRef], calls: ^[Ca
     }
     assert(index.lookup("main::score") == None)
     assert(index.lookup_identity("missing") == None)
-    refs :: index.references_to("score")
+    refs: index.references_to("score")
     assert_eq(refs.len(), 2)
     assert_eq(refs[0][0].span.start, 9)
     assert_eq(refs[1][0].span.start, 2)
-    calls :: index.call_sites("score")
+    calls: index.call_sites("score")
     assert_eq(calls.len(), 2)
     assert_eq(calls[0][0].caller, "first")
     assert_eq(calls[1][0].caller, "second")
@@ -112,7 +112,7 @@ fn semindex_query_test_index(defs: ^[SymbolDef], refs: ^[SymbolRef], calls: ^[Ca
     assert_eq(index.call_edges().len(), 3)
 }
 #Test("semindex_structural_audit_sorts_ids_and_ignores_locations_and_metadata") {
-    before :: semindex_query_test_index([SymbolDef]{
+    before: semindex_query_test_index([SymbolDef]{
         semindex_query_test_definition("z", "removed", .Const),
         semindex_query_test_definition("point", "Point", .Struct{fields: [SemIndexNameTypeFact]{SemIndexNameTypeFact{name: "x", ty: "Int"}}}),
         semindex_query_test_definition("a", "removed", .Type),
@@ -122,13 +122,13 @@ fn semindex_query_test_index(defs: ^[SymbolDef], refs: ^[SymbolRef], calls: ^[Ca
     unchanged.def_span = SourceSpan{start: 100, end: 200}
     unchanged.module_path = "other"
     unchanged.derives = [String]{"New"}
-    after :: semindex_query_test_index([SymbolDef]{
+    after: semindex_query_test_index([SymbolDef]{
         semindex_query_test_definition("y", "new", .Tag),
         semindex_query_test_definition("point", "Point", .Struct{fields: [SemIndexNameTypeFact]{SemIndexNameTypeFact{name: "x", ty: "Float"}}}),
         semindex_query_test_definition("b", "new", .Trait),
         ^unchanged,
     }, [SymbolRef]{}, [CallEdge]{}, [MemberFact]{})
-    audit :: before.structural_audit(after)
+    audit: before.structural_audit(after)
     assert_eq(audit.added, [String]{"b", "y"})
     assert_eq(audit.removed, [String]{"a", "z"})
     assert_eq(audit.changed, [String]{"point"})
@@ -151,7 +151,7 @@ fn semindex_query_test_index(defs: ^[SymbolDef], refs: ^[SymbolRef], calls: ^[Ca
         {owner: "Other", module_path: "a", states: [StateNodeFact]{}, transitions: [StateTransitionFact]{}},
         {owner: "Widget", module_path: "b", states: [StateNodeFact]{}, transitions: [StateTransitionFact]{}},
     })
-    dossier :: index.dossier("widget-id")
+    dossier: index.dossier("widget-id")
     assert_eq(dossier.target, "Widget")
     assert_eq(dossier.members[0].name, "title")
     assert_eq(dossier.members[1].signature, "retained")
@@ -164,7 +164,7 @@ fn semindex_query_test_index(defs: ^[SymbolDef], refs: ^[SymbolRef], calls: ^[Ca
     assert_eq(dossier.bypass_facts[1].detail, "telemetry only")
     assert_eq(dossier.state_graphs.len(), 1)
     assert_eq(dossier.state_graphs[0].module_path, "b")
-    missing :: index.dossier("missing")
+    missing: index.dossier("missing")
     assert(missing.definition == None)
     assert_eq(missing.target, "missing")
     assert_eq(missing.members.len(), 0)
@@ -174,14 +174,14 @@ fn semindex_query_test_index(defs: ^[SymbolDef], refs: ^[SymbolRef], calls: ^[Ca
 // Requires the canonical CP-DERIVATIONS invalidation helper, not a local
 // reimplementation of Foundation's identity/disposition law.
 #Test("semindex_derivations_keep_sorted_evidence_ids_and_invalidate_only_current") {
-    identity :: derivation_identity("source", "build", "run", "target")
-    first :: derivation_record("subject", "a", "checker", .StaticDerivation, "rule", [String]{}, identity)
-    second :: derivation_record("subject", "b", "checker", .StaticDerivation, "rule", [String]{first.id}, identity)
+    identity: derivation_identity("source", "build", "run", "target")
+    first: derivation_record("subject", "a", "checker", .StaticDerivation, "rule", [String]{}, identity)
+    second: derivation_record("subject", "b", "checker", .StaticDerivation, "rule", [String]{first.id}, identity)
     retained := derivation_record("redacted", "c", "checker", .StaticDerivation, "rule", [String]{}, identity)
     retained.disposition = .Redacted
     index := semindex_query_test_index([SymbolDef]{}, [SymbolRef]{}, [CallEdge]{}, [MemberFact]{})
     &index.set_derivations([DerivationRecord]{second, retained, first})
-    expected :: if first.id < second.id -> first.id else -> second.id
+    expected: if first.id < second.id -> first.id else -> second.id
     if index.derivation_ref("subject") == {
         .Val(reference) -> assert_eq(reference.id, expected)
         .None -> { panic("retained subject evidence absent") }
@@ -193,7 +193,7 @@ fn semindex_query_test_index(defs: ^[SymbolDef], refs: ^[SymbolRef], calls: ^[Ca
     assert(index.derivation("absent") == None)
     assert(index.derivation_ref("absent") == None)
     assert_eq(&index.invalidate_derivations(identity), 0)
-    changed :: derivation_identity("source", "build", "run", "changed-target")
+    changed: derivation_identity("source", "build", "run", "changed-target")
     assert_eq(&index.invalidate_derivations(changed), 2)
     assert_eq(&index.invalidate_derivations(changed), 0)
     if index.derivation(first.id) == {
@@ -209,8 +209,8 @@ fn semindex_query_test_index(defs: ^[SymbolDef], refs: ^[SymbolRef], calls: ^[Ca
 // Checked integration oracles: these consume real indices opened from the
 // original Rust fixtures. Register through S4/C4 rather than fake snapshots.
 // Original Point.x Int -> Float fixture.
-fn semindex_test_structural_audit_reports_signature_change(before: SemIndex, after: SemIndex) {
-    audit :: before.structural_audit(after)
+semindex_test_structural_audit_reports_signature_change: fn(before: SemIndex, after: SemIndex) {
+    audit: before.structural_audit(after)
     assert_eq(audit.added.len(), 0)
     assert_eq(audit.removed.len(), 0)
     found := false
@@ -219,8 +219,8 @@ fn semindex_test_structural_audit_reports_signature_change(before: SemIndex, aft
 }
 // Original score(String)->Int changes to score(String,Int)->Float. A signature
 // edit is changed, not added/removed.
-fn semindex_test_structural_audit_tracks_callable_signature_changes(before: SemIndex, after: SemIndex) {
-    audit :: before.structural_audit(after)
+semindex_test_structural_audit_tracks_callable_signature_changes: fn(before: SemIndex, after: SemIndex) {
+    audit: before.structural_audit(after)
     loop identity in audit.added -> assert(!(identity.starts_with("fn:") && identity.ends_with("::score")))
     loop identity in audit.removed -> assert(!(identity.starts_with("fn:") && identity.ends_with("::score")))
     found := false
@@ -228,8 +228,8 @@ fn semindex_test_structural_audit_tracks_callable_signature_changes(before: SemI
     assert(found)
 }
 // Original Widget/DrawThing fixture.
-fn semindex_test_dossier_stitches_scattered_members(index: SemIndex) {
-    dossier :: index.dossier("Widget")
+semindex_test_dossier_stitches_scattered_members: fn(index: SemIndex) {
+    dossier: index.dossier("Widget")
     signatures := [String]{}
     loop member in dossier.members -> &signatures.push("{member.name}:{member.signature}")
     assert(signatures.contains("title:title: String"))
@@ -244,8 +244,8 @@ fn semindex_test_dossier_stitches_scattered_members(index: SemIndex) {
     assert(label && size && render)
 }
 // Original Client.connect fixture.
-fn semindex_test_dossier_preserves_method_call_contract(index: SemIndex) {
-    dossier :: index.dossier("Client")
+semindex_test_dossier_preserves_method_call_contract: fn(index: SemIndex) {
+    dossier: index.dossier("Client")
     found := false
     loop member in dossier.members {
         if member.name != "connect" -> next
@@ -259,8 +259,8 @@ fn semindex_test_dossier_preserves_method_call_contract(index: SemIndex) {
 }
 // Original Invoice/risky_fn/fetch_it fixture. JSON/text consumer
 // assertions1545–1551 need S17–S20, not copied wire strings.
-fn semindex_test_dossier_bypass_facts(index: SemIndex) {
-    dossier :: index.dossier("run")
+semindex_test_dossier_bypass_facts: fn(index: SemIndex) {
+    dossier: index.dossier("run")
     kinds := [String]{}
     allow := false
     drop := false
@@ -285,7 +285,7 @@ fn semindex_test_dossier_bypass_facts(index: SemIndex) {
 
 // Scalar projections consume the real retained owner through a READ parameter.
 // No owned getter, one-row owner container, encoded wrapper or deep index copy.
-fn semindex_query_test_scalar_consumers(index: SemIndex, expected_name: String, expected_unfree: [String]) Never! {
+semindex_query_test_scalar_consumers: fn(index: SemIndex, expected_name: String, expected_unfree: [String]) Never! {
     if index.package_facts == {
         .Val(facts) -> {
             assert_eq(facts.name, expected_name)

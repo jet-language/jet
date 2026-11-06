@@ -1,4 +1,4 @@
-package {
+package: {
     name: "serde_json_number_events"
     version: "0.1.0"
     authority: { allow: [Exec, FS, FS.Read, IO, Mem.Alloc] }
@@ -6,15 +6,15 @@ package {
 
 // DataEvent.Number is the public, lossless numeric lexeme on every tier.
 use {
-    data :: core.data
-    encoding :: core.encoding
-    json :: core.encoding.json
-    cbor :: core.encoding.cbor
-    files :: core.files
+    data: core.data
+    encoding: core.encoding
+    json: core.encoding.json
+    cbor: core.encoding.cbor
+    files: core.files
 }
 
-fn reject_json(path: Path, canonical: Bool, text: String) (EncodingError | IOError)! {
-    output :: files.create(path)
+reject_json: fn(path: Path, canonical: Bool, text: String) (EncodingError | IOError)! {
+    output: files.create(path)
     writer := json.writer(^output, canonical: canonical)
     if &writer.write(encoding.DataEvent.Number(text)) == {
         .Ok(_) -> panic("JSON writer accepted Number")
@@ -29,8 +29,8 @@ fn reject_json(path: Path, canonical: Bool, text: String) (EncodingError | IOErr
     }
 }
 
-fn reject_cbor(path: Path, text: String) (EncodingError | IOError)! {
-    output :: files.create(path)
+reject_cbor: fn(path: Path, text: String) (EncodingError | IOError)! {
+    output: files.create(path)
     writer := cbor.writer(^output)
     if &writer.write(encoding.DataEvent.Number(text)) == {
         .Ok(_) -> panic("CBOR writer accepted Number")
@@ -41,8 +41,8 @@ fn reject_cbor(path: Path, text: String) (EncodingError | IOError)! {
     }
 }
 
-fn run() (DataError | EncodingError | IOError)! {
-    trees :: data.json<Dyn>("[123456789012345678901234567890,1e400]")
+run: fn() (DataError | EncodingError | IOError)! {
+    trees: data.json<Dyn>("[123456789012345678901234567890,1e400]")
     loop tree in trees {
         loop event in json.events(tree) {
             if event == {
@@ -51,8 +51,8 @@ fn run() (DataError | EncodingError | IOError)! {
             }
         }
     }
-    scratch :: files.temp_dir("jet-json-number-events")
-    path :: Path.from(scratch.path).join("numbers")
+    scratch: files.temp_dir("jet-json-number-events")
+    path: Path.from(scratch.path).join("numbers")
     loop text in ([String]{"abc", "123"}) {
         loop canonical in ([Bool]{false, true}) {
             reject_json(path, canonical, text)

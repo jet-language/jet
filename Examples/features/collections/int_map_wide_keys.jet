@@ -1,17 +1,17 @@
 // #4142: an [Int:V] map keys exact Int values, not their machine words.
 // Every lookup key is computed separately from the stored key, so a spilled
 // value (outside the inline range, e.g. a u64 hash >= 2^63) must still match.
-fn parse(text: String) -> Int { Int.parse(text) ?? 0 }
+parse: fn(text: String) -> Int { Int.parse(text) ?? 0 }
 
 // Uppercase bindings fold at compile time, including keys beyond i64 and u128.
-BAKED_MAP :: [
+BAKED_MAP: [
     340282366920938463463374607431768211457: "positive",
     -340282366920938463463374607431768211457: "negative",
     0: "zero",
 ]
 
-fn run() {
-    texts :: [
+run: fn() {
+    texts: [
         "12017618986949271521",
         "9223372036854775808",
         "5000000000000000000",
@@ -26,10 +26,10 @@ fn run() {
     }
     print("len {m.len()}")
     loop text in texts {
-        key :: parse(text)
+        key: parse(text)
         print("get {key} -> {m.get(key) ?? "missing"} has {m.has_key(key)}")
     }
-    sum :: parse("12017618986949271520") + 1
+    sum: parse("12017618986949271520") + 1
     print("computed {sum} -> {m.get(sum) ?? "missing"}")
     print("absent {m.get(parse("12017618986949271522")) ?? "missing"} has {m.has_key(parse("12017618986949271522"))}")
     print("keys {m.keys().to_list()}")

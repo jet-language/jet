@@ -5,90 +5,90 @@
 // and in an impl head that implements an instance trait for a file type
 // (`impl Provider.gc_m8.Native`, D-IMPLDOT1). A bound inside an instance or an
 // inline module names that module's own trait (`<W: Native>`).
-trait Native {
-    fn strong_count(self) -> Int
+Native: trait {
+    strong_count: fn(self) -> Int
 }
 
-trait Labelled {
-    fn label(self) -> String
+Labelled: trait {
+    label: fn(self) -> String
 }
 
-struct Provider {
+Provider: struct {
     count: Int
 }
 
 impl Provider.Native {
-    fn strong_count(self) -> Int { self.count }
+    strong_count: fn(self) -> Int { self.count }
 }
 
-module seam<N: Native> {
-    struct Handle {
+seam: module<N: Native> {
+    Handle: struct {
         native: N
     }
 
     impl Handle.Native {
-        fn strong_count(self) -> Int { self.native.strong_count() * 10 }
+        strong_count: fn(self) -> Int { self.native.strong_count() * 10 }
     }
 
-    fn strong_count(value: N) -> Int { value.strong_count() }
+    strong_count: fn(value: N) -> Int { value.strong_count() }
 
-    fn bounded<M: Native>(value: M) -> Int { value.strong_count() + 1 }
+    bounded: fn<M: Native>(value: M) -> Int { value.strong_count() + 1 }
 
-    fn via_bound(value: N) -> Int { bounded(value) + bounded(Handle{native: value}) }
+    via_bound: fn(value: N) -> Int { bounded(value) + bounded(Handle{native: value}) }
 }
 
-module seam_m8 :: seam<Provider>
+seam_m8: seam<Provider>
 
-module seam_alias :: seam_m8
+seam_alias: seam_m8
 
-struct Outer {
+Outer: struct {
     inner: seam_m8.Handle
     others: [seam_alias.Handle]
 }
 
 impl seam_m8.Handle.Labelled {
-    fn label(self) -> String { "handle {self.native.strong_count()}" }
+    label: fn(self) -> String { "handle {self.native.strong_count()}" }
 }
 
-module gc<O>(scale: Int) {
-    trait Native {
-        fn strong_count(self) -> Int
+gc: module<O>(scale: Int) {
+    Native: trait {
+        strong_count: fn(self) -> Int
     }
 
-    fn weighted<W: Native>(value: W) -> Int { value.strong_count() * scale }
+    weighted: fn<W: Native>(value: W) -> Int { value.strong_count() * scale }
 
-    fn count_of(values: [O]) -> Int { values.len() }
+    count_of: fn(values: [O]) -> Int { values.len() }
 }
 
-module gc_m8 :: gc<Provider>(3)
+gc_m8: gc<Provider>(3)
 
-module plain {
-    trait Native {
-        fn strong_count(self) -> Int
+plain: module {
+    Native: trait {
+        strong_count: fn(self) -> Int
     }
 
-    struct Box {
+    Box: struct {
         count: Int
     }
 
     impl Box.Native {
-        fn strong_count(self) -> Int { self.count }
+        strong_count: fn(self) -> Int { self.count }
     }
 
-    fn doubled<N: Native>(value: N) -> Int { value.strong_count() * 2 }
+    doubled: fn<N: Native>(value: N) -> Int { value.strong_count() * 2 }
 }
 
 impl Outer.gc_m8.Native {
-    fn strong_count(self) -> Int { self.inner.strong_count() + self.others.len() }
+    strong_count: fn(self) -> Int { self.inner.strong_count() + self.others.len() }
 }
 
-fn run() {
-    p :: Provider{count: 3}
+run: fn() {
+    p: Provider{count: 3}
     print(seam_m8.strong_count(p))
     print(seam_m8.via_bound(Provider{count: 4}))
-    h :: seam_m8.Handle{native: Provider{count: 5}}
+    h: seam_m8.Handle{native: Provider{count: 5}}
     print(h.label())
-    outer :: Outer{inner: h, others: [seam_alias.Handle]{seam_alias.Handle{native: Provider{count: 6}}}}
+    outer: Outer{inner: h, others: [seam_alias.Handle]{seam_alias.Handle{native: Provider{count: 6}}}}
     print(outer.inner.strong_count())
     print(gc_m8.weighted(outer))
     print(plain.doubled(plain.Box{count: 8}))

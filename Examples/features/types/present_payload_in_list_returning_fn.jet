@@ -1,21 +1,21 @@
 // In a function that returns `[T]?`, only the returned list is shaped by that
 // return type. A `Val(...)` built for a field or a list element keeps its own
 // type: a struct literal stays the struct, an enum literal stays the enum.
-struct Label {
+Label: struct {
     name: String
 }
 
-enum Default {
+Default: enum {
     Text(value: String)
     Flag(value: Bool)
 }
 
-struct Arg {
+Arg: struct {
     text: String
     label: Label?
 }
 
-fn label_all(args: [Arg], name: String) -> [Arg]? {
+label_all: fn(args: [Arg], name: String) -> [Arg]? {
     if args.len() == 0 -> return None
     labelled := args
     loop index in 0..<labelled.len() {
@@ -24,7 +24,7 @@ fn label_all(args: [Arg], name: String) -> [Arg]? {
     Val(labelled)
 }
 
-fn defaults(csv: Bool) -> [Default?]? {
+defaults: fn(csv: Bool) -> [Default?]? {
     found := [Default?]{None}
     if csv {
         &found.push(Val(Default.Text{value: ","}))
@@ -33,9 +33,9 @@ fn defaults(csv: Bool) -> [Default?]? {
     Val(found)
 }
 
-fn run() {
-    args :: [Arg]{Arg{text: "a", label: None}, Arg{text: "b", label: None}}
-    labelled :: label_all(args, "arg") ?? [Arg]{}
+run: fn() {
+    args: [Arg]{Arg{text: "a", label: None}, Arg{text: "b", label: None}}
+    labelled: label_all(args, "arg") ?? [Arg]{}
     loop arg in labelled -> print("{arg.text}: {arg.label?.name ?? "-"}")
     print(label_all([Arg]{}, "none") == None)
     entries := [Default?]{}

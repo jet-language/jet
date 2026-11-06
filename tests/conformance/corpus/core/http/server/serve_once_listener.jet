@@ -1,19 +1,19 @@
 // core-conformance: core.http.server.serve_once_listener
 use {
-    client :: core.http.client
-    server :: core.http.server
-    net :: core.net
+    client: core.http.client
+    server: core.http.server
+    net: core.net
 }
 
-fn run() {
-    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
-    address :: listener.local_addr() ?? panic("address")
-    mux :: server.mux()
+run: fn() {
+    listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address: listener.local_addr() ?? panic("address")
+    mux: server.mux()
     mux.get("/", (req: HTTPRequest) -> Ok(server.response(200, "served")))
-    t :: task {
+    t: task {
         server.serve_once_listener(listener, mux)
     }
-    response :: client.get("http://{address}/") ?? panic("get")
+    response: client.get("http://{address}/") ?? panic("get")
     print(response.body().text(1024) ?? panic("body"))
     t.join() ?? panic("serve")
 }

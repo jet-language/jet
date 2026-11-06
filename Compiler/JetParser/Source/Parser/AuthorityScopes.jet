@@ -12,11 +12,11 @@ use jet_foundation.[
     expr_span,
 ]
 
-fn parser_authority_effect_path(expr: Expr) -> String? {
+parser_authority_effect_path: fn(expr: Expr) -> String? {
     if expr == {
         .Ident(name, _, _) -> Val(name)
         .Field(base, member, _, _) -> {
-            prefix :: parser_authority_effect_path(base) ?? return None
+            prefix: parser_authority_effect_path(base) ?? return None
             Val("{prefix}.{member}")
         }
         else -> None
@@ -26,21 +26,21 @@ fn parser_authority_effect_path(expr: Expr) -> String? {
 // The whole written path `Log.Audit`; a field's own span is its member. A
 // bound authority (`#FX(authority: Log.Audit)`) is reported over this path,
 // a bare capability over its leaf.
-fn parser_authority_path_span(expr: Expr) -> Span {
+parser_authority_path_span: fn(expr: Expr) -> Span {
     if expr == .Field(base, _, span, _) -> return Span{start: parser_authority_path_span(base).start, end: span.end}
     expr_span(expr)
 }
 
-fn parser_authority_scope_stmt(state: &JetParserState, marker: Marker, args: [CallArg], body: [Stmt], span: Span) -> Stmt? {
+parser_authority_scope_stmt: fn(state: &JetParserState, marker: Marker, args: [CallArg], body: [Stmt], span: Span) -> Stmt? {
     caps := [NamedSpan]{}
     loop argument in args {
-        written :: parser_authority_effect_path(argument.expr) ?? {
+        written: parser_authority_effect_path(argument.expr) ?? {
             parser_marker_shape_error(&state, marker)
             return None
         }
         name := written
         if name.starts_with("Effect.") -> name = name.slice(7, name.len())
-        cap_span :: if argument.label == None -> expr_span(argument.expr) else -> parser_authority_path_span(argument.expr)
+        cap_span: if argument.label == None -> expr_span(argument.expr) else -> parser_authority_path_span(argument.expr)
         &caps.push(NamedSpan{name: name, span: cap_span})
     }
     binding := NamedSpan?{None}

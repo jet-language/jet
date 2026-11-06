@@ -2,8 +2,8 @@
 // `entry`): a recursive function whose body ends by combining its own call
 // with a value through an associative operation,
 //
-//     fn triangle(n: Int) -> Int { if n < 1 -> return 0; n + triangle(n - 1) }
-//     fn fact(n: Int) -> Int { if n < 2 -> return 1; fact(n - 1) * n }
+//     triangle: fn(n: Int) -> Int { if n < 1 -> return 0; n + triangle(n - 1) }
+//     fact: fn(n: Int) -> Int { if n < 2 -> return 1; fact(n - 1) * n }
 //
 // makes that last call the next pass of a loop instead, carrying the
 // operation's value so far in an accumulator. The operations are an exact
@@ -25,7 +25,7 @@
 // (or test `p > c` and so on, with a step of at least 1). For a word p, c
 // plus the step must also stay in p's range. Then each pass brings p closer
 // to the test, and the If returns after finitely many passes. An endless
-// recursion such as `fn f(n: Int) -> Int { f(n + 1) + 1 }` has no such test.
+// recursion such as `f: fn(n: Int) -> Int { f(n + 1) + 1 }` has no such test.
 // It stops with E3012 when it reaches the end of the stack, and as a loop it
 // would never stop, so it stays a call.
 // (How deep a finite recursion may go before E3012 already depends on the
@@ -63,19 +63,19 @@
 use jet_foundation.[Type, compiler_threads_single, name_rows_set, name_rows_value]
 
 // Rewrites each recursive function the header comment describes.
-fn ir_opt_accumulate(m: &IRModule, functions: &[IRFunction], recursive: [Bool], keys: [String]) Never! {
+ir_opt_accumulate: fn(m: &IRModule, functions: &[IRFunction], recursive: [Bool], keys: [String]) Never! {
     loop id in 0..<functions.len() {
         if recursive[id] -> _ := ir_opt_accumulate_function(&m, &functions[id], id, keys)
     }
 }
 
 // Rewrites function `id` (`f`) as the header comment says; whether it did.
-fn ir_opt_accumulate_function(m: &IRModule, f: &IRFunction, id: Int, keys: [String]) -> Bool Never! {
-    count :: f.op.len()
+ir_opt_accumulate_function: fn(m: &IRModule, f: &IRFunction, id: Int, keys: [String]) -> Bool Never! {
+    count: f.op.len()
     if f.asm != None || count == 0 || f.result < 0 || !ir_opt_accumulate_value(m, f.result) -> return false
     int_params := false
     loop slot in 0..<f.param_count {
-        kind :: m.types[f.slot_type[slot]].kind
+        kind: m.types[f.slot_type[slot]].kind
         if !ir_opt_accumulate_param(m, f.slot_type[slot]) -> return false
         if kind == .Int -> int_params = true
     }
@@ -84,7 +84,7 @@ fn ir_opt_accumulate_function(m: &IRModule, f: &IRFunction, id: Int, keys: [Stri
     last := count - 1
     loop last >= 0 && f.op[last] == .Unreachable -> last -= 1
     if last < 0 || f.op[last] != .Return || f.a[last] < 0 -> return false
-    sum :: f.a[last]
+    sum: f.a[last]
     tail := last - 1
     loop tail >= 0 && f.op[tail] == .Drop -> tail -= 1
     if tail < 0 || f.dst[tail] != sum || f.slot_type[sum] != f.result || !ir_opt_accumulate_op(m, f, tail) -> return false
@@ -96,10 +96,10 @@ fn ir_opt_accumulate_function(m: &IRModule, f: &IRFunction, id: Int, keys: [Stri
     loop k in 0..<count {
         if k != call && f.op[k] == .Call && f.a[k] == id -> return false
     }
-    result :: f.dst[call]
-    left :: f.a[tail] == result
+    result: f.dst[call]
+    left: f.a[tail] == result
     if !left && f.b[tail] != result -> return false
-    x :: if left -> f.b[tail] else -> f.a[tail]
+    x: if left -> f.b[tail] else -> f.a[tail]
     if x < 0 || x == result || x == sum -> return false
     drops_x := false
     loop k in (tail + 1)..<last {
@@ -118,13 +118,13 @@ fn ir_opt_accumulate_function(m: &IRModule, f: &IRFunction, id: Int, keys: [Stri
         }
     }
     if depth != 0 -> return false
-    edges :: ir_opt_accumulate_edges(f, keys)
+    edges: ir_opt_accumulate_edges(f, keys)
     // Before the operation: no write of a parameter, of `sum` or (but the
     // call) of `result`, no read of either, no drop of a parameter, and each
     // return a value of the result's type, or nothing on a stop edge.
     reads := [Int]{}
     loop k in 0..<tail {
-        write :: ir_x64_write(f, k)
+        write: ir_x64_write(f, k)
         if write >= 0 && (write < f.param_count || write == sum || (write == result && k != call)) -> return false
         ir_x64_reads_into(f, k, &reads)
         loop read in reads {
@@ -141,17 +141,17 @@ fn ir_opt_accumulate_function(m: &IRModule, f: &IRFunction, id: Int, keys: [Stri
     }
     // The call's arguments the code after it drops become the next
     // parameters as they are; the others are cloned.
-    args :: f.b[call]
+    args: f.b[call]
     consumed := [Bool]{}
     loop index in 0..<f.param_count -> &consumed.push(false)
-    clone :: name_rows_value(m.name_rows, "jet_rt_int_clone") ?? -2
+    clone: name_rows_value(m.name_rows, "jet_rt_int_clone") ?? -2
     scan := call + 1
     loop scan < tail {
         if ir_opt_accumulate_stop(f, keys, scan) {
             // The callee's stop reaches here only in the body as it was: a
             // stop edge that does more than drop and return (a catch, a
             // transaction's restore, a cleanup scope) keeps the body.
-            end :: f.c[scan + 1]
+            end: f.c[scan + 1]
             loop k in (scan + 2)..<end {
                 if f.op[k] == .Return -> next
                 if f.op[k] != .Drop || !ir_opt_accumulate_pure(m, f, k, clone) -> return false
@@ -160,7 +160,7 @@ fn ir_opt_accumulate_function(m: &IRModule, f: &IRFunction, id: Int, keys: [Stri
             next
         }
         if f.op[scan] == .Drop {
-            arg :: ir_opt_accumulate_arg(f, args, f.a[scan])
+            arg: ir_opt_accumulate_arg(f, args, f.a[scan])
             if arg >= 0 {
                 if consumed[arg] || f.a[scan] == x -> return false
                 consumed[arg] = true
@@ -179,34 +179,34 @@ fn ir_opt_accumulate_function(m: &IRModule, f: &IRFunction, id: Int, keys: [Stri
         }
     }
     if !ir_opt_accumulate_ends(m, f, call) -> return false
-    head :: ir_opt_accumulate_head(m, f, clone)
-    total :: f.slot_type.len()
-    line :: f.code_line[call]
+    head: ir_opt_accumulate_head(m, f, clone)
+    total: f.slot_type.len()
+    line: f.code_line[call]
     code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
     if head > 0 {
         fresh := [Int]{}
         loop _ in 0..<total -> &fresh.push(-1)
         loop k in 0..<head {
-            written :: ir_x64_write(f, k)
+            written: ir_x64_write(f, k)
             if written >= f.param_count && fresh[written] < 0 -> fresh[written] = ir_version_slot(&f, written)
         }
         ir_version_copy(&f, &code, 0, head - 1, 0, fresh, 0)
     }
     clone_name := clone
     if int_params -> clone_name = ir_intern_name(&m, "jet_rt_int_clone")
-    acc :: ir_slot(&f, f.result, IRSlotKind.Local, -1, line)
+    acc: ir_slot(&f, f.result, IRSlotKind.Local, -1, line)
     ir_opt_code_put(&code, IROp.Const, acc, ir_opt_accumulate_unit(f.op[tail]), -1, -1, line)
     names := [Int]{}
     loop _ in 0..<total -> &names.push(-1)
     owns := [Int]{}
     loop p in 0..<f.param_count {
-        own :: ir_slot(&f, f.slot_type[p], IRSlotKind.Local, f.slot_name[p], line)
+        own: ir_slot(&f, f.slot_type[p], IRSlotKind.Local, f.slot_name[p], line)
         names[p] = own
         &owns.push(own)
         ir_opt_accumulate_take(m, &f, &code, own, p, clone_name, line)
     }
-    op :: f.op[tail]
-    overflow :: f.c[tail]
+    op: f.op[tail]
+    overflow: f.c[tail]
     ir_opt_code_put(&code, IROp.Loop, -1, -1, -1, -1, line)
     pending := [Int]{}
     depth = 0
@@ -216,15 +216,15 @@ fn ir_opt_accumulate_function(m: &IRModule, f: &IRFunction, id: Int, keys: [Stri
             &pending.push(f.a[k])
             next
         }
-        at :: f.code_line[k]
+        at: f.code_line[k]
         if f.op[k] == .Return {
             if edges[k] {
                 ir_opt_accumulate_release(m, f, &code, acc, owns, pending, at)
                 ir_opt_code_put(&code, IROp.Return, -1, -1, -1, -1, at)
                 next
             }
-            value :: ir_version_name(names, f.a[k])
-            ret :: ir_slot(&f, f.result, IRSlotKind.Temp, -1, at)
+            value: ir_version_name(names, f.a[k])
+            ret: ir_slot(&f, f.result, IRSlotKind.Temp, -1, at)
             if left {
                 ir_opt_code_put(&code, op, ret, value, acc, overflow, at)
             } else {
@@ -245,23 +245,23 @@ fn ir_opt_accumulate_function(m: &IRModule, f: &IRFunction, id: Int, keys: [Stri
     // The next pass's parameters, read before the accumulator moves on.
     values := [Int]{}
     loop p in 0..<f.param_count {
-        arg :: f.args[args + p]
+        arg: f.args[args + p]
         if consumed[p] {
             &values.push(arg)
         } else {
-            held :: ir_slot(&f, f.slot_type[p], IRSlotKind.Temp, -1, line)
+            held: ir_slot(&f, f.slot_type[p], IRSlotKind.Temp, -1, line)
             ir_opt_accumulate_take(m, &f, &code, held, ir_version_name(names, arg), clone_name, line)
             &values.push(held)
         }
     }
-    step :: ir_slot(&f, f.result, IRSlotKind.Temp, -1, line)
-    term :: ir_version_name(names, x)
+    step: ir_slot(&f, f.result, IRSlotKind.Temp, -1, line)
+    term: ir_version_name(names, x)
     if left {
         ir_opt_code_put(&code, op, step, term, acc, overflow, line)
     } else {
         ir_opt_code_put(&code, op, step, acc, term, overflow, line)
     }
-    owned :: m.types[f.result].drop != ""
+    owned: m.types[f.result].drop != ""
     if owned -> ir_opt_code_put(&code, IROp.Drop, -1, acc, -1, -1, line)
     ir_opt_code_put(&code, IROp.Move, acc, step, -1, -1, line)
     if drops_x -> ir_opt_code_put(&code, IROp.Drop, -1, term, -1, -1, line)
@@ -288,15 +288,15 @@ fn ir_opt_accumulate_function(m: &IRModule, f: &IRFunction, id: Int, keys: [Stri
 
 // Whether an accumulated value of type row `ty` qualifies: an exact Int or a
 // word with no drop.
-fn ir_opt_accumulate_value(m: IRModule, ty: Int) -> Bool Never! {
-    row :: m.types[ty]
+ir_opt_accumulate_value: fn(m: IRModule, ty: Int) -> Bool Never! {
+    row: m.types[ty]
     row.kind == .Int || (row.kind == .Word && row.drop == "")
 }
 
 // Whether a parameter of type row `ty` qualifies: an exact Int, which the
 // loop clones, or a scalar with no drop, which it copies.
-fn ir_opt_accumulate_param(m: IRModule, ty: Int) -> Bool Never! {
-    row :: m.types[ty]
+ir_opt_accumulate_param: fn(m: IRModule, ty: Int) -> Bool Never! {
+    row: m.types[ty]
     if row.kind == .Int -> return true
     if row.drop != "" -> return false
     row.kind == .Bool || row.kind == .Word || row.kind == .Float || row.kind == .Float32 || row.kind == .Char
@@ -304,15 +304,15 @@ fn ir_opt_accumulate_param(m: IRModule, ty: Int) -> Bool Never! {
 
 // Whether instruction `at` is an associative operation of the result's
 // type that cannot stop, as the header comment lists them.
-fn ir_opt_accumulate_op(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
-    op :: f.op[at]
+ir_opt_accumulate_op: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
+    op: f.op[at]
     if op != .Add && op != .Mul && op != .BitAnd && op != .BitOr && op != .BitXor -> return false
-    a :: f.a[at]
-    b :: f.b[at]
+    a: f.a[at]
+    b: f.b[at]
     if a < 0 || b < 0 || f.slot_type[a] != f.result || f.slot_type[b] != f.result -> return false
-    row :: m.types[f.result]
-    exact :: row.kind == .Int && f.c[at] == IR_OVERFLOW_TRAP
-    word :: row.kind == .Word
+    row: m.types[f.result]
+    exact: row.kind == .Int && f.c[at] == IR_OVERFLOW_TRAP
+    word: row.kind == .Word
     if op == {
         .Add | .Mul -> exact || (word && f.c[at] == IR_OVERFLOW_WRAP)
         .BitAnd -> exact || (word && row.signed)
@@ -322,7 +322,7 @@ fn ir_opt_accumulate_op(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
 }
 
 // The unit of an operation ir_opt_accumulate_op accepts.
-fn ir_opt_accumulate_unit(op: IROp) -> Int Never! {
+ir_opt_accumulate_unit: fn(op: IROp) -> Int Never! {
     if op == {
         .Mul -> 1
         .BitAnd -> -1
@@ -334,17 +334,17 @@ fn ir_opt_accumulate_unit(op: IROp) -> Int Never! {
 // before the next pass instead of after the callee: a constant, copy or
 // move of a scalar, an Int, word or Bool operation that cannot stop, a clone
 // of an Int, or a drop of a scalar.
-fn ir_opt_accumulate_pure(m: IRModule, f: IRFunction, at: Int, clone: Int) -> Bool Never! {
+ir_opt_accumulate_pure: fn(m: IRModule, f: IRFunction, at: Int, clone: Int) -> Bool Never! {
     if f.op[at] == {
         .Const | .Copy | .Move -> ir_opt_accumulate_param(m, f.slot_type[f.dst[at]])
         .Not -> true
         .Add | .Sub | .Mul | .BitAnd | .BitOr | .BitXor | .Neg | .Eq | .Ne | .Lt | .Le | .Gt | .Ge -> {
-            kind :: m.types[f.slot_type[f.a[at]]].kind
+            kind: m.types[f.slot_type[f.a[at]]].kind
             (kind == .Int || kind == .Word || kind == .Bool) && !ir_op_can_stop(m, f, at)
         }
         .CallRuntime -> clone >= 0 && f.a[at] == clone && f.c[at] == 1
         .Drop -> {
-            row :: m.types[f.slot_type[f.a[at]]]
+            row: m.types[f.slot_type[f.a[at]]]
             row.drop == "" || row.kind == .Int
         }
         else -> false
@@ -353,7 +353,7 @@ fn ir_opt_accumulate_pure(m: IRModule, f: IRFunction, at: Int, clone: Int) -> Bo
 
 // The index of `slot` among the call's arguments (from `args`), or -1; a
 // parameter is never one the body gives away.
-fn ir_opt_accumulate_arg(f: IRFunction, args: Int, slot: Int) -> Int Never! {
+ir_opt_accumulate_arg: fn(f: IRFunction, args: Int, slot: Int) -> Int Never! {
     if slot < f.param_count -> return -1
     loop index in 0..<f.param_count {
         if f.args[args + index] == slot -> return index
@@ -363,15 +363,15 @@ fn ir_opt_accumulate_arg(f: IRFunction, args: Int, slot: Int) -> Int Never! {
 
 // Whether `at` is `stopped := poll()` or `stopped := trap()` followed by
 // `if stopped` with no Else: a stop point (Build.jet ir_stop_point).
-fn ir_opt_accumulate_stop(f: IRFunction, keys: [String], at: Int) -> Bool Never! {
+ir_opt_accumulate_stop: fn(f: IRFunction, keys: [String], at: Int) -> Bool Never! {
     if at + 1 >= f.op.len() || f.op[at] != .Call || f.c[at] != 0 || f.dst[at] < 0 -> return false
-    callee :: f.a[at]
+    callee: f.a[at]
     if callee < 0 || callee >= keys.len() || (keys[callee] != IR_STOP_POLL_KEY && keys[callee] != IR_STOP_TRAP_KEY) -> return false
     f.op[at + 1] == .If && f.a[at + 1] == f.dst[at] && f.b[at + 1] < 0
 }
 
 // Per instruction, whether it lies inside a stop point's edge.
-fn ir_opt_accumulate_edges(f: IRFunction, keys: [String]) -> [Bool] Never! {
+ir_opt_accumulate_edges: fn(f: IRFunction, keys: [String]) -> [Bool] Never! {
     edges := [Bool]{}
     loop _ in 0..<f.op.len() -> &edges.push(false)
     loop at in 0..<f.op.len() {
@@ -385,8 +385,8 @@ fn ir_opt_accumulate_edges(f: IRFunction, keys: [String]) -> [Bool] Never! {
 // by testing its parameters and returning, as OptEntry.jet guards it
 // (ir_opt_entry_guard: no effect, so running it twice means the same),
 // else 0.
-fn ir_opt_accumulate_head(m: IRModule, f: IRFunction, clone: Int) -> Int Never! {
-    _ :: ir_opt_entry_guard(m, f, clone) ?? return 0
+ir_opt_accumulate_head: fn(m: IRModule, f: IRFunction, clone: Int) -> Int Never! {
+    _: ir_opt_entry_guard(m, f, clone) ?? return 0
     at := 0
     loop f.op[at] != .If -> at += 1
     f.c[at] + 1
@@ -397,7 +397,7 @@ fn ir_opt_accumulate_head(m: IRModule, f: IRFunction, clone: Int) -> Int Never! 
 // parameter p is at most (or at least) a constant c, and the call passes p
 // plus a constant step of at most -1 (or at least 1). For a word p, the step
 // from c must stay in p's range.
-fn ir_opt_accumulate_ends(m: IRModule, f: IRFunction, call: Int) -> Bool Never! {
+ir_opt_accumulate_ends: fn(m: IRModule, f: IRFunction, call: Int) -> Bool Never! {
     depth := 0
     loop k in 0..<call {
         if depth == 0 && f.op[k] == .If && f.b[k] < 0 && f.op[f.c[k] - 1] == .Return && ir_opt_accumulate_ends_at(m, f, k, call) -> return true
@@ -412,38 +412,38 @@ fn ir_opt_accumulate_ends(m: IRModule, f: IRFunction, call: Int) -> Bool Never! 
 
 // Whether the If at `branch` tests the parameter the call steps toward it,
 // as ir_opt_accumulate_ends says.
-fn ir_opt_accumulate_ends_at(m: IRModule, f: IRFunction, branch: Int, call: Int) -> Bool Never! {
+ir_opt_accumulate_ends_at: fn(m: IRModule, f: IRFunction, branch: Int, call: Int) -> Bool Never! {
     // A Br in the If could leave it before its Return.
     loop k in (branch + 1)..<f.c[branch] {
         if f.op[k] == .Br || f.op[k] == .BrIf -> return false
     }
-    test :: ir_opt_accumulate_writer(f, f.a[branch], branch)
+    test: ir_opt_accumulate_writer(f, f.a[branch], branch)
     if test < 0 -> return false
-    op :: f.op[test]
+    op: f.op[test]
     if op != .Lt && op != .Le && op != .Gt && op != .Ge -> return false
-    on_left :: f.a[test] >= 0 && f.a[test] < f.param_count
-    p :: if on_left -> f.a[test] else -> f.b[test]
+    on_left: f.a[test] >= 0 && f.a[test] < f.param_count
+    p: if on_left -> f.a[test] else -> f.b[test]
     if p < 0 || p >= f.param_count -> return false
-    limit :: ir_opt_accumulate_const(f, if on_left -> f.b[test] else -> f.a[test], branch) ?? return false
+    limit: ir_opt_accumulate_const(f, if on_left -> f.b[test] else -> f.a[test], branch) ?? return false
     // Whether the If returns when p is at most c (`p < c`, `c > p`, ..).
-    below :: (op == .Lt || op == .Le) == on_left
-    stepped :: ir_opt_accumulate_writer(f, f.args[f.b[call] + p], call)
+    below: (op == .Lt || op == .Le) == on_left
+    stepped: ir_opt_accumulate_writer(f, f.args[f.b[call] + p], call)
     if stepped < 0 -> return false
-    plus :: f.op[stepped] == .Add
+    plus: f.op[stepped] == .Add
     if !plus && (f.op[stepped] != .Sub || f.a[stepped] != p) -> return false
     if f.a[stepped] != p && f.b[stepped] != p -> return false
-    by :: ir_opt_accumulate_const(f, if f.a[stepped] == p -> f.b[stepped] else -> f.a[stepped], stepped) ?? return false
-    step :: if plus -> by else -> 0 - by
+    by: ir_opt_accumulate_const(f, if f.a[stepped] == p -> f.b[stepped] else -> f.a[stepped], stepped) ?? return false
+    step: if plus -> by else -> 0 - by
     if (below && step > -1) || (!below && step < 1) -> return false
-    row :: m.types[f.slot_type[p]]
+    row: m.types[f.slot_type[p]]
     if row.kind == .Int -> return true
-    _ :: ir_opt_word(ir_x64_shape(row), limit + step, true) ?? return false
+    _: ir_opt_word(ir_x64_shape(row), limit + step, true) ?? return false
     true
 }
 
 // The one instruction of `f` that writes `slot` (not a parameter), when it
 // lies before `before`; else -1.
-fn ir_opt_accumulate_writer(f: IRFunction, slot: Int, before: Int) -> Int Never! {
+ir_opt_accumulate_writer: fn(f: IRFunction, slot: Int, before: Int) -> Int Never! {
     if slot < f.param_count -> return -1
     found := -1
     loop k in 0..<f.op.len() {
@@ -455,16 +455,16 @@ fn ir_opt_accumulate_writer(f: IRFunction, slot: Int, before: Int) -> Int Never!
 }
 
 // The value of the Const that is the one write of `slot`, before `before`.
-fn ir_opt_accumulate_const(f: IRFunction, slot: Int, before: Int) -> Int? Never! {
-    at :: ir_opt_accumulate_writer(f, slot, before)
+ir_opt_accumulate_const: fn(f: IRFunction, slot: Int, before: Int) -> Int? Never! {
+    at: ir_opt_accumulate_writer(f, slot, before)
     if at < 0 || f.op[at] != .Const -> return None
     Val(f.a[at])
 }
 
 // `own := source`: a clone of an Int, else a copy.
-fn ir_opt_accumulate_take(m: IRModule, f: &IRFunction, code: &IROptCode, own: Int, source: Int, clone: Int, line: Int) Never! {
+ir_opt_accumulate_take: fn(m: IRModule, f: &IRFunction, code: &IROptCode, own: Int, source: Int, clone: Int, line: Int) Never! {
     if m.types[f.slot_type[own]].kind == .Int {
-        args :: ir_args(&f, [Int]{source})
+        args: ir_args(&f, [Int]{source})
         ir_opt_code_put(&code, IROp.CallRuntime, own, clone, args, 1, line)
     } else {
         ir_opt_code_put(&code, IROp.Copy, own, source, -1, -1, line)
@@ -473,7 +473,7 @@ fn ir_opt_accumulate_take(m: IRModule, f: &IRFunction, code: &IROptCode, own: In
 
 // The drops before a return out of the loop: the accumulator, the
 // parameters' copies and the arguments the body gave away (`pending`).
-fn ir_opt_accumulate_release(m: IRModule, f: IRFunction, code: &IROptCode, acc: Int, owns: [Int], pending: [Int], line: Int) Never! {
+ir_opt_accumulate_release: fn(m: IRModule, f: IRFunction, code: &IROptCode, acc: Int, owns: [Int], pending: [Int], line: Int) Never! {
     if m.types[f.result].drop != "" -> ir_opt_code_put(&code, IROp.Drop, -1, acc, -1, -1, line)
     loop own in owns {
         if m.types[f.slot_type[own]].kind == .Int -> ir_opt_code_put(&code, IROp.Drop, -1, own, -1, -1, line)
@@ -488,32 +488,32 @@ fn ir_opt_accumulate_release(m: IRModule, f: IRFunction, code: &IROptCode, acc: 
 // stop point. Function 0 is the stop poll, g is function 1 and its
 // parameter n slot 0.
 
-fn ir_accumulate_test_head(m: &IRModule, int: Bool) -> IRFunction Never! {
+ir_accumulate_test_head: fn(m: &IRModule, int: Bool) -> IRFunction Never! {
     ir_accumulate_test_guarded(&m, int, IROp.Lt, 2)
 }
 
 // g starting with `if n test bound -> return 1`, or with no test when `test`
 // is Nop.
-fn ir_accumulate_test_guarded(m: &IRModule, int: Bool, test: IROp, bound: Int) -> IRFunction Never! {
-    _ :: ir_stop_poll(&m, IR_STOP_POLL_KEY)
+ir_accumulate_test_guarded: fn(m: &IRModule, int: Bool, test: IROp, bound: Int) -> IRFunction Never! {
+    _: ir_stop_poll(&m, IR_STOP_POLL_KEY)
     ty := ir_type_row(&m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
     if int -> ty = ir_type_row(&m, Type.Int) ?? panic("no Int row")
-    flag :: ir_type_row(&m, Type.Bool) ?? panic("no Bool row")
+    flag: ir_type_row(&m, Type.Bool) ?? panic("no Bool row")
     g := ir_function_new("g", "test:accumulate.jet::g", "", "accumulate.jet", 1)
-    n :: ir_slot(&g, ty, IRSlotKind.Param, ir_intern_name(&m, "n"), 1)
+    n: ir_slot(&g, ty, IRSlotKind.Param, ir_intern_name(&m, "n"), 1)
     g.result = ty
     if test == .Nop -> return g
-    limit :: ir_slot(&g, ty, IRSlotKind.Temp, -1, 0)
+    limit: ir_slot(&g, ty, IRSlotKind.Temp, -1, 0)
     _ := ir_emit(&g, IROp.Const, limit, bound, -1, -1, 2)
-    small :: ir_slot(&g, flag, IRSlotKind.Temp, -1, 0)
+    small: ir_slot(&g, flag, IRSlotKind.Temp, -1, 0)
     _ := ir_emit(&g, test, small, n, limit, -1, 2)
     _ := ir_open_if(&g, small, 2)
-    one :: ir_slot(&g, ty, IRSlotKind.Temp, -1, 0)
+    one: ir_slot(&g, ty, IRSlotKind.Temp, -1, 0)
     _ := ir_emit(&g, IROp.Const, one, 1, -1, -1, 2)
     if int {
-        owned :: ir_slot(&g, ty, IRSlotKind.Temp, -1, 0)
-        clone :: ir_intern_name(&m, "jet_rt_int_clone")
-        args :: ir_args(&g, [Int]{one})
+        owned: ir_slot(&g, ty, IRSlotKind.Temp, -1, 0)
+        clone: ir_intern_name(&m, "jet_rt_int_clone")
+        args: ir_args(&g, [Int]{one})
         _ := ir_emit(&g, IROp.CallRuntime, owned, clone, args, 1, 2)
         _ := ir_emit(&g, IROp.Return, -1, owned, -1, -1, 2)
     } else {
@@ -523,25 +523,25 @@ fn ir_accumulate_test_guarded(m: &IRModule, int: Bool, test: IROp, bound: Int) -
     g
 }
 
-fn ir_accumulate_test_int(m: IRModule, g: IRFunction) -> Bool Never! {
+ir_accumulate_test_int: fn(m: IRModule, g: IRFunction) -> Bool Never! {
     m.types[g.result].kind == .Int
 }
 
 // `got := g(n - less)`, the drop of its argument, and the stop point after
 // the call; returns `got`.
-fn ir_accumulate_test_call(m: &IRModule, g: &IRFunction, less: Int, line: Int) -> Int Never! {
-    int :: ir_accumulate_test_int(m, g)
-    by :: ir_slot(&g, g.result, IRSlotKind.Temp, -1, 0)
+ir_accumulate_test_call: fn(m: &IRModule, g: &IRFunction, less: Int, line: Int) -> Int Never! {
+    int: ir_accumulate_test_int(m, g)
+    by: ir_slot(&g, g.result, IRSlotKind.Temp, -1, 0)
     _ := ir_emit(&g, IROp.Const, by, less, -1, -1, line)
-    arg :: ir_slot(&g, g.result, IRSlotKind.Temp, -1, 0)
+    arg: ir_slot(&g, g.result, IRSlotKind.Temp, -1, 0)
     _ := ir_emit(&g, IROp.Sub, arg, 0, by, if int -> IR_OVERFLOW_TRAP else -> IR_OVERFLOW_WRAP, line)
-    got :: ir_slot(&g, g.result, IRSlotKind.Temp, -1, 0)
-    args :: ir_args(&g, [Int]{arg})
+    got: ir_slot(&g, g.result, IRSlotKind.Temp, -1, 0)
+    args: ir_args(&g, [Int]{arg})
     _ := ir_emit(&g, IROp.Call, got, 1, args, 1, line)
     if int -> _ := ir_emit(&g, IROp.Drop, -1, arg, -1, -1, line)
-    flag :: ir_type_row(&m, Type.Bool) ?? panic("no Bool row")
-    stopped :: ir_slot(&g, flag, IRSlotKind.Temp, -1, 0)
-    none :: ir_args(&g, [Int]{})
+    flag: ir_type_row(&m, Type.Bool) ?? panic("no Bool row")
+    stopped: ir_slot(&g, flag, IRSlotKind.Temp, -1, 0)
+    none: ir_args(&g, [Int]{})
     _ := ir_emit(&g, IROp.Call, stopped, 0, none, 0, line)
     _ := ir_open_if(&g, stopped, line)
     _ := ir_emit(&g, IROp.Return, -1, -1, -1, -1, line)
@@ -550,8 +550,8 @@ fn ir_accumulate_test_call(m: &IRModule, g: &IRFunction, less: Int, line: Int) -
 }
 
 // `out := a op b` with overflow `c`; returns `out`.
-fn ir_accumulate_test_op(g: &IRFunction, op: IROp, a: Int, b: Int, c: Int, line: Int) -> Int Never! {
-    out :: ir_slot(&g, g.result, IRSlotKind.Temp, -1, 0)
+ir_accumulate_test_op: fn(g: &IRFunction, op: IROp, a: Int, b: Int, c: Int, line: Int) -> Int Never! {
+    out: ir_slot(&g, g.result, IRSlotKind.Temp, -1, 0)
     _ := ir_emit(&g, op, out, a, b, c, line)
     out
 }
@@ -559,7 +559,7 @@ fn ir_accumulate_test_op(g: &IRFunction, op: IROp, a: Int, b: Int, c: Int, line:
 // Ends g with `drops` and `return sum`, runs the passes of `level` over the
 // module (without "accumulate" unless `enabled`) with IR Lint after each,
 // and returns g's calls of itself and its Loops.
-fn ir_accumulate_test_run(m: ^IRModule, g: ^IRFunction, sum: Int, drops: [Int], level: Int, enabled: Bool) -> (calls: Int, loops: Int) Never! {
+ir_accumulate_test_run: fn(m: ^IRModule, g: ^IRFunction, sum: Int, drops: [Int], level: Int, enabled: Bool) -> (calls: Int, loops: Int) Never! {
     built := ^m
     f := ^g
     loop slot in drops -> _ := ir_emit(&f, IROp.Drop, -1, slot, -1, -1, 9)
@@ -572,9 +572,9 @@ fn ir_accumulate_test_run(m: ^IRModule, g: ^IRFunction, sum: Int, drops: [Int], 
     options := ir_opt_options(level)
     options.verify = true
     if !enabled -> &options.disabled.push("accumulate")
-    report :: ir_optimize_module(&built, options, compiler_threads_single())
+    report: ir_optimize_module(&built, options, compiler_threads_single())
     assert_eq(report.lint.len(), 0)
-    out :: built.functions[1]
+    out: built.functions[1]
     calls := 0
     loops := 0
     loop at in 0..<out.op.len() {
@@ -588,17 +588,17 @@ fn ir_accumulate_test_run(m: ^IRModule, g: ^IRFunction, sum: Int, drops: [Int], 
 // O2 entry pass copy bodies, so the tests count calls as present or absent,
 // not one by one.)
 #Test("An exact Int sum of a value computed before a self call and that call becomes a loop") {
-    modes :: [Bool]{false, true}
+    modes: [Bool]{false, true}
     loop level in 1..<3 {
         loop enabled in modes {
             m := ir_module_new()
             g := ir_accumulate_test_head(&m, true)
-            three :: ir_slot(&g, g.result, IRSlotKind.Temp, -1, 0)
+            three: ir_slot(&g, g.result, IRSlotKind.Temp, -1, 0)
             _ := ir_emit(&g, IROp.Const, three, 3, -1, -1, 3)
-            scaled :: ir_accumulate_test_op(&g, IROp.Mul, 0, three, IR_OVERFLOW_TRAP, 3)
-            got_call :: ir_accumulate_test_call(&m, &g, 1, 3)
-            sum :: ir_accumulate_test_op(&g, IROp.Add, scaled, got_call, IR_OVERFLOW_TRAP, 3)
-            got :: ir_accumulate_test_run(^m, ^g, sum, [Int]{scaled, got_call}, level, enabled)
+            scaled: ir_accumulate_test_op(&g, IROp.Mul, 0, three, IR_OVERFLOW_TRAP, 3)
+            got_call: ir_accumulate_test_call(&m, &g, 1, 3)
+            sum: ir_accumulate_test_op(&g, IROp.Add, scaled, got_call, IR_OVERFLOW_TRAP, 3)
+            got: ir_accumulate_test_run(^m, ^g, sum, [Int]{scaled, got_call}, level, enabled)
             assert_eq(got.calls == 0, enabled)
             assert_eq(got.loops > 0, enabled)
         }
@@ -611,10 +611,10 @@ fn ir_accumulate_test_run(m: ^IRModule, g: ^IRFunction, sum: Int, drops: [Int], 
     loop level in 1..<3 {
         m := ir_module_new()
         g := ir_accumulate_test_head(&m, true)
-        first :: ir_accumulate_test_call(&m, &g, 1, 3)
-        second :: ir_accumulate_test_call(&m, &g, 2, 3)
-        sum :: ir_accumulate_test_op(&g, IROp.Add, first, second, IR_OVERFLOW_TRAP, 3)
-        got :: ir_accumulate_test_run(^m, ^g, sum, [Int]{first, second}, level, true)
+        first: ir_accumulate_test_call(&m, &g, 1, 3)
+        second: ir_accumulate_test_call(&m, &g, 2, 3)
+        sum: ir_accumulate_test_op(&g, IROp.Add, first, second, IR_OVERFLOW_TRAP, 3)
+        got: ir_accumulate_test_run(^m, ^g, sum, [Int]{first, second}, level, true)
         assert(got.calls > 1)
         assert_eq(got.loops, 0)
     }
@@ -622,14 +622,14 @@ fn ir_accumulate_test_run(m: ^IRModule, g: ^IRFunction, sum: Int, drops: [Int], 
 
 // n + g(n - 1): x is the parameter, the call's value the right operand.
 #Test("An exact Int sum of a parameter and a self call becomes a loop") {
-    modes :: [Bool]{false, true}
+    modes: [Bool]{false, true}
     loop level in 1..<3 {
         loop enabled in modes {
             m := ir_module_new()
             g := ir_accumulate_test_head(&m, true)
-            got_call :: ir_accumulate_test_call(&m, &g, 1, 3)
-            sum :: ir_accumulate_test_op(&g, IROp.Add, 0, got_call, IR_OVERFLOW_TRAP, 3)
-            got :: ir_accumulate_test_run(^m, ^g, sum, [Int]{got_call}, level, enabled)
+            got_call: ir_accumulate_test_call(&m, &g, 1, 3)
+            sum: ir_accumulate_test_op(&g, IROp.Add, 0, got_call, IR_OVERFLOW_TRAP, 3)
+            got: ir_accumulate_test_run(^m, ^g, sum, [Int]{got_call}, level, enabled)
             assert_eq(got.calls == 0, enabled)
             assert_eq(got.loops > 0, enabled)
         }
@@ -638,14 +638,14 @@ fn ir_accumulate_test_run(m: ^IRModule, g: ^IRFunction, sum: Int, drops: [Int], 
 
 // g(n - 1) * n: the call's value is the left operand.
 #Test("An exact Int product of a self call and a parameter becomes a loop") {
-    modes :: [Bool]{false, true}
+    modes: [Bool]{false, true}
     loop level in 1..<3 {
         loop enabled in modes {
             m := ir_module_new()
             g := ir_accumulate_test_head(&m, true)
-            got_call :: ir_accumulate_test_call(&m, &g, 1, 3)
-            product :: ir_accumulate_test_op(&g, IROp.Mul, got_call, 0, IR_OVERFLOW_TRAP, 3)
-            got :: ir_accumulate_test_run(^m, ^g, product, [Int]{got_call}, level, enabled)
+            got_call: ir_accumulate_test_call(&m, &g, 1, 3)
+            product: ir_accumulate_test_op(&g, IROp.Mul, got_call, 0, IR_OVERFLOW_TRAP, 3)
+            got: ir_accumulate_test_run(^m, ^g, product, [Int]{got_call}, level, enabled)
             assert_eq(got.calls == 0, enabled)
             assert_eq(got.loops > 0, enabled)
         }
@@ -655,17 +655,17 @@ fn ir_accumulate_test_run(m: ^IRModule, g: ^IRFunction, sum: Int, drops: [Int], 
 // g(n - 1).bit_and/bit_or/bit_xor(n * 3): x is computed after the call, by
 // code that cannot stop.
 #Test("An exact Int bit operation of a self call and a value computed after it becomes a loop") {
-    ops :: [IROp]{IROp.BitAnd, IROp.BitOr, IROp.BitXor}
+    ops: [IROp]{IROp.BitAnd, IROp.BitOr, IROp.BitXor}
     loop op in ops {
         loop level in 1..<3 {
             m := ir_module_new()
             g := ir_accumulate_test_head(&m, true)
-            got_call :: ir_accumulate_test_call(&m, &g, 1, 3)
-            three :: ir_slot(&g, g.result, IRSlotKind.Temp, -1, 0)
+            got_call: ir_accumulate_test_call(&m, &g, 1, 3)
+            three: ir_slot(&g, g.result, IRSlotKind.Temp, -1, 0)
             _ := ir_emit(&g, IROp.Const, three, 3, -1, -1, 3)
-            scaled :: ir_accumulate_test_op(&g, IROp.Mul, 0, three, IR_OVERFLOW_TRAP, 3)
-            combined :: ir_accumulate_test_op(&g, op, got_call, scaled, IR_OVERFLOW_TRAP, 3)
-            got :: ir_accumulate_test_run(^m, ^g, combined, [Int]{got_call, scaled}, level, true)
+            scaled: ir_accumulate_test_op(&g, IROp.Mul, 0, three, IR_OVERFLOW_TRAP, 3)
+            combined: ir_accumulate_test_op(&g, op, got_call, scaled, IR_OVERFLOW_TRAP, 3)
+            got: ir_accumulate_test_run(^m, ^g, combined, [Int]{got_call, scaled}, level, true)
             assert_eq(got.calls, 0)
             assert(got.loops > 0)
         }
@@ -675,14 +675,14 @@ fn ir_accumulate_test_run(m: ^IRModule, g: ^IRFunction, sum: Int, drops: [Int], 
 // wrapping(n + g(n - 1)), wrapping(n * g(n - 1)), n.bit_and(g(n - 1)) over
 // I64 words.
 #Test("A wrapping word sum or product, or a signed word bit operation, of a self call becomes a loop") {
-    ops :: [IROp]{IROp.Add, IROp.Mul, IROp.BitAnd}
+    ops: [IROp]{IROp.Add, IROp.Mul, IROp.BitAnd}
     loop op in ops {
         loop level in 1..<3 {
             m := ir_module_new()
             g := ir_accumulate_test_head(&m, false)
-            got_call :: ir_accumulate_test_call(&m, &g, 1, 3)
-            combined :: ir_accumulate_test_op(&g, op, 0, got_call, IR_OVERFLOW_WRAP, 3)
-            got :: ir_accumulate_test_run(^m, ^g, combined, [Int]{}, level, true)
+            got_call: ir_accumulate_test_call(&m, &g, 1, 3)
+            combined: ir_accumulate_test_op(&g, op, 0, got_call, IR_OVERFLOW_WRAP, 3)
+            got: ir_accumulate_test_run(^m, ^g, combined, [Int]{}, level, true)
             assert_eq(got.calls, 0)
             assert(got.loops > 0)
         }
@@ -692,16 +692,16 @@ fn ir_accumulate_test_run(m: ^IRModule, g: ^IRFunction, sum: Int, drops: [Int], 
 // n + g(n - 1) over I64 words that traps (it can stop), and g(n - 1) - n
 // over exact Ints (not associative), stay recursive.
 #Test("A trapping word sum or a difference of a self call stays a call") {
-    kinds :: [Bool]{false, true}
+    kinds: [Bool]{false, true}
     loop level in 1..<3 {
         loop int in kinds {
             m := ir_module_new()
             g := ir_accumulate_test_head(&m, int)
-            got_call :: ir_accumulate_test_call(&m, &g, 1, 3)
-            op :: if int -> IROp.Sub else -> IROp.Add
-            combined :: ir_accumulate_test_op(&g, op, got_call, 0, IR_OVERFLOW_TRAP, 3)
-            drops :: if int -> [Int]{got_call} else -> [Int]{}
-            got :: ir_accumulate_test_run(^m, ^g, combined, drops, level, true)
+            got_call: ir_accumulate_test_call(&m, &g, 1, 3)
+            op: if int -> IROp.Sub else -> IROp.Add
+            combined: ir_accumulate_test_op(&g, op, got_call, 0, IR_OVERFLOW_TRAP, 3)
+            drops: if int -> [Int]{got_call} else -> [Int]{}
+            got: ir_accumulate_test_run(^m, ^g, combined, drops, level, true)
             assert(got.calls > 0)
             assert_eq(got.loops, 0)
         }
@@ -714,13 +714,13 @@ fn ir_accumulate_test_run(m: ^IRModule, g: ^IRFunction, sum: Int, drops: [Int], 
     loop level in 1..<3 {
         m := ir_module_new()
         g := ir_accumulate_test_head(&m, true)
-        got_call :: ir_accumulate_test_call(&m, &g, 1, 3)
-        flag :: ir_type_row(&m, Type.Bool) ?? panic("no Bool row")
-        polled :: ir_slot(&g, flag, IRSlotKind.Temp, -1, 0)
-        none :: ir_args(&g, [Int]{})
+        got_call: ir_accumulate_test_call(&m, &g, 1, 3)
+        flag: ir_type_row(&m, Type.Bool) ?? panic("no Bool row")
+        polled: ir_slot(&g, flag, IRSlotKind.Temp, -1, 0)
+        none: ir_args(&g, [Int]{})
         _ := ir_emit(&g, IROp.Call, polled, 0, none, 0, 3)
-        sum :: ir_accumulate_test_op(&g, IROp.Add, got_call, 0, IR_OVERFLOW_TRAP, 3)
-        got :: ir_accumulate_test_run(^m, ^g, sum, [Int]{got_call}, level, true)
+        sum: ir_accumulate_test_op(&g, IROp.Add, got_call, 0, IR_OVERFLOW_TRAP, 3)
+        got: ir_accumulate_test_run(^m, ^g, sum, [Int]{got_call}, level, true)
         assert(got.calls > 0)
         assert_eq(got.loops, 0)
     }
@@ -730,18 +730,18 @@ fn ir_accumulate_test_run(m: ^IRModule, g: ^IRFunction, sum: Int, drops: [Int], 
 // Ints and wrapping I64 words: each pass raises n toward the test that
 // ends it.
 #Test("A self call that raises its parameter toward an upper test becomes a loop") {
-    kinds :: [Bool]{false, true}
-    tests :: [IROp]{IROp.Gt, IROp.Ge}
+    kinds: [Bool]{false, true}
+    tests: [IROp]{IROp.Gt, IROp.Ge}
     loop test in tests {
         loop level in 1..<3 {
             loop int in kinds {
                 loop enabled in kinds {
                     m := ir_module_new()
                     g := ir_accumulate_test_guarded(&m, int, test, 2)
-                    got_call :: ir_accumulate_test_call(&m, &g, -1, 3)
-                    sum :: ir_accumulate_test_op(&g, IROp.Add, 0, got_call, if int -> IR_OVERFLOW_TRAP else -> IR_OVERFLOW_WRAP, 3)
-                    drops :: if int -> [Int]{got_call} else -> [Int]{}
-                    got :: ir_accumulate_test_run(^m, ^g, sum, drops, level, enabled)
+                    got_call: ir_accumulate_test_call(&m, &g, -1, 3)
+                    sum: ir_accumulate_test_op(&g, IROp.Add, 0, got_call, if int -> IR_OVERFLOW_TRAP else -> IR_OVERFLOW_WRAP, 3)
+                    drops: if int -> [Int]{got_call} else -> [Int]{}
+                    got: ir_accumulate_test_run(^m, ^g, sum, drops, level, enabled)
                     assert_eq(got.calls == 0, enabled)
                     assert_eq(got.loops > 0, enabled)
                 }
@@ -755,15 +755,15 @@ fn ir_accumulate_test_run(m: ^IRModule, g: ^IRFunction, sum: Int, drops: [Int], 
 // away from the test), and n + g(n - 0) (it does not move): a loop would not
 // end, so each stays a call.
 #Test("A self call that does not move its parameter toward a test that ends it stays a call") {
-    tests :: [IROp]{IROp.Nop, IROp.Lt, IROp.Lt}
-    lesses :: [Int]{-1, -1, 0}
+    tests: [IROp]{IROp.Nop, IROp.Lt, IROp.Lt}
+    lesses: [Int]{-1, -1, 0}
     loop shape in 0..<tests.len() {
         loop level in 1..<3 {
             m := ir_module_new()
             g := ir_accumulate_test_guarded(&m, true, tests[shape], 2)
-            got_call :: ir_accumulate_test_call(&m, &g, lesses[shape], 3)
-            sum :: ir_accumulate_test_op(&g, IROp.Add, 0, got_call, IR_OVERFLOW_TRAP, 3)
-            got :: ir_accumulate_test_run(^m, ^g, sum, [Int]{got_call}, level, true)
+            got_call: ir_accumulate_test_call(&m, &g, lesses[shape], 3)
+            sum: ir_accumulate_test_op(&g, IROp.Add, 0, got_call, IR_OVERFLOW_TRAP, 3)
+            got: ir_accumulate_test_run(^m, ^g, sum, [Int]{got_call}, level, true)
             assert(got.calls > 0)
             assert_eq(got.loops, 0)
         }
@@ -774,14 +774,14 @@ fn ir_accumulate_test_run(m: ^IRModule, g: ^IRFunction, sum: Int, drops: [Int], 
 // 1`: with k = 1, n stays in range down to the test, a loop; with k = 2, n
 // = -2^63 + 1 would wrap past it to the top of the range, so it stays a call.
 #Test("A word step that could wrap past the test that ends it stays a call") {
-    lesses :: [Int]{1, 2}
+    lesses: [Int]{1, 2}
     loop less in lesses {
         loop level in 1..<3 {
             m := ir_module_new()
             g := ir_accumulate_test_guarded(&m, false, IROp.Lt, 0 - 9223372036854775807)
-            got_call :: ir_accumulate_test_call(&m, &g, less, 3)
-            sum :: ir_accumulate_test_op(&g, IROp.Add, 0, got_call, IR_OVERFLOW_WRAP, 3)
-            got :: ir_accumulate_test_run(^m, ^g, sum, [Int]{}, level, true)
+            got_call: ir_accumulate_test_call(&m, &g, less, 3)
+            sum: ir_accumulate_test_op(&g, IROp.Add, 0, got_call, IR_OVERFLOW_WRAP, 3)
+            got: ir_accumulate_test_run(^m, ^g, sum, [Int]{}, level, true)
             assert_eq(got.calls == 0, less == 1)
             assert_eq(got.loops > 0, less == 1)
         }
@@ -795,20 +795,20 @@ fn ir_accumulate_test_run(m: ^IRModule, g: ^IRFunction, sum: Int, drops: [Int], 
     loop level in 1..<3 {
         m := ir_module_new()
         g := ir_accumulate_test_guarded(&m, false, IROp.Nop, 0)
-        flag :: ir_type_row(&m, Type.Bool) ?? panic("no Bool row")
-        limit :: ir_slot(&g, g.result, IRSlotKind.Temp, -1, 0)
+        flag: ir_type_row(&m, Type.Bool) ?? panic("no Bool row")
+        limit: ir_slot(&g, g.result, IRSlotKind.Temp, -1, 0)
         _ := ir_emit(&g, IROp.Const, limit, 2, -1, -1, 2)
-        small :: ir_slot(&g, flag, IRSlotKind.Temp, -1, 0)
+        small: ir_slot(&g, flag, IRSlotKind.Temp, -1, 0)
         _ := ir_emit(&g, IROp.Lt, small, 0, limit, -1, 2)
         _ := ir_open_if(&g, small, 2)
-        five :: ir_slot(&g, g.result, IRSlotKind.Temp, -1, 0)
+        five: ir_slot(&g, g.result, IRSlotKind.Temp, -1, 0)
         _ := ir_emit(&g, IROp.Const, five, 5, -1, -1, 2)
-        scaled :: ir_accumulate_test_op(&g, IROp.Mul, 0, five, IR_OVERFLOW_WRAP, 2)
+        scaled: ir_accumulate_test_op(&g, IROp.Mul, 0, five, IR_OVERFLOW_WRAP, 2)
         _ := ir_emit(&g, IROp.Return, -1, scaled, -1, -1, 2)
         ir_end(&g, 2)
-        got_call :: ir_accumulate_test_call(&m, &g, 1, 3)
-        sum :: ir_accumulate_test_op(&g, IROp.Add, 0, got_call, IR_OVERFLOW_WRAP, 3)
-        got :: ir_accumulate_test_run(^m, ^g, sum, [Int]{}, level, true)
+        got_call: ir_accumulate_test_call(&m, &g, 1, 3)
+        sum: ir_accumulate_test_op(&g, IROp.Add, 0, got_call, IR_OVERFLOW_WRAP, 3)
+        got: ir_accumulate_test_run(^m, ^g, sum, [Int]{}, level, true)
         assert_eq(got.calls, 0)
         assert(got.loops > 0)
     }

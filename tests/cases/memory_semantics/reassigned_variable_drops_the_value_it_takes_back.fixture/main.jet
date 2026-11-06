@@ -3,28 +3,28 @@
 // its scope end drops it. Each scenario runs 40,000 times on a table of 16
 // rows. A value the variable never drops keeps 250 MB or more resident, so the
 // resident set may grow by at most 8 MB across a scenario.
-package {
+package: {
     name: "reassigned_variable_drops_the_value_it_takes_back"
     authority: { allow: [FS.Read] }
 }
 
-use files :: core.files
+use files: core.files
 
-ROUNDS :: 40000
-GROWTH_LIMIT_KB :: 8192
+ROUNDS: 40000
+GROWTH_LIMIT_KB: 8192
 
-struct Row {
+Row: struct {
     name: String
     items: [String]
 }
 
-struct Table {
+Table: struct {
     rows: [Row]
     count: Int
 }
 
-fn status_kb(field: String) -> Int {
-    status :: files.read("/proc/self/status") ?? panic("read /proc/self/status")
+status_kb: fn(field: String) -> Int {
+    status: files.read("/proc/self/status") ?? panic("read /proc/self/status")
     loop line in status.split("\n") {
         if !line.starts_with(field) -> next
         loop part in line.slice(field.len(), line.len()).trim().split(" ") {
@@ -34,18 +34,18 @@ fn status_kb(field: String) -> Int {
     panic("no {field} line")
 }
 
-fn make_table(n: Int) -> Table {
+make_table: fn(n: Int) -> Table {
     rows := [Row]{}
     loop i in 0..<n -> &rows.push(Row{name: "row {i}", items: [String]{"a {i}", "b {i}"}})
     Table{rows: rows, count: n}
 }
 
-fn pass_through(table: ^Table) -> Table {
+pass_through: fn(table: ^Table) -> Table {
     ^table
 }
 
 // The value moves out, and the next statement moves it back in.
-fn back_from_a_local() -> Int {
+back_from_a_local: fn() -> Int {
     table := make_table(16)
     returned := pass_through(^table)
     table = ^returned
@@ -53,7 +53,7 @@ fn back_from_a_local() -> Int {
 }
 
 // A fresh value assigned after the move is the variable's to drop.
-fn fresh_after_a_move() -> Int {
+fresh_after_a_move: fn() -> Int {
     table := make_table(16)
     moved := pass_through(^table)
     table = make_table(16)
@@ -62,7 +62,7 @@ fn fresh_after_a_move() -> Int {
 
 // Each pass moves the value out and back: the variable owns it at the loop's
 // end and drops it once the loop is done.
-fn back_in_a_loop() -> Int {
+back_in_a_loop: fn() -> Int {
     table := make_table(16)
     total := 0
     loop _ in 0..<2 {
@@ -74,16 +74,16 @@ fn back_in_a_loop() -> Int {
     total + table.count
 }
 
-fn measure(name: String, scenario: fn() -> Int) {
+measure: fn(name: String, scenario: fn() -> Int) {
     total := scenario()
-    start :: status_kb("VmRSS:")
+    start: status_kb("VmRSS:")
     loop _ in 1..<ROUNDS -> total += scenario()
-    grown :: status_kb("VmRSS:") - start
+    grown: status_kb("VmRSS:") - start
     if grown > GROWTH_LIMIT_KB -> panic("{name}: the resident set grew {grown} kB over {ROUNDS} rounds")
     print("{name}: {total} rows, every table dropped")
 }
 
-fn run() {
+run: fn() {
     measure("back from a local", back_from_a_local)
     measure("fresh after a move", fresh_after_a_move)
     measure("back in a loop", back_in_a_loop)

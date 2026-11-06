@@ -1,9 +1,9 @@
 // D-VALIDATE1: a `validate { }` block becomes `Signup.validate(value)`, which
 // returns every failing rule as a `FieldError` (path = the `at:` field), and
 // the generated decode hands its decoded value to it.
-use json :: core.encoding.json
+use json: core.encoding.json
 
-struct Signup {
+Signup: struct {
     email: String
     password: String
 
@@ -14,7 +14,7 @@ struct Signup {
     }
 }
 
-fn report(label: String, signup: Signup) {
+report: fn(label: String, signup: Signup) {
     if Signup.validate(signup) == {
         .Ok(v) -> print("{label}: ok ({v.email})")
         .Err(errs) -> {
@@ -24,8 +24,8 @@ fn report(label: String, signup: Signup) {
     }
 }
 
-fn decode(label: String, text: String) {
-    signup :: json.decode<Signup>(text) ?? {
+decode: fn(label: String, text: String) {
+    signup: json.decode<Signup>(text) ?? {
         print("{label}: {err.len()} problem(s)")
         loop e in err -> print("  {e.path}: {e.reason}")
         return
@@ -33,7 +33,7 @@ fn decode(label: String, text: String) {
     print("{label}: ok ({signup.email})")
 }
 
-fn run() {
+run: fn() {
     report("bad", Signup{email: "", password: "short"})
     report("good", Signup{email: "a@b.com", password: "supersecretpw"})
     decode("decode-same", "{{\"email\":\"a@b.com\",\"password\":\"a@b.com\"}}")

@@ -1,23 +1,23 @@
 // Backend-neutral typed web module swap facts and transaction state.
 use jet_foundation.HotSwap.[HotSwapDecision, StateRetentionDecision, StateRetentionFact]
-struct WebModuleSwapIdentity { module_ref: String; page: String }
+WebModuleSwapIdentity: struct { module_ref: String; page: String }
 impl WebModuleSwapIdentity {
-    fn new(module_ref: String, page: String) -> Self { Self(module_ref: ^module_ref, page: ^page) }
-    fn is_valid(self: Self) -> Bool { !self.module_ref.is_empty() && !self.page.is_empty() }
+    new: fn(module_ref: String, page: String) -> Self { Self(module_ref: ^module_ref, page: ^page) }
+    is_valid: fn(self: Self) -> Bool { !self.module_ref.is_empty() && !self.page.is_empty() }
 }
-struct WebPageFact { identity: String; artifact: String }
+WebPageFact: struct { identity: String; artifact: String }
 impl WebPageFact {
-    fn new(identity: String, artifact: String) -> Self { Self(identity: ^identity, artifact: ^artifact) }
+    new: fn(identity: String, artifact: String) -> Self { Self(identity: ^identity, artifact: ^artifact) }
 }
-struct WebModuleFact { identity: String; interface_fingerprint: String; body_fingerprint: String }
+WebModuleFact: struct { identity: String; interface_fingerprint: String; body_fingerprint: String }
 impl WebModuleFact {
-    fn new(identity: String, interface_fingerprint: String, body_fingerprint: String) -> Self {
+    new: fn(identity: String, interface_fingerprint: String, body_fingerprint: String) -> Self {
         Self(identity: ^identity, interface_fingerprint: ^interface_fingerprint, body_fingerprint: ^body_fingerprint)
     }
 }
-enum WebStateValue { Text(String); Integer(I64); Unsigned(U64); Boolean(Bool); Bytes([U8]) }
+WebStateValue: enum { Text(String); Integer(I64); Unsigned(U64); Boolean(Bool); Bytes([U8]) }
 impl WebStateValue {
-    fn kind(self: Self) -> String { if self == {
+    kind: fn(self: Self) -> String { if self == {
         .Text(_) -> "text"
         .Integer(_) -> "integer"
         .Unsigned(_) -> "unsigned"
@@ -25,17 +25,17 @@ impl WebStateValue {
         .Bytes(_) -> "bytes"
     } }
 }
-impl From<&String> for WebStateValue { fn from(value: String) -> Self { .Text(value.to_string()) } }
-impl From<String> for WebStateValue { fn from(value: String) -> Self { .Text(^value) } }
-impl From<Bool> for WebStateValue { fn from(value: Bool) -> Self { .Boolean(value) } }
-impl From<I64> for WebStateValue { fn from(value: I64) -> Self { .Integer(value) } }
-impl From<I32> for WebStateValue { fn from(value: I32) -> Self { .Integer(I64{value}) } }
-impl From<U64> for WebStateValue { fn from(value: U64) -> Self { .Unsigned(value) } }
-impl From<U32> for WebStateValue { fn from(value: U32) -> Self { .Unsigned(U64{value}) } }
-impl From<[U8]> for WebStateValue { fn from(value: [U8]) -> Self { .Bytes(^value) } }
-enum WebStateKind { Signal; Store; QueryCache; FormDraft; Scroll; Focus; Island }
+impl From<&String> for WebStateValue { from: fn(value: String) -> Self { .Text(value.to_string()) } }
+impl From<String> for WebStateValue { from: fn(value: String) -> Self { .Text(^value) } }
+impl From<Bool> for WebStateValue { from: fn(value: Bool) -> Self { .Boolean(value) } }
+impl From<I64> for WebStateValue { from: fn(value: I64) -> Self { .Integer(value) } }
+impl From<I32> for WebStateValue { from: fn(value: I32) -> Self { .Integer(I64{value}) } }
+impl From<U64> for WebStateValue { from: fn(value: U64) -> Self { .Unsigned(value) } }
+impl From<U32> for WebStateValue { from: fn(value: U32) -> Self { .Unsigned(U64{value}) } }
+impl From<[U8]> for WebStateValue { from: fn(value: [U8]) -> Self { .Bytes(^value) } }
+WebStateKind: enum { Signal; Store; QueryCache; FormDraft; Scroll; Focus; Island }
 impl WebStateKind {
-    fn as_str(self) -> String { if self == {
+    as_str: fn(self) -> String { if self == {
         .Signal -> "signal"
         .Store -> "store"
         .QueryCache -> "query_cache"
@@ -45,40 +45,40 @@ impl WebStateKind {
         .Island -> "island"
     } }
 }
-struct WebSignalFact { key: String; type_fingerprint: String; value: WebStateValue }
+WebSignalFact: struct { key: String; type_fingerprint: String; value: WebStateValue }
 impl WebSignalFact {
-    fn new<T: Into<WebStateValue>>(key: String, type_fingerprint: String, value: T) -> Self { Self(key: ^key, type_fingerprint: ^type_fingerprint, value: value.into()) }
+    new: fn<T: Into<WebStateValue>>(key: String, type_fingerprint: String, value: T) -> Self { Self(key: ^key, type_fingerprint: ^type_fingerprint, value: value.into()) }
 }
-struct WebStoreFact { key: String; type_fingerprint: String; value: WebStateValue }
+WebStoreFact: struct { key: String; type_fingerprint: String; value: WebStateValue }
 impl WebStoreFact {
-    fn new<T: Into<WebStateValue>>(key: String, type_fingerprint: String, value: T) -> Self { Self(key: ^key, type_fingerprint: ^type_fingerprint, value: value.into()) }
+    new: fn<T: Into<WebStateValue>>(key: String, type_fingerprint: String, value: T) -> Self { Self(key: ^key, type_fingerprint: ^type_fingerprint, value: value.into()) }
 }
-struct WebQueryCacheFact { key: String; type_fingerprint: String; value: WebStateValue }
+WebQueryCacheFact: struct { key: String; type_fingerprint: String; value: WebStateValue }
 impl WebQueryCacheFact {
-    fn new<T: Into<WebStateValue>>(key: String, type_fingerprint: String, value: T) -> Self { Self(key: ^key, type_fingerprint: ^type_fingerprint, value: value.into()) }
+    new: fn<T: Into<WebStateValue>>(key: String, type_fingerprint: String, value: T) -> Self { Self(key: ^key, type_fingerprint: ^type_fingerprint, value: value.into()) }
 }
-struct WebFormDraftFact { key: String; type_fingerprint: String; value: WebStateValue }
+WebFormDraftFact: struct { key: String; type_fingerprint: String; value: WebStateValue }
 impl WebFormDraftFact {
-    fn new<T: Into<WebStateValue>>(key: String, type_fingerprint: String, value: T) -> Self { Self(key: ^key, type_fingerprint: ^type_fingerprint, value: value.into()) }
+    new: fn<T: Into<WebStateValue>>(key: String, type_fingerprint: String, value: T) -> Self { Self(key: ^key, type_fingerprint: ^type_fingerprint, value: value.into()) }
 }
-struct WebScrollFact { key: String; type_fingerprint: String; value: WebStateValue }
+WebScrollFact: struct { key: String; type_fingerprint: String; value: WebStateValue }
 impl WebScrollFact {
-    fn new<T: Into<WebStateValue>>(key: String, type_fingerprint: String, value: T) -> Self { Self(key: ^key, type_fingerprint: ^type_fingerprint, value: value.into()) }
+    new: fn<T: Into<WebStateValue>>(key: String, type_fingerprint: String, value: T) -> Self { Self(key: ^key, type_fingerprint: ^type_fingerprint, value: value.into()) }
 }
-struct WebFocusFact { key: String; type_fingerprint: String; value: WebStateValue }
+WebFocusFact: struct { key: String; type_fingerprint: String; value: WebStateValue }
 impl WebFocusFact {
-    fn new<T: Into<WebStateValue>>(key: String, type_fingerprint: String, value: T) -> Self { Self(key: ^key, type_fingerprint: ^type_fingerprint, value: value.into()) }
+    new: fn<T: Into<WebStateValue>>(key: String, type_fingerprint: String, value: T) -> Self { Self(key: ^key, type_fingerprint: ^type_fingerprint, value: value.into()) }
 }
-struct WebIslandFact { key: String; identity: String; type_fingerprint: String; value: WebStateValue }
+WebIslandFact: struct { key: String; identity: String; type_fingerprint: String; value: WebStateValue }
 impl WebIslandFact {
-    fn new<T: Into<WebStateValue>>(key: String, identity: String, type_fingerprint: String, value: T) -> Self { Self(key: ^key, identity: ^identity, type_fingerprint: ^type_fingerprint, value: value.into()) }
+    new: fn<T: Into<WebStateValue>>(key: String, identity: String, type_fingerprint: String, value: T) -> Self { Self(key: ^key, identity: ^identity, type_fingerprint: ^type_fingerprint, value: value.into()) }
 }
-enum WebModuleSwapStateFact {
+WebModuleSwapStateFact: enum {
     Signal(WebSignalFact); Store(WebStoreFact); QueryCache(WebQueryCacheFact); FormDraft(WebFormDraftFact)
     Scroll(WebScrollFact); Focus(WebFocusFact); Island(WebIslandFact)
 }
 impl WebModuleSwapStateFact {
-    fn kind(self: Self) -> WebStateKind { if self == {
+    kind: fn(self: Self) -> WebStateKind { if self == {
         .Signal(_) -> .Signal
         .Store(_) -> .Store
         .QueryCache(_) -> .QueryCache
@@ -87,7 +87,7 @@ impl WebModuleSwapStateFact {
         .Focus(_) -> .Focus
         .Island(_) -> .Island
     } }
-    fn key(self: Self) -> String { if self == {
+    key: fn(self: Self) -> String { if self == {
         .Signal(f) -> &f.key
         .Store(f) -> &f.key
         .QueryCache(f) -> &f.key
@@ -96,11 +96,11 @@ impl WebModuleSwapStateFact {
         .Focus(f) -> &f.key
         .Island(f) -> &f.key
     } }
-    fn identity(self: Self) -> String { if self == {
+    identity: fn(self: Self) -> String { if self == {
         .Island(f) -> &f.identity
         else -> self.key()
     } }
-    fn type_fingerprint(self: Self) -> String { if self == {
+    type_fingerprint: fn(self: Self) -> String { if self == {
         .Signal(f) -> &f.type_fingerprint
         .Store(f) -> &f.type_fingerprint
         .QueryCache(f) -> &f.type_fingerprint
@@ -109,7 +109,7 @@ impl WebModuleSwapStateFact {
         .Focus(f) -> &f.type_fingerprint
         .Island(f) -> &f.type_fingerprint
     } }
-    fn value(self: Self) -> WebStateValue { if self == {
+    value: fn(self: Self) -> WebStateValue { if self == {
         .Signal(f) -> &f.value
         .Store(f) -> &f.value
         .QueryCache(f) -> &f.value
@@ -118,7 +118,7 @@ impl WebModuleSwapStateFact {
         .Focus(f) -> &f.value
         .Island(f) -> &f.value
     } }
-    fn with_value(self: Self, value: WebStateValue) -> Self {
+    with_value: fn(self: Self, value: WebStateValue) -> Self {
         if self == {
             .Signal(f) -> .Signal(WebSignalFact(key: f.key.clone(), type_fingerprint: f.type_fingerprint.clone(), value: ^value))
             .Store(f) -> .Store(WebStoreFact(key: f.key.clone(), type_fingerprint: f.type_fingerprint.clone(), value: ^value))
@@ -130,16 +130,16 @@ impl WebModuleSwapStateFact {
         }
     }
 }
-struct WebModuleSwapSnapshot {
+WebModuleSwapSnapshot: struct {
     identity: WebModuleSwapIdentity; source_revision: String; build_revision: String
     page: WebPageFact; modules: [WebModuleFact]; state: [WebModuleSwapStateFact]
 }
 impl WebModuleSwapSnapshot {
-    fn new(identity: WebModuleSwapIdentity, source_revision: String, build_revision: String, page: WebPageFact, modules: [WebModuleFact], state: [WebModuleSwapStateFact]) -> Self WebModuleSwapError! {
+    new: fn(identity: WebModuleSwapIdentity, source_revision: String, build_revision: String, page: WebPageFact, modules: [WebModuleFact], state: [WebModuleSwapStateFact]) -> Self WebModuleSwapError! {
         snapshot := Self(identity: ^identity, source_revision: ^source_revision, build_revision: ^build_revision, page: ^page, modules: ^modules, state: ^state)
         snapshot.normalize()?; return .Ok(^snapshot)
     }
-    fn normalize(self: &Self) WebModuleSwapError! {
+    normalize: fn(self: &Self) WebModuleSwapError! {
         if !self.identity.is_valid() -> return .Err(.InvalidSnapshot(detail: "module and page identity must be non-empty"))
         if self.source_revision.is_empty() || self.build_revision.is_empty() -> return .Err(.InvalidSnapshot(detail: "source and build revisions must be non-empty"))
         if self.page.identity.is_empty() -> return .Err(.InvalidSnapshot(detail: "page identity must be non-empty"))
@@ -157,21 +157,21 @@ impl WebModuleSwapSnapshot {
         if self.state.windows(2).any((pair) -> pair[0].kind() == pair[1].kind() && pair[0].key() == pair[1].key()) -> return .Err(.InvalidSnapshot(detail: "state keys must be unique within a state family"))
         return .Ok(_)
     }
-    fn module_ref(self: Self, identity: String) -> WebModuleFact? {
+    module_ref: fn(self: Self, identity: String) -> WebModuleFact? {
         self.modules.binary_search_by((module_ref) -> module_ref.identity.as_str().cmp(identity)).ok().map((index) -> &self.modules[index])
     }
-    fn state_fact(self: Self, kind: WebStateKind, key: String) -> WebModuleSwapStateFact? {
+    state_fact: fn(self: Self, kind: WebStateKind, key: String) -> WebModuleSwapStateFact? {
         self.state.binary_search_by((fact) -> (_0: fact.kind(), _1: fact.key()).cmp(&(_0: kind, _1: key))).ok().map((index) -> &self.state[index])
     }
 }
-enum WebModuleSwapReasonCode {
+WebModuleSwapReasonCode: enum {
     NoChange; SourceRevisionChanged; BuildRevisionChanged; ModuleBodyChanged; ModuleAdded; ModuleRemoved; ModuleIdentityChanged
     ModuleInterfaceChanged; PageIdentityChanged; StateAdded; StateRemoved; StateRetentionFresh; SignalTypeChanged
     StoreTypeChanged; QueryCacheTypeChanged; FormDraftTypeChanged; ScrollTypeChanged; FocusTypeChanged; IslandTypeChanged
     IslandIdentityChanged; IdentityMismatch; SemanticIncompatible; StalePlan; NothingToRollback
 }
 impl WebModuleSwapReasonCode {
-    fn as_str(self) -> String {
+    as_str: fn(self) -> String {
         if self == {
             .NoChange -> "no_change"; .SourceRevisionChanged -> "source_revision_changed"; .BuildRevisionChanged -> "build_revision_changed"
             .ModuleBodyChanged -> "module_body_changed"; .ModuleAdded -> "module_added"; .ModuleRemoved -> "module_removed"; .ModuleIdentityChanged -> "module_identity_changed"
@@ -183,26 +183,26 @@ impl WebModuleSwapReasonCode {
         }
     }
 }
-impl WebModuleSwapReasonCode.Display { fn display(self: Self) -> String { self.as_str() } }
-enum WebModuleSwapCompatibility { Compatible; Incompatible { reason_codes: [WebModuleSwapReasonCode] } }
+impl WebModuleSwapReasonCode.Display { display: fn(self: Self) -> String { self.as_str() } }
+WebModuleSwapCompatibility: enum { Compatible; Incompatible { reason_codes: [WebModuleSwapReasonCode] } }
 impl WebModuleSwapCompatibility {
-    fn is_compatible(self: Self) -> Bool { self == .Compatible }
-    fn reason_codes(self: Self) -> [WebModuleSwapReasonCode] { if self == {
+    is_compatible: fn(self: Self) -> Bool { self == .Compatible }
+    reason_codes: fn(self: Self) -> [WebModuleSwapReasonCode] { if self == {
         .Compatible -> &[]
         .Incompatible(reason_codes: codes) -> codes
     } }
 }
-struct WebModuleSwapResetFact {
+WebModuleSwapResetFact: struct {
     state: WebModuleSwapStateFact; prior_identity: String?; prior_type_fingerprint: String?; reason: WebModuleSwapReasonCode
 }
-struct WebModuleSwapPlan {
+WebModuleSwapPlan: struct {
     base: WebModuleSwapSnapshot; candidate: WebModuleSwapSnapshot
     // Sema owns compatibility and retention; this adapter never re-derives either.
     decision: HotSwapDecision; compatibility: WebModuleSwapCompatibility
     changed_modules: [String]; preserved: [WebModuleSwapStateFact]; reset: [WebModuleSwapResetFact]; reason_codes: [WebModuleSwapReasonCode]
 }
 impl WebModuleSwapPlan {
-    fn from_hot_swap_decision(base: WebModuleSwapSnapshot, candidate: WebModuleSwapSnapshot, decision: HotSwapDecision) -> Self WebModuleSwapError! {
+    from_hot_swap_decision: fn(base: WebModuleSwapSnapshot, candidate: WebModuleSwapSnapshot, decision: HotSwapDecision) -> Self WebModuleSwapError! {
         base := base.clone(); candidate := candidate.clone(); base.normalize()?; candidate.normalize()
         if decision.module_ref.is_empty() || decision.module_ref != base.identity.module_ref -> return .Err(.DecisionModuleMismatch(expected: base.identity.module_ref.clone(), found: decision.module_ref.clone()))
         retention := [String:&StateRetentionFact]{}
@@ -218,10 +218,10 @@ impl WebModuleSwapPlan {
         loop fact in &candidate.state {
             if new_state.insert(fact.key(), fact).is_some() -> return .Err(.DuplicateRetentionKey(key: fact.key().to_string()))
         }
-        old_keys :: old_state.keys().sorted(); new_keys :: new_state.keys().sorted(); retention_keys :: retention.keys().sorted()
+        old_keys: old_state.keys().sorted(); new_keys: new_state.keys().sorted(); retention_keys: retention.keys().sorted()
         loop key in old_keys.iter().chain(new_keys.iter()) {
             if !retention.contains_key(key) {
-                fact :: new_state.get(key).or_else(() -> old_state.get(key)).expect("state key exists")
+                fact: new_state.get(key).or_else(() -> old_state.get(key)).expect("state key exists")
                 return .Err(.MissingRetentionFact(kind: fact.kind(), key: key.to_string()))
             }
         }
@@ -231,28 +231,28 @@ impl WebModuleSwapPlan {
         reasons := [WebModuleSwapReasonCode:Bool]{} // GATE #4499: exact enum keys, declaration order.
         if base.source_revision != candidate.source_revision -> reasons.insert(.SourceRevisionChanged, true)
         if base.build_revision != candidate.build_revision -> reasons.insert(.BuildRevisionChanged, true)
-        changed :: !decision.changed.is_empty() || !decision.changed_functions.is_empty()
-        changed_modules :: if changed || !decision.is_compatible() -> [decision.module_ref.clone()] else -> []
+        changed: !decision.changed.is_empty() || !decision.changed_functions.is_empty()
+        changed_modules: if changed || !decision.is_compatible() -> [decision.module_ref.clone()] else -> []
         if !decision.changed_functions.is_empty() && decision.is_compatible() -> reasons.insert(.ModuleBodyChanged, true)
         if !decision.is_compatible() -> reasons.insert(.SemanticIncompatible, true)
         preserved := [WebModuleSwapStateFact]{}; reset := [WebModuleSwapResetFact]{}
         loop key in &new_keys {
-            new_fact :: new_state.get(key).unwrap(); retention_fact :: retention.get(key).expect("checked web retention fact")
+            new_fact: new_state.get(key).unwrap(); retention_fact: retention.get(key).expect("checked web retention fact")
             match.bit_and(retention_fact.decision) {
                 .Preserve -> {
-                    old_fact :: old_state.get(key).ok_or_else(() -> WebModuleSwapError.InvalidSnapshot(detail: "retention fact `{key}` preserves state with no resident value"))?
+                    old_fact: old_state.get(key).ok_or_else(() -> WebModuleSwapError.InvalidSnapshot(detail: "retention fact `{key}` preserves state with no resident value"))?
                     preserved.push(new_fact.with_value(old_fact.value().clone()))
                 }
                 .Fresh(..) -> {
                     reasons.insert(.StateRetentionFresh, true)
-                    (prior_identity, prior_type_fingerprint) :: old_state.get(key).map((old_fact) -> (.Val(old_fact.identity().to_string()), .Val(old_fact.type_fingerprint().to_string()))).unwrap_or((.None, .None))
+                    (prior_identity, prior_type_fingerprint): old_state.get(key).map((old_fact) -> (.Val(old_fact.identity().to_string()), .Val(old_fact.type_fingerprint().to_string()))).unwrap_or((.None, .None))
                     reset.push(WebModuleSwapResetFact(state: new_fact.clone(), prior_identity: ^prior_identity, prior_type_fingerprint: ^prior_type_fingerprint, reason: if old_state.contains_key(key) { .StateRetentionFresh } else { .StateAdded }))
                 }
             }
         }
         loop key in &old_keys {
             if new_state.contains_key(key) -> next
-            old_fact :: old_state.get(key).unwrap(); retention_fact :: retention.get(key).expect("checked web retention fact")
+            old_fact: old_state.get(key).unwrap(); retention_fact: retention.get(key).expect("checked web retention fact")
             if retention_fact.decision == .Preserve -> return .Err(.InvalidSnapshot(detail: "retention fact `{key}` preserves removed state"))
             reasons.insert(.StateRemoved, true)
             reset.push(WebModuleSwapResetFact(state: old_fact.clone(), prior_identity: .Val(old_fact.identity().to_string()), prior_type_fingerprint: .Val(old_fact.type_fingerprint().to_string()), reason: .StateRemoved))
@@ -260,14 +260,14 @@ impl WebModuleSwapPlan {
         if reasons.is_empty() -> reasons.insert(.NoChange, true)
         preserved.sort_by((left, right) -> (_0: left.kind(), _1: left.key()).cmp(&(_0: right.kind(), _1: right.key())))
         reset.sort_by((left, right) -> (_0: left.state.kind(), _1: left.state.key()).cmp(&(_0: right.state.kind(), _1: right.state.key())))
-        reason_codes :: reasons.keys().sorted()
-        compatibility :: if decision.is_compatible() -> .Compatible else -> .Incompatible(reason_codes: [.SemanticIncompatible])
+        reason_codes: reasons.keys().sorted()
+        compatibility: if decision.is_compatible() -> .Compatible else -> .Incompatible(reason_codes: [.SemanticIncompatible])
         return .Ok(Self(base: ^base, candidate: ^candidate, decision: decision.clone(), compatibility: ^compatibility, changed_modules: ^changed_modules, preserved: ^preserved, reset: ^reset, reason_codes: ^reason_codes))
     }
-    fn decision(self: Self) -> HotSwapDecision { &self.decision }
-    fn is_compatible(self: Self) -> Bool { self.decision.is_compatible() }
-    fn changed_module_set(self: Self) -> [String] { &self.changed_modules }
-    fn applied_snapshot(self: Self) -> WebModuleSwapSnapshot {
+    decision: fn(self: Self) -> HotSwapDecision { &self.decision }
+    is_compatible: fn(self: Self) -> Bool { self.decision.is_compatible() }
+    changed_module_set: fn(self: Self) -> [String] { &self.changed_modules }
+    applied_snapshot: fn(self: Self) -> WebModuleSwapSnapshot {
         snapshot := self.candidate.clone()
         loop preserved in &self.preserved {
             if snapshot.state.iter_mut().find((fact) -> fact.kind() == preserved.kind() && fact.key() == preserved.key()) == .Val(slot) -> *slot = preserved.clone()
@@ -275,9 +275,9 @@ impl WebModuleSwapPlan {
         return ^snapshot
     }
 }
-enum WebModuleSwapOperation { Pause; Apply; Commit; Rollback; Restart }
+WebModuleSwapOperation: enum { Pause; Apply; Commit; Rollback; Restart }
 impl WebModuleSwapOperation {
-    fn as_str(self) -> String { if self == {
+    as_str: fn(self) -> String { if self == {
         .Pause -> "pause"
         .Apply -> "apply"
         .Commit -> "commit"
@@ -285,19 +285,19 @@ impl WebModuleSwapOperation {
         .Restart -> "restart"
     } }
 }
-impl WebModuleSwapOperation.Display { fn display(self: Self) -> String { self.as_str() } }
-enum WebModuleSwapPhase { Committed; Paused; Applied }
+impl WebModuleSwapOperation.Display { display: fn(self: Self) -> String { self.as_str() } }
+WebModuleSwapPhase: enum { Committed; Paused; Applied }
 impl WebModuleSwapPhase {
-    fn as_str(self) -> String { if self == {
+    as_str: fn(self) -> String { if self == {
         .Committed -> "committed"
         .Paused -> "paused"
         .Applied -> "applied"
     } }
 }
-impl WebModuleSwapPhase.Display { fn display(self: Self) -> String { self.as_str() } }
-enum WebModuleSwapReceiptStatus { Paused; Applied; Committed; RolledBack; Restarted }
+impl WebModuleSwapPhase.Display { display: fn(self: Self) -> String { self.as_str() } }
+WebModuleSwapReceiptStatus: enum { Paused; Applied; Committed; RolledBack; Restarted }
 impl WebModuleSwapReceiptStatus {
-    fn as_str(self) -> String { if self == {
+    as_str: fn(self) -> String { if self == {
         .Paused -> "paused"
         .Applied -> "applied"
         .Committed -> "committed"
@@ -305,25 +305,25 @@ impl WebModuleSwapReceiptStatus {
         .Restarted -> "restarted"
     } }
 }
-struct WebModuleSwapReceipt {
+WebModuleSwapReceipt: struct {
     operation: WebModuleSwapOperation; status: WebModuleSwapReceiptStatus; phase: WebModuleSwapPhase
     identity: WebModuleSwapIdentity; candidate_identity: WebModuleSwapIdentity
     source_revision: String; build_revision: String; changed_modules: [String]; reason_codes: [WebModuleSwapReasonCode]
     preserved: [WebModuleSwapStateFact]; reset: [WebModuleSwapResetFact]; committed_page: WebPageFact; active_page: WebPageFact
 }
 impl WebModuleSwapReceipt {
-    fn changed_module_set(self: Self) -> [String] { &self.changed_modules }
-    fn preserved_facts(self: Self) -> [WebModuleSwapStateFact] { &self.preserved }
-    fn audit(self: Self) -> String {
-        changed :: self.changed_modules.join(",")
-        reasons :: self.reason_codes.iter().map((reason) -> reason.as_str()).collect<[_]>().join(",")
-        preserved :: self.preserved.iter().map((fact) -> "{fact.kind().as_str()}:{fact.key()}").collect<[_]>().join(",")
-        reset :: self.reset.iter().map((fact) -> "{fact.state.kind().as_str()}:{fact.state.key()}({fact.reason.as_str()})").collect<[_]>().join(",")
+    changed_module_set: fn(self: Self) -> [String] { &self.changed_modules }
+    preserved_facts: fn(self: Self) -> [WebModuleSwapStateFact] { &self.preserved }
+    audit: fn(self: Self) -> String {
+        changed: self.changed_modules.join(",")
+        reasons: self.reason_codes.iter().map((reason) -> reason.as_str()).collect<[_]>().join(",")
+        preserved: self.preserved.iter().map((fact) -> "{fact.kind().as_str()}:{fact.key()}").collect<[_]>().join(",")
+        reset: self.reset.iter().map((fact) -> "{fact.state.kind().as_str()}:{fact.state.key()}({fact.reason.as_str()})").collect<[_]>().join(",")
         return "operation={self.operation} status={self.status.as_str()} phase={self.phase} identity={self.identity.module_ref}/{self.identity.page} candidate={self.candidate_identity.module_ref}/{self.candidate_identity.page} source_revision={self.source_revision} build_revision={self.build_revision} changed_modules=[{changed}] reasons=[{reasons}] preserved=[{preserved}] reset=[{reset}] committed_page={self.committed_page.artifact} active_page={self.active_page.artifact}"
     }
 }
 #Error
-enum WebModuleSwapError {
+WebModuleSwapError: enum {
     InvalidSnapshot { detail: String }
     IdentityMismatch { expected: WebModuleSwapIdentity, found: WebModuleSwapIdentity }
     DecisionModuleMismatch { expected: String, found: String }
@@ -336,7 +336,7 @@ enum WebModuleSwapError {
     NoPendingPlan; NoAppliedPlan; NoCommittedPage
 }
 impl WebModuleSwapError.Display {
-    fn display(self: Self) -> String {
+    display: fn(self: Self) -> String {
         return if self == {
             .InvalidSnapshot(detail: detail) -> "invalid web swap snapshot: {detail}"
             .IdentityMismatch(expected: expected, found: found) -> "web swap identity mismatch: expected {expected.module_ref}/{expected.page} but found {found.module_ref}/{found.page}"
@@ -352,19 +352,19 @@ impl WebModuleSwapError.Display {
     }
 }
 // #Error supplies the native error contract.
-struct WebModuleSwapState {
+WebModuleSwapState: struct {
     committed: WebModuleSwapSnapshot; pending: WebModuleSwapPlan?; active: WebModuleSwapSnapshot; phase: WebModuleSwapPhase
 }
 impl WebModuleSwapState {
-    fn new(snapshot: WebModuleSwapSnapshot) -> Self WebModuleSwapError! {
+    new: fn(snapshot: WebModuleSwapSnapshot) -> Self WebModuleSwapError! {
         snapshot := ^snapshot; snapshot.normalize()
         return .Ok(Self(active: snapshot.clone(), committed: ^snapshot, pending: .None, phase: .Committed))
     }
-    fn committed(self: Self) -> WebModuleSwapSnapshot { &self.committed }
-    fn active(self: Self) -> WebModuleSwapSnapshot { &self.active }
-    fn pending(self: Self) -> WebModuleSwapPlan? { self.pending.as_ref() }
-    fn phase(self: Self) -> WebModuleSwapPhase { self.phase }
-    fn pause(self: Self, plan: WebModuleSwapPlan) -> WebModuleSwapReceipt WebModuleSwapError! {
+    committed: fn(self: Self) -> WebModuleSwapSnapshot { &self.committed }
+    active: fn(self: Self) -> WebModuleSwapSnapshot { &self.active }
+    pending: fn(self: Self) -> WebModuleSwapPlan? { self.pending.as_ref() }
+    phase: fn(self: Self) -> WebModuleSwapPhase { self.phase }
+    pause: fn(self: Self, plan: WebModuleSwapPlan) -> WebModuleSwapReceipt WebModuleSwapError! {
         if self.phase != .Committed || self.pending.is_some() -> return .Err(.InvalidTransition(operation: .Pause, phase: self.phase))
         self.validate_base(&plan)
         if plan.base.identity != plan.candidate.identity -> return .Err(.IdentityMismatch(expected: plan.base.identity.clone(), found: plan.candidate.identity.clone()))
@@ -372,43 +372,43 @@ impl WebModuleSwapState {
         self.pending = .Val(^plan); self.phase = .Paused
         return .Ok(self.receipt(.Pause, .Paused))
     }
-    fn apply(self: Self) -> WebModuleSwapReceipt WebModuleSwapError! {
+    apply: fn(self: Self) -> WebModuleSwapReceipt WebModuleSwapError! {
         if self.phase != .Paused -> return .Err(.InvalidTransition(operation: .Apply, phase: self.phase))
-        plan :: self.pending.as_ref().ok_or(WebModuleSwapError.NoPendingPlan)
+        plan: self.pending.as_ref().ok_or(WebModuleSwapError.NoPendingPlan)
         self.validate_base(plan)
         if !plan.is_compatible() -> return .Err(.Incompatible(reason_codes: plan.compatibility.reason_codes().to_vec()))
-        applied :: plan.applied_snapshot(); self.active = ^applied; self.phase = .Applied
+        applied: plan.applied_snapshot(); self.active = ^applied; self.phase = .Applied
         return .Ok(self.receipt(.Apply, .Applied))
     }
-    fn commit(self: Self) -> WebModuleSwapReceipt WebModuleSwapError! {
+    commit: fn(self: Self) -> WebModuleSwapReceipt WebModuleSwapError! {
         if self.phase != .Applied -> return .Err(.InvalidTransition(operation: .Commit, phase: self.phase))
-        plan :: self.pending.as_ref().ok_or(WebModuleSwapError.NoAppliedPlan)
+        plan: self.pending.as_ref().ok_or(WebModuleSwapError.NoAppliedPlan)
         self.validate_base(plan)
         if self.active.identity != plan.candidate.identity -> return .Err(.IdentityMismatch(expected: plan.candidate.identity.clone(), found: self.active.identity.clone()))
-        plan :: self.pending.take().expect("applied swap has a pending plan")
+        plan: self.pending.take().expect("applied swap has a pending plan")
         self.committed = self.active.clone(); self.phase = .Committed
         return .Ok(self.receipt_for_plan(&plan, .Commit, .Committed))
     }
-    fn rollback(self: Self) -> WebModuleSwapReceipt WebModuleSwapError! {
-        had_pending :: self.pending.is_some()
-        receipt_data :: self.pending.as_ref().map((plan) -> (_0: plan.candidate.identity.clone(), _1: plan.candidate.source_revision.clone(), _2: plan.candidate.build_revision.clone(), _3: plan.changed_modules.clone(), _4: plan.reason_codes.clone(), _5: plan.preserved.clone(), _6: plan.reset.clone()))
+    rollback: fn(self: Self) -> WebModuleSwapReceipt WebModuleSwapError! {
+        had_pending: self.pending.is_some()
+        receipt_data: self.pending.as_ref().map((plan) -> (_0: plan.candidate.identity.clone(), _1: plan.candidate.source_revision.clone(), _2: plan.candidate.build_revision.clone(), _3: plan.changed_modules.clone(), _4: plan.reason_codes.clone(), _5: plan.preserved.clone(), _6: plan.reset.clone()))
         self.pending = .None; self.active = self.committed.clone(); self.phase = .Committed
         if had_pending {
-            (candidate_identity, source_revision, build_revision, changed_modules, reason_codes, preserved, reset) :: receipt_data.expect("pending plan was present")
+            (candidate_identity, source_revision, build_revision, changed_modules, reason_codes, preserved, reset): receipt_data.expect("pending plan was present")
             return .Ok(WebModuleSwapReceipt(operation: .Rollback, status: .RolledBack, phase: self.phase, identity: self.committed.identity.clone(), candidate_identity: ^candidate_identity, source_revision: ^source_revision, build_revision: ^build_revision, changed_modules: ^changed_modules, reason_codes: ^reason_codes, preserved: ^preserved, reset: ^reset, committed_page: self.committed.page.clone(), active_page: self.active.page.clone()))
         }
         return .Ok(WebModuleSwapReceipt(operation: .Rollback, status: .RolledBack, phase: self.phase, identity: self.committed.identity.clone(), candidate_identity: self.committed.identity.clone(), source_revision: self.committed.source_revision.clone(), build_revision: self.committed.build_revision.clone(), changed_modules: [], reason_codes: [.NothingToRollback], preserved: [], reset: [], committed_page: self.committed.page.clone(), active_page: self.active.page.clone()))
     }
-    fn apply_decision(self: Self, plan: WebModuleSwapPlan) -> WebModuleSwapReceipt WebModuleSwapError! {
+    apply_decision: fn(self: Self, plan: WebModuleSwapPlan) -> WebModuleSwapReceipt WebModuleSwapError! {
         if !plan.is_compatible() -> return self.restart(^plan)
         self.pause(^plan)
-        if self.apply() == .Err(error) { _ :: self.rollback(); return .Err(^error) }
+        if self.apply() == .Err(error) { _: self.rollback(); return .Err(^error) }
         return if self.commit() == {
             .Ok(receipt) -> .Ok(^receipt)
-            .Err(error) -> { _ :: self.rollback(), .Err(^error) }
+            .Err(error) -> { _: self.rollback(), .Err(^error) }
         }
     }
-    fn restart(self: Self, plan: WebModuleSwapPlan) -> WebModuleSwapReceipt WebModuleSwapError! {
+    restart: fn(self: Self, plan: WebModuleSwapPlan) -> WebModuleSwapReceipt WebModuleSwapError! {
         if self.phase != .Committed || self.pending.is_some() -> return .Err(.InvalidTransition(operation: .Restart, phase: self.phase))
         self.validate_base(&plan)
         if plan.base.identity != plan.candidate.identity -> return .Err(.IdentityMismatch(expected: plan.base.identity.clone(), found: plan.candidate.identity.clone()))
@@ -416,16 +416,16 @@ impl WebModuleSwapState {
         self.active = plan.candidate.clone(); self.committed = self.active.clone(); self.phase = .Committed
         return .Ok(self.receipt_for_plan(&plan, .Restart, .Restarted))
     }
-    fn validate_base(self: &Self, plan: &WebModuleSwapPlan) WebModuleSwapError! {
+    validate_base: fn(self: &Self, plan: &WebModuleSwapPlan) WebModuleSwapError! {
         if self.committed.identity != plan.base.identity -> return .Err(.IdentityMismatch(expected: self.committed.identity.clone(), found: plan.base.identity.clone()))
         if self.committed.source_revision != plan.base.source_revision || self.committed.build_revision != plan.base.build_revision -> return .Err(.StalePlan(expected_source_revision: plan.base.source_revision.clone(), found_source_revision: self.committed.source_revision.clone(), expected_build_revision: plan.base.build_revision.clone(), found_build_revision: self.committed.build_revision.clone()))
         return .Ok(_)
     }
-    fn receipt(self: Self, operation: WebModuleSwapOperation, status: WebModuleSwapReceiptStatus) -> WebModuleSwapReceipt {
-        plan :: self.pending.as_ref().expect("successful swap operation has a pending plan")
+    receipt: fn(self: Self, operation: WebModuleSwapOperation, status: WebModuleSwapReceiptStatus) -> WebModuleSwapReceipt {
+        plan: self.pending.as_ref().expect("successful swap operation has a pending plan")
         return self.receipt_for_plan(plan, operation, status)
     }
-    fn receipt_for_plan(self: Self, plan: WebModuleSwapPlan, operation: WebModuleSwapOperation, status: WebModuleSwapReceiptStatus) -> WebModuleSwapReceipt {
+    receipt_for_plan: fn(self: Self, plan: WebModuleSwapPlan, operation: WebModuleSwapOperation, status: WebModuleSwapReceiptStatus) -> WebModuleSwapReceipt {
         WebModuleSwapReceipt(operation: operation, status: status, phase: self.phase, identity: self.committed.identity.clone(), candidate_identity: plan.candidate.identity.clone(), source_revision: plan.candidate.source_revision.clone(), build_revision: plan.candidate.build_revision.clone(), changed_modules: plan.changed_modules.clone(), reason_codes: plan.reason_codes.clone(), preserved: plan.preserved.clone(), reset: plan.reset.clone(), committed_page: self.committed.page.clone(), active_page: self.active.page.clone())
     }
 }

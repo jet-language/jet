@@ -19,49 +19,49 @@ use {
         build_session_finish, build_session_new,
     ]
     jetpack_artifact_store.[BuildNodeRecord, BuildRecord, ObjectHandle]
-    build_math :: core.math
+    build_math: core.math
 }
-fn inspect_build_require(ok: Bool, message: String) Never! {
+inspect_build_require: fn(ok: Bool, message: String) Never! {
     if !ok -> panic("InspectBuild: {message}")
 }
-fn inspect_build_node(node: BuildGraphNode, kind: String, subject: String, key: String, inputs: [String]) Never! {
+inspect_build_node: fn(node: BuildGraphNode, kind: String, subject: String, key: String, inputs: [String]) Never! {
     inspect_build_require(node.kind == kind && node.subject == subject && node.key == key && node.inputs == inputs, "exact {kind} node {subject}")
 }
-fn inspect_build_request() -> JetDriverCompileRequest {
-    snapshot :: JetDriverAuthorizedSourceSnapshot{
-        roots: [JetDriverAuthorizedSourceRoot]{{canonical_path: "/inspect-build", identity: "build-root", allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{{path: "/inspect-build/main.jet", relative_path: "main.jet", identity: "build-source", source: "fn run() {{}}"}}, foreign_cache_files: []}},
+inspect_build_request: fn() -> JetDriverCompileRequest {
+    snapshot: JetDriverAuthorizedSourceSnapshot{
+        roots: [JetDriverAuthorizedSourceRoot]{{canonical_path: "/inspect-build", identity: "build-root", allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{{path: "/inspect-build/main.jet", relative_path: "main.jet", identity: "build-source", source: "run: fn() {{}}"}}, foreign_cache_files: []}},
         entry_root_identity: "build-root", entry_path: "/inspect-build/main.jet",
     }
     jet_cli_driver_request(snapshot, [], Val(1), JetDriverCompileMode.Doc)
 }
 #Test("inspect_build") {
-    empty :: JetDriverBuildQueryResult{plan: None, graph: None, generated: [], diagnostics: [], complete: true, internal_problem: None}
+    empty: JetDriverBuildQueryResult{plan: None, graph: None, generated: [], diagnostics: [], complete: true, internal_problem: None}
     inspect_build_require(jet_cli_build_report(empty, None, false) == "default pipeline: no root fn build\n", "default pipeline human")
     inspect_build_require(jet_cli_build_report(empty, None, true) == "{{\"schema\":\"jet.status/v1\",\"action\":\"inspect.build\",\"ok\":true,\"reports\":[],\"build\":null}}\n", "default pipeline JSON")
-    policy :: BuildSessionPolicy{legacy_denied: None, plugins_denied: None, plugin_grants: [String:[String]]{}}
+    policy: BuildSessionPolicy{legacy_denied: None, plugins_denied: None, plugin_grants: [String:[String]]{}}
     session := build_session_new(101, "fixture", "compiler", policy)
-    action_reply :: build_session_call(&session, "action", [BuildSessionValue]{BuildSessionValue.Text{value: "compile"}, BuildSessionValue.List{values: [BuildSessionValue]{BuildSessionValue.Text{value: "main.jet"}}}, BuildSessionValue.List{values: [BuildSessionValue]{BuildSessionValue.Text{value: "out/app"}}}, BuildSessionValue.List{values: [BuildSessionValue]{BuildSessionValue.Text{value: "compiler"}, BuildSessionValue.Text{value: "main.jet"}}}, BuildSessionValue.List{values: [BuildSessionValue]{}}}, None, false, 1, 2)
-    action :: if action_reply == {.Value(value) -> value else -> panic("checked action failed")}
-    target_reply :: build_session_call(&session, "add_executable", [BuildSessionValue]{BuildSessionValue.Text{value: "app"}, BuildSessionValue.List{values: [BuildSessionValue]{BuildSessionValue.Text{value: "main.jet"}}}, BuildSessionValue.List{values: [BuildSessionValue]{action}}}, None, false, 3, 4)
-    target :: if target_reply == {.Value(value) -> value else -> panic("checked target failed")}
-    // `fn build(b: Build)` names its default with `b.default(app)` and returns
+    action_reply: build_session_call(&session, "action", [BuildSessionValue]{BuildSessionValue.Text{value: "compile"}, BuildSessionValue.List{values: [BuildSessionValue]{BuildSessionValue.Text{value: "main.jet"}}}, BuildSessionValue.List{values: [BuildSessionValue]{BuildSessionValue.Text{value: "out/app"}}}, BuildSessionValue.List{values: [BuildSessionValue]{BuildSessionValue.Text{value: "compiler"}, BuildSessionValue.Text{value: "main.jet"}}}, BuildSessionValue.List{values: [BuildSessionValue]{}}}, None, false, 1, 2)
+    action: if action_reply == {.Value(value) -> value else -> panic("checked action failed")}
+    target_reply: build_session_call(&session, "add_executable", [BuildSessionValue]{BuildSessionValue.Text{value: "app"}, BuildSessionValue.List{values: [BuildSessionValue]{BuildSessionValue.Text{value: "main.jet"}}}, BuildSessionValue.List{values: [BuildSessionValue]{action}}}, None, false, 3, 4)
+    target: if target_reply == {.Value(value) -> value else -> panic("checked target failed")}
+    // `build: fn(b: Build)` names its default with `b.default(app)` and returns
     // nothing; the configured session is the plan (Graph.jet build_session_finish).
-    default_reply :: build_session_call(&session, "default", [BuildSessionValue]{target}, None, false, 5, 6)
+    default_reply: build_session_call(&session, "default", [BuildSessionValue]{target}, None, false, 5, 6)
     if default_reply == {.Value(_) -> {} else -> panic("checked default failed")}
-    finished :: build_session_finish(&session, BuildSessionValue.Unit)
-    plan :: finished.plan ?? panic("checked finish failed")
-    graph :: build_plan_graph(plan)
-    query :: JetDriverBuildQueryResult{plan: Val(plan), graph: Val(graph), generated: [], diagnostics: [], complete: true, internal_problem: None}
-    human :: jet_cli_build_report(query, None, false)
+    finished: build_session_finish(&session, BuildSessionValue.Unit)
+    plan: finished.plan ?? panic("checked finish failed")
+    graph: build_plan_graph(plan)
+    query: JetDriverBuildQueryResult{plan: Val(plan), graph: Val(graph), generated: [], diagnostics: [], complete: true, internal_problem: None}
+    human: jet_cli_build_report(query, None, false)
     inspect_build_require(human == "target\tapp\tExecutable\naction\tcompile\tout/app\n", "checked graph human")
-    machine :: jet_cli_build_report(query, None, true)
-    key :: graph.actions[0].key
+    machine: jet_cli_build_report(query, None, true)
+    key: graph.actions[0].key
     // The checked graph owns the key; every observable projection field is
     // pinned independently of the renderer, including the static file universe.
-    files :: "[{{\"path\":\"main.jet\",\"owner\":null,\"consumers\":[0],\"targets\":[0]}},{{\"path\":\"out/app\",\"owner\":0,\"consumers\":[],\"targets\":[0]}}]"
-    payload :: "{{\"schema_version\":1,\"default\":0,\"targets\":[{{\"id\":0,\"name\":\"app\",\"kind\":\"Executable\",\"deps\":[],\"actions\":[0],\"files\":[\"main.jet\"]}}],\"actions\":[{{\"id\":0,\"name\":\"compile\",\"inputs\":[\"main.jet\"],\"outputs\":[\"out/app\"],\"caps\":[],\"pools\":[\"cpu\"],\"toolchain\":\"host\",\"probes\":[],\"cache\":\"Cached\",\"cache_status\":\"unknown\",\"key\":\"{key}\",\"compiler_owned\":false,\"provenance\":[\"argv=compiler main.jet\",\"inputs=1\",\"outputs=1\",\"cache=Cached\"]}}],\"action_keys\":[{{\"action\":\"compile\",\"key\":\"{key}\"}}],\"cache_hits\":[],\"files\":{files},\"affected_files\":{files},\"toolchains\":[{{\"name\":\"host\",\"target\":\"host\"}}],\"probes\":[],\"generated\":[]}}"
+    files: "[{{\"path\":\"main.jet\",\"owner\":null,\"consumers\":[0],\"targets\":[0]}},{{\"path\":\"out/app\",\"owner\":0,\"consumers\":[],\"targets\":[0]}}]"
+    payload: "{{\"schema_version\":1,\"default\":0,\"targets\":[{{\"id\":0,\"name\":\"app\",\"kind\":\"Executable\",\"deps\":[],\"actions\":[0],\"files\":[\"main.jet\"]}}],\"actions\":[{{\"id\":0,\"name\":\"compile\",\"inputs\":[\"main.jet\"],\"outputs\":[\"out/app\"],\"caps\":[],\"pools\":[\"cpu\"],\"toolchain\":\"host\",\"probes\":[],\"cache\":\"Cached\",\"cache_status\":\"unknown\",\"key\":\"{key}\",\"compiler_owned\":false,\"provenance\":[\"argv=compiler main.jet\",\"inputs=1\",\"outputs=1\",\"cache=Cached\"]}}],\"action_keys\":[{{\"action\":\"compile\",\"key\":\"{key}\"}}],\"cache_hits\":[],\"files\":{files},\"affected_files\":{files},\"toolchains\":[{{\"name\":\"host\",\"target\":\"host\"}}],\"probes\":[],\"generated\":[]}}"
     inspect_build_require(jet_driver_build_plan_json(plan) == payload, "canonical graph JSON exact fields and order")
-    machine_expected :: "{{\"schema\":\"jet.status/v1\",\"action\":\"inspect.build\",\"ok\":true,\"reports\":[],\"build\":{payload}}}\n"
+    machine_expected: "{{\"schema\":\"jet.status/v1\",\"action\":\"inspect.build\",\"ok\":true,\"reports\":[],\"build\":{payload}}}\n"
     inspect_build_require(machine == machine_expected, "checked graph JSON exact envelope")
     inspect_build_require(jet_cli_build_report(query, Val("app"), false) == "app\n  kind=Executable\n  sources=1\n  deps=0\n  actions=1\n", "target explanation")
     inspect_build_require(jet_cli_build_report(query, Val("compile"), false) == "compile\n  argv=compiler main.jet\n  inputs=1\n  outputs=1\n  cache=Cached\n", "action explanation")
@@ -71,7 +71,7 @@ fn inspect_build_request() -> JetDriverCompileRequest {
     inspect_build_require(jet_cli_build_report(query, Val("compile"), true) == "{{\"schema\":\"jet.status/v1\",\"action\":\"inspect.build\",\"ok\":true,\"reports\":[],\"label\":\"compile\",\"provenance\":[\"argv=compiler main.jet\",\"inputs=1\",\"outputs=1\",\"cache=Cached\"]}}\n", "action explanation JSON")
     inspect_build_require(jet_cli_build_report(query, Val("out/app"), true) == "{{\"schema\":\"jet.status/v1\",\"action\":\"inspect.build\",\"ok\":true,\"reports\":[],\"label\":\"out/app\",\"provenance\":[\"owner=Some(ActionId(0))\",\"consumers=[]\",\"targets=[TargetId(0)]\"]}}\n", "file explanation JSON")
     inspect_build_require(jet_cli_build_report(query, Val("missing"), true) == "{{\"schema\":\"jet.status/v1\",\"action\":\"inspect.build\",\"ok\":true,\"reports\":[],\"label\":\"missing\",\"provenance\":[\"owner=None\",\"consumers=[]\",\"targets=[]\"]}}\n", "unknown file JSON")
-    unrequested :: jet_driver_compile(inspect_build_request())
+    unrequested: jet_driver_compile(inspect_build_request())
     inspect_build_require(unrequested.complete && unrequested.internal_problem == None, "checked fixture compiles")
     inspect_build_require(unrequested.build_nodes == None, "unrequested compile does not allocate a node projection")
     inspect_build_require(jet_cli_build_duration(0.0) == "0.000", "positive zero")
@@ -80,7 +80,7 @@ fn inspect_build_request() -> JetDriverCompileRequest {
     inspect_build_require(jet_cli_build_duration(0.1875) == "0.188", "odd halfway rounds up")
     inspect_build_require(jet_cli_build_duration(1.2345) == "1.234", "do not double-round binary float")
     inspect_build_require(jet_cli_build_duration(build_math.from_bits(1)) == "0.000", "subnormal")
-    record :: BuildRecord.new("main", [BuildNodeRecord]{{kind: "check", key: "key", subject: "main", duration_ms: 0.1875, why_ran: "source-changed", inputs: [String]{"main.jet"}}})
+    record: BuildRecord.new("main", [BuildNodeRecord]{{kind: "check", key: "key", subject: "main", duration_ms: 0.1875, why_ran: "source-changed", inputs: [String]{"main.jet"}}})
     inspect_build_require(jet_cli_build_nodes_report("main", Val(record), [BuildGraphNode]{}, false) == "check\tkey\tmain\t0.188\tsource-changed\tmain.jet\n", "real node fields human")
     inspect_build_require(jet_cli_build_nodes_report("main", Val(record), [BuildGraphNode]{}, true) == "{{\"schema\":\"jet.explain-build/v1\",\"program\":\"main\",\"nodes\":[{{\"kind\":\"check\",\"key\":\"key\",\"subject\":\"main\",\"duration_ms\":0.188,\"why_ran\":\"source-changed\",\"inputs\":[\"main.jet\"]}}],\"planned\":[]}}\n", "node schema does not invent fields")
     scope := JetDriverBuildQueryScope{}
@@ -95,13 +95,13 @@ fn inspect_build_request() -> JetDriverCompileRequest {
     inspect_build_node(static_query.nodes[2], "link", "main", "b6423079c3279ff750ff90cba335186d0999283f94ff5bfd41815734385e0138", [String]{"compile:main"})
     // Controlled observation inputs test the receipt projection, not a claim
     // that this fixture executed an object compiler or published a runtime pack.
-    object :: ObjectHandle.from_bytes("controlled object identity input".bytes())
-    observed :: jet_cli_build_compile_observation(static_query.nodes[1], 12.5, None, object) ?? panic("actual compile observation rejected")
+    object: ObjectHandle.from_bytes("controlled object identity input".bytes())
+    observed: jet_cli_build_compile_observation(static_query.nodes[1], 12.5, None, object) ?? panic("actual compile observation rejected")
     inspect_build_require(observed.object == object && observed.node.duration_ms == 12.5, "object identity and measured duration are retained without substitution")
-    observed_record :: BuildRecord.new("main", [observed.node])
+    observed_record: BuildRecord.new("main", [observed.node])
     inspect_build_require(jet_cli_build_nodes_report("main", Val(observed_record), [BuildGraphNode]{}, false) == "compile\tfc7c98733a19662c13cb2cf9d4fd679654cb2d58d4a6ee86b659b14b9ea189d8\tmain\t12.500\tfirst-run\tcheck:main.jet\n", "executed compile exact human receipt")
     inspect_build_require(jet_cli_build_nodes_report("main", Val(observed_record), [BuildGraphNode]{}, true) == "{{\"schema\":\"jet.explain-build/v1\",\"program\":\"main\",\"nodes\":[{{\"kind\":\"compile\",\"key\":\"fc7c98733a19662c13cb2cf9d4fd679654cb2d58d4a6ee86b659b14b9ea189d8\",\"subject\":\"main\",\"duration_ms\":12.500,\"why_ran\":\"first-run\",\"inputs\":[\"check:main.jet\"]}}],\"planned\":[]}}\n", "executed compile exact JSON receipt")
-    prior :: jet_cli_build_compile_observation(static_query.nodes[1], 12.5, Val(record), object) ?? panic("prior record observation rejected")
+    prior: jet_cli_build_compile_observation(static_query.nodes[1], 12.5, Val(record), object) ?? panic("prior record observation rejected")
     inspect_build_require(prior.node.why_ran == "input:check:main.jet", "Rust prior-record literal names input without inventing input-changed")
     inspect_build_require(jet_cli_build_compile_observation(static_query.nodes[0], 12.5, None, object) == .Err(_), "object observation cannot stamp an unexecuted check node")
     inspect_build_require(jet_cli_build_compile_observation(static_query.nodes[1], -1.0, None, object) == .Err(_), "invalid measured duration cannot become a fake zero")
@@ -116,17 +116,17 @@ fn inspect_build_request() -> JetDriverCompileRequest {
     selected := inspect_build_request()
     selected.capture_build_nodes = true
     selected.build_output_names = [String]{"z", "a", "z"}
-    selected_result :: jet_driver_compile(^selected)
-    selected_nodes :: selected_result.build_nodes ?? panic("selected outputs lost final nodes")
+    selected_result: jet_driver_compile(^selected)
+    selected_nodes: selected_result.build_nodes ?? panic("selected outputs lost final nodes")
     inspect_build_require(selected_result.complete && selected_nodes.len() == 5, "selected outputs sorted and deduplicated")
     inspect_build_node(selected_nodes[1], "compile", "a", "09aa99b89705217152a804b0fad71966574c2fe659fce7dd2561fd4fc9337d72", [String]{"check:main.jet"})
     inspect_build_node(selected_nodes[2], "compile", "z", "4c033701848037361fca21c04ebb21c87a69af4def9efe6cd22aae0d841d000c", [String]{"check:main.jet"})
     inspect_build_node(selected_nodes[3], "link", "a", "d2cc18555b722bcff7df964cc877e15ffdae6cfdffc8dd219fd64476c4ea944e", [String]{"compile:a"})
     inspect_build_node(selected_nodes[4], "link", "z", "1b995f4cc018af862930ddf3d5cf973c675838ebbbea540afb73f12e50d76d35", [String]{"compile:z"})
     generated_request := inspect_build_request()
-    loaded :: jet_driver_source_query(generated_request)
+    loaded: jet_driver_source_query(generated_request)
     inspect_build_require(loaded.complete && loaded.entry_module_index >= 0, "generated owner is loader selected")
-    generated_request.generated_modules = [JetDriverGeneratedModule]{{package_identity: loaded.modules[loaded.entry_module_index].package_identity, name: "generated", relative_path: "build/generated.jet", source: "fn generated_value() -> Int {{ 7 }}"}}
+    generated_request.generated_modules = [JetDriverGeneratedModule]{{package_identity: loaded.modules[loaded.entry_module_index].package_identity, name: "generated", relative_path: "build/generated.jet", source: "generated_value: fn() -> Int {{ 7 }}"}}
     generated_response := jet_driver_query_build_nodes(^generated_request, &scope)
     generated_owner := ^generated_response.request
     generated_query := ^generated_response.query
@@ -134,49 +134,49 @@ fn inspect_build_request() -> JetDriverCompileRequest {
     inspect_build_require(generated_query.complete && generated_query.nodes.len() == 4, "final generated source is a checked module")
     inspect_build_node(generated_query.nodes[0], "check", "build/generated.jet", "070a459848bc4669182150dd08b8cd3802535d2649bf3be1f38047472cee92b8", [String]{"build/generated.jet"})
     inspect_build_require(generated_query.nodes[0].input_digests == [BuildGraphInputDigest]{{name: "build/generated.jet", digest: "601d5b33f645e3713d0435b7ad669435dc3274d9f866b26079fddc352629ec72"}}, "generated bytes are retained, not omitted Doc modules or virtual origins")
-    planned_text :: jet_cli_build_nodes_host(inspect_build_request(), &scope, "main.jet", "main", None, false, false, false)
+    planned_text: jet_cli_build_nodes_host(inspect_build_request(), &scope, "main.jet", "main", None, false, false, false)
     inspect_build_require(planned_text.exit_code == JET_DRIVER_EXIT_OK && planned_text.stdout == "no build recorded for main yet; planned steps:\ncheck\te05c67e9bab9aa34ca3456b464c3adbe3b66f767085eb68b85663f8b70695957\tmain.jet\tmain.jet\ncompile\tfc7c98733a19662c13cb2cf9d4fd679654cb2d58d4a6ee86b659b14b9ea189d8\tmain\tcheck:main.jet\nlink\tb6423079c3279ff750ff90cba335186d0999283f94ff5bfd41815734385e0138\tmain\tcompile:main\n", "no record lists the planned steps with no time or reason")
-    planned_json :: jet_cli_build_nodes_host(inspect_build_request(), &scope, "main.jet", "main", None, true, false, false)
+    planned_json: jet_cli_build_nodes_host(inspect_build_request(), &scope, "main.jet", "main", None, true, false, false)
     inspect_build_require(planned_json.exit_code == JET_DRIVER_EXIT_OK && planned_json.stdout == "{{\"schema\":\"jet.explain-build/v1\",\"program\":\"main\",\"nodes\":[],\"planned\":[{{\"kind\":\"check\",\"key\":\"e05c67e9bab9aa34ca3456b464c3adbe3b66f767085eb68b85663f8b70695957\",\"subject\":\"main.jet\",\"inputs\":[\"main.jet\"]}},{{\"kind\":\"compile\",\"key\":\"fc7c98733a19662c13cb2cf9d4fd679654cb2d58d4a6ee86b659b14b9ea189d8\",\"subject\":\"main\",\"inputs\":[\"check:main.jet\"]}},{{\"kind\":\"link\",\"key\":\"b6423079c3279ff750ff90cba335186d0999283f94ff5bfd41815734385e0138\",\"subject\":\"main\",\"inputs\":[\"compile:main\"]}}]}}\n", "no record has empty nodes and planned entries without duration_ms or why_ran")
-    foreign :: jet_cli_build_nodes_host(inspect_build_request(), &scope, "main.jet", "main", Val(BuildRecord.new("other", [BuildNodeRecord]{})), true, false, false)
+    foreign: jet_cli_build_nodes_host(inspect_build_request(), &scope, "main.jet", "main", Val(BuildRecord.new("other", [BuildNodeRecord]{})), true, false, false)
     inspect_build_require(foreign.exit_code == JET_DRIVER_EXIT_USER_ERROR && foreign.stdout.contains("E2104"), "a record for another program still refuses")
     broken := inspect_build_request()
-    broken.authorized_sources.roots[0].files[0].source = "fn run() -> Int {{ true }}"
+    broken.authorized_sources.roots[0].files[0].source = "run: fn() -> Int {{ true }}"
     failed_response := jet_driver_query_build_plan(^broken, &scope)
     broken = ^failed_response.request
     failed_query := ^failed_response.query
     inspect_build_require(!failed_query.complete && failed_query.diagnostics.len() > 0, "no-build packages still undergo semantic checking")
     inspect_build_require(failed_query.nodes.len() == 0, "failed check publishes no static identities")
-    human_failure :: jet_cli_build_query_failure(broken, failed_query, "main.jet", false, false, false)
+    human_failure: jet_cli_build_query_failure(broken, failed_query, "main.jet", false, false, false)
     inspect_build_require(human_failure.exit_code == JET_DRIVER_EXIT_USER_ERROR && human_failure.stdout == "" && human_failure.stderr.contains("problem") && human_failure.stderr.contains("found"), "build failures preserve canonical problem-count report")
-    json_failure :: jet_cli_build_query_failure(broken, failed_query, "main.jet", true, false, false)
+    json_failure: jet_cli_build_query_failure(broken, failed_query, "main.jet", true, false, false)
     inspect_build_require(json_failure.exit_code == JET_DRIVER_EXIT_USER_ERROR && json_failure.stderr == "" && json_failure.stdout.contains("\"action\":\"diagnostics\""), "build failures preserve canonical diagnostics status envelope")
     advisory := diagnostic_from_registry("L0507", None, "prefer an ordered arm table", "one ordered arm table is the normal form", "use ordered arms")
     advisory.severity = DIAGNOSTIC_LINT
     with_advisory := failed_query
     &with_advisory.diagnostics.push(advisory)
-    quiet_failure :: jet_cli_build_query_failure(broken, with_advisory, "main.jet", true, false, false)
-    verbose_failure :: jet_cli_build_query_failure(broken, with_advisory, "main.jet", true, false, true)
+    quiet_failure: jet_cli_build_query_failure(broken, with_advisory, "main.jet", true, false, false)
+    verbose_failure: jet_cli_build_query_failure(broken, with_advisory, "main.jet", true, false, true)
     inspect_build_require(!quiet_failure.stdout.contains("L0507") && verbose_failure.stdout.contains("L0507"), "build failure advisories require verbose presentation")
-    internal_query :: JetDriverBuildQueryResult{plan: None, graph: None, generated: [], diagnostics: [], complete: false, internal_problem: Val("build query lost its plan")}
-    internal_failure :: jet_cli_build_query_failure(inspect_build_request(), internal_query, "main.jet", true, false, false)
+    internal_query: JetDriverBuildQueryResult{plan: None, graph: None, generated: [], diagnostics: [], complete: false, internal_problem: Val("build query lost its plan")}
+    internal_failure: jet_cli_build_query_failure(inspect_build_request(), internal_query, "main.jet", true, false, false)
     inspect_build_require(internal_failure.exit_code == JET_CLI_EXIT_ICE && internal_failure.stdout == "" && internal_failure.stderr.contains("internal compiler error: build query lost its plan"), "internal query failures retain ICE exit and stream")
 }
 
-// Known failing: #5454 owns this port. Planning `fn build` runs compile-time
+// Known failing: #5454 owns this port. Planning `build: fn` runs compile-time
 // code, and a unit test has no runtime image (CLISeams.jet: E0956 names
 // jet_runtime.image), so the planned query is incomplete here.
 #Test("inspect_build planned fn build", expected_fail: true) {
     scope := JetDriverBuildQueryScope{}
     planned := inspect_build_request()
-    planned.authorized_sources.roots[0].files[0].source = "fn build(b: Build) {{}}\nfn run() {{}}"
+    planned.authorized_sources.roots[0].files[0].source = "build: fn(b: Build) {{}}\nrun: fn() {{}}"
     planned_response := jet_driver_query_build_nodes(^planned, &scope)
     planned_request := ^planned_response.request
     planned_query := ^planned_response.query
     inspect_build_require(planned_request.authorized_sources.entry_path == "/inspect-build/main.jet" && planned_request.selected_entry == None && planned_request.mode == JetDriverCompileMode.Doc && !planned_request.capture_build_program && !planned_request.capture_build_nodes, "build staging restores entry and selection before returning the invocation")
     inspect_build_require(planned_request.generated_modules.len() == 0 && planned_request.build_output_names.len() == 0, "final checked bundle leaves no temporary generated sources or output overrides in the request")
     inspect_build_require(planned_query.complete && planned_query.generated.len() == 0 && planned_query.nodes.len() == 3, "zero-generated plan still checks the final ordinary bundle")
-    planned_graph :: planned_query.graph ?? panic("checked plan lost graph")
-    planned_plan :: planned_query.plan ?? panic("checked plan lost plan")
+    planned_graph: planned_query.graph ?? panic("checked plan lost graph")
+    planned_plan: planned_query.plan ?? panic("checked plan lost plan")
     inspect_build_require(planned_graph.nodes == planned_query.nodes && build_plan_graph(planned_plan).nodes == planned_query.nodes, "same finished Core plan owns the compiler nodes")
 }

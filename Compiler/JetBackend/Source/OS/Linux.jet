@@ -18,53 +18,53 @@
 // Docs/research/jet-backend-design-2026-10-01.md.
 use core.mem
 
-OS_SYS_READ :: 0
-OS_SYS_WRITE :: 1
-OS_SYS_CLOSE :: 3
-OS_SYS_MMAP :: 9
-OS_SYS_MPROTECT :: 10
-OS_SYS_MUNMAP :: 11
-OS_SYS_BRK :: 12
-OS_SYS_RT_SIGACTION :: 13
-OS_SYS_RT_SIGPROCMASK :: 14
-OS_SYS_PREAD64 :: 17
-OS_SYS_DUP2 :: 33
-OS_SYS_NANOSLEEP :: 35
-OS_SYS_GETPID :: 39
-OS_SYS_EXECVE :: 59
-OS_SYS_FORK :: 57
-OS_SYS_WAIT4 :: 61
-OS_SYS_KILL :: 62
-OS_SYS_FCNTL :: 72
-OS_SYS_SIGALTSTACK :: 131
-OS_SYS_PRCTL :: 157
-OS_SYS_ARCH_PRCTL :: 158
-OS_SYS_EXIT_GROUP :: 231
-OS_SYS_OPENAT :: 257
-OS_SYS_PRLIMIT64 :: 302
-OS_SYS_GETRANDOM :: 318
-OS_SYS_MEMFD_CREATE :: 319
-OS_SYS_CLOSE_RANGE :: 436
+OS_SYS_READ: 0
+OS_SYS_WRITE: 1
+OS_SYS_CLOSE: 3
+OS_SYS_MMAP: 9
+OS_SYS_MPROTECT: 10
+OS_SYS_MUNMAP: 11
+OS_SYS_BRK: 12
+OS_SYS_RT_SIGACTION: 13
+OS_SYS_RT_SIGPROCMASK: 14
+OS_SYS_PREAD64: 17
+OS_SYS_DUP2: 33
+OS_SYS_NANOSLEEP: 35
+OS_SYS_GETPID: 39
+OS_SYS_EXECVE: 59
+OS_SYS_FORK: 57
+OS_SYS_WAIT4: 61
+OS_SYS_KILL: 62
+OS_SYS_FCNTL: 72
+OS_SYS_SIGALTSTACK: 131
+OS_SYS_PRCTL: 157
+OS_SYS_ARCH_PRCTL: 158
+OS_SYS_EXIT_GROUP: 231
+OS_SYS_OPENAT: 257
+OS_SYS_PRLIMIT64: 302
+OS_SYS_GETRANDOM: 318
+OS_SYS_MEMFD_CREATE: 319
+OS_SYS_CLOSE_RANGE: 436
 
-OS_PROT_READ :: 1
-OS_PROT_WRITE :: 2
-OS_PROT_EXEC :: 4
+OS_PROT_READ: 1
+OS_PROT_WRITE: 2
+OS_PROT_EXEC: 4
 
-OS_PAGE_SIZE :: 4096
+OS_PAGE_SIZE: 4096
 
-OS_MAP_PRIVATE :: 0x02
-OS_MAP_PRIVATE_ANONYMOUS :: 0x22
-OS_MAP_NORESERVE :: 0x4000
+OS_MAP_PRIVATE: 0x02
+OS_MAP_PRIVATE_ANONYMOUS: 0x22
+OS_MAP_NORESERVE: 0x4000
 // Map exactly at the address, replacing what the caller had mapped there.
-OS_MAP_FIXED :: 0x10
+OS_MAP_FIXED: 0x10
 // Map exactly at the hint or fail with EEXIST; never replace a mapping.
-OS_MAP_FIXED_NOREPLACE :: 0x100000
+OS_MAP_FIXED_NOREPLACE: 0x100000
 
-OS_AT_FDCWD :: -100
-OS_O_RDONLY_CLOEXEC :: 0x80000
+OS_AT_FDCWD: -100
+OS_O_RDONLY_CLOEXEC: 0x80000
 
-OS_EEXIST :: 17
-OS_EINTR :: 4
+OS_EEXIST: 17
+OS_EINTR: 4
 
 // One raw system call with up to six arguments. The operands arrive in rdi,
 // rsi, rdx, rcx, r8, r9 and r10 (InlineAsm.jet X64_ASM_INPUTS), and each is
@@ -72,7 +72,7 @@ OS_EINTR :: 4
 // the fourth. The leaf is a call, which clobbers the argument registers, so
 // none is restored.
 #[Unsafe("a raw Linux x86-64 system call; the caller passes the call number and arguments that call expects"), FFI(asm)]
-fn os_syscall(number: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int) -> Int {
+os_syscall: fn(number: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int) -> Int {
     """
     mov rax, {number}
     mov rdi, {a1}
@@ -89,23 +89,23 @@ fn os_syscall(number: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int)
 }
 
 // Whether a system call result is `-errno` rather than a value.
-fn os_failed(result: Int) -> Bool Never! {
+os_failed: fn(result: Int) -> Bool Never! {
     result < 0 && result > -4096
 }
 
-fn os_page_round(size: Int) -> Int Never! {
+os_page_round: fn(size: Int) -> Int Never! {
     size + (OS_PAGE_SIZE - size % OS_PAGE_SIZE) % OS_PAGE_SIZE
 }
 
 // Read up to `count` bytes from `fd` into the memory at `address`.
-fn os_read(fd: Int, address: Int, count: Int) -> Int {
+os_read: fn(fd: Int, address: Int, count: Int) -> Int {
     #Unsafe("the caller owns `count` writable bytes at `address`") {
         return os_syscall(OS_SYS_READ, fd, address, count, 0, 0, 0)
     }
 }
 
 // Write up to `count` bytes at `address` to `fd`.
-fn os_write(fd: Int, address: Int, count: Int) -> Int {
+os_write: fn(fd: Int, address: Int, count: Int) -> Int {
     #Unsafe("the caller owns `count` readable bytes at `address`") {
         return os_syscall(OS_SYS_WRITE, fd, address, count, 0, 0, 0)
     }
@@ -113,55 +113,55 @@ fn os_write(fd: Int, address: Int, count: Int) -> Int {
 
 // Map `size` bytes (rounded up to whole pages) of fresh zeroed private memory
 // with `protection` (a sum of OS_PROT_*). Returns the address.
-fn os_map(size: Int, protection: Int) -> Int {
+os_map: fn(size: Int, protection: Int) -> Int {
     #Unsafe("an anonymous mapping aliases no existing memory") {
         return os_syscall(OS_SYS_MMAP, 0, os_page_round(size), protection, OS_MAP_PRIVATE_ANONYMOUS, -1, 0)
     }
 }
 
 // Change the protection of the whole pages in `address .. address + size`.
-fn os_protect(address: Int, size: Int, protection: Int) -> Int {
+os_protect: fn(address: Int, size: Int, protection: Int) -> Int {
     #Unsafe("the caller owns the mapping it changes") {
         return os_syscall(OS_SYS_MPROTECT, address, os_page_round(size), protection, 0, 0, 0)
     }
 }
 
-fn os_unmap(address: Int, size: Int) -> Int {
+os_unmap: fn(address: Int, size: Int) -> Int {
     #Unsafe("the caller owns the mapping and nothing uses it any more") {
         return os_syscall(OS_SYS_MUNMAP, address, os_page_round(size), 0, 0, 0, 0)
     }
 }
 
 // End the process with `status`; never returns.
-fn os_exit(status: Int) {
+os_exit: fn(status: Int) {
     #Unsafe("exit_group ends every thread of the process") {
         _ := os_syscall(OS_SYS_EXIT_GROUP, status, 0, 0, 0, 0, 0)
     }
 }
 
 #[Unsafe("stores one word at an address the caller owns and has mapped writable"), FFI(asm)]
-fn os_store_word(address: Int, value: Int) {
+os_store_word: fn(address: Int, value: Int) {
     """
     mov qword ptr [{address}], {value}
     """
 }
 
 #[Unsafe("reads one word at an address the caller owns and has mapped readable"), FFI(asm)]
-fn os_load_word(address: Int) -> Int {
+os_load_word: fn(address: Int) -> Int {
     """
     mov rax, qword ptr [{address}] ; -> return
     """
 }
 
 #[Unsafe("reads one byte at an address the caller owns and has mapped readable"), FFI(asm)]
-fn os_load_byte(address: Int) -> Int {
+os_load_byte: fn(address: Int) -> Int {
     """
     movzx rax, byte ptr [{address}] ; -> return
     """
 }
 
 #[Unsafe("stores one byte at an address the caller owns and has mapped writable"), FFI(asm)]
-fn os_store_byte(address: Int, value: Int) {
+os_store_byte: fn(address: Int, value: Int) {
     """
     mov rax, {value}
     mov byte ptr [{address}], al
@@ -171,12 +171,12 @@ fn os_store_byte(address: Int, value: Int) {
 // Copy `bytes` to `address` one little-endian word at a time. The last word
 // is padded with zero bytes, so the destination must hold `bytes.len()`
 // rounded up to 8 bytes (a page-rounded mapping always does).
-fn os_copy_in(address: Int, bytes: [U8]) {
+os_copy_in: fn(address: Int, bytes: [U8]) {
     os_copy_in_range(address, bytes, 0, bytes.len())
 }
 
 // Like os_copy_in, but borrowing one range avoids allocating image chunks.
-fn os_copy_in_range(address: Int, bytes: [U8], start: Int, count: Int) {
+os_copy_in_range: fn(address: Int, bytes: [U8], start: Int, count: Int) {
     at := 0
     loop at < count {
         word := 0
@@ -200,7 +200,7 @@ fn os_copy_in_range(address: Int, bytes: [U8], start: Int, count: Int) {
 // with one word argument and return its word result. The caller vouches that
 // `address` is executable code with that signature.
 #[Unsafe("calls machine code; the caller vouches for the code and its System V signature"), FFI(asm)]
-fn os_call_address(address: Int, argument: Int) -> Int {
+os_call_address: fn(address: Int, argument: Int) -> Int {
     """
     push {address}
     push {argument}
@@ -213,7 +213,7 @@ fn os_call_address(address: Int, argument: Int) -> Int {
 }
 
 #[Unsafe("calls machine code; the caller vouches for the code and its two-word System V signature"), FFI(asm)]
-fn os_call_address_two(address: Int, first: Int, second: Int) -> Int {
+os_call_address_two: fn(address: Int, first: Int, second: Int) -> Int {
     """
     push {address}
     push {first}
@@ -228,7 +228,7 @@ fn os_call_address_two(address: Int, first: Int, second: Int) -> Int {
 }
 
 #[Unsafe("calls machine code; the caller holds the mapping and its checked zero-argument Unit System V signature"), FFI(asm)]
-fn os_call_address_unit(address: Int) {
+os_call_address_unit: fn(address: Int) {
     """
     push {address}
     pop r11
@@ -238,7 +238,7 @@ fn os_call_address_unit(address: Int) {
 }
 
 #[Unsafe("calls machine code; the caller holds the mapping and its checked three-word Unit System V signature"), FFI(asm)]
-fn os_call_address_three_unit(address: Int, first: Int, second: Int, third: Int) {
+os_call_address_three_unit: fn(address: Int, first: Int, second: Int, third: Int) {
     """
     push {address}
     push {first}
@@ -254,7 +254,7 @@ fn os_call_address_three_unit(address: Int, first: Int, second: Int, third: Int)
 }
 
 #[Unsafe("calls machine code; the caller holds the mapping and its checked one-word Unit System V signature"), FFI(asm)]
-fn os_call_address_one_unit(address: Int, first: Int) {
+os_call_address_one_unit: fn(address: Int, first: Int) {
     """
     push {address}
     push {first}
@@ -266,7 +266,7 @@ fn os_call_address_one_unit(address: Int, first: Int) {
 }
 
 #[Unsafe("calls machine code; the caller holds the mapping and its checked two-word Unit System V signature"), FFI(asm)]
-fn os_call_address_two_unit(address: Int, first: Int, second: Int) {
+os_call_address_two_unit: fn(address: Int, first: Int, second: Int) {
     """
     push {address}
     push {first}
@@ -283,7 +283,7 @@ fn os_call_address_two_unit(address: Int, first: Int, second: Int) {
 // enter the arbitrary-precision numeric runtime while bootstrapping its heap.
 // The registers move as os_syscall's do.
 #[Unsafe("a raw Linux x86-64 syscall; the caller supplies the syscall's valid machine-word arguments"), FFI(asm)]
-fn os_syscall_i64(number: I64, a1: I64, a2: I64, a3: I64, a4: I64, a5: I64, a6: I64) -> I64 {
+os_syscall_i64: fn(number: I64, a1: I64, a2: I64, a3: I64, a4: I64, a5: I64, a6: I64) -> I64 {
     """
     mov rax, {number}
     mov rdi, {a1}
@@ -300,14 +300,14 @@ fn os_syscall_i64(number: I64, a1: I64, a2: I64, a3: I64, a4: I64, a5: I64, a6: 
 }
 
 #[Unsafe("reads one aligned machine word in live allocator-owned mapped memory"), FFI(asm)]
-fn os_load_i64(address: I64) -> I64 {
+os_load_i64: fn(address: I64) -> I64 {
     """
     mov rax, qword ptr [{address}] ; -> return
     """
 }
 
 #[Unsafe("stores one aligned machine word in live allocator-owned mapped memory; x86 TSO makes this a release store"), FFI(asm)]
-fn os_store_i64(address: I64, value: I64) {
+os_store_i64: fn(address: I64, value: I64) {
     """
     mov qword ptr [{address}], {value}
     """
@@ -316,7 +316,7 @@ fn os_store_i64(address: I64, value: I64) {
 // Returns the previous word. The locked instruction is a full memory barrier,
 // so a successful 0 -> 1 exchange acquires a lock released by os_store_i64.
 #[Unsafe("atomically compares and exchanges one aligned live machine word; every non-atomic access to protected data holds its lock"), FFI(asm)]
-fn os_cas_i64(address: I64, expected: I64, desired: I64) -> I64 {
+os_cas_i64: fn(address: I64, expected: I64, desired: I64) -> I64 {
     """
     push {address}
     push {expected}
@@ -331,7 +331,7 @@ fn os_cas_i64(address: I64, expected: I64, desired: I64) -> I64 {
 }
 
 #[Unsafe("x86 pause only hints that this thread is waiting in a spin loop"), FFI(asm)]
-fn os_spin_pause() {
+os_spin_pause: fn() {
     """
     pause
     """
@@ -341,7 +341,7 @@ fn os_spin_pause() {
 // identification only, nothing is read or written in memory. cpuid writes
 // ebx, which is callee-saved, so each leaf saves rbx and restores it.
 #[Unsafe("cpuid only reports processor identification; rbx is saved and restored"), FFI(asm)]
-fn os_cpuid_eax_i64(leaf: I64, subleaf: I64) -> I64 {
+os_cpuid_eax_i64: fn(leaf: I64, subleaf: I64) -> I64 {
     """
     push rbx
     mov rax, {leaf}
@@ -354,7 +354,7 @@ fn os_cpuid_eax_i64(leaf: I64, subleaf: I64) -> I64 {
 }
 
 #[Unsafe("cpuid only reports processor identification; rbx is saved and restored"), FFI(asm)]
-fn os_cpuid_ebx_i64(leaf: I64, subleaf: I64) -> I64 {
+os_cpuid_ebx_i64: fn(leaf: I64, subleaf: I64) -> I64 {
     """
     push rbx
     mov rax, {leaf}
@@ -368,7 +368,7 @@ fn os_cpuid_ebx_i64(leaf: I64, subleaf: I64) -> I64 {
 }
 
 #[Unsafe("cpuid only reports processor identification; rbx is saved and restored"), FFI(asm)]
-fn os_cpuid_ecx_i64(leaf: I64, subleaf: I64) -> I64 {
+os_cpuid_ecx_i64: fn(leaf: I64, subleaf: I64) -> I64 {
     """
     push rbx
     mov rax, {leaf}
@@ -381,7 +381,7 @@ fn os_cpuid_ecx_i64(leaf: I64, subleaf: I64) -> I64 {
 }
 
 #[Unsafe("cpuid only reports processor identification; rbx is saved and restored"), FFI(asm)]
-fn os_cpuid_edx_i64(leaf: I64, subleaf: I64) -> I64 {
+os_cpuid_edx_i64: fn(leaf: I64, subleaf: I64) -> I64 {
     """
     push rbx
     mov rax, {leaf}
@@ -396,7 +396,7 @@ fn os_cpuid_edx_i64(leaf: I64, subleaf: I64) -> I64 {
 // Extended control register `register` (0 is XCR0, the state the OS saves).
 // xgetbv faults unless CPUID.1:ECX.OSXSAVE is set; callers check it first.
 #[Unsafe("xgetbv only reads an extended control register; the caller has seen CPUID.1:ECX.OSXSAVE"), FFI(asm)]
-fn os_xgetbv_i64(register: I64) -> I64 {
+os_xgetbv_i64: fn(register: I64) -> I64 {
     """
     mov rcx, {register}
     xgetbv
@@ -410,7 +410,7 @@ fn os_xgetbv_i64(register: I64) -> I64 {
 // heap's arena choice, Alloc.jet alloc_arena). An rsp read needs a
 // template-owned pushed word, which is popped back; nothing is dereferenced.
 #[Unsafe("reads the stack pointer register after one balanced push; no memory is read"), FFI(asm)]
-fn os_stack_address_i64() -> I64 {
+os_stack_address_i64: fn() -> I64 {
     """
     mov rcx, 0
     push rcx
@@ -425,7 +425,7 @@ fn os_stack_address_i64() -> I64 {
 // Ascending copies `count` bytes from `source` to `target` in increasing
 // address order, so an overlap must have target below source.
 #[Unsafe("the caller owns count readable bytes at source and count writable bytes at target; an overlap has target below source"), FFI(asm)]
-fn os_copy_ascending_i64(target: I64, source: I64, count: I64) {
+os_copy_ascending_i64: fn(target: I64, source: I64, count: I64) {
     """
     push {target}
     push {source}
@@ -444,7 +444,7 @@ fn os_copy_ascending_i64(target: I64, source: I64, count: I64) {
 // `source_last`, then clears the direction flag again: an overlap must have
 // target above source.
 #[Unsafe("the caller owns count readable bytes ending at source_last and count writable bytes ending at target_last; an overlap has target above source"), FFI(asm)]
-fn os_copy_descending_bytes_i64(target_last: I64, source_last: I64, count: I64) {
+os_copy_descending_bytes_i64: fn(target_last: I64, source_last: I64, count: I64) {
     """
     push {target_last}
     push {source_last}
@@ -460,7 +460,7 @@ fn os_copy_descending_bytes_i64(target_last: I64, source_last: I64, count: I64) 
 }
 
 #[Unsafe("the caller owns count readable words whose last starts at source_last and count writable words whose last starts at target_last; an overlap has target above source"), FFI(asm)]
-fn os_copy_descending_words_i64(target_last: I64, source_last: I64, count: I64) {
+os_copy_descending_words_i64: fn(target_last: I64, source_last: I64, count: I64) {
     """
     push {target_last}
     push {source_last}
@@ -478,7 +478,7 @@ fn os_copy_descending_words_i64(target_last: I64, source_last: I64, count: I64) 
 // String store for the runtime's word fills (RouteAGame.jet canvas spans):
 // writes `count` copies of the 8-byte `value` from `target` upward.
 #[Unsafe("the caller owns count writable 8-byte words at target"), FFI(asm)]
-fn os_fill_words_i64(target: I64, value: I64, count: I64) {
+os_fill_words_i64: fn(target: I64, value: I64, count: I64) {
     """
     push {target}
     push {value}
@@ -493,14 +493,14 @@ fn os_fill_words_i64(target: I64, value: I64, count: I64) {
 }
 
 #[Unsafe("reads one byte from a live readable mapped address supplied by the caller"), FFI(asm)]
-fn os_load_u8(address: I64) -> I64 {
+os_load_u8: fn(address: I64) -> I64 {
     """
     movzx rax, byte ptr [{address}] ; -> return
     """
 }
 
 #[Unsafe("writes one byte to a live writable mapped address supplied by the caller"), FFI(asm)]
-fn os_store_u8(address: I64, value: I64) {
+os_store_u8: fn(address: I64, value: I64) {
     """
     mov rax, {value}
     mov byte ptr [{address}], al
@@ -510,7 +510,7 @@ fn os_store_u8(address: I64, value: I64) {
 // Heap-free diagnostic transport: the syscall borrows one stack word, and
 // balanced push/pop restore rsp before returning. count must be in 0..=8.
 #[Unsafe("writes at most eight bytes from a stack-local word while that word is live; the balanced pushes and pops do not expose stack storage after return"), FFI(asm)]
-fn os_write_word_i64(fd: I64, word: I64, count: I64) -> I64 {
+os_write_word_i64: fn(fd: I64, word: I64, count: I64) -> I64 {
     """
     push {fd}
     push {word}
@@ -531,7 +531,7 @@ fn os_write_word_i64(fd: I64, word: I64, count: I64) -> I64 {
 // Borrow two iovecs and their LF byte only for the synchronous writev call.
 // The return count includes the LF if the complete frame was accepted.
 #[Unsafe("bytes lends length readable bytes; the second iovec lends a stack-local LF; writev retains neither pointer and every push is balanced"), FFI(asm)]
-fn os_write_line_i64(fd: I64, bytes: I64, length: I64) -> I64 {
+os_write_line_i64: fn(fd: I64, bytes: I64, length: I64) -> I64 {
     """
     push {fd}
     push {bytes}
@@ -568,7 +568,7 @@ fn os_write_line_i64(fd: I64, bytes: I64, length: I64) -> I64 {
 // Preserve the six argument registers, as os_syscall_i64 does, so seven
 // generic inputs do not compete with nine fixed output/clobber registers.
 #[Unsafe("the syscall may read at most four initialized stack words and retains no pointer; all pushes are balanced before return"), FFI(asm)]
-fn os_syscall_stack4_i64(number: I64, a1: I64, w0: I64, w1: I64, w2: I64, w3: I64, a4: I64) -> I64 {
+os_syscall_stack4_i64: fn(number: I64, a1: I64, w0: I64, w1: I64, w2: I64, w3: I64, a4: I64) -> I64 {
     """
     push rdi
     push rsi
@@ -615,7 +615,7 @@ fn os_syscall_stack4_i64(number: I64, a1: I64, w0: I64, w1: I64, w2: I64, w3: I6
 // GS is reserved for Jet; musl keeps its independent TLS on FS. Every
 // attached TCB stores its own address at offset zero. No lazy attachment probe.
 #[Unsafe("the calling thread is attached and GS points at its live Jet TCB"), FFI(asm)]
-fn os_tls_base_i64() -> I64 {
+os_tls_base_i64: fn() -> I64 {
     """
     mov rax, qword ptr gs:[0] ; -> return
     """
@@ -624,7 +624,7 @@ fn os_tls_base_i64() -> I64 {
 // Cold startup/defect reports may run while GS is deliberately zero. Probe the
 // actual base without dereferencing it; attached hot reads keep their leaf above.
 #[Unsafe("ARCH_GET_GS writes one initialized aligned stack word only during this syscall; no TLS or heap is read, and the push/pop is balanced"), FFI(asm)]
-fn os_tls_base_probe_i64() -> I64 {
+os_tls_base_probe_i64: fn() -> I64 {
     """
     mov rdx, 0
     push rdx
@@ -639,7 +639,7 @@ fn os_tls_base_probe_i64() -> I64 {
 }
 
 #[Unsafe("atomically adds to one aligned live word and returns its previous value"), FFI(asm)]
-fn os_fetch_add_i64(address: I64, delta: I64) -> I64 {
+os_fetch_add_i64: fn(address: I64, delta: I64) -> I64 {
     """
     push {address}
     push {delta}
@@ -652,7 +652,7 @@ fn os_fetch_add_i64(address: I64, delta: I64) -> I64 {
 }
 
 #[Unsafe("atomically exchanges one aligned live word; xchg has an implicit full barrier"), FFI(asm)]
-fn os_swap_i64(address: I64, value: I64) -> I64 {
+os_swap_i64: fn(address: I64, value: I64) -> I64 {
     """
     push {address}
     push {value}
@@ -665,7 +665,7 @@ fn os_swap_i64(address: I64, value: I64) -> I64 {
 }
 
 #[Unsafe("calls executable System V code with one raw word argument"), FFI(asm)]
-fn os_call_address_i64(address: I64, argument: I64) -> I64 {
+os_call_address_i64: fn(address: I64, argument: I64) -> I64 {
     """
     push {address}
     push {argument}
@@ -678,7 +678,7 @@ fn os_call_address_i64(address: I64, argument: I64) -> I64 {
 }
 
 #[Unsafe("calls a Jet closure's code with the live closure header and one raw word argument"), FFI(asm)]
-fn os_call_address_two_i64(address: I64, first: I64, second: I64) -> I64 {
+os_call_address_two_i64: fn(address: I64, first: I64, second: I64) -> I64 {
     """
     push {address}
     push {first}
@@ -699,7 +699,7 @@ fn os_call_address_two_i64(address: I64, first: I64, second: I64) -> I64 {
 // syscalls before execve. A thread's stack has a guard page; parent/child TID
 // words live until the kernel's CHILD_CLEARTID and join finish.
 #[Unsafe("raw clone child runs only Jet/syscall code, never Rust or musl; supplied stack contains entry and argument"), FFI(asm)]
-fn os_clone_i64(flags: I64, stack: I64, parent_tid: I64, child_tid: I64) -> I64 {
+os_clone_i64: fn(flags: I64, stack: I64, parent_tid: I64, child_tid: I64) -> I64 {
     """
     push rdi
     push rsi
@@ -740,7 +740,7 @@ fn os_clone_i64(flags: I64, stack: I64, parent_tid: I64, child_tid: I64) -> I64 
 }
 
 #[Unsafe("calls checked System V Unit code; the caller lends one live raw machine-word argument"), FFI(asm)]
-fn os_call1_unit_i64(address: I64, a: I64) {
+os_call1_unit_i64: fn(address: I64, a: I64) {
     """
     push {address}
     push {a}
@@ -752,7 +752,7 @@ fn os_call1_unit_i64(address: I64, a: I64) {
 }
 
 #[Unsafe("calls checked System V Unit code; the caller vouches for both raw machine-word arguments"), FFI(asm)]
-fn os_call2_unit_i64(address: I64, a: I64, b: I64) {
+os_call2_unit_i64: fn(address: I64, a: I64, b: I64) {
     """
     push {address}
     push {a}
@@ -766,7 +766,7 @@ fn os_call2_unit_i64(address: I64, a: I64, b: I64) {
 }
 
 #[Unsafe("calls checked System V Unit code; the caller vouches for all three raw machine-word arguments"), FFI(asm)]
-fn os_call3_unit_i64(address: I64, a: I64, b: I64, c: I64) {
+os_call3_unit_i64: fn(address: I64, a: I64, b: I64, c: I64) {
     """
     push {address}
     push {a}
@@ -782,7 +782,7 @@ fn os_call3_unit_i64(address: I64, a: I64, b: I64, c: I64) {
 }
 
 #[Unsafe("calls a checked native runtime callback with one machine-word argument"), FFI(asm)]
-fn os_call1_i64(address: I64, a: I64) -> I64 {
+os_call1_i64: fn(address: I64, a: I64) -> I64 {
     """
     push {address}
     push {a}
@@ -795,7 +795,7 @@ fn os_call1_i64(address: I64, a: I64) -> I64 {
 }
 
 #[Unsafe("calls a checked native runtime callback with two machine-word arguments"), FFI(asm)]
-fn os_call2_i64(address: I64, a: I64, b: I64) -> I64 {
+os_call2_i64: fn(address: I64, a: I64, b: I64) -> I64 {
     """
     push {address}
     push {a}
@@ -810,7 +810,7 @@ fn os_call2_i64(address: I64, a: I64, b: I64) -> I64 {
 }
 
 #[Unsafe("calls a checked native runtime callback with three machine-word arguments"), FFI(asm)]
-fn os_call3_i64(address: I64, a: I64, b: I64, c: I64) -> I64 {
+os_call3_i64: fn(address: I64, a: I64, b: I64, c: I64) -> I64 {
     """
     push {address}
     push {a}
@@ -827,7 +827,7 @@ fn os_call3_i64(address: I64, a: I64, b: I64, c: I64) -> I64 {
 }
 
 #[Unsafe("calls a checked native runtime callback with four machine-word arguments"), FFI(asm)]
-fn os_call4_i64(address: I64, a: I64, b: I64, c: I64, d: I64) -> I64 {
+os_call4_i64: fn(address: I64, a: I64, b: I64, c: I64, d: I64) -> I64 {
     """
     push {address}
     push {a}
@@ -846,7 +846,7 @@ fn os_call4_i64(address: I64, a: I64, b: I64, c: I64, d: I64) -> I64 {
 }
 
 #[Unsafe("calls a checked native runtime callback with five machine-word arguments"), FFI(asm)]
-fn os_call5_i64(address: I64, a: I64, b: I64, c: I64, d: I64, e: I64) -> I64 {
+os_call5_i64: fn(address: I64, a: I64, b: I64, c: I64, d: I64, e: I64) -> I64 {
     """
     push {address}
     push {a}
@@ -869,7 +869,7 @@ fn os_call5_i64(address: I64, a: I64, b: I64, c: I64, d: I64, e: I64) -> I64 {
 // Linux AT_EMPTY_PATH refers to the held source inode, never reopens an old
 // pathname. The borrowed empty path is one stack-local zero.
 #[Unsafe("source and directory are live owned descriptors, name is terminated; linkat borrows a stack-local empty path and retains no pointer"), FFI(asm)]
-fn os_link_fd_i64(source: I64, directory: I64, name: I64) -> I64 {
+os_link_fd_i64: fn(source: I64, directory: I64, name: I64) -> I64 {
     """
     push {source}
     push {directory}
@@ -890,7 +890,7 @@ fn os_link_fd_i64(source: I64, directory: I64, name: I64) -> I64 {
 }
 
 #[Unsafe("ioctl reads one stack-local machine word with the supplied audited request and live fd; it retains no pointer and all pushes are balanced"), FFI(asm)]
-fn os_ioctl_word_i64(fd: I64, request: I64, word: I64) -> I64 {
+os_ioctl_word_i64: fn(fd: I64, request: I64, word: I64) -> I64 {
     """
     push {fd}
     push {request}
@@ -913,7 +913,7 @@ fn os_ioctl_word_i64(fd: I64, request: I64, word: I64) -> I64 {
 // atime64/72 mtime80/88 ctime96/104 blocks112 blockSize120.
 // Failed syscalls still copy initialized zeros; callers must inspect errno.
 #[Unsafe("object is a live fd for fstat or a terminated path for stat/lstat; output lends 128 writable bytes; the initialized stack stat frame never escapes"), FFI(asm)]
-fn os_stat_packed_i64(number: I64, object: I64, output: I64) -> I64 {
+os_stat_packed_i64: fn(number: I64, object: I64, output: I64) -> I64 {
     """
     push {number}
     push {object}
@@ -1002,9 +1002,9 @@ fn os_stat_packed_i64(number: I64, object: I64, output: I64) -> I64 {
 }
 
 #Unsafe("the audited caller lends the stat scalar row and valid syscall object")
-fn os_stat_facts_i64(number: I64, object: I64, output: I64) -> I64 {
+os_stat_facts_i64: fn(number: I64, object: I64, output: I64) -> I64 {
     #Unsafe("packed Linux 32-bit fields become independent portable machine words without any allocation") {
-        result :: os_stat_packed_i64(number, object, output)
+        result: os_stat_packed_i64(number, object, output)
         os_store_i64(wrapping(output + I64{16}), os_load_i64(wrapping(output + I64{16})).bit_and(I64{4294967295}))
         os_store_i64(wrapping(output + I64{32}), (os_load_i64(wrapping(output + I64{32})) >> I64{32}).bit_and(I64{4294967295}))
         os_store_i64(wrapping(output + I64{40}), os_load_i64(wrapping(output + I64{40})).bit_and(I64{4294967295}))
@@ -1015,7 +1015,7 @@ fn os_stat_facts_i64(number: I64, object: I64, output: I64) -> I64 {
 // An indirect call of a function value passes its closure header as argument
 // zero; a C void(void) entry address is not that representation.
 #[Unsafe("calls a checked System V void(void) process entry that remains executable for the entire call"), FFI(asm)]
-fn os_call0_unit(address: I64) {
+os_call0_unit: fn(address: I64) {
     """
     push {address}
     pop r11
@@ -1025,7 +1025,7 @@ fn os_call0_unit(address: I64) {
 }
 
 #[Unsafe("directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes"), FFI(asm)]
-fn os_statx_created_i64(directory: I64, path: I64, flags: I64, output: I64) -> I64 {
+os_statx_created_i64: fn(directory: I64, path: I64, flags: I64, output: I64) -> I64 {
     """
     push {directory}
     push {path}
@@ -1118,22 +1118,22 @@ fn os_statx_created_i64(directory: I64, path: I64, flags: I64, output: I64) -> I
     """
 }
 
-fn x64_value_word(address: Int) -> Int {
-    error :: x64_native_slot_error(address, 8)
+x64_value_word: fn(address: Int) -> Int {
+    error: x64_native_slot_error(address, 8)
     if error != "" -> panic(error)
     word := 0
     #Unsafe("address names an initialized canonical native word owned by the pinned request or retained slot") { word = os_load_word(address) }
     word
 }
-fn x64_value_byte(address: Int) -> Int {
-    error :: x64_native_slot_error(address, 1)
+x64_value_byte: fn(address: Int) -> Int {
+    error: x64_native_slot_error(address, 1)
     if error != "" -> panic(error)
     byte := 0
     #Unsafe("address names an initialized canonical native byte owned by the pinned request or retained slot") { byte = os_load_byte(address) }
     byte
 }
-fn x64_value_unsigned_bytes(address: Int, size: Int) -> Int {
-    error :: x64_native_slot_error(address, size)
+x64_value_unsigned_bytes: fn(address: Int, size: Int) -> Int {
+    error: x64_native_slot_error(address, size)
     if error != "" -> panic(error)
     value := 0
     #Unsafe("width and address range are checked; the caller retains the initialized slot's physical permit") {
@@ -1141,7 +1141,7 @@ fn x64_value_unsigned_bytes(address: Int, size: Int) -> Int {
     }
     value
 }
-struct X64NativeAllocation {
+X64NativeAllocation: struct {
     pointer: Int
     size: Int
     align: Int
@@ -1149,17 +1149,17 @@ struct X64NativeAllocation {
     refusal_key: String
 }
 
-fn x64_native_slot_error(address: Int, size: Int) -> String Never! {
+x64_native_slot_error: fn(address: Int, size: Int) -> String Never! {
     if size != 1 && size != 2 && size != 4 && size != 8 -> return "NativeSlotWidthInvalid: {size}"
     if address <= 0 || address > 9223372036854775807 - size -> return "NativeSlotAddressInvalid"
     ""
 }
-fn x64_native_slot_write_error(address: Int, size: Int, value: Int) -> String Never! {
-    error :: x64_native_slot_error(address, size)
+x64_native_slot_write_error: fn(address: Int, size: Int, value: Int) -> String Never! {
+    error: x64_native_slot_error(address, size)
     if error != "" -> return error
     x64_native_word_range_error(size, value)
 }
-fn x64_native_word_range_error(size: Int, value: Int) -> String Never! {
+x64_native_word_range_error: fn(size: Int, value: Int) -> String Never! {
     if size != 1 && size != 2 && size != 4 && size != 8 -> return "NativeSlotWidthInvalid: {size}"
     if size == 8 {
         if value < -9223372036854775808 || value > 18446744073709551615 -> return "NativeSlotValueOutOfRange: {size}"
@@ -1168,24 +1168,24 @@ fn x64_native_word_range_error(size: Int, value: Int) -> String Never! {
 }
 // Only initialized slots under their original physical permit reach these
 // helpers. Byte stores never write beyond a Bool/Char/narrow integer payload.
-fn x64_native_slot_write(address: Int, size: Int, value: Int) -> String {
-    error :: x64_native_slot_write_error(address, size, value)
+x64_native_slot_write: fn(address: Int, size: Int, value: Int) -> String {
+    error: x64_native_slot_write_error(address, size, value)
     if error != "" -> return error
-    bits :: if value >= 9223372036854775808 -> value - 18446744073709551616 else -> value
+    bits: if value >= 9223372036854775808 -> value - 18446744073709551616 else -> value
     #Unsafe("the caller owns exactly size writable bytes under the native payload permit; width and value were checked above") {
         if size == 8 -> os_store_word(address, bits)
         else -> loop index in 0..<size -> os_store_byte(address + index, (bits >> (8 * index)).bit_and(255))
     }
     ""
 }
-fn x64_native_allocation_error(size: Int, align: Int) -> String Never! {
+x64_native_allocation_error: fn(size: Int, align: Int) -> String Never! {
     if size <= 0 || size > 9223372036854775807 -> return "NativeAllocationSizeInvalid: {size}"
     if align <= 0 || align > 9223372036854775807 || (align.bit_and((align - 1))) != 0 -> return "NativeAllocationAlignmentInvalid: {align}"
     ""
 }
 // Allocate and release addresses are resolved by the caller's one admitted
 // runtime inventory. The receipt, not dlsym or a symbol spelling, selects them.
-fn x64_execution_alloc(allocate: Int, release: Int, size: Int, align: Int) -> X64NativeAllocation {
+x64_execution_alloc: fn(allocate: Int, release: Int, size: Int, align: Int) -> X64NativeAllocation {
     error := x64_native_allocation_error(size, align)
     pointer := 0
     if error == "" && (allocate == 0 || release == 0) -> error = "NativeAllocationProviderMissing"
@@ -1195,23 +1195,23 @@ fn x64_execution_alloc(allocate: Int, release: Int, size: Int, align: Int) -> X6
     }
     X64NativeAllocation{pointer: pointer, size: size, align: align, release: release, refusal_key: error}
 }
-fn x64_native_free_error(allocation: X64NativeAllocation, size: Int, align: Int) -> String Never! {
+x64_native_free_error: fn(allocation: X64NativeAllocation, size: Int, align: Int) -> String Never! {
     if allocation.refusal_key != "" -> return allocation.refusal_key
-    error :: x64_native_allocation_error(size, align)
+    error: x64_native_allocation_error(size, align)
     if error != "" -> return error
     if allocation.pointer == 0 || allocation.release == 0 -> return "NativeAllocationProviderMissing"
     if allocation.size != size || allocation.align != align -> return "NativeAllocationFreeLayoutMismatch"
     ""
 }
-fn x64_execution_free(allocation: X64NativeAllocation, size: Int, align: Int) -> String {
-    error :: x64_native_free_error(allocation, size, align)
+x64_execution_free: fn(allocation: X64NativeAllocation, size: Int, align: Int) -> String {
+    error: x64_native_free_error(allocation, size, align)
     if error != "" -> return error
     #Unsafe("the allocation receipt pairs this owner with its original free address and exact size/alignment") { _ := os_call_address_three(allocation.release, allocation.pointer, size, align) }
     ""
 }
 // The caller checks the sealed runtime signature or parent-pinned callable
 // role first. No raw-address operation escapes this vetted OS module.
-fn x64_native_call(address: Int, arity: Int, first: Int, second: Int, third: Int) -> Int {
+x64_native_call: fn(address: Int, arity: Int, first: Int, second: Int, third: Int) -> Int {
     if address == 0 || arity < 0 || arity > 3 -> panic("NativeCallSignatureInvalid")
     result := 0
     #Unsafe("the admitted runtime signature or pinned clone/drop role was checked before invoking its fixed word ABI") {
@@ -1223,7 +1223,7 @@ fn x64_native_call(address: Int, arity: Int, first: Int, second: Int, third: Int
 }
 
 #[Unsafe("calls machine code; the caller vouches for its three-word System V signature"), FFI(asm)]
-fn os_call_address_three(address: Int, first: Int, second: Int, third: Int) -> Int {
+os_call_address_three: fn(address: Int, first: Int, second: Int, third: Int) -> Int {
     """
     push {address}
     push {first}

@@ -4,25 +4,25 @@
 // values fail closed.
 use jet_foundation.[AllocatorPolicy, ByteSize]
 
-fn pkg_bad_allocator(detail: String) -> PackageParseError Never! {
+pkg_bad_allocator: fn(detail: String) -> PackageParseError Never! {
     PackageParseError.BadAllocatorPolicy{detail: detail}
 }
 
-fn pkg_parse_program_allocator(value: String) -> AllocatorPolicy PackageParseError! {
-    compact :: pkg_without_whitespace(value)
+pkg_parse_program_allocator: fn(value: String) -> AllocatorPolicy PackageParseError! {
+    compact: pkg_without_whitespace(value)
     if compact == "mem.Heap" -> return Ok(AllocatorPolicy.HostedDefault)
-    args :: pkg_strip_wrapped(compact, "mem.Counting.over(", ")") ?? return Err(pkg_bad_allocator("`allocator:` must be `mem.Heap` or `mem.Counting.over(mem.Heap, cap: <bytes>)`"))
-    parts :: pkg_top_level_commas(args)
+    args: pkg_strip_wrapped(compact, "mem.Counting.over(", ")") ?? return Err(pkg_bad_allocator("`allocator:` must be `mem.Heap` or `mem.Counting.over(mem.Heap, cap: <bytes>)`"))
+    parts: pkg_top_level_commas(args)
     if parts.len() == 0 || parts[0] != "mem.Heap" || parts.len() > 2 {
         return Err(pkg_bad_allocator("`mem.Counting.over` wraps `mem.Heap` and accepts only the optional `cap:` argument"))
     }
     if parts.len() == 1 -> return Ok(AllocatorPolicy.Counting{cap: None})
     if !parts[1].starts_with("cap:") -> return Err(pkg_bad_allocator("the counting allocator's optional argument is spelled `cap:`"))
-    bytes :: pkg_parse_allocator_bytes(parts[1].removeprefix("cap:"))
+    bytes: pkg_parse_allocator_bytes(parts[1].removeprefix("cap:"))
     Ok(AllocatorPolicy.Counting{cap: Val(ByteSize{bytes: bytes})})
 }
 
-fn pkg_parse_allocator_bytes(value: String) -> Int PackageParseError! {
+pkg_parse_allocator_bytes: fn(value: String) -> Int PackageParseError! {
     digits := value
     multiplier := 1
     if value.cut_last(".") == {
@@ -40,23 +40,23 @@ fn pkg_parse_allocator_bytes(value: String) -> Int PackageParseError! {
         }
         .None -> {}
     }
-    count :: pkg_parse_u64(digits.replace("_", "")) ?? return Err(pkg_bad_allocator("`cap:` must be a positive whole-byte quantity such as `2.gb`"))
+    count: pkg_parse_u64(digits.replace("_", "")) ?? return Err(pkg_bad_allocator("`cap:` must be a positive whole-byte quantity such as `2.gb`"))
     if count == 0 || count > PKG_MAX_U64_IN_INT /% multiplier -> return Err(pkg_bad_allocator("`cap:` must be a positive byte quantity that fits in 64 bits"))
     Ok(count * multiplier)
 }
 
 // The largest byte count an `Int` carries; Rust's u64 range beyond it is
 // refused as not fitting.
-PKG_MAX_U64_IN_INT :: 9223372036854775807
+PKG_MAX_U64_IN_INT: 9223372036854775807
 
 // `str::parse::<u64>()`: an optional `+`, then one or more ASCII digits.
-fn pkg_parse_u64(text: String) -> Int? Never! {
-    raw :: text.bytes()
-    start :: if raw.len() > 0 && Int.from_u8(raw[0]) == 43 -> 1 else -> 0
+pkg_parse_u64: fn(text: String) -> Int? Never! {
+    raw: text.bytes()
+    start: if raw.len() > 0 && Int.from_u8(raw[0]) == 43 -> 1 else -> 0
     if start >= raw.len() -> return None
     value := 0
     loop index in start..<raw.len() {
-        digit :: Int.from_u8(raw[index]) - 48
+        digit: Int.from_u8(raw[index]) - 48
         if digit < 0 || digit > 9 -> return None
         if value > (PKG_MAX_U64_IN_INT - digit) /% 10 -> return None
         value = value * 10 + digit
@@ -66,13 +66,13 @@ fn pkg_parse_u64(text: String) -> Int? Never! {
 
 // `str::parse::<i64>()`: an optional sign, then one or more ASCII digits,
 // within `i64::MIN..=i64::MAX` (a negative magnitude may reach 2^63).
-fn pkg_parse_i64(text: String) -> Int? Never! {
-    raw :: text.bytes()
+pkg_parse_i64: fn(text: String) -> Int? Never! {
+    raw: text.bytes()
     if raw.len() == 0 || Int.from_u8(raw[0]) != 45 -> return pkg_parse_u64(text)
     if raw.len() == 1 -> return None
     magnitude := 0
     loop index in 1..<raw.len() {
-        digit :: Int.from_u8(raw[index]) - 48
+        digit: Int.from_u8(raw[index]) - 48
         if digit < 0 || digit > 9 -> return None
         if magnitude > (PKG_MAX_U64_IN_INT + 1 - digit) /% 10 -> return None
         magnitude = magnitude * 10 + digit
@@ -81,12 +81,12 @@ fn pkg_parse_i64(text: String) -> Int? Never! {
 }
 
 // The text with every Unicode whitespace scalar removed.
-fn pkg_without_whitespace(value: String) -> String Never! {
-    raw :: value.bytes()
+pkg_without_whitespace: fn(value: String) -> String Never! {
+    raw: value.bytes()
     out := [U8]{}
     index := 0
     loop index < raw.len() {
-        width :: pkg_bytes_space_width(raw, index)
+        width: pkg_bytes_space_width(raw, index)
         if width > 0 {
             index += width
             next

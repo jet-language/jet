@@ -5,7 +5,7 @@
 use jet_foundation.[RuntimeLayer, jet_ring_parse_manifest_layer]
 
 // The lock section the reader is currently filling.
-enum LockParseSection {
+LockParseSection: enum {
     // Top-level keys before the first header.
     Preamble
     Root
@@ -26,7 +26,7 @@ enum LockParseSection {
     Semantic
 
     // The section a header line opens, or None for an unknown header.
-    fn from_header(line: String) -> LockParseSection? Never! {
+    from_header: fn(line: String) -> LockParseSection? Never! {
         if line == {
             "[[comptime_inputs]]" -> Val(LockParseSection.ComptimeInput)
             "[[package]]" -> Val(LockParseSection.Package)
@@ -46,7 +46,7 @@ enum LockParseSection {
     }
 
     // Sections whose own `version` key is not the lockfile version.
-    fn owns_version_key(self) -> Bool Never! {
+    owns_version_key: fn(self) -> Bool Never! {
         if self == {
             .Package | .Toolchain | .Browser | .WorkspaceOverlayPackage | .Root | .Semantic -> true
             else -> false
@@ -54,7 +54,7 @@ enum LockParseSection {
     }
 
     // Sections that shadow the top-level workspace keys.
-    fn shadows_workspace_keys(self) -> Bool Never! {
+    shadows_workspace_keys: fn(self) -> Bool Never! {
         if self == {
             .Package | .Root | .Semantic -> true
             else -> false
@@ -63,10 +63,10 @@ enum LockParseSection {
 }
 
 // Parse lock text into the canonical model.
-fn pkg_lock_parse(raw: String) -> LockFile LockError! {
+pkg_lock_parse: fn(raw: String) -> LockFile LockError! {
     if raw.bytes().len() > PKG_MAX_LOCK_BYTES -> return Err(LockError.Invalid(pkg_lock_oversized_file_message()))
     parser := LockParser.new()
-    lines :: raw.split("\n").to_list()
+    lines: raw.split("\n").to_list()
     loop index in 0..<lines.len() {
         line_text := lines[index]
         if line_text.ends_with(pkg_lock_carriage_return()) -> line_text = line_text.removesuffix(pkg_lock_carriage_return())
@@ -82,7 +82,7 @@ fn pkg_lock_parse(raw: String) -> LockFile LockError! {
 // Parse a lock read from `lock_path`. An unsupported format version is
 // distinct from corruption: the reader must not rewrite an input whose
 // required meanings it cannot establish.
-fn pkg_lock_parse_with_path(raw: String, lock_path: String) -> LockFile LockError! {
+pkg_lock_parse_with_path: fn(raw: String, lock_path: String) -> LockFile LockError! {
     if pkg_lock_parse(raw) == {
         .Ok(lock) -> Ok(lock)
         .Err(error) -> if error == {
@@ -95,9 +95,9 @@ fn pkg_lock_parse_with_path(raw: String, lock_path: String) -> LockFile LockErro
 // Identify a lock that claims workspace authority even when its typed parse
 // fails, so callers report the malformed/stale lock instead of treating it as
 // an ordinary package lock or an empty workspace.
-fn pkg_lock_looks_like_workspace_lock(raw: String) -> Bool Never! {
+pkg_lock_looks_like_workspace_lock: fn(raw: String) -> Bool Never! {
     loop line_text in raw.split("\n") {
-        line :: line_text.trim()
+        line: line_text.trim()
         if line == {
             "[[workspace_member]]" | "[[workspace_overlay]]" | "[[workspace_overlay_package]]" | "[[workspace_build_grant]]" -> { return true }
             else -> {}
@@ -107,16 +107,16 @@ fn pkg_lock_looks_like_workspace_lock(raw: String) -> Bool Never! {
     false
 }
 
-fn pkg_lock_oversized_value_message(line: Int) -> String Never! {
+pkg_lock_oversized_value_message: fn(line: Int) -> String Never! {
     "lock value exceeds the 1 MiB safety limit at line {line}"
 }
 
-fn pkg_lock_oversized_file_message() -> String Never! {
+pkg_lock_oversized_file_message: fn() -> String Never! {
     "lock file exceeds the 1 MiB safety limit"
 }
 
 // The reader state: finished records plus the one record being filled.
-struct LockParser {
+LockParser: struct {
     version: Int?
     packages: [LockedPackage]
     root_dependencies: [String]
@@ -150,7 +150,7 @@ struct LockParser {
     in_semantic: Bool
     semantic_lines: [String]
 
-    fn new() -> LockParser Never! {
+    new: fn() -> LockParser Never! {
         LockParser{
             version: None,
             packages: [LockedPackage]{},
@@ -186,7 +186,7 @@ struct LockParser {
     }
 
     // Consume one trimmed line.
-    fn accept(&self, line: String, number: Int) LockError! {
+    accept: fn(&self, line: String, number: Int) LockError! {
         if line == "" || line.starts_with("#") -> return
         if line.starts_with("[") {
             // Any section header closes the section being built.
@@ -195,9 +195,9 @@ struct LockParser {
             self.in_semantic = self.section == LockParseSection.Semantic
             return
         }
-        pair :: line.split_once("=") ?? return Err(LockError.Invalid("malformed lock line {number}: expected `key = value`"))
-        key :: pair.before.trim()
-        value :: pair.after.trim()
+        pair: line.split_once("=") ?? return Err(LockError.Invalid("malformed lock line {number}: expected `key = value`"))
+        key: pair.before.trim()
+        value: pair.after.trim()
         // The SemanticLock version line precedes its first block, so it lands in
         // whichever machine section ends the file (Trust `SEMANTIC_LOCK_VERSION_KEY`).
         // It opens the verbatim semantic tail.
@@ -244,7 +244,7 @@ struct LockParser {
         }
     }
 
-    fn assign_build_stamp(&self, key: String, value: String) LockError! {
+    assign_build_stamp: fn(&self, key: String, value: String) LockError! {
         stamp := self.build_stamp ?? BuildStamp.default()
         if key == {
             "git" -> stamp.git = Val(pkg_lock_unescape(value))
@@ -260,11 +260,11 @@ struct LockParser {
         self.build_stamp = Val(stamp)
     }
 
-    fn assign_root(&self, key: String, value: String) LockError! {
+    assign_root: fn(&self, key: String, value: String) LockError! {
         if key == {
             "dependencies" -> self.root_dependencies = pkg_lock_parse_string_array(value)
             "authority" -> {
-                parsed :: if pkg_parse_authority_value(value) == {
+                parsed: if pkg_parse_authority_value(value) == {
                     .Ok(block) -> block
                     .Err(error) -> { return Err(LockError.Invalid(error.message())) }
                 }
@@ -275,7 +275,7 @@ struct LockParser {
     }
 
     // Finish the record of the current section and return to the preamble.
-    fn close_section(&self) LockError! {
+    close_section: fn(&self) LockError! {
         if self.section == {
             .ComptimeInput -> {
                 if self.comptime_input.finish() == {
@@ -325,10 +325,10 @@ struct LockParser {
         self.section = LockParseSection.Preamble
     }
 
-    fn finish(&self) -> LockFile LockError! {
+    finish: fn(&self) -> LockFile LockError! {
         &self.close_section()
-        policy :: pkg_lock_build_workspace_overlay_policy(self.overlays, self.overlay_packages, self.build_grants, self.policy_allow_unfree, self.policy_build_deny)
-        version :: self.version ?? return Err(LockError.Invalid("lock is missing top-level `version`"))
+        policy: pkg_lock_build_workspace_overlay_policy(self.overlays, self.overlay_packages, self.build_grants, self.policy_allow_unfree, self.policy_build_deny)
+        version: self.version ?? return Err(LockError.Invalid("lock is missing top-level `version`"))
         if version != PKG_LOCK_VERSION -> return Err(LockError.UnsupportedVersion("{version}"))
         lock := LockFile{
             version: version,
@@ -353,17 +353,17 @@ struct LockParser {
 
 // The raw SemanticLock lines as one newline-terminated block, or "" when the
 // lock has none. A tail that already ends the file keeps its exact bytes.
-fn pkg_lock_semantic_text(lines: [String]) -> String Never! {
+pkg_lock_semantic_text: fn(lines: [String]) -> String Never! {
     if lines.len() == 0 -> return ""
-    text :: lines.join("\n")
+    text: lines.join("\n")
     if text.ends_with("\n") -> text else -> "{text}\n"
 }
 
-struct PartialComptimeInput {
+PartialComptimeInput: struct {
     path: String?{None}
     hash: String?{None}
 
-    fn assign(&self, key: String, value: String) Never! {
+    assign: fn(&self, key: String, value: String) Never! {
         if key == {
             "path" -> self.path = Val(pkg_lock_unescape(value))
             "hash" -> self.hash = Val(pkg_lock_trim_quotes(value))
@@ -372,14 +372,14 @@ struct PartialComptimeInput {
     }
 
     // An input without both facts is dropped.
-    fn finish(self) -> ComptimeInput? Never! {
-        path :: self.path ?? return None
-        hash :: self.hash ?? return None
+    finish: fn(self) -> ComptimeInput? Never! {
+        path: self.path ?? return None
+        hash: self.hash ?? return None
         Val(ComptimeInput{path: path, hash: hash})
     }
 }
 
-struct PartialBuildContribution {
+PartialBuildContribution: struct {
     package: String?{None}
     key: String?{None}
     value: String?{None}
@@ -388,8 +388,8 @@ struct PartialBuildContribution {
     source: String?{None}
     reason: String?{None}
 
-    fn assign(&self, key: String, value: String) LockError! {
-        text :: pkg_lock_unescape(value)
+    assign: fn(&self, key: String, value: String) LockError! {
+        text: pkg_lock_unescape(value)
         if key == {
             "package" -> self.package = Val(text)
             "key" -> self.key = Val(text)
@@ -402,7 +402,7 @@ struct PartialBuildContribution {
         }
     }
 
-    fn finish(self) -> LockedBuildContribution LockError! {
+    finish: fn(self) -> LockedBuildContribution LockError! {
         LockedBuildContribution{
             package: pkg_lock_required_contribution_field("package", self.package),
             key: pkg_lock_required_contribution_field("key", self.key),
@@ -415,20 +415,20 @@ struct PartialBuildContribution {
     }
 }
 
-fn pkg_lock_required_contribution_field(name: String, value: String?) -> String LockError! {
-    text :: value ?? return Err(LockError.Invalid("build contribution is missing `{name}`"))
+pkg_lock_required_contribution_field: fn(name: String, value: String?) -> String LockError! {
+    text: value ?? return Err(LockError.Invalid("build contribution is missing `{name}`"))
     if text == "" -> return Err(LockError.Invalid("build contribution is missing `{name}`"))
     Ok(text)
 }
 
-struct PartialWorkspaceMember {
+PartialWorkspaceMember: struct {
     name: String?{None}
     path: String?{None}
     source_digest: String?{None}
     canonical_path: String?{None}
     package_digest: String?{None}
 
-    fn assign(&self, key: String, value: String) Never! {
+    assign: fn(&self, key: String, value: String) Never! {
         if key == {
             "name" -> self.name = Val(pkg_lock_unescape(value))
             "path" -> self.path = Val(pkg_lock_unescape(value))
@@ -439,7 +439,7 @@ struct PartialWorkspaceMember {
         }
     }
 
-    fn finish(self) -> LockedWorkspaceMember LockError! {
+    finish: fn(self) -> LockedWorkspaceMember LockError! {
         LockedWorkspaceMember{
             name: pkg_lock_required_member_field("name", self.name),
             path: pkg_lock_required_member_field("path", self.path),
@@ -450,18 +450,18 @@ struct PartialWorkspaceMember {
     }
 }
 
-fn pkg_lock_required_member_field(name: String, value: String?) -> String LockError! {
-    text :: value ?? return Err(LockError.Invalid("workspace member is missing `{name}`"))
+pkg_lock_required_member_field: fn(name: String, value: String?) -> String LockError! {
+    text: value ?? return Err(LockError.Invalid("workspace member is missing `{name}`"))
     if text == "" -> return Err(LockError.Invalid("workspace member is missing `{name}`"))
     Ok(text)
 }
 
-struct PartialWorkspaceOverlay {
+PartialWorkspaceOverlay: struct {
     name: String?{None}
     provider: String?{None}
     channel: String?{None}
 
-    fn assign(&self, key: String, value: String) LockError! {
+    assign: fn(&self, key: String, value: String) LockError! {
         if key == {
             "name" -> self.name = Val(pkg_lock_unescape(value))
             "provider" -> self.provider = Val(pkg_lock_unescape(value))
@@ -470,14 +470,14 @@ struct PartialWorkspaceOverlay {
         }
     }
 
-    fn finish(self) -> PartialWorkspaceOverlay LockError! {
-        name :: pkg_lock_nonempty(self.name) ?? return Err(LockError.Invalid("workspace overlay is missing `name`"))
+    finish: fn(self) -> PartialWorkspaceOverlay LockError! {
+        name: pkg_lock_nonempty(self.name) ?? return Err(LockError.Invalid("workspace overlay is missing `name`"))
         if self.channel != None && self.provider == None -> return Err(LockError.Invalid("workspace overlay `{name}` has `channel` without `provider`"))
         Ok(PartialWorkspaceOverlay{name: Val(name), provider: self.provider, channel: self.channel})
     }
 }
 
-struct PartialWorkspaceOverlayPackage {
+PartialWorkspaceOverlayPackage: struct {
     overlay: String?{None}
     package: String?{None}
     source: String?{None}
@@ -489,7 +489,7 @@ struct PartialWorkspaceOverlayPackage {
     patches: [String]{[String]{}}
     allow_unfree: Bool{false}
 
-    fn assign(&self, key: String, value: String) LockError! {
+    assign: fn(&self, key: String, value: String) LockError! {
         if key == {
             "overlay" -> self.overlay = Val(pkg_lock_unescape(value))
             "package" -> self.package = Val(pkg_lock_unescape(value))
@@ -509,9 +509,9 @@ struct PartialWorkspaceOverlayPackage {
         }
     }
 
-    fn finish(self) -> PartialWorkspaceOverlayPackage LockError! {
-        overlay :: pkg_lock_nonempty(self.overlay) ?? return Err(LockError.Invalid("workspace overlay package is missing `overlay`"))
-        package :: pkg_lock_nonempty(self.package) ?? return Err(LockError.Invalid("workspace overlay package is missing `package`"))
+    finish: fn(self) -> PartialWorkspaceOverlayPackage LockError! {
+        overlay: pkg_lock_nonempty(self.overlay) ?? return Err(LockError.Invalid("workspace overlay package is missing `overlay`"))
+        package: pkg_lock_nonempty(self.package) ?? return Err(LockError.Invalid("workspace overlay package is missing `package`"))
         finished := self
         finished.overlay = Val(overlay)
         finished.package = Val(package)
@@ -519,11 +519,11 @@ struct PartialWorkspaceOverlayPackage {
     }
 }
 
-struct PartialWorkspaceBuildGrant {
+PartialWorkspaceBuildGrant: struct {
     package: String?{None}
     effects: [String]{[String]{}}
 
-    fn assign(&self, key: String, value: String) LockError! {
+    assign: fn(&self, key: String, value: String) LockError! {
         if key == {
             "package" -> self.package = Val(pkg_lock_unescape(value))
             "effects" -> self.effects = pkg_lock_parse_string_array(value)
@@ -531,29 +531,29 @@ struct PartialWorkspaceBuildGrant {
         }
     }
 
-    fn finish(self) -> PartialWorkspaceBuildGrant LockError! {
-        package :: pkg_lock_nonempty(self.package) ?? return Err(LockError.Invalid("workspace build grant is missing `package`"))
+    finish: fn(self) -> PartialWorkspaceBuildGrant LockError! {
+        package: pkg_lock_nonempty(self.package) ?? return Err(LockError.Invalid("workspace build grant is missing `package`"))
         Ok(PartialWorkspaceBuildGrant{package: Val(package), effects: self.effects})
     }
 }
 
 // Assemble the workspace overlay policy from its finished lock tables,
 // rejecting duplicate or dangling identities.
-fn pkg_lock_build_workspace_overlay_policy(overlays: [PartialWorkspaceOverlay], packages: [PartialWorkspaceOverlayPackage], grants: [PartialWorkspaceBuildGrant], allow_unfree: [String], build_deny: [String]) -> OverlayPolicy LockError! {
+pkg_lock_build_workspace_overlay_policy: fn(overlays: [PartialWorkspaceOverlay], packages: [PartialWorkspaceOverlayPackage], grants: [PartialWorkspaceBuildGrant], allow_unfree: [String], build_deny: [String]) -> OverlayPolicy LockError! {
     policy := OverlayPolicy{overlays: [OverlaySet]{}, allow_unfree: allow_unfree, build_deny: build_deny, build_grants: [BuildGrant]{}}
     overlay_names := [String]{}
     loop overlay in overlays {
-        name :: overlay.name ?? return Err(LockError.Invalid("workspace overlay is missing `name`"))
+        name: overlay.name ?? return Err(LockError.Invalid("workspace overlay is missing `name`"))
         if overlay_names.contains(name) -> return Err(LockError.Invalid("duplicate workspace overlay `{name}`"))
         &overlay_names.push(name)
-        provider :: if overlay.provider == {
+        provider: if overlay.provider == {
             .Val(provider_name) -> Val(ProviderOverride{provider: provider_name, channel: overlay.channel})
             .None -> None
         }
         &policy.overlays.push(OverlaySet{name: name, provider: provider, packages: [PackageOverride]{}})
     }
     loop grant in grants {
-        package :: grant.package ?? return Err(LockError.Invalid("workspace build grant is missing `package`"))
+        package: grant.package ?? return Err(LockError.Invalid("workspace build grant is missing `package`"))
         loop existing in policy.build_grants {
             if existing.subject == package -> return Err(LockError.Invalid("duplicate workspace build grant `{package}`"))
         }
@@ -561,9 +561,9 @@ fn pkg_lock_build_workspace_overlay_policy(overlays: [PartialWorkspaceOverlay], 
     }
     package_keys := [String]{}
     loop package in packages {
-        overlay_name :: package.overlay ?? return Err(LockError.Invalid("workspace overlay package is missing `overlay`"))
-        package_name :: package.package ?? return Err(LockError.Invalid("workspace overlay package is missing `package`"))
-        package_key :: "{overlay_name}/{package_name}"
+        overlay_name: package.overlay ?? return Err(LockError.Invalid("workspace overlay package is missing `overlay`"))
+        package_name: package.package ?? return Err(LockError.Invalid("workspace overlay package is missing `package`"))
+        package_key: "{overlay_name}/{package_name}"
         if package_keys.contains(package_key) -> return Err(LockError.Invalid("duplicate workspace overlay package `{package_key}`"))
         &package_keys.push(package_key)
         target := -1
@@ -573,14 +573,14 @@ fn pkg_lock_build_workspace_overlay_policy(overlays: [PartialWorkspaceOverlay], 
         if target < 0 -> return Err(LockError.Invalid("workspace overlay package names unknown overlay `{overlay_name}`"))
         field_priorities := [String: Int]{}
         loop fact in package.field_priorities {
-            split :: fact.split_once("=") ?? return Err(LockError.Invalid("invalid workspace overlay field priority `{fact}`"))
+            split: fact.split_once("=") ?? return Err(LockError.Invalid("invalid workspace overlay field priority `{fact}`"))
             if field_priorities.get(split.before) != None -> return Err(LockError.Invalid("duplicate workspace overlay field priority `{split.before}`"))
-            priority :: pkg_overlay_parse_i32(split.after) ?? return Err(LockError.Invalid("invalid workspace overlay field priority `{fact}`"))
+            priority: pkg_overlay_parse_i32(split.after) ?? return Err(LockError.Invalid("invalid workspace overlay field priority `{fact}`"))
             field_priorities[split.before] = priority
         }
         env := [OverrideEnv]{}
         loop fact in package.env {
-            split :: fact.split_once("=") ?? return Err(LockError.Invalid("invalid workspace overlay environment fact `{fact}`"))
+            split: fact.split_once("=") ?? return Err(LockError.Invalid("invalid workspace overlay environment fact `{fact}`"))
             &env.push(OverrideEnv{key: split.before, value: split.after})
         }
         env_keys := [String]{}
@@ -605,7 +605,7 @@ fn pkg_lock_build_workspace_overlay_policy(overlays: [PartialWorkspaceOverlay], 
     Ok(policy)
 }
 
-struct PartialPackage {
+PartialPackage: struct {
     name: String?{None}
     version: String?{None}
     source_raw: String?{None}
@@ -626,7 +626,7 @@ struct PartialPackage {
     receipt: String?{None}
     provenance: DependencyProvenance?{None}
 
-    fn assign(&self, key: String, value: String) LockError! {
+    assign: fn(&self, key: String, value: String) LockError! {
         if key.starts_with("nix-") -> return &self.assign_nix_closure(key, value)
         if key == {
             "name" -> self.name = Val(pkg_lock_unescape(value))
@@ -646,12 +646,12 @@ struct PartialPackage {
             "denied-effects" -> self.denied_effects = pkg_lock_parse_string_array(value)
             "effect-authority" -> self.effect_authority = Val(pkg_lock_unescape(value))
             "receipt" -> {
-                receipt :: pkg_lock_unescape(value)
+                receipt: pkg_lock_unescape(value)
                 self.receipt = if receipt == "" -> None else -> Val(receipt)
             }
             "provenance-transparency" | "provenance-publisher" | "provenance-build" -> {
                 provenance := self.provenance ?? DependencyProvenance.empty()
-                text :: pkg_lock_unescape(value)
+                text: pkg_lock_unescape(value)
                 if key == {
                     "provenance-transparency" -> provenance.transparency = Val(text)
                     "provenance-publisher" -> provenance.publisher = Val(text)
@@ -671,7 +671,7 @@ struct PartialPackage {
         }
     }
 
-    fn assign_nix_closure(&self, key: String, value: String) LockError! {
+    assign_nix_closure: fn(&self, key: String, value: String) LockError! {
         closure := self.nix_closure ?? PartialNixClosure{}
         if key == {
             "nix-channel" -> closure.channel = Val(pkg_lock_unescape(value))
@@ -692,16 +692,16 @@ struct PartialPackage {
         self.nix_closure = Val(closure)
     }
 
-    fn finish(self) -> LockedPackage LockError! {
-        name :: self.name ?? return Err(LockError.Invalid("missing name"))
-        version :: self.version ?? return Err(LockError.Invalid("missing version"))
-        source :: pkg_lock_parse_source(self.source_raw ?? "")
-        nix_closure :: if self.nix_closure == {
+    finish: fn(self) -> LockedPackage LockError! {
+        name: self.name ?? return Err(LockError.Invalid("missing name"))
+        version: self.version ?? return Err(LockError.Invalid("missing version"))
+        source: pkg_lock_parse_source(self.source_raw ?? "")
+        nix_closure: if self.nix_closure == {
             .Val(partial) -> Val(partial.finish())
             .None -> None
         }
         pkg_lock_validate_package_nix(source, nix_closure, self.envelope)
-        locked :: if self.locked_raw == {
+        locked: if self.locked_raw == {
             .Val(raw) -> Val(pkg_lock_parse_locked(raw))
             .None -> None
         }
@@ -732,10 +732,10 @@ struct PartialPackage {
 // Rust PartialPkg::finish validates borrowed identities before moving the
 // source, closure and envelope into the completed package. Read parameters
 // keep those same owned records reusable without cloning their payloads.
-fn pkg_lock_validate_package_nix(source: LockSource, nix_closure: NixClosureRecord?, envelope: LockEnvelope?) LockError! {
+pkg_lock_validate_package_nix: fn(source: LockSource, nix_closure: NixClosureRecord?, envelope: LockEnvelope?) LockError! {
     if source == {
         .Nix(_, output) -> {
-            closure :: nix_closure ?? return Err(LockError.Invalid("Nix package is missing its portable closure record"))
+            closure: nix_closure ?? return Err(LockError.Invalid("Nix package is missing its portable closure record"))
             if closure.output != output -> return Err(LockError.Invalid("Nix source output disagrees with its closure record"))
         }
         else -> {
@@ -753,7 +753,7 @@ fn pkg_lock_validate_package_nix(source: LockSource, nix_closure: NixClosureReco
     }
 }
 
-struct PartialNixClosure {
+PartialNixClosure: struct {
     channel: String?{None}
     revision: String?{None}
     system: String?{None}
@@ -768,8 +768,8 @@ struct PartialNixClosure {
     cache_key: String?{None}
     project_cas_bundle: String?{None}
 
-    fn finish(self) -> NixClosureRecord LockError! {
-        record :: NixClosureRecord{
+    finish: fn(self) -> NixClosureRecord LockError! {
+        record: NixClosureRecord{
             channel: self.channel ?? return Err(pkg_lock_nix_closure_missing("channel")),
             revision: self.revision ?? return Err(pkg_lock_nix_closure_missing("revision")),
             system: self.system ?? return Err(pkg_lock_nix_closure_missing("system")),
@@ -789,17 +789,17 @@ struct PartialNixClosure {
     }
 }
 
-fn pkg_lock_nix_closure_missing(field: String) -> LockError Never! {
+pkg_lock_nix_closure_missing: fn(field: String) -> LockError Never! {
     LockError.Invalid("Nix closure is missing `{field}`")
 }
 
-struct PartialToolchain {
+PartialToolchain: struct {
     id: String?{None}
     channel: String?{None}
     version: String?{None}
     envelope: LockEnvelope{LockEnvelope.empty()}
 
-    fn assign(&self, key: String, value: String) Never! {
+    assign: fn(&self, key: String, value: String) Never! {
         if key == {
             "id" -> self.id = Val(pkg_lock_unescape(value))
             "channel" -> self.channel = Val(pkg_lock_unescape(value))
@@ -808,12 +808,12 @@ struct PartialToolchain {
         }
     }
 
-    fn finish(self) -> LockedToolchain Never! {
+    finish: fn(self) -> LockedToolchain Never! {
         LockedToolchain{id: self.id ?? "", channel: self.channel ?? "", version: self.version ?? "", envelope: self.envelope}
     }
 }
 
-struct PartialBrowser {
+PartialBrowser: struct {
     engine: String?{None}
     version: String?{None}
     binary: String?{None}
@@ -821,7 +821,7 @@ struct PartialBrowser {
     size: Int?{None}
     envelope: LockEnvelope{LockEnvelope.empty()}
 
-    fn assign(&self, key: String, value: String) LockError! {
+    assign: fn(&self, key: String, value: String) LockError! {
         if key == {
             "engine" -> self.engine = Val(pkg_lock_unescape(value))
             "version" -> self.version = Val(pkg_lock_unescape(value))
@@ -832,7 +832,7 @@ struct PartialBrowser {
         }
     }
 
-    fn finish(self) -> LockedBrowser LockError! {
+    finish: fn(self) -> LockedBrowser LockError! {
         LockedBrowser{
             engine: self.engine ?? return Err(LockError.Invalid("missing browser engine")),
             version: self.version ?? return Err(LockError.Invalid("missing browser version")),
@@ -844,12 +844,12 @@ struct PartialBrowser {
     }
 }
 
-struct PartialSourceChannel {
+PartialSourceChannel: struct {
     name: String?{None}
     channel: String?{None}
     exact: String?{None}
 
-    fn assign(&self, key: String, value: String) Never! {
+    assign: fn(&self, key: String, value: String) Never! {
         if key == {
             "name" -> self.name = Val(pkg_lock_unescape(value))
             "channel" -> self.channel = Val(pkg_lock_unescape(value))
@@ -858,12 +858,12 @@ struct PartialSourceChannel {
         }
     }
 
-    fn finish(self) -> LockedSourceChannel Never! {
+    finish: fn(self) -> LockedSourceChannel Never! {
         LockedSourceChannel{name: self.name ?? "", channel: self.channel ?? "", exact: pkg_canonical_locked_ref(self.exact ?? "")}
     }
 }
 
-fn pkg_lock_is_envelope_key(key: String) -> Bool Never! {
+pkg_lock_is_envelope_key: fn(key: String) -> Bool Never! {
     if key == {
         "output-hash" | "platform" | "signature" | "catalog-tier" | "catalog-trust" | "provenance" -> true
         else -> false
@@ -871,7 +871,7 @@ fn pkg_lock_is_envelope_key(key: String) -> Bool Never! {
 }
 
 // Fill one envelope field; other keys are ignored.
-fn pkg_lock_assign_envelope(envelope: &LockEnvelope, key: String, value: String) Never! {
+pkg_lock_assign_envelope: fn(envelope: &LockEnvelope, key: String, value: String) Never! {
     if key == {
         "output-hash" -> envelope.output_hash = pkg_lock_unescape(value)
         "platform" -> envelope.platform = pkg_lock_unescape(value)
@@ -885,8 +885,8 @@ fn pkg_lock_assign_envelope(envelope: &LockEnvelope, key: String, value: String)
 
 // Parse a `source = { … }` inline table. The first recognized source key
 // wins, in the Rust reader's order.
-fn pkg_lock_parse_source(input: String) -> LockSource LockError! {
-    inline :: pkg_lock_inline_body(input)
+pkg_lock_parse_source: fn(input: String) -> LockSource LockError! {
+    inline: pkg_lock_inline_body(input)
     if pkg_lock_kv_field(inline, "root") != None -> return Ok(LockSource.Root)
     if pkg_lock_kv_field(inline, "path") == {
         .Val(path) -> { return Ok(LockSource.Path(path)) }
@@ -931,16 +931,16 @@ fn pkg_lock_parse_source(input: String) -> LockSource LockError! {
     }
     if pkg_lock_kv_field(inline, "foreign") == {
         .Val(root) -> {
-            language :: ForeignLanguage.from_root(root) ?? return Err(LockError.Invalid("unknown foreign language `{root}`"))
-            reference :: pkg_lock_kv_field(inline, "reference") ?? return Err(LockError.Invalid("foreign source is missing `reference`"))
-            output :: pkg_lock_kv_field(inline, "output") ?? return Err(LockError.Invalid("foreign source is missing `output`"))
+            language: ForeignLanguage.from_root(root) ?? return Err(LockError.Invalid("unknown foreign language `{root}`"))
+            reference: pkg_lock_kv_field(inline, "reference") ?? return Err(LockError.Invalid("foreign source is missing `reference`"))
+            output: pkg_lock_kv_field(inline, "output") ?? return Err(LockError.Invalid("foreign source is missing `output`"))
             return Ok(LockSource.Foreign{language: language, reference: pkg_canonical_locked_ref(reference), output: output})
         }
         .None -> {}
     }
     if pkg_lock_kv_field(inline, "git") == {
         .Val(url) -> {
-            selector :: if pkg_lock_kv_field(inline, "tag") == {
+            selector: if pkg_lock_kv_field(inline, "tag") == {
                 .Val(name) -> "tag = \"{name}\""
                 .None -> if pkg_lock_kv_field(inline, "branch") == {
                     .Val(branch) -> "branch = \"{branch}\""
@@ -958,9 +958,9 @@ fn pkg_lock_parse_source(input: String) -> LockSource LockError! {
 }
 
 // Parse a `locked = { rev = …, tree-hash = …, last-modified = … }` table.
-fn pkg_lock_parse_locked(input: String) -> LockedRevision Never! {
-    inline :: pkg_lock_inline_body(input)
-    last_modified :: if pkg_lock_kv_field(inline, "last-modified") == {
+pkg_lock_parse_locked: fn(input: String) -> LockedRevision Never! {
+    inline: pkg_lock_inline_body(input)
+    last_modified: if pkg_lock_kv_field(inline, "last-modified") == {
         .Val(text) -> pkg_lock_parse_unsigned(text, 9223372036854775807) ?? 0
         .None -> 0
     }
@@ -968,7 +968,7 @@ fn pkg_lock_parse_locked(input: String) -> LockedRevision Never! {
 }
 
 // The inside of an inline table: every leading `{` and trailing `}` removed.
-fn pkg_lock_inline_body(input: String) -> String Never! {
+pkg_lock_inline_body: fn(input: String) -> String Never! {
     text := input.trim()
     loop text.starts_with("{{") -> text = text.removeprefix("{{")
     loop text.ends_with("}}") -> text = text.removesuffix("}}")
@@ -976,20 +976,20 @@ fn pkg_lock_inline_body(input: String) -> String Never! {
 }
 
 // The one-scalar carriage return (U+000D) text.
-fn pkg_lock_carriage_return() -> String Never! {
+pkg_lock_carriage_return: fn() -> String Never! {
     String.from_bytes([U8]{U8{13}}) ?? ""
 }
 
 // The value for `key = "…"` or `key = digits` in an inline table body. A
 // part that starts with `key` but has no `=` after it ends the search.
-fn pkg_lock_kv_field(inline: String, key: String) -> String? Never! {
-    raw :: inline.bytes()
+pkg_lock_kv_field: fn(inline: String, key: String) -> String? Never! {
+    raw: inline.bytes()
     parts := [String]{}
     start := 0
     quoted := false
     escaped := false
     loop index in 0..<raw.len() {
-        code :: Int.from_u8(raw[index])
+        code: Int.from_u8(raw[index])
         if {
             escaped -> escaped = false
             quoted && code == 92 -> escaped = true
@@ -1003,11 +1003,11 @@ fn pkg_lock_kv_field(inline: String, key: String) -> String? Never! {
     }
     &parts.push(pkg_bytes_text(raw, start, raw.len()))
     loop part_text in parts {
-        part :: part_text.trim()
+        part: part_text.trim()
         if !part.starts_with(key) -> next
-        rest :: part.removeprefix(key).trim()
+        rest: part.removeprefix(key).trim()
         if !rest.starts_with("=") -> return None
-        value :: rest.removeprefix("=").trim()
+        value: rest.removeprefix("=").trim()
         if value.starts_with("\"") -> return Val(pkg_lock_unescape(value))
         return Val(value)
     }
@@ -1016,13 +1016,13 @@ fn pkg_lock_kv_field(inline: String, key: String) -> String? Never! {
 
 // Parse a `["a", "b"]` string array. Quoted items keep their exact text
 // (including empty strings); bare items drop whitespace.
-fn pkg_lock_parse_string_array(input: String) -> [String] LockError! {
-    value :: input.trim()
+pkg_lock_parse_string_array: fn(input: String) -> [String] LockError! {
+    value: input.trim()
     if !(value.starts_with("[") && value.ends_with("]")) || value.bytes().len() < 2 -> return Err(LockError.Invalid("invalid string array: {value}"))
-    raw_all :: value.bytes()
-    inner :: pkg_bytes_text(raw_all, 1, raw_all.len() - 1)
+    raw_all: value.bytes()
+    inner: pkg_bytes_text(raw_all, 1, raw_all.len() - 1)
     if inner.trim() == "" -> return Ok([String]{})
-    raw :: inner.bytes()
+    raw: inner.bytes()
     values := [String]{}
     current := [U8]{}
     quoted := false
@@ -1031,8 +1031,8 @@ fn pkg_lock_parse_string_array(input: String) -> [String] LockError! {
     item_quoted := false
     index := 0
     loop index < raw.len() {
-        byte :: raw[index]
-        code :: Int.from_u8(byte)
+        byte: raw[index]
+        code: Int.from_u8(byte)
         if {
             escaped -> {
                 &current.push(if code == {
@@ -1062,7 +1062,7 @@ fn pkg_lock_parse_string_array(input: String) -> [String] LockError! {
                 item_started = true
             }
             else -> {
-                width :: pkg_bytes_space_width(raw, index)
+                width: pkg_bytes_space_width(raw, index)
                 if width > 0 {
                     index += width
                     next
@@ -1078,26 +1078,26 @@ fn pkg_lock_parse_string_array(input: String) -> [String] LockError! {
     Ok(values)
 }
 
-fn pkg_lock_array_item(bytes: [U8], quoted: Bool) -> String Never! {
-    text :: pkg_bytes_text(bytes, 0, bytes.len())
+pkg_lock_array_item: fn(bytes: [U8], quoted: Bool) -> String Never! {
+    text: pkg_bytes_text(bytes, 0, bytes.len())
     if quoted -> return text
     text.trim()
 }
 
 // Undo `pkg_lock_escape` on a (possibly quoted) value. The surrounding
 // quotes are removed only when both are present.
-fn pkg_lock_unescape(input: String) -> String Never! {
-    trimmed :: input.trim()
+pkg_lock_unescape: fn(input: String) -> String Never! {
+    trimmed: input.trim()
     text := trimmed
     if trimmed.starts_with("\"") {
-        inner :: trimmed.removeprefix("\"")
+        inner: trimmed.removeprefix("\"")
         if inner.ends_with("\"") -> text = inner.removesuffix("\"")
     }
-    raw :: text.bytes()
+    raw: text.bytes()
     out := [U8]{}
     escaped := false
     loop byte in raw {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if {
             escaped -> {
                 &out.push(if code == {
@@ -1117,7 +1117,7 @@ fn pkg_lock_unescape(input: String) -> String Never! {
 }
 
 // `value` with every leading and trailing `"` removed.
-fn pkg_lock_trim_quotes(value: String) -> String Never! {
+pkg_lock_trim_quotes: fn(value: String) -> String Never! {
     text := value
     loop text.starts_with("\"") -> text = text.removeprefix("\"")
     loop text.ends_with("\"") -> text = text.removesuffix("\"")
@@ -1125,16 +1125,16 @@ fn pkg_lock_trim_quotes(value: String) -> String Never! {
 }
 
 // A decimal unsigned integer (optional leading `+`) no larger than `max`.
-fn pkg_lock_parse_unsigned(text: String, max: Int) -> Int? Never! {
+pkg_lock_parse_unsigned: fn(text: String, max: Int) -> Int? Never! {
     digits := text
     if digits.starts_with("+") -> digits = digits.removeprefix("+")
-    raw :: digits.bytes()
+    raw: digits.bytes()
     if raw.len() == 0 -> return None
     value := 0
     loop byte in raw {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if code < 48 || code > 57 -> return None
-        digit :: code - 48
+        digit: code - 48
         if value > (max - digit) /% 10 -> return None
         value = value * 10 + digit
     }
@@ -1142,8 +1142,8 @@ fn pkg_lock_parse_unsigned(text: String, max: Int) -> Int? Never! {
 }
 
 // The value when it is present and non-empty.
-fn pkg_lock_nonempty(value: String?) -> String? Never! {
-    text :: value ?? return None
+pkg_lock_nonempty: fn(value: String?) -> String? Never! {
+    text: value ?? return None
     if text == "" -> return None
     Val(text)
 }

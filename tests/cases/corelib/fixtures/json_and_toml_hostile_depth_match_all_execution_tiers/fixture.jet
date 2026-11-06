@@ -1,19 +1,19 @@
 
 use {
-    json :: core.encoding.json
-    toml :: core.encoding.toml
+    json: core.encoding.json
+    toml: core.encoding.toml
 }
 
-fn run() {
-    open64 :: "[".repeat(64)
-    close64 :: "]".repeat(64)
+run: fn() {
+    open64: "[".repeat(64)
+    close64: "]".repeat(64)
     if json.parse("{open64}{close64}") == {
         .Ok(_) -> { print("json64:accepted") }
         .Err(error) -> { print("json64:{error.line}:{error.message}") }
     }
 
-    open65 :: "[".repeat(65)
-    close65 :: "]".repeat(65)
+    open65: "[".repeat(65)
+    close65: "]".repeat(65)
     if json.parse("{open65}{close65}") == {
         .Ok(_) -> { print("json65:accepted") }
         .Err(error) -> { print("json65:{error.line}:{error.message}") }

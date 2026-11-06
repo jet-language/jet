@@ -2,12 +2,12 @@
 Marker structs keep fields and settings in one body
 ====================
 
-struct Pattern {
+Pattern: struct {
     value: String
 
     impl Marker {
-        sites :: []
-        repeatable :: true
+        sites: []
+        repeatable: true
     }
 }
 
@@ -23,10 +23,10 @@ struct Pattern {
       (impl_block
         type: (type_identifier)
         body: (block
-          (binding
+          (label
             name: (identifier))
           (bracket_expr)
-          (binding
+          (label
             name: (identifier))
           (boolean))))))
 
@@ -34,12 +34,12 @@ struct Pattern {
 Public fixed groups preserve members and import-local qualification
 ====================
 
-pub struct Fast {
+pub Fast: struct {
     impl Marker {
-        group :: #[library.Tag, Inline, Scalar]
+        group: #[library.Tag, Inline, Scalar]
     }
 }
-#library.Fast fn helper() {}
+#library.Fast helper: fn() {}
 
 ---
 
@@ -50,7 +50,7 @@ pub struct Fast {
       (impl_block
         type: (type_identifier)
         body: (block
-          (binding
+          (label
             name: (identifier))
           (attribute_list
             (identifier)
@@ -68,20 +68,20 @@ pub struct Fast {
 Nested public marker groups
 ====================
 
-module inner {
-    struct Tag {
+inner: module {
+    Tag: struct {
         impl Marker {
-            sites :: []
+            sites: []
         }
     }
 
-    struct Pair {
+    Pair: struct {
         impl Marker {
-            group :: #[Tag, Inline]
+            group: #[Tag, Inline]
         }
     }
 
-    #Pair fn helper() {}
+    #Pair helper: fn() {}
 }
 
 ---
@@ -96,7 +96,7 @@ module inner {
           (impl_block
             type: (type_identifier)
             body: (block
-              (binding
+              (label
                 name: (identifier))
               (bracket_expr)))))
       (struct_def
@@ -105,7 +105,7 @@ module inner {
           (impl_block
             type: (type_identifier)
             body: (block
-              (binding
+              (label
                 name: (identifier))
               (attribute_list
                 (type_identifier)

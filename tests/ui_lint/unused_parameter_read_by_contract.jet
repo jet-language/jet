@@ -1,16 +1,16 @@
 // A parameter read only by a `#Pre` or `#Post` condition is used. Only
 // `unused` is reported.
 #Pre(lanes == 4 || lanes == 8 || lanes == 16, "need 4, 8 or 16 lanes")
-fn simd_width(lanes: Int, xs: [Int]) -> Int {
+simd_width: fn(lanes: Int, xs: [Int]) -> Int {
     xs.len()
 }
 
 #Post(result >= floor, "below the floor")
-fn at_least(floor: Int, value: Int, unused: Int) -> Int {
+at_least: fn(floor: Int, value: Int, unused: Int) -> Int {
     value
 }
 
-fn run() {
+run: fn() {
     print(simd_width(4, [Int]{1, 2}))
     print(at_least(1, 2, 3))
 }

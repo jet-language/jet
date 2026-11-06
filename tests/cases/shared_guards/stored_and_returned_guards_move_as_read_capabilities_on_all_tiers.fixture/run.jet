@@ -1,42 +1,42 @@
 
-struct HeldGuard {
+HeldGuard: struct {
     stored: (lease: SharedGuard<Int>, marker: Int),
 }
 
-enum Held {
+Held: enum {
     Guard(SharedGuard<Int>)
 }
 
-fn ignore_union(value: SharedGuard<Int> | Int) -> Int {
+ignore_union: fn(value: SharedGuard<Int> | Int) -> Int {
     return 0
 }
 
-fn read_stored(handle: Shared<Int>) -> Int {
-    HeldGuard{ stored } :: HeldGuard{
+read_stored: fn(handle: Shared<Int>) -> Int {
+    HeldGuard{ stored }: HeldGuard{
         stored: (lease: handle.guard_edit(), marker: 0),
     }
-    (lease, marker) :: stored
+    (lease, marker): stored
     return lease.value + marker
 }
 
-fn acquire_pair(
+acquire_pair: fn(
     first: Shared<Int>,
     second: Shared<Int>
 ) (left: SharedGuard<Int>, right: SharedGuard<Int>) -> {
     return (left: first.guard_edit(), right: second.guard_edit())
 }
 
-fn read_pair(first: Shared<Int>, second: Shared<Int>) -> Int {
-    (left, right) :: acquire_pair(first, second)
+read_pair: fn(first: Shared<Int>, second: Shared<Int>) -> Int {
+    (left, right): acquire_pair(first, second)
     return left.value + right.value
 }
 
-fn run() {
+run: fn() {
     first := shared 8
     second := shared 2
     print(read_stored(first))
     print(read_pair(first, second))
-    bumped :: first.guard_edit()
+    bumped: first.guard_edit()
     bumped.value += 1
     print(bumped.value)
 }

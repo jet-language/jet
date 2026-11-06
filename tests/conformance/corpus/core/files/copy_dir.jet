@@ -1,19 +1,19 @@
 // core-conformance: core.files.copy_dir
 use {
-    files :: core.files
-    testing :: core.testing
-    sys :: core.sys
+    files: core.files
+    testing: core.testing
+    sys: core.sys
 }
 
-fn run() {
-    root :: testing.temp_dir("files-copy-dir")
-    source :: Path.from(root).join("source")
-    source_file :: source.join("fixture.txt")
-    destination :: Path.from(root).join("destination")
-    destination_file :: destination.join("fixture.txt")
+run: fn() {
+    root: testing.temp_dir("files-copy-dir")
+    source: Path.from(root).join("source")
+    source_file: source.join("fixture.txt")
+    destination: Path.from(root).join("destination")
+    destination_file: destination.join("fixture.txt")
     files.create_dir(source) ?? panic("source")
     files.write(source_file, "fixture") ?? panic("seed")
-    nested :: source.join("nested")
+    nested: source.join("nested")
     files.create_dir(nested) ?? panic("nested")
     files.write(nested.join("deep.txt"), "deep") ?? panic("deep")
     if sys.name() == "linux" -> files.symlink("nested", source.join("link")) ?? panic("symlink")

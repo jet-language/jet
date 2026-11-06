@@ -1,4 +1,4 @@
-struct CalcCell {
+CalcCell: struct {
     priv kind: Int
     priv value: Int
     priv left: String
@@ -6,22 +6,22 @@ struct CalcCell {
     priv deps: [String]
 }
 
-struct RecalcResult {
+RecalcResult: struct {
     priv values: [String:Int]
     priv touched: [String]
 }
 
-fn eval(cell: CalcCell, values: [String:Int]) -> Int {
+eval: fn(cell: CalcCell, values: [String:Int]) -> Int {
     if cell.kind == 0 -> return cell.value
     return (values.get(cell.left.copy()) ?? 0) + (values.get(cell.right.copy()) ?? 0)
 }
 
-fn recalc(cells: [String:CalcCell], previous: [String:Int], changed: String) -> RecalcResult {
+recalc: fn(cells: [String:CalcCell], previous: [String:Int], changed: String) -> RecalcResult {
     values := previous.copy()
     touched := [String]{}
     dirty := [String:Bool]{}
     dirty[changed] = true
-    order :: [String]{"a", "one", "b", "total", "unrelated"}
+    order: [String]{"a", "one", "b", "total", "unrelated"}
     loop name in order {
         if dirty.get(name.copy()) ?? false {
             if cells.get(name.copy()) == .Val(cell) {
@@ -38,7 +38,7 @@ fn recalc(cells: [String:CalcCell], previous: [String:Int], changed: String) -> 
     return RecalcResult{ values: values, touched: touched }
 }
 
-fn sample() -> [String] {
+sample: fn() -> [String] {
     cells := [String:CalcCell]{
         "a": CalcCell{ kind: 0, value: 2, left: "", right: "", deps: [] },
         "one": CalcCell{ kind: 0, value: 1, left: "", right: "", deps: [] },
@@ -46,11 +46,11 @@ fn sample() -> [String] {
         "total": CalcCell{ kind: 1, value: 0, left: "b", right: "a", deps: ["b", "a"] },
         "unrelated": CalcCell{ kind: 0, value: 99, left: "", right: "", deps: [] }
     }
-    first :: recalc(cells, [String:Int]{"one": 1}, "a")
+    first: recalc(cells, [String:Int]{"one": 1}, "a")
     cells["a"].value = 5
-    second :: recalc(cells, first.values, "a")
-    first_total :: first.values.get("total") ?? 0
-    second_total :: second.values.get("total") ?? 0
+    second: recalc(cells, first.values, "a")
+    first_total: first.values.get("total") ?? 0
+    second_total: second.values.get("total") ?? 0
     return [
         "first total={first_total} touched={first.touched}",
         "second total={second_total} touched={second.touched}"

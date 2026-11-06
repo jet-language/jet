@@ -1,16 +1,16 @@
-use files :: core.files
+use files: core.files
 
-struct Member {
+Member: struct {
     name: String
     file: FileReader?
 }
 
 // The match form over a borrowed element's optional handle (#6590): the
 // switch's subject aliases the element, so only the List closes the handle.
-fn member_size(members: &[Member], index: Int) -> Int IOError! {
+member_size: fn(members: &[Member], index: Int) -> Int IOError! {
     if &members[index].file == {
         .Val(input) -> {
-            info :: input.stat()
+            info: input.stat()
             Ok(info.size)
         }
         .None -> Ok(-1)
@@ -18,12 +18,12 @@ fn member_size(members: &[Member], index: Int) -> Int IOError! {
 }
 
 // The handle still reads after every match above.
-fn member_bytes(members: &[Member], index: Int) -> Int IOError! {
+member_bytes: fn(members: &[Member], index: Int) -> Int IOError! {
     total := 0
     if &members[index].file == .Val(input) {
         &input.seek(0)
         loop {
-            chunk :: input.read(65536)
+            chunk: input.read(65536)
             if chunk.len() == 0 -> break
             total += chunk.len()
         }
@@ -32,25 +32,25 @@ fn member_bytes(members: &[Member], index: Int) -> Int IOError! {
 }
 
 // The same switch over an element of a read List of optional handles.
-fn present(readers: [FileReader?], index: Int) -> Bool {
+present: fn(readers: [FileReader?], index: Int) -> Bool {
     if readers[index] == {
         .Val(_) -> true
         .None -> false
     }
 }
 
-fn run() {
-    main :: files.open("main.jet") ?? panic("open main.jet")
+run: fn() {
+    main: files.open("main.jet") ?? panic("open main.jet")
     members := [Member]{Member{name: "main", file: Val(main)}, Member{name: "none", file: None}}
     loop round in 0..<3 {
-        size :: member_size(&members, 0) ?? panic("size")
-        absent :: member_size(&members, 1) ?? panic("size")
+        size: member_size(&members, 0) ?? panic("size")
+        absent: member_size(&members, 1) ?? panic("size")
         print("round {round}: main has bytes {size > 0}, none {absent}")
     }
-    bytes :: member_bytes(&members, 0) ?? panic("bytes")
+    bytes: member_bytes(&members, 0) ?? panic("bytes")
     print("read every byte {bytes == (member_size(&members, 0) ?? -2)}")
-    package :: files.open("package.jet") ?? panic("open package.jet")
-    readers :: [FileReader?]{Val(package), None}
+    package: files.open("package.jet") ?? panic("open package.jet")
+    readers: [FileReader?]{Val(package), None}
     loop round in 0..<3 -> print("present {present(readers, 0)} {present(readers, 1)}")
     print("done")
 }

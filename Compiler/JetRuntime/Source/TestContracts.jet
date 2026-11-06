@@ -14,14 +14,14 @@ test_contract_root := I64{0}
 
 // The harness main opens the run's records file once, before any test runs;
 // it arms `jet prove`'s authority journal then too (ProveJournal.jet).
-#Export(c) fn jet_rt_test_contracts_open(path: I64) {
+#Export(c) jet_rt_test_contracts_open: fn(path: I64) {
     rt_prove_journal_open()
     if (test_contract_root != I64{0}) -> return
-    root :: jet_rt_alloc(I64{40}, I64{8})
+    root: jet_rt_alloc(I64{40}, I64{8})
     thread_zero(root, I64{40})
     trap_store(wrapping(root + I64{8}), test_text_clone(path))
-    capacity :: I64{64}
-    sites :: jet_rt_alloc(capacity * I64{16}, I64{8})
+    capacity: I64{64}
+    sites: jet_rt_alloc(capacity * I64{16}, I64{8})
     thread_zero(sites, capacity * I64{16})
     trap_store(wrapping(root + I64{16}), sites)
     trap_store(wrapping(root + I64{24}), capacity)
@@ -32,12 +32,12 @@ test_contract_root := I64{0}
 
 // One observation of the clause whose site text is `data`/`length`: `held`
 // when its condition was true. A run with no records file records nothing.
-#Export(c) fn jet_rt_test_contract(data: I64, length: I64, held: Bool) {
-    root :: test_contract_root
+#Export(c) jet_rt_test_contract: fn(data: I64, length: I64, held: Bool) {
+    root: test_contract_root
     if (root == I64{0}) -> return
     sync_mutex_lock(root)
     if held {
-        entry :: test_contract_entry(root, data)
+        entry: test_contract_entry(root, data)
         if (trap_word(wrapping(entry + I64{8})) != I64{0}) {
             sync_mutex_unlock(root)
             return
@@ -50,14 +50,14 @@ test_contract_root := I64{0}
 
 // The site's [key, seen] pair, inserted unseen when absent; the table doubles
 // before it is half full. The caller holds the lock.
-fn test_contract_entry(root: I64, key: I64) -> I64 {
+test_contract_entry: fn(root: I64, key: I64) -> I64 {
     if ((trap_word(wrapping(root + I64{32})) + I64{1}) * I64{2} > trap_word(wrapping(root + I64{24}))) -> test_contract_grow(root)
-    sites :: trap_word(wrapping(root + I64{16}))
-    mask :: trap_word(wrapping(root + I64{24})) - I64{1}
+    sites: trap_word(wrapping(root + I64{16}))
+    mask: trap_word(wrapping(root + I64{24})) - I64{1}
     index := test_contract_hash(key).bit_and(mask)
     loop {
-        entry :: wrapping(sites + index * I64{16})
-        found :: trap_word(entry)
+        entry: wrapping(sites + index * I64{16})
+        found: trap_word(entry)
         if (found == key) -> return entry
         if (found == I64{0}) {
             trap_store(entry, key)
@@ -70,30 +70,30 @@ fn test_contract_entry(root: I64, key: I64) -> I64 {
     I64{0}
 }
 
-fn test_contract_hash(key: I64) -> I64 {
+test_contract_hash: fn(key: I64) -> I64 {
     // Static data addresses are 8-aligned; fold the high bits into the low.
-    mixed :: key.bit_xor(key >> I64{17})
+    mixed: key.bit_xor(key >> I64{17})
     (mixed >> I64{3}).bit_and(I64{9223372036854775807})
 }
 
-fn test_contract_grow(root: I64) {
-    old_sites :: trap_word(wrapping(root + I64{16}))
-    old_capacity :: trap_word(wrapping(root + I64{24}))
-    capacity :: old_capacity * I64{2}
-    sites :: jet_rt_alloc(capacity * I64{16}, I64{8})
+test_contract_grow: fn(root: I64) {
+    old_sites: trap_word(wrapping(root + I64{16}))
+    old_capacity: trap_word(wrapping(root + I64{24}))
+    capacity: old_capacity * I64{2}
+    sites: jet_rt_alloc(capacity * I64{16}, I64{8})
     thread_zero(sites, capacity * I64{16})
-    mask :: capacity - I64{1}
+    mask: capacity - I64{1}
     at := I64{0}
     loop at < old_capacity {
-        old :: wrapping(old_sites + at * I64{16})
-        key :: trap_word(old)
+        old: wrapping(old_sites + at * I64{16})
+        key: trap_word(old)
         if (key != I64{0}) {
             index := test_contract_hash(key).bit_and(mask)
             loop {
                 if (trap_word(wrapping(sites + index * I64{16})) == I64{0}) -> break
                 index = (index + I64{1}).bit_and(mask)
             }
-            entry :: wrapping(sites + index * I64{16})
+            entry: wrapping(sites + index * I64{16})
             trap_store(entry, key)
             trap_store(wrapping(entry + I64{8}), trap_word(wrapping(old + I64{8})))
         }
@@ -106,12 +106,12 @@ fn test_contract_grow(root: I64) {
 
 // Appends the site's record; a write failure is a protocol failure (exit
 // 103), as for the harness's own records (BuildTests.jet ir_test_append).
-fn test_contract_append(path: I64, data: I64, length: I64, held: Bool) {
-    head :: rt_static_text("JET_NATIVE_CONTRACT ")
-    head_len :: trap_word(wrapping(head + I64{8}))
+test_contract_append: fn(path: I64, data: I64, length: I64, held: Bool) {
+    head: rt_static_text("JET_NATIVE_CONTRACT ")
+    head_len: trap_word(wrapping(head + I64{8}))
     // The head, the held digit, a space, at most 19 length digits, two '\n'.
-    record :: test_text_new(head_len + I64{23} + length)
-    out :: trap_word(record)
+    record: test_text_new(head_len + I64{23} + length)
+    out: trap_word(record)
     test_copy_bytes(out, trap_word(head), head_len)
     used := head_len
     trap_put(wrapping(out + used), if held -> I64{49} else -> I64{48})
@@ -125,10 +125,10 @@ fn test_contract_append(path: I64, data: I64, length: I64, held: Bool) {
     trap_put(wrapping(out + used), I64{10})
     used += I64{1}
     trap_store(wrapping(record + I64{8}), used)
-    error :: jet_rt_alloc(I64{8}, I64{8})
+    error: jet_rt_alloc(I64{8}, I64{8})
     trap_store(error, I64{0})
     if (jet_rt_test_append(path, record, error) == I64{0}) {
-        message :: jet_rt_handle_show_io_error(trap_word(error))
+        message: jet_rt_handle_show_io_error(trap_word(error))
         jet_rt_test_eprint(message)
         jet_std_process_exit_owned(I64{103})
     }

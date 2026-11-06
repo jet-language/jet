@@ -1,29 +1,29 @@
 // #4745: each return uses this callable's optional success type, not ?Int.
 #Error
-enum Missing { Bad }
+Missing: enum { Bad }
 
-struct Claim { text: String }
+Claim: struct { text: String }
 
-fn explicit_none() -> String? Missing! {
+explicit_none: fn() -> String? Missing! {
     return None
 }
-fn fallback_none(input: Int?) -> Claim? Missing! {
-    value :: input ?? return None
+fallback_none: fn(input: Int?) -> Claim? Missing! {
+    value: input ?? return None
     Val(Claim{text: "{value}"})
 }
-fn tail_none() -> [String]? Missing! {
+tail_none: fn() -> [String]? Missing! {
     None
 }
-fn explicit_ok() -> String? Missing! {
+explicit_ok: fn() -> String? Missing! {
     Ok(None)
 }
 // `??` handles absence and failure together, so the `None` checks test the
 // optional success directly and let `Missing` propagate.
-fn run() Missing! {
+run: fn() Missing! {
     print(explicit_none() == .None)
     print(fallback_none(None) == .None)
     print(tail_none() == .None)
     print(explicit_ok() == .None)
-    claim :: fallback_none(Val(7)) ?? panic("missing claim")
+    claim: fallback_none(Val(7)) ?? panic("missing claim")
     print(claim.text)
 }

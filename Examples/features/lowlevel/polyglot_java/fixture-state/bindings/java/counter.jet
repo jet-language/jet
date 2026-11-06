@@ -1,42 +1,42 @@
-#Import module c.jet_java_counter {
-    fn new(arg0: Int) -> Int = "jet_java_counter_new"
-    fn take_error() -> Int = "jet_java_counter_take_error"
-    fn close(handle: Int) = "jet_java_counter_close"
-    fn add(handle: Int, arg0: Int) -> Int = "jet_java_counter_add"
-    fn explode(handle: Int, arg0: Int) -> Int = "jet_java_counter_explode"
-    fn twice(arg0: Float) -> Float = "jet_java_counter_twice"
+#Import c.jet_java_counter: module {
+    new: fn(arg0: Int) -> Int = "jet_java_counter_new"
+    take_error: fn() -> Int = "jet_java_counter_take_error"
+    close: fn(handle: Int) = "jet_java_counter_close"
+    add: fn(handle: Int, arg0: Int) -> Int = "jet_java_counter_add"
+    explode: fn(handle: Int, arg0: Int) -> Int = "jet_java_counter_explode"
+    twice: fn(arg0: Float) -> Float = "jet_java_counter_twice"
 }
-use abi :: c.jet_java_counter
+use abi: c.jet_java_counter
 
-struct Handle { priv value: Int }
-enum JavaError { Exception }
+Handle: struct { priv value: Int }
+JavaError: enum { Exception }
 
-fn new(arg0: Int) -[FFI.Java]> Handle JavaError! {
-    value :: abi.new(arg0)
+new: fn(arg0: Int) -[FFI.Java]> Handle JavaError! {
+    value: abi.new(arg0)
     if abi.take_error() != 0 { return Err(JavaError.Exception) }
     return Ok(Handle{ value: value })
 }
 
-fn close(^handle: Handle) -[FFI.Java]> {}
+close: fn(^handle: Handle) -[FFI.Java]> {}
 
 impl Handle.Close {
-    fn close(^self) { abi.close(self.value) }
+    close: fn(^self) { abi.close(self.value) }
 }
 
-fn add(handle: Handle, arg0: Int) -[FFI.Java]> Int JavaError! {
-    value :: abi.add(handle.value, arg0)
+add: fn(handle: Handle, arg0: Int) -[FFI.Java]> Int JavaError! {
+    value: abi.add(handle.value, arg0)
     if abi.take_error() != 0 { return Err(JavaError.Exception) }
     return Ok(value)
 }
 
-fn explode(handle: Handle, arg0: Int) -[FFI.Java]> Int JavaError! {
-    value :: abi.explode(handle.value, arg0)
+explode: fn(handle: Handle, arg0: Int) -[FFI.Java]> Int JavaError! {
+    value: abi.explode(handle.value, arg0)
     if abi.take_error() != 0 { return Err(JavaError.Exception) }
     return Ok(value)
 }
 
-fn twice(arg0: Float) -[FFI.Java]> Float JavaError! {
-    value :: abi.twice(arg0)
+twice: fn(arg0: Float) -[FFI.Java]> Float JavaError! {
+    value: abi.twice(arg0)
     if abi.take_error() != 0 { return Err(JavaError.Exception) }
     return Ok(value)
 }

@@ -36,16 +36,16 @@ ROOT = Path(__file__).resolve().parents[2]
 JET_BIN = ROOT / "target" / "debug" / "jet"
 JET_ENV = ROOT / "Tools/agent/jet-env"
 SCRATCH_ROOT = Path.home() / ".cache" / "jet-dev" / "corelib-compare"
-JET_WORKLOAD = r'''fn to_u8(n: Int) -> U8 { (U8{n & 255}) }
+JET_WORKLOAD = r'''to_u8: fn(n: Int) -> U8 { (U8{n & 255}) }
 
-fn run() {
+run: fn() {
     payload := [U8]{}
     i := 0
     loop i < 257 {
         payload.push(to_u8(i % 251))
         i += 1
     }
-    rounds :: {rounds}
+    rounds: {rounds}
     encoded := ""
     i = 0
     loop i < rounds {
@@ -156,20 +156,20 @@ def main() -> int:
         )
         source_file = scratch / "source.jet"
         source_file.write_text(
-            "use builtin_b64 :: core.encoding.base64\n"
-            "fn encode(data: [U8]) -> String { builtin_b64.encode(data) }\n",
+            "use builtin_b64: core.encoding.base64\n"
+            "encode: fn(data: [U8]) -> String { builtin_b64.encode(data) }\n",
             encoding="utf-8",
         )
         rust_entry = scratch / "rust_builtin.jet"
         rust_entry.write_text(
-            f'''use b64 :: core.encoding.base64
+            f'''use b64: core.encoding.base64
 '''
             + JET_WORKLOAD.replace("{rounds}", str(args.rounds)),
             encoding="utf-8",
         )
         source_entry = scratch / "jet_source.jet"
         source_entry.write_text(
-            f'''use b64 :: source
+            f'''use b64: source
 '''
             + JET_WORKLOAD.replace("{rounds}", str(args.rounds)),
             encoding="utf-8",

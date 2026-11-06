@@ -10,13 +10,13 @@ step raw: jet repl --project {work}/project
 pty: true
 limit: time=8
 pty-send: "x := add_three(1)\r" after 200ms
-pty-send: "y :: add_three(x)\r" after 150ms
+pty-send: "y: add_three(x)\r" after 150ms
 pty-send: "\u0012" after 150ms
 pty-send: "1\r" after 120ms
 pty-send: "\u001b[D2\r" after 120ms
 pty-send: "y\r" after 200ms
 pty-send: ":quit\r" after 150ms
 exit: 0
-stdout: ~ "rerun #2: y :: add_three(x)" # Original substring predicate rs2703.
+stdout: ~ "rerun #2: y: add_three(x)" # Original substring predicate rs2703.
 stdout: ~ "8 : Int" # Original substring predicate rs2707.
 stdout: !~ "E0102" # Original project function unknown rejection rs2711.

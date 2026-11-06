@@ -1,14 +1,14 @@
 // D-APPROX1=A: core.data.sketch — approximate data structures.
 use {
-    hll_mod :: core.data.sketch.hll
-    td_mod :: core.data.sketch.tdigest
-    cms_mod :: core.data.sketch.cms
-    rs_mod :: core.data.sketch.reservoir
+    hll_mod: core.data.sketch.hll
+    td_mod: core.data.sketch.tdigest
+    cms_mod: core.data.sketch.cms
+    rs_mod: core.data.sketch.reservoir
 }
 
 // Sketches are plain values; write receivers update their private storage.
 // Cloning a sketch gives an independent value, including its sampler RNG state.
-fn run() {
+run: fn() {
     // HyperLogLog: cardinality estimator.
     // 3 distinct items + 1 duplicate → count ≈ 3.
     hll := hll_mod.new()
@@ -76,7 +76,7 @@ fn run() {
     &frequencies.add("hello")
     print(frequencies)
     print(frequencies.count("hello"))
-    combined :: cms_mod.merge(frequencies, frequencies)
+    combined: cms_mod.merge(frequencies, frequencies)
     print(combined.count("hello"))
     sample := rs_mod.new(3)
     &sample.add("x")

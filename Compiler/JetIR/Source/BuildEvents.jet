@@ -10,38 +10,38 @@
 use jet_foundation.[Span, BodyHandleOp, Type, type_carrier_identity]
 
 // The compiler-known `Event<T>`.
-fn ir_event_type(ty: Type) -> Bool Never! {
+ir_event_type: fn(ty: Type) -> Bool Never! {
     if ir_untag(ty) == .Apply(name, args) -> return name == "Event" && args.len() == 1
     false
 }
 
-fn ir_event_row(m: &IRModule, ty: Type) -> Int Never! {
+ir_event_row: fn(m: &IRModule, ty: Type) -> Int Never! {
     ir_intern_type(&m, type_carrier_identity(ty), ir_owned_layout(IRTypeKind.Pointer, ty, "jet_rt_handle_drop_jet_event", "jet_rt_handle_clone_jet_event"))
 }
 
 // `core.event.__event_with_policy<T>(policy)`: the provider borrows the
 // policy, which is released here when consumed.
-fn ir_event_with_policy(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, args: [Int], span: Span) -> Int Never! {
+ir_event_with_policy: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, args: [Int], span: Span) -> Int Never! {
     if !ir_event_type(result_ty) -> return ir_fail_slot(&b, span, "Event.with_policy producing {ir_type_name(result_ty)}")
     if args.len() != 1 -> return ir_fail_slot(&b, span, "Event.with_policy with {args.len()} arguments")
-    policy :: ir_expr(&m, p, &b, args[0])
+    policy: ir_expr(&m, p, &b, args[0])
     if ir_failed(b) || policy < 0 -> return -1
-    event_row :: ir_event_row(&m, result_ty)
-    event :: ir_runtime(&m, &b, "jet_event_with_policy", [Int]{policy}, event_row)
+    event_row: ir_event_row(&m, result_ty)
+    event: ir_runtime(&m, &b, "jet_event_with_policy", [Int]{policy}, event_row)
     ir_release(&m, &b, policy)
     event
 }
 
 // Every `core.event` method row the providers implement; None leaves any
 // other to ir_handle_method.
-fn ir_event_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: BodyHandleOp, args: [Int], span: Span) -> Int? Never! {
+ir_event_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: BodyHandleOp, args: [Int], span: Span) -> Int? Never! {
     if operation == {
         .EventMethod(_) -> {}
         else -> return None
     }
-    route :: ir_general_handle_route(operation, ir_ty(p, b, receiver), args.len(), ir_failure_carrier_for_type(ty)) ?? return None
+    route: ir_general_handle_route(operation, ir_ty(p, b, receiver), args.len(), ir_failure_carrier_for_type(ty)) ?? return None
     if route.module_name != "core.event" -> return None
-    symbol :: route.symbol
+    symbol: route.symbol
     if ir_event_listen_export(symbol) == .Val(listen) {
         if symbol.ends_with("::on") -> return Val(ir_event_listen(&m, p, &b, ty, receiver, args, listen, false, false, span))
         if symbol.ends_with("::once") -> return Val(ir_event_listen(&m, p, &b, ty, receiver, args, listen, false, true, span))
@@ -51,7 +51,7 @@ fn ir_event_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver
     if symbol == "jet_std::JetHook::run" -> return Val(ir_hook_run(&m, p, &b, ty, receiver, args, span))
     if symbol == "jet_std::JetDecisionHook::run" -> return Val(ir_decision_hook_run(&m, p, &b, ty, receiver, args, span))
     if symbol == "jet_std::JetAsyncEvent::emit_async" -> return Val(ir_async_emit(&m, p, &b, ty, receiver, args, span))
-    export :: if symbol == {
+    export: if symbol == {
         "jet_std::JetEvent::listener_count" -> "jet_event_listener_count"
         "jet_std::JetEvent::trace" -> "jet_event_trace"
         "jet_std::JetHook::listener_count" | "jet_std::JetDecisionHook::listener_count" -> "jet_hook_listener_count"
@@ -79,7 +79,7 @@ fn ir_event_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver
 }
 
 // The provider registration of a family's on / once / on_priority row.
-fn ir_event_listen_export(symbol: String) -> String? Never! {
+ir_event_listen_export: fn(symbol: String) -> String? Never! {
     if symbol.starts_with("jet_std::JetEvent::") -> return Val("jet_event_listen")
     if symbol.starts_with("jet_std::JetHook::") || symbol.starts_with("jet_std::JetDecisionHook::") -> return Val("jet_hook_listen")
     if symbol.starts_with("jet_std::JetAsyncEvent::") -> return Val("jet_async_event_listen")
@@ -88,15 +88,15 @@ fn ir_event_listen_export(symbol: String) -> String? Never! {
 
 // A receiver-only method: Unit, an owned exact Int, a Bool, an owned String
 // or a payload-free enum's ordinal word.
-fn ir_event_query(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], export: String, span: Span) -> Int Never! {
+ir_event_query: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], export: String, span: Span) -> Int Never! {
     if args.len() != 0 -> return ir_fail_slot(&b, span, "{export} with {args.len()} arguments")
-    handle :: ir_expr(&m, p, &b, receiver)
+    handle: ir_expr(&m, p, &b, receiver)
     if ir_failed(b) || handle < 0 -> return -1
     result := -1
     if ir_unit_type(ty) {
-        _ :: ir_runtime(&m, &b, export, [Int]{handle}, -1)
+        _: ir_runtime(&m, &b, export, [Int]{handle}, -1)
     } else {
-        row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+        row: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
         result = ir_runtime(&m, &b, export, [Int]{handle}, row)
         b.fresh[result] = m.types[row].drop != ""
     }
@@ -107,43 +107,43 @@ fn ir_event_query(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver:
 // on / once / on_priority(scope, (priority,) handler): the provider takes the
 // handler's closure box, so a kept handler is cloned for it first; the
 // priority crosses as a native word.
-fn ir_event_listen(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], export: String, prioritized: Bool, once: Bool, span: Span) -> Int Never! {
+ir_event_listen: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], export: String, prioritized: Bool, once: Bool, span: Span) -> Int Never! {
     if args.len() != (if prioritized -> 3 else -> 2) -> return ir_fail_slot(&b, span, "Event listener registration with {args.len()} arguments")
-    handler_ty :: ir_ty(p, b, args[args.len() - 1])
-    closure_ty :: handler_ty
+    handler_ty: ir_ty(p, b, args[args.len() - 1])
+    closure_ty: handler_ty
     if ir_untag(closure_ty) == .Fn(params, _, _, _, _, _) {
         if params.len() != 1 -> return ir_fail_slot(&b, span, "Event handler taking {params.len()} parameters")
     } else {
         return ir_fail_slot(&b, span, "Event handler of {ir_type_name(closure_ty)}")
     }
-    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-    event :: ir_expr(&m, p, &b, receiver)
+    row: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    event: ir_expr(&m, p, &b, receiver)
     if ir_failed(b) || event < 0 -> return -1
-    scope :: ir_expr(&m, p, &b, args[0])
+    scope: ir_expr(&m, p, &b, args[0])
     if ir_failed(b) || scope < 0 -> return -1
     priority := ir_word_const(&m, &b, 0)
     if prioritized {
-        value :: ir_expr(&m, p, &b, args[1])
+        value: ir_expr(&m, p, &b, args[1])
         if ir_failed(b) || value < 0 -> return -1
         if ir_untag(ir_ty(p, b, args[1])) == Type.Int {
-            word_row :: ir_word_row(&m)
+            word_row: ir_word_row(&m)
             priority = ir_runtime(&m, &b, "jet_int_owned_to_i64", [Int]{value}, word_row)
         } else {
             priority = value
         }
         if priority != value -> ir_release(&m, &b, value)
     }
-    closure :: ir_expr(&m, p, &b, args[args.len() - 1])
+    closure: ir_expr(&m, p, &b, args[args.len() - 1])
     if ir_failed(b) || closure < 0 -> return -1
-    handed :: ir_closure_handover(&m, p, &b, closure, span)
+    handed: ir_closure_handover(&m, p, &b, closure, span)
     if handed.held < 0 -> return -1
-    held :: handed.held
-    invoke_id :: ir_lazy_helper(&m, p, &b, "callback", closure_ty, span)
+    held: handed.held
+    invoke_id: ir_lazy_helper(&m, p, &b, "callback", closure_ty, span)
     if invoke_id < 0 -> return -1
-    invoke :: ir_lazy_address(&m, &b, invoke_id)
-    release :: handed.release
-    once_word :: ir_word_const(&m, &b, if once -> 1 else -> 0)
-    subscription :: ir_runtime(&m, &b, export, [Int]{event, scope, priority, once_word, held, invoke, release}, row)
+    invoke: ir_lazy_address(&m, &b, invoke_id)
+    release: handed.release
+    once_word: ir_word_const(&m, &b, if once -> 1 else -> 0)
+    subscription: ir_runtime(&m, &b, export, [Int]{event, scope, priority, once_word, held, invoke, release}, row)
     b.fresh[subscription] = true
     ir_release(&m, &b, scope)
     ir_release(&m, &b, event)
@@ -153,10 +153,10 @@ fn ir_event_listen(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver
 // emit(payload): the payload's native slot is lent to every handler and a
 // consumed payload is released after the dispatch; the result is the
 // dispatch's EventTrace.
-fn ir_event_emit(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
+ir_event_emit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
     if args.len() != 1 -> return ir_fail_slot(&b, span, "Event.emit with {args.len()} arguments")
-    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-    event :: ir_expr(&m, p, &b, receiver)
+    row: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    event: ir_expr(&m, p, &b, receiver)
     if ir_failed(b) || event < 0 -> return -1
     payload := -1
     slot := ir_word_const(&m, &b, 0)
@@ -165,7 +165,7 @@ fn ir_event_emit(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: 
         if ir_failed(b) || payload < 0 -> return -1
         slot = ir_lazy_value_slot(&m, &b, payload)
     }
-    trace :: ir_runtime(&m, &b, "jet_event_emit", [Int]{event, slot}, row)
+    trace: ir_runtime(&m, &b, "jet_event_emit", [Int]{event, slot}, row)
     b.fresh[trace] = true
     ir_release(&m, &b, payload)
     ir_release(&m, &b, event)
@@ -176,9 +176,9 @@ fn ir_event_emit(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: 
 // and DecisionHook<T, E> (one hook box), AsyncEvent<T, E> and
 // DispatchReport<E>; None for any other type, a declared one of the same
 // name included.
-fn ir_event_family_row(m: &IRModule, p: IRProgram, ty: Type) -> Int? Never! {
+ir_event_family_row: fn(m: &IRModule, p: IRProgram, ty: Type) -> Int? Never! {
     if ir_untag(ty) == .Apply(name, args) {
-        handle :: if name == {
+        handle: if name == {
             "Hook" | "DecisionHook" -> if args.len() == 2 -> "hook" else -> ""
             "AsyncEvent" -> if args.len() == 2 -> "async_event" else -> ""
             "DispatchReport" -> if args.len() == 1 -> "dispatch_report" else -> ""
@@ -192,39 +192,39 @@ fn ir_event_family_row(m: &IRModule, p: IRProgram, ty: Type) -> Int? Never! {
 
 // `core.event.__hook_new<T, R>(fallback)`: the hook takes over the moved
 // fallback under R's descriptor.
-fn ir_hook_new(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, args: [Int], span: Span) -> Int Never! {
-    row :: ir_event_family_row(&m, p, result_ty) ?? return ir_fail_slot(&b, span, "Hook.new producing {ir_type_name(result_ty)}")
+ir_hook_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, args: [Int], span: Span) -> Int Never! {
+    row: ir_event_family_row(&m, p, result_ty) ?? return ir_fail_slot(&b, span, "Hook.new producing {ir_type_name(result_ty)}")
     if args.len() != 1 -> return ir_fail_slot(&b, span, "Hook.new with {args.len()} arguments")
-    fallback_ty :: ir_type_args(ir_untag(result_ty))[1].copy()
+    fallback_ty: ir_type_args(ir_untag(result_ty))[1].copy()
     slot := ir_word_const(&m, &b, 0)
-    fallback :: ir_expr(&m, p, &b, args[0])
+    fallback: ir_expr(&m, p, &b, args[0])
     if ir_failed(b) -> return -1
     if !ir_unit_type(fallback_ty) {
         if fallback < 0 -> return -1
         slot = ir_reactive_moved_slot(&m, p, &b, fallback, span)
         if ir_failed(b) -> return -1
     }
-    meta :: ir_lazy_meta(&m, p, &b, fallback_ty, span)
+    meta: ir_lazy_meta(&m, p, &b, fallback_ty, span)
     if meta < 0 -> return -1
-    hook :: ir_runtime(&m, &b, "jet_hook_new", [Int]{slot, meta}, row)
+    hook: ir_runtime(&m, &b, "jet_hook_new", [Int]{slot, meta}, row)
     b.fresh[hook] = true
     hook
 }
 
 // `core.event.__decision_hook_new<T, E>(policy)`: the policy is its ordinal
 // word (the provider has one).
-fn ir_decision_hook_new(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, args: [Int], span: Span) -> Int Never! {
-    row :: ir_event_family_row(&m, p, result_ty) ?? return ir_fail_slot(&b, span, "DecisionHook.new producing {ir_type_name(result_ty)}")
+ir_decision_hook_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, args: [Int], span: Span) -> Int Never! {
+    row: ir_event_family_row(&m, p, result_ty) ?? return ir_fail_slot(&b, span, "DecisionHook.new producing {ir_type_name(result_ty)}")
     if args.len() != 1 -> return ir_fail_slot(&b, span, "DecisionHook.new with {args.len()} arguments")
-    policy :: ir_expr(&m, p, &b, args[0])
+    policy: ir_expr(&m, p, &b, args[0])
     if ir_failed(b) || policy < 0 -> return -1
-    hook :: ir_runtime(&m, &b, "jet_decision_hook_new", [Int]{policy}, row)
+    hook: ir_runtime(&m, &b, "jet_decision_hook_new", [Int]{policy}, row)
     b.fresh[hook] = true
     ir_release(&m, &b, policy)
     hook
 }
 
-fn ir_event_ok_type(ty: Type) -> Type? Never! {
+ir_event_ok_type: fn(ty: Type) -> Type? Never! {
     if ir_untag(ty) == .Result(ok_ty, _) -> return Val(ok_ty.copy())
     None
 }
@@ -232,15 +232,15 @@ fn ir_event_ok_type(ty: Type) -> Type? Never! {
 // `core.event.__async_new<T, E>(policy, failures)`: the source validated the
 // capacity, so the provider's event is always the Ok payload; the policy
 // record is borrowed and released here when consumed.
-fn ir_async_event_new(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, args: [Int], span: Span) -> Int Never! {
-    event_ty :: ir_event_ok_type(result_ty) ?? return ir_fail_slot(&b, span, "AsyncEvent.new producing {ir_type_name(result_ty)}")
-    row :: ir_event_family_row(&m, p, event_ty) ?? return ir_fail_slot(&b, span, "AsyncEvent.new producing {ir_type_name(event_ty)}")
+ir_async_event_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, args: [Int], span: Span) -> Int Never! {
+    event_ty: ir_event_ok_type(result_ty) ?? return ir_fail_slot(&b, span, "AsyncEvent.new producing {ir_type_name(result_ty)}")
+    row: ir_event_family_row(&m, p, event_ty) ?? return ir_fail_slot(&b, span, "AsyncEvent.new producing {ir_type_name(event_ty)}")
     if args.len() != 2 -> return ir_fail_slot(&b, span, "AsyncEvent.new with {args.len()} arguments")
-    policy :: ir_expr(&m, p, &b, args[0])
+    policy: ir_expr(&m, p, &b, args[0])
     if ir_failed(b) || policy < 0 -> return -1
-    failures :: ir_expr(&m, p, &b, args[1])
+    failures: ir_expr(&m, p, &b, args[1])
     if ir_failed(b) || failures < 0 -> return -1
-    event :: ir_runtime(&m, &b, "jet_async_event_new", [Int]{policy, failures}, row)
+    event: ir_runtime(&m, &b, "jet_async_event_new", [Int]{policy, failures}, row)
     b.fresh[event] = true
     ir_release(&m, &b, failures)
     ir_release(&m, &b, policy)
@@ -248,40 +248,40 @@ fn ir_async_event_new(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type
 }
 
 // A value the runtime writes to frame storage through `export(args, out)`.
-fn ir_event_out_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, export: String, args: [Int], span: Span) -> Int Never! {
+ir_event_out_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, export: String, args: [Int], span: Span) -> Int Never! {
     call_args := args.copy()
     if ir_unit_type(ty) {
         &call_args.push(ir_word_const(&m, &b, 0))
-        _ :: ir_runtime(&m, &b, export, call_args, -1)
+        _: ir_runtime(&m, &b, export, call_args, -1)
         return -1
     }
-    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    row: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     // The runtime writes one descriptor stride (at least a word).
-    stride :: ir_align8(ir_list_stride(m, row))
-    bytes :: if stride < 8 -> 8 else -> stride
+    stride: ir_align8(ir_list_stride(m, row))
+    bytes: if stride < 8 -> 8 else -> stride
     if m.types[row].kind == .Aggregate {
-        storage :: ir_fresh_temp(&m, &b, row)
+        storage: ir_fresh_temp(&m, &b, row)
         ir_emit(&b.f, IROp.StackAddress, storage, bytes, 8, -1, b.line)
         &call_args.push(storage)
-        _ :: ir_runtime(&m, &b, export, call_args, -1)
+        _: ir_runtime(&m, &b, export, call_args, -1)
         return storage
     }
-    out :: ir_out_slot(&m, &b, bytes.div_euclid(8))
+    out: ir_out_slot(&m, &b, bytes.div_euclid(8))
     &call_args.push(out)
-    _ :: ir_runtime(&m, &b, export, call_args, -1)
-    value :: ir_load_at(&m, &b, out, 0, row)
+    _: ir_runtime(&m, &b, export, call_args, -1)
+    value: ir_load_at(&m, &b, out, 0, row)
     b.fresh[value] = true
     value
 }
 
 // The lent slot of a call's payload argument (a word 0 for Unit) and the
 // payload value to release after the call (-1 for none).
-fn ir_event_lent_payload(m: &IRModule, p: IRProgram, b: &IRBuilder, arg: Int) -> (slot: Int, value: Int) Never! {
+ir_event_lent_payload: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, arg: Int) -> (slot: Int, value: Int) Never! {
     if ir_unit_type(ir_ty(p, b, arg)) {
         _ := ir_expr(&m, p, &b, arg)
         return (slot: ir_word_const(&m, &b, 0), value: -1)
     }
-    value :: ir_expr(&m, p, &b, arg)
+    value: ir_expr(&m, p, &b, arg)
     if ir_failed(b) || value < 0 -> return (slot: -1, value: -1)
     (slot: ir_lazy_value_slot(&m, &b, value), value: value)
 }
@@ -289,21 +289,21 @@ fn ir_event_lent_payload(m: &IRModule, p: IRProgram, b: &IRBuilder, arg: Int) ->
 // Hook.run(payload, fallback): the payload is lent to every handler, the
 // fallback moves to the provider, and the result R comes back in frame
 // storage.
-fn ir_hook_run(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
+ir_hook_run: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
     if args.len() != 2 -> return ir_fail_slot(&b, span, "Hook.run with {args.len()} arguments")
-    hook :: ir_expr(&m, p, &b, receiver)
+    hook: ir_expr(&m, p, &b, receiver)
     if ir_failed(b) || hook < 0 -> return -1
-    payload :: ir_event_lent_payload(&m, p, &b, args[0])
+    payload: ir_event_lent_payload(&m, p, &b, args[0])
     if ir_failed(b) || payload.slot < 0 -> return -1
     fallback_slot := ir_word_const(&m, &b, 0)
-    fallback :: ir_expr(&m, p, &b, args[1])
+    fallback: ir_expr(&m, p, &b, args[1])
     if ir_failed(b) -> return -1
     if !ir_unit_type(ty) {
         if fallback < 0 -> return -1
         fallback_slot = ir_reactive_moved_slot(&m, p, &b, fallback, span)
         if ir_failed(b) -> return -1
     }
-    result :: ir_event_out_value(&m, p, &b, ty, "jet_hook_run", [Int]{hook, payload.slot, fallback_slot}, span)
+    result: ir_event_out_value(&m, p, &b, ty, "jet_hook_run", [Int]{hook, payload.slot, fallback_slot}, span)
     ir_release(&m, &b, payload.value)
     ir_release(&m, &b, hook)
     result
@@ -311,9 +311,9 @@ fn ir_hook_run(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: In
 
 // The (variant index, single payload offset) of `variant` in enum row
 // `row` applied to `args`; a payload-free variant's offset is 0.
-fn ir_event_variant(m: &IRModule, p: IRProgram, row: Int, args: [Type], variant: String) -> (index: Int, offset: Int)? Never! {
-    index :: ir_variant_index(p, row, variant) ?? return None
-    members :: ir_variant_members(&m, p, row, args, index) ?? return None
+ir_event_variant: fn(m: &IRModule, p: IRProgram, row: Int, args: [Type], variant: String) -> (index: Int, offset: Int)? Never! {
+    index: ir_variant_index(p, row, variant) ?? return None
+    members: ir_variant_members(&m, p, row, args, index) ?? return None
     if members.len() == 0 -> return Val((index: index, offset: 0))
     if members.len() != 1 || members[0].boxed -> return None
     Val((index: index, offset: members[0].offset))
@@ -322,36 +322,36 @@ fn ir_event_variant(m: &IRModule, p: IRProgram, row: Int, args: [Type], variant:
 // DecisionHook.run(payload): the provider folds the decisions and builds the
 // HookOutcome box from the layout words passed here (the runtime's
 // DECISION_* / OUTCOME_* offsets in EventHooks.jet).
-fn ir_decision_hook_run(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
+ir_decision_hook_run: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
     if args.len() != 1 -> return ir_fail_slot(&b, span, "DecisionHook.run with {args.len()} arguments")
-    outcome_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-    type_args :: ir_type_args(ir_untag(ty))
+    outcome_row: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    type_args: ir_type_args(ir_untag(ty))
     if type_args.len() != 2 || m.types[outcome_row].kind != .Pointer -> return ir_fail_slot(&b, span, "DecisionHook.run producing {ir_type_name(ty)}")
-    decision_ty :: Type.Apply{name: "HookDecision", args: type_args.copy()}
-    decision_row :: ir_value_type(&m, p, decision_ty) ?? return ir_type_fail(&b, span, decision_ty)
+    decision_ty: Type.Apply{name: "HookDecision", args: type_args.copy()}
+    decision_row: ir_value_type(&m, p, decision_ty) ?? return ir_type_fail(&b, span, decision_ty)
     if m.types[decision_row].kind != .Pointer -> return ir_fail_slot(&b, span, "DecisionHook decisions of {ir_type_name(decision_ty)}")
-    outcome_def :: ir_enum_def(m, p, outcome_row) ?? return ir_fail_slot(&b, span, "HookOutcome without a declaration")
-    decision_def :: ir_enum_def(m, p, decision_row) ?? return ir_fail_slot(&b, span, "HookDecision without a declaration")
-    outcome_args :: ir_row_args(m, outcome_row)
-    decision_args :: ir_row_args(m, decision_row)
-    transform :: ir_event_variant(&m, p, decision_def, decision_args, "Transform") ?? return ir_fail_slot(&b, span, "layout of HookDecision.Transform")
-    cancel :: ir_event_variant(&m, p, decision_def, decision_args, "Cancel") ?? return ir_fail_slot(&b, span, "layout of HookDecision.Cancel")
-    fail :: ir_event_variant(&m, p, decision_def, decision_args, "Fail") ?? return ir_fail_slot(&b, span, "layout of HookDecision.Fail")
-    kept :: ir_event_variant(&m, p, outcome_def, outcome_args, "Continue") ?? return ir_fail_slot(&b, span, "layout of HookOutcome.Continue")
-    cancelled :: ir_event_variant(&m, p, outcome_def, outcome_args, "Cancel") ?? return ir_fail_slot(&b, span, "layout of HookOutcome.Cancel")
-    failed :: ir_event_variant(&m, p, outcome_def, outcome_args, "Fail") ?? return ir_fail_slot(&b, span, "layout of HookOutcome.Fail")
-    bytes :: ir_enum_box_size(&m, p, outcome_def, outcome_args) ?? return ir_fail_slot(&b, span, "layout of HookOutcome")
-    hook :: ir_expr(&m, p, &b, receiver)
+    outcome_def: ir_enum_def(m, p, outcome_row) ?? return ir_fail_slot(&b, span, "HookOutcome without a declaration")
+    decision_def: ir_enum_def(m, p, decision_row) ?? return ir_fail_slot(&b, span, "HookDecision without a declaration")
+    outcome_args: ir_row_args(m, outcome_row)
+    decision_args: ir_row_args(m, decision_row)
+    transform: ir_event_variant(&m, p, decision_def, decision_args, "Transform") ?? return ir_fail_slot(&b, span, "layout of HookDecision.Transform")
+    cancel: ir_event_variant(&m, p, decision_def, decision_args, "Cancel") ?? return ir_fail_slot(&b, span, "layout of HookDecision.Cancel")
+    fail: ir_event_variant(&m, p, decision_def, decision_args, "Fail") ?? return ir_fail_slot(&b, span, "layout of HookDecision.Fail")
+    kept: ir_event_variant(&m, p, outcome_def, outcome_args, "Continue") ?? return ir_fail_slot(&b, span, "layout of HookOutcome.Continue")
+    cancelled: ir_event_variant(&m, p, outcome_def, outcome_args, "Cancel") ?? return ir_fail_slot(&b, span, "layout of HookOutcome.Cancel")
+    failed: ir_event_variant(&m, p, outcome_def, outcome_args, "Fail") ?? return ir_fail_slot(&b, span, "layout of HookOutcome.Fail")
+    bytes: ir_enum_box_size(&m, p, outcome_def, outcome_args) ?? return ir_fail_slot(&b, span, "layout of HookOutcome")
+    hook: ir_expr(&m, p, &b, receiver)
     if ir_failed(b) || hook < 0 -> return -1
-    payload :: ir_event_lent_payload(&m, p, &b, args[0])
+    payload: ir_event_lent_payload(&m, p, &b, args[0])
     if ir_failed(b) || payload.slot < 0 -> return -1
-    t_meta :: ir_lazy_meta(&m, p, &b, type_args[0], span)
+    t_meta: ir_lazy_meta(&m, p, &b, type_args[0], span)
     if t_meta < 0 -> return -1
-    e_meta :: ir_lazy_meta(&m, p, &b, type_args[1], span)
+    e_meta: ir_lazy_meta(&m, p, &b, type_args[1], span)
     if e_meta < 0 -> return -1
-    d_meta :: ir_lazy_meta(&m, p, &b, decision_ty, span)
+    d_meta: ir_lazy_meta(&m, p, &b, decision_ty, span)
     if d_meta < 0 -> return -1
-    words :: [Int]{
+    words: [Int]{
         t_meta, e_meta, d_meta,
         ir_word_const(&m, &b, transform.index), ir_word_const(&m, &b, transform.offset),
         ir_word_const(&m, &b, cancel.index),
@@ -361,9 +361,9 @@ fn ir_decision_hook_run(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rec
         ir_word_const(&m, &b, cancelled.index),
         ir_word_const(&m, &b, failed.index), ir_word_const(&m, &b, failed.offset),
     }
-    layout :: ir_out_slot(&m, &b, words.len())
+    layout: ir_out_slot(&m, &b, words.len())
     loop (position, word) in words -> ir_emit(&b.f, IROp.Store, -1, layout, position * 8, word, b.line)
-    outcome :: ir_runtime(&m, &b, "jet_decision_hook_run", [Int]{hook, payload.slot, layout}, outcome_row)
+    outcome: ir_runtime(&m, &b, "jet_decision_hook_run", [Int]{hook, payload.slot, layout}, outcome_row)
     b.fresh[outcome] = true
     ir_release(&m, &b, payload.value)
     ir_release(&m, &b, hook)
@@ -372,26 +372,26 @@ fn ir_decision_hook_run(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rec
 
 // AsyncEvent.emit_async(payload): the entry takes over the moved payload
 // under T's descriptor and its task's result is the DispatchReport.
-fn ir_async_emit(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
+ir_async_emit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
     if args.len() != 1 -> return ir_fail_slot(&b, span, "AsyncEvent.emit_async with {args.len()} arguments")
-    element :: ir_task_element(ty) ?? return ir_fail_slot(&b, span, "AsyncEvent.emit_async producing {ir_type_name(ty)}")
-    task_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-    payload_ty :: ir_ty(p, b, args[0])
-    event :: ir_expr(&m, p, &b, receiver)
+    element: ir_task_element(ty) ?? return ir_fail_slot(&b, span, "AsyncEvent.emit_async producing {ir_type_name(ty)}")
+    task_row: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    payload_ty: ir_ty(p, b, args[0])
+    event: ir_expr(&m, p, &b, receiver)
     if ir_failed(b) || event < 0 -> return -1
     slot := ir_word_const(&m, &b, 0)
-    payload :: ir_expr(&m, p, &b, args[0])
+    payload: ir_expr(&m, p, &b, args[0])
     if ir_failed(b) -> return -1
     if !ir_unit_type(payload_ty) {
         if payload < 0 -> return -1
         slot = ir_reactive_moved_slot(&m, p, &b, payload, span)
         if ir_failed(b) -> return -1
     }
-    meta :: ir_lazy_meta(&m, p, &b, payload_ty, span)
+    meta: ir_lazy_meta(&m, p, &b, payload_ty, span)
     if meta < 0 -> return -1
-    report_meta :: ir_lazy_meta(&m, p, &b, element, span)
+    report_meta: ir_lazy_meta(&m, p, &b, element, span)
     if report_meta < 0 -> return -1
-    emitted :: ir_runtime(&m, &b, "jet_async_event_emit", [Int]{event, slot, meta, report_meta}, task_row)
+    emitted: ir_runtime(&m, &b, "jet_async_event_emit", [Int]{event, slot, meta, report_meta}, task_row)
     b.fresh[emitted] = true
     ir_release(&m, &b, event)
     emitted

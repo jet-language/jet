@@ -8,7 +8,7 @@
 // them without a manifest) is Jetpack's Environment transition, which no CLI
 // package reaches: those forms are refused.
 use {
-    cli_files :: core.files
+    cli_files: core.files
     jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[DIAGNOSTIC_ERROR, diagnostic_render]
     jet_lexer.[lex]
@@ -17,43 +17,43 @@ use {
     jetpack_trust.[trust_pin_write_init]
 }
 
-fn jet_cli_init(args: [String], color: Bool, quiet: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
-    cwd :: cli_files.cwd() ?? "."
-    script :: args.get(1)
-    base :: cli_files.basename(cwd)
-    name :: if base == "" || base == "/" -> "app" else -> base
-    message :: trust_pin_write_init(cwd, name, JET_CLI_VERSION) ?? {
-        diagnostic :: if err == .Pin(report) -> report else -> panic("the init pin writer returned a non-pin error")
+jet_cli_init: fn(args: [String], color: Bool, quiet: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
+    cwd: cli_files.cwd() ?? "."
+    script: args.get(1)
+    base: cli_files.basename(cwd)
+    name: if base == "" || base == "/" -> "app" else -> base
+    message: trust_pin_write_init(cwd, name, JET_CLI_VERSION) ?? {
+        diagnostic: if err == .Pin(report) -> report else -> panic("the init pin writer returned a non-pin error")
         return jet_cli_done("", diagnostic_render(diagnostic, "", "", color), JET_DRIVER_EXIT_USER_ERROR)
     }
-    lifted :: if script == .Val(path) -> jet_cli_init_lift(cwd, path) else -> ""
+    lifted: if script == .Val(path) -> jet_cli_init_lift(cwd, path) else -> ""
     jet_cli_done("", jet_cli_init_status("{lifted}{message}\n", quiet, json), JET_DRIVER_EXIT_OK)
 }
 
-fn jet_cli_init_status(text: String, quiet: Bool, json: Bool) -> String Never! {
+jet_cli_init_status: fn(text: String, quiet: Bool, json: Bool) -> String Never! {
     if quiet || json -> return ""
     text.copy()
 }
 
 // `lift_inline_deps_into_manifest`: a script that cannot be read, masked,
 // lexed or parsed, or that has no inline refs, lifts nothing and says nothing.
-fn jet_cli_init_lift(cwd: String, script: String) -[FS, Env]> String Never! {
+jet_cli_init_lift: fn(cwd: String, script: String) -[FS, Env]> String Never! {
     file := script
     if !cli_files.is_file(file) && cli_files.is_file("{script}.jet") -> file = "{script}.jet"
-    source :: cli_files.read(file) ?? return ""
-    masked :: pkg_mask_inline_package_source(source) ?? return ""
-    bytes :: masked.source.bytes()
+    source: cli_files.read(file) ?? return ""
+    masked: pkg_mask_inline_package_source(source) ?? return ""
+    bytes: masked.source.bytes()
     if lex(bytes).diagnostics.len() > 0 -> return ""
-    parsed :: parse_source(bytes)
+    parsed: parse_source(bytes)
     loop diagnostic in parsed.diagnostics {
         if diagnostic.severity == DIAGNOSTIC_ERROR -> return ""
     }
-    deps :: pkg_inline_deps_collect(parsed.program)
+    deps: pkg_inline_deps_collect(parsed.program)
     if deps.len() == 0 -> return ""
-    manifest :: cli_files.join(cwd, JET_CLI_PACKAGE_FILE)
+    manifest: cli_files.join(cwd, JET_CLI_PACKAGE_FILE)
     raw := cli_files.read(manifest) ?? return ""
     loop dep in deps -> raw = pkg_add_dependency(raw, dep.name, DepSpec.Registry(dep.selector))
     cli_files.write(manifest, raw) ?? return ""
-    noun :: if deps.len() == 1 -> "dependency" else -> "dependencies"
+    noun: if deps.len() == 1 -> "dependency" else -> "dependencies"
     "lifted {deps.len()} inline {noun} into {JET_CLI_PACKAGE_FILE}\n"
 }

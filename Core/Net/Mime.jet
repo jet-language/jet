@@ -5,11 +5,11 @@
 // table is the same one CoreLib uses for static HTTP files; unknown
 // extensions are absent, never `application/octet-stream`.
 #Error
-enum MIMEError {
+MIMEError: enum {
     Syntax
 }
 
-struct MIME {
+MIME: struct {
     top: String
     sub: String
     priv parameters: [[String]]
@@ -17,17 +17,17 @@ struct MIME {
 
 impl MIME {
     /// The lowercase top-level type, such as `text`.
-    fn media_type(self) -> String Never! { self.top.copy() }
+    media_type: fn(self) -> String Never! { self.top.copy() }
 
     /// The lowercase subtype, such as `html`.
-    fn subtype(self) -> String Never! { self.sub.copy() }
+    subtype: fn(self) -> String Never! { self.sub.copy() }
 
     /// `type/subtype` without parameters.
-    fn essence(self) -> String Never! { "{self.top}/{self.sub}" }
+    essence: fn(self) -> String Never! { "{self.top}/{self.sub}" }
 
     /// The value of the named parameter; names compare case-insensitively.
-    fn param(self, name: String) -> String? Never! {
-        key :: ascii_lower(name)
+    param: fn(self, name: String) -> String? Never! {
+        key: ascii_lower(name)
         loop row in self.parameters {
             if row[0] == key -> return Val(row[1].copy())
         }
@@ -35,10 +35,10 @@ impl MIME {
     }
 
     /// Validated `[name, value]` parameter rows in source order.
-    fn params(self) -> [[String]] Never! { self.parameters.copy() }
+    params: fn(self) -> [[String]] Never! { self.parameters.copy() }
 
     /// Canonical essence followed by parameters in their original order.
-    fn to_string(self) -> String Never! {
+    to_string: fn(self) -> String Never! {
         out := self.essence()
         loop row in self.parameters {
             if row.len() == 2 -> out = "{out}; {row[0]}={row[1]}"
@@ -47,9 +47,9 @@ impl MIME {
     }
 }
 
-fn parse(text: String) -> MIME MIMEError! {
-    raw :: trim_ascii(text)
-    bytes :: raw.bytes()
+parse: fn(text: String) -> MIME MIMEError! {
+    raw: trim_ascii(text)
+    bytes: raw.bytes()
     semi := bytes.len()
     i := 0
     loop i < bytes.len() {
@@ -59,7 +59,7 @@ fn parse(text: String) -> MIME MIMEError! {
         }
         i = i + 1
     }
-    essence :: slice(bytes, 0, semi)
+    essence: slice(bytes, 0, semi)
     slash := -1
     i = 0
     loop i < essence.bytes().len() {
@@ -70,8 +70,8 @@ fn parse(text: String) -> MIME MIMEError! {
         i = i + 1
     }
     if slash <= 0 -> return Err(MIMEError.Syntax)
-    top :: ascii_lower(trim_ascii(slice(essence.bytes(), 0, slash)))
-    sub :: ascii_lower(trim_ascii(slice(essence.bytes(), slash + 1, essence.bytes().len())))
+    top: ascii_lower(trim_ascii(slice(essence.bytes(), 0, slash)))
+    sub: ascii_lower(trim_ascii(slice(essence.bytes(), slash + 1, essence.bytes().len())))
     if !mime_token(top) || !mime_token(sub) -> return Err(MIMEError.Syntax)
 
     parameters := [[String]]{}
@@ -79,16 +79,16 @@ fn parse(text: String) -> MIME MIMEError! {
     i = start
     loop i <= bytes.len() {
         if i == bytes.len() || bytes[i] == (U8{59}) {
-            parameter :: trim_ascii(slice(bytes, start, i))
+            parameter: trim_ascii(slice(bytes, start, i))
             if parameter.bytes().len() > 0 {
                 eq := index_of(parameter.bytes(), 61)
                 if eq <= 0 -> return Err(MIMEError.Syntax)
-                name :: ascii_lower(trim_ascii(slice(parameter.bytes(), 0, eq)))
+                name: ascii_lower(trim_ascii(slice(parameter.bytes(), 0, eq)))
                 if !mime_token(name) -> return Err(MIMEError.Syntax)
-                raw_value :: trim_ascii(slice(parameter.bytes(), eq + 1, parameter.bytes().len()))
-                vb :: raw_value.bytes()
-                quoted :: vb.len() >= 2 && vb[0] == (U8{34}) && vb[vb.len() - 1] == (U8{34})
-                value :: if quoted -> slice(vb, 1, vb.len() - 1) else -> raw_value
+                raw_value: trim_ascii(slice(parameter.bytes(), eq + 1, parameter.bytes().len()))
+                vb: raw_value.bytes()
+                quoted: vb.len() >= 2 && vb[0] == (U8{34}) && vb[vb.len() - 1] == (U8{34})
+                value: if quoted -> slice(vb, 1, vb.len() - 1) else -> raw_value
                 &parameters.push([String]{name, value})
             }
             start = i + 1
@@ -98,8 +98,8 @@ fn parse(text: String) -> MIME MIMEError! {
     Ok(MIME{top: top, sub: sub, parameters: parameters})
 }
 
-fn from_extension(ext: String) -> String? Never! {
-    key :: ascii_lower(trim_dot(ext))
+from_extension: fn(ext: String) -> String? Never! {
+    key: ascii_lower(trim_dot(ext))
     if key == {
         "html" | "htm" -> Val("text/html")
         "css" -> Val("text/css")
@@ -126,8 +126,8 @@ fn from_extension(ext: String) -> String? Never! {
     }
 }
 
-fn extension(mime: String) -> String? Never! {
-    essence :: ascii_lower(trim_params(mime))
+extension: fn(mime: String) -> String? Never! {
+    essence: ascii_lower(trim_params(mime))
     if essence == {
         "text/html" -> Val("html")
         "text/css" -> Val("css")
@@ -153,53 +153,53 @@ fn extension(mime: String) -> String? Never! {
     }
 }
 
-fn trim_dot(ext: String) -> String Never! {
-    raw :: ext.bytes()
+trim_dot: fn(ext: String) -> String Never! {
+    raw: ext.bytes()
     i := 0
     loop i < raw.len() && raw[i] == (U8{46}) -> i = i + 1
     if i > 0 -> return slice(raw, i, raw.len())
     return ext.copy()
 }
 
-fn trim_params(mime: String) -> String Never! {
-    raw :: mime.bytes()
+trim_params: fn(mime: String) -> String Never! {
+    raw: mime.bytes()
     loop i in 0..<raw.len() {
         if raw[i] == (U8{59}) -> return trim_ascii(slice(raw, 0, i))
     }
     trim_ascii(mime)
 }
 
-fn trim_ascii(text: String) -> String Never! {
-    raw :: text.bytes()
+trim_ascii: fn(text: String) -> String Never! {
+    raw: text.bytes()
     start := 0
     end := raw.len()
     loop {
         if start >= end -> return ""
-        n :: Int.from_u8(raw[start])
+        n: Int.from_u8(raw[start])
         if n == 32 || n == 9 || n == 10 || n == 13 -> start = start + 1 else -> break
     }
     loop {
         if end <= start -> return ""
-        n :: Int.from_u8(raw[end - 1])
+        n: Int.from_u8(raw[end - 1])
         if n == 32 || n == 9 || n == 10 || n == 13 -> end = end - 1 else -> break
     }
     slice(raw, start, end)
 }
 
-fn ascii_lower(text: String) -> String Never! {
+ascii_lower: fn(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
-        n :: b
+        n: b
         if n >= 65 && n <= 90 -> &out.push(U8{n + 32}) else -> &out.push(b)
     }
     String.from_bytes(out) ?? ""
 }
 
-fn mime_token(text: String) -> Bool Never! {
-    raw :: text.bytes()
+mime_token: fn(text: String) -> Bool Never! {
+    raw: text.bytes()
     if raw.len() == 0 -> return false
     loop b in raw {
-        n :: Int.from_u8(b)
+        n: Int.from_u8(b)
         if (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || (n >= 48 && n <= 57) {
             next
         }
@@ -211,14 +211,14 @@ fn mime_token(text: String) -> Bool Never! {
     true
 }
 
-fn index_of(raw: [U8], needle: Int) -> Int Never! {
+index_of: fn(raw: [U8], needle: Int) -> Int Never! {
     loop i in 0..<raw.len() {
         if Int.from_u8(raw[i]) == needle -> return i
     }
     -1
 }
 
-fn slice(raw: [U8], start: Int, end: Int) -> String Never! {
+slice: fn(raw: [U8], start: Int, end: Int) -> String Never! {
     out := [U8]{}
     i := start
     loop {
@@ -229,9 +229,9 @@ fn slice(raw: [U8], start: Int, end: Int) -> String Never! {
 }
 
 #Test("MIME render preserves parameter order") {
-    value :: parse("Text/Plain; Charset=\"UTF-8\"; boundary=abc") ?? panic("valid MIME")
+    value: parse("Text/Plain; Charset=\"UTF-8\"; boundary=abc") ?? panic("valid MIME")
     assert(value.to_string() == "text/plain; charset=UTF-8; boundary=abc")
-    charset :: Val("UTF-8")
+    charset: Val("UTF-8")
     assert(value.param("CHARSET") == charset)
     assert(value.param("missing") == None)
 }

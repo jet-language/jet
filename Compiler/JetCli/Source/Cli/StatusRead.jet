@@ -1,9 +1,9 @@
 // Adapted from origin/port/compiler Jetpack/Foundation/Source/Report.jet
 // `report_status_value_parse`: use the Core JSON reader, not another parser.
 use {
-    cli_json :: core.encoding.json
-    status_math :: core.math
-    status_text :: core.text
+    cli_json: core.encoding.json
+    status_math: core.math
+    status_text: core.text
     core.encoding.[Dyn]
     jet_foundation.[foundation_float_display, foundation_json_integer]
 }
@@ -11,15 +11,15 @@ use {
 // Rust's `String` refusals from the status readers (StatusValue::parse and
 // the ledgers and manifests read through it).
 #Error
-struct JetCLIReadError {
+JetCLIReadError: struct {
     message: String
 }
 
-fn jet_cli_read_error(message: String) -> JetCLIReadError Never! {
+jet_cli_read_error: fn(message: String) -> JetCLIReadError Never! {
     JetCLIReadError{message: message}
 }
 
-fn report_status_value_parse(text: String) -> Dyn JetCLIReadError! {
+report_status_value_parse: fn(text: String) -> Dyn JetCLIReadError! {
     if cli_json.parse(text) == {
         .Ok(tree) -> Ok(tree)
         .Err(error) -> Err(jet_cli_read_error(error.reason))
@@ -31,8 +31,8 @@ fn report_status_value_parse(text: String) -> Dyn JetCLIReadError! {
 // and a fraction or exponent is an f64 rendered in its Display form
 // (`1.2300e+4` is `12300`); Bytes are their base64 text and a DateTime its
 // RFC 3339 text.
-fn jet_cli_status_from_tree(tree: Dyn) -> JetCLIStatusValue JetCLIReadError! {
-    value :: if tree == {
+jet_cli_status_from_tree: fn(tree: Dyn) -> JetCLIStatusValue JetCLIReadError! {
+    value: if tree == {
         .Null -> JetCLIStatusValue.Null
         .Bool(value) -> jet_cli_status_bool(value)
         .Int(value) -> jet_cli_status_int(value)
@@ -50,7 +50,7 @@ fn jet_cli_status_from_tree(tree: Dyn) -> JetCLIStatusValue JetCLIReadError! {
             }
             // copy: `lexeme` is a payload view of read parameter `tree`; the status value owns its text.
             if !float_spelled -> return Ok(JetCLIStatusValue.Float{text: lexeme.copy()})
-            number :: Float.parse(lexeme) ?? return Err(jet_cli_read_error("status number `{lexeme}` is not a JSON number"))
+            number: Float.parse(lexeme) ?? return Err(jet_cli_read_error("status number `{lexeme}` is not a JSON number"))
             if !status_math.is_finite(number) {
                 return Err(jet_cli_read_error("status fields cannot contain non-finite numbers"))
             }
@@ -83,11 +83,11 @@ fn jet_cli_status_from_tree(tree: Dyn) -> JetCLIStatusValue JetCLIReadError! {
 }
 
 // StatusValue::parse always goes through the canonical Core JSON reader.
-fn jet_cli_status_value_parse(text: String) -> JetCLIStatusValue JetCLIReadError! {
+jet_cli_status_value_parse: fn(text: String) -> JetCLIStatusValue JetCLIReadError! {
     jet_cli_status_from_tree(report_status_value_parse(text))
 }
 
-fn jet_cli_status_get(value: JetCLIStatusValue, name: String) -> JetCLIStatusValue? Never! {
+jet_cli_status_get: fn(value: JetCLIStatusValue, name: String) -> JetCLIStatusValue? Never! {
     if value == .Object(fields) {
         loop field in fields {
             if field.name == name -> return Val(field.value)
@@ -96,28 +96,28 @@ fn jet_cli_status_get(value: JetCLIStatusValue, name: String) -> JetCLIStatusVal
     None
 }
 
-fn jet_cli_status_string(value: JetCLIStatusValue?) -> String? Never! {
+jet_cli_status_string: fn(value: JetCLIStatusValue?) -> String? Never! {
     if value == .Val(status) {
         if status == .Text(text) -> return Val(text)
     }
     None
 }
 
-fn jet_cli_status_integer(value: JetCLIStatusValue?) -> Int? Never! {
+jet_cli_status_integer: fn(value: JetCLIStatusValue?) -> Int? Never! {
     if value == .Val(status) {
         if status == .Integer(number) -> return Val(number)
     }
     None
 }
 
-fn jet_cli_status_boolean(value: JetCLIStatusValue?) -> Bool? Never! {
+jet_cli_status_boolean: fn(value: JetCLIStatusValue?) -> Bool? Never! {
     if value == .Val(status) {
         if status == .Bool(flag) -> return Val(flag)
     }
     None
 }
 
-fn jet_cli_status_list(value: JetCLIStatusValue?) -> [JetCLIStatusValue]? Never! {
+jet_cli_status_list: fn(value: JetCLIStatusValue?) -> [JetCLIStatusValue]? Never! {
     if value == .Val(status) {
         // copy: `items` is a payload of read parameter `value`, which keeps the original; the returned Option owns this one
         if status == .Array(items) -> return Val(items.copy())
@@ -125,12 +125,12 @@ fn jet_cli_status_list(value: JetCLIStatusValue?) -> [JetCLIStatusValue]? Never!
     None
 }
 
-fn jet_cli_status_is_object(value: JetCLIStatusValue?) -> Bool Never! {
+jet_cli_status_is_object: fn(value: JetCLIStatusValue?) -> Bool Never! {
     if value == .Val(.Object(_)) -> return true
     false
 }
 
-fn jet_cli_status_nested(value: JetCLIStatusValue, field: String, name: String) -> JetCLIStatusValue? Never! {
-    child :: jet_cli_status_get(value, field) ?? return None
+jet_cli_status_nested: fn(value: JetCLIStatusValue, field: String, name: String) -> JetCLIStatusValue? Never! {
+    child: jet_cli_status_get(value, field) ?? return None
     jet_cli_status_get(child, name)
 }

@@ -12,32 +12,32 @@ use jet_foundation.[Func, Program, NameFacts, ExternFn]
 // A real parser supplies the function from the exact S6 method-contract fixture.
 // Rust hover2821–2900 intentionally differs from fn_signature: effective return
 // first, default ellipsis instead of evaluated/default-source values.
-fn semindex_s10_hover_method_contract_assertions(function: Func) Never! {
-    assert_eq(semindex_hover_for_fn(function), "fn connect(host: String, /, timeout seconds: Int{{…}}, *, tls enabled: Bool{{…}}, rest: ...String) String\nfailure: String (implicit default !Err)")
+semindex_s10_hover_method_contract_assertions: fn(function: Func) Never! {
+    assert_eq(semindex_hover_for_fn(function), "connect: fn(host: String, /, timeout seconds: Int{{…}}, *, tls enabled: Bool{{…}}, rest: ...String) String\nfailure: String (implicit default !Err)")
 }
 
 // C4 must parse these source fixtures and pass their original Func values
 // before sema's inferred-failure mutation. The empty checked effect spelling is
 // distinct from absent effects in Rust's hover (no audit-signature filtering).
-fn semindex_s10_hover_empty_source() -> String Never! {
-    "fn ready() -[]> Bool {{ return true }}\nfn run() {{}}\n"
+semindex_s10_hover_empty_source: fn() -> String Never! {
+    "ready: fn() -[]> Bool {{ return true }}\nrun: fn() {{}}\n"
 }
-fn semindex_s10_hover_empty_assertions(function: Func) Never! {
-    assert_eq(semindex_hover_for_fn(function), "fn ready() Bool -[]>\nfailure: Bool (implicit default !Err)")
+semindex_s10_hover_empty_assertions: fn(function: Func) Never! {
+    assert_eq(semindex_hover_for_fn(function), "ready: fn() Bool -[]>\nfailure: Bool (implicit default !Err)")
 }
-fn semindex_s10_hover_via_source() -> String Never! {
+semindex_s10_hover_via_source: fn() -> String Never! {
     semindex_s20_via_signature_source()
 }
-fn semindex_s10_hover_via_assertions(function: Func) Never! {
-    text :: semindex_hover_for_fn(function)
+semindex_s10_hover_via_assertions: fn(function: Func) Never! {
+    text: semindex_hover_for_fn(function)
     assert(text.contains(" -[via act]>"))
     assert(!text.contains(" -[IO]>"))
 }
 
 // Feed the actual ExternFn extracted from semindex_test_typed_callable_fixture;
 // source defaults/parameter spans and all unavailable stages are canonical facts.
-fn semindex_s10_extern_boundary_assertions(function: ExternFn, source: String) Never! {
-    kind :: semindex_extern_callable_kind(function, source)
+semindex_s10_extern_boundary_assertions: fn(function: ExternFn, source: String) Never! {
+    kind: semindex_extern_callable_kind(function, source)
     if kind == {
         .Function(params, sources, available, contract, variadic, ret, failure, foreign, effects, via, access, defaults, policies, generics) -> {
             assert_eq(params.len(), 1)
@@ -79,12 +79,12 @@ fn semindex_s10_extern_boundary_assertions(function: ExternFn, source: String) N
 // Same checked source/path as Build.jet's original generic oracle. In addition
 // to that complete public index assertion, inspect the real S8-produced DB to
 // ensure CodeModule changed only semantic scope, not physical module identity.
-fn semindex_s10_generic_body_owner_assertions(db: SymbolDB, index: SemIndex, path: String, json: String) {
+semindex_s10_generic_body_owner_assertions: fn(db: SymbolDB, index: SemIndex, path: String, json: String) {
     semindex_build_test_generic_instance_identity_reaches_index_and_symbol_database(index, path, json)
     instance := InstanceFact?{None}
     loop row in index.instances() -> instance = Val(row)
-    fingerprint :: (instance ?? panic("checked generic instance")).fingerprint
-    owner :: "instance:{fingerprint}"
+    fingerprint: (instance ?? panic("checked generic instance")).fingerprint
+    owner: "instance:{fingerprint}"
     found := false
     loop definition in db.defs {
         if definition.name != "value" -> next
@@ -97,23 +97,23 @@ fn semindex_s10_generic_body_owner_assertions(db: SymbolDB, index: SemIndex, pat
 
 // The exact lib829 two-file fixture is already retained in Build.jet; both
 // alias definition identity and receiver-specific method anchors stay checked.
-fn semindex_s10_import_reference_assertions(index: SemIndex) {
+semindex_s10_import_reference_assertions: fn(index: SemIndex) {
     semindex_build_test_checked_reference_facts_cover_import_members_aliases_and_receivers(index)
 }
 // This is the separate original tests774 two-file selected-import fixture.
-fn semindex_s10_selected_import_assertions(symbols: SemanticSymbolIndex) Never! {
+semindex_s10_selected_import_assertions: fn(symbols: SemanticSymbolIndex) Never! {
     semindex_s9_import_assertions(symbols)
 }
 
 // Complete original item identity fixture: open both revisions at the SAME
 // identity_reorder.jet path through the actual driver.
-fn semindex_s10_item_reorder_before() -> String Never! {
-    "\nmodule math {{\n    fn double(n: Int) -> Int {{\n        return n * 2\n    }}\n}}\n\nstruct Point {{\n    x: Int\n    y: Int\n\n    fn sum(self) -> Int {{\n        return self.x + self.y\n    }}\n}}\n\nimpl Point {{\n    fn origin() -> Point {{\n        return Point.{{x: 0, y: 0}}\n    }}\n}}\n\nenum Light {{\n    Red\n    Green\n}}\n\nfn helper(p: Point) -> Int {{\n    return p.sum()\n}}\n\nfn run() {{\n    p :: Point.origin()\n    print(helper(p))\n}}\n"
+semindex_s10_item_reorder_before: fn() -> String Never! {
+    "\nmath: module {{\n    double: fn(n: Int) -> Int {{\n        return n * 2\n    }}\n}}\n\nPoint: struct {{\n    x: Int\n    y: Int\n\n    sum: fn(self) -> Int {{\n        return self.x + self.y\n    }}\n}}\n\nimpl Point {{\n    origin: fn() -> Point {{\n        return Point.{{x: 0, y: 0}}\n    }}\n}}\n\nLight: enum {{\n    Red\n    Green\n}}\n\nhelper: fn(p: Point) -> Int {{\n    return p.sum()\n}}\n\nrun: fn() {{\n    p: Point.origin()\n    print(helper(p))\n}}\n"
 }
-fn semindex_s10_item_reorder_after() -> String Never! {
-    "\nenum Light {{\n    Red\n    Green\n}}\n\nfn helper(p: Point) -> Int {{\n    return p.sum()\n}}\n\nstruct Point {{\n    x: Int\n    y: Int\n\n    fn sum(self) -> Int {{\n        return self.x + self.y\n    }}\n}}\n\nmodule math {{\n    fn double(n: Int) -> Int {{\n        return n * 2\n    }}\n}}\n\nimpl Point {{\n    fn origin() -> Point {{\n        return Point.{{x: 0, y: 0}}\n    }}\n}}\n\nfn run() {{\n    p :: Point.origin()\n    print(helper(p))\n}}\n"
+semindex_s10_item_reorder_after: fn() -> String Never! {
+    "\nLight: enum {{\n    Red\n    Green\n}}\n\nhelper: fn(p: Point) -> Int {{\n    return p.sum()\n}}\n\nPoint: struct {{\n    x: Int\n    y: Int\n\n    sum: fn(self) -> Int {{\n        return self.x + self.y\n    }}\n}}\n\nmath: module {{\n    double: fn(n: Int) -> Int {{\n        return n * 2\n    }}\n}}\n\nimpl Point {{\n    origin: fn() -> Point {{\n        return Point.{{x: 0, y: 0}}\n    }}\n}}\n\nrun: fn() {{\n    p: Point.origin()\n    print(helper(p))\n}}\n"
 }
-fn semindex_s10_item_reorder_assertions(before: SemIndex, after: SemIndex) Never! {
+semindex_s10_item_reorder_assertions: fn(before: SemIndex, after: SemIndex) Never! {
     before_ids := [String]{}
     after_ids := [String]{}
     loop definition in before.definitions() -> &before_ids.push(definition.identity)
@@ -140,12 +140,12 @@ fn semindex_s10_item_reorder_assertions(before: SemIndex, after: SemIndex) Never
 
 // Real parser/checked producers supply both contexts/DBs. The incoming state
 // belongs to S9's already-pushed root; S10 neither pushes nor pops ancestry.
-fn semindex_s10_context_restoration_assertions(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, item: Item, mp: String) {
-    previous_scope :: ctx.scope_identity
-    previous_caller :: ctx.caller
-    previous_depth :: ctx.structural_parents.len()
-    previous_slot :: ctx.structural_slot
-    previous_kind :: ctx.structural_slot_kind
+semindex_s10_context_restoration_assertions: fn(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, item: Item, mp: String) {
+    previous_scope: ctx.scope_identity
+    previous_caller: ctx.caller
+    previous_depth: ctx.structural_parents.len()
+    previous_slot: ctx.structural_slot
+    previous_kind: ctx.structural_slot_kind
     semindex_collect_item_facts(&db, &ctx, names, program, source, item, mp)
     assert_eq(ctx.scope_identity, previous_scope)
     assert_eq(ctx.caller, previous_caller)

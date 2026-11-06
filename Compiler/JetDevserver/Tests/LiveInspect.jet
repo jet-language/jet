@@ -1,19 +1,19 @@
 use {
     jet_devserver.LiveInspect.[LiveRuntimeWindow, decode_raw_snapshot, read, render, runtime_window, snapshot_path]
-    fs :: std.fs
+    fs: std.fs
     core.sys.target.[selected_family]
 }
 
 #Test("render_uses_only_bounded_runtime_facts") {
-    snapshot :: "{{\"protocol\":\"jet.live.v1\",\"session_id\":\"session\",\"source_id\":\"app.jet\",\"build_id\":\"build-1\",\"revision\":\"rev-1\",\"world_id\":\"world-1\",\"values\":[{{\"value_id\":\"app::counter\",\"type_identity\":\"Int\",\"disposition\":\"kept\",\"reason\":\"\"}}],\"schema_version\":1,\"pid\":42,\"start_id\":\"test\",\"captured_ms\":1,\"tasks\":[{{\"id\":1,\"parent\":0,\"state\":\"running\",\"wait\":\"\",\"deadline_ms\":null,\"cancelled\":false}},{{\"id\":2,\"parent\":1,\"state\":\"blocked\",\"wait\":\"channel send\",\"deadline_ms\":480,\"cancelled\":false}}],\"channels\":[{{\"id\":1,\"depth\":4,\"capacity\":4,\"send_waiters\":1,\"recv_waiters\":0,\"closed\":false}}],\"effects\":{{\"compute\":1,\"waiting\":1,\"channel\":1,\"time\":0,\"io\":0}},\"resources\":{{\"workers\":4,\"running\":1,\"queued\":0,\"cancelled\":0,\"arenas\":0,\"arena_allocations\":0,\"arena_bytes\":0}}}}"
-    rendered :: render(snapshot)
+    snapshot: "{{\"protocol\":\"jet.live.v1\",\"session_id\":\"session\",\"source_id\":\"app.jet\",\"build_id\":\"build-1\",\"revision\":\"rev-1\",\"world_id\":\"world-1\",\"values\":[{{\"value_id\":\"app::counter\",\"type_identity\":\"Int\",\"disposition\":\"kept\",\"reason\":\"\"}}],\"schema_version\":1,\"pid\":42,\"start_id\":\"test\",\"captured_ms\":1,\"tasks\":[{{\"id\":1,\"parent\":0,\"state\":\"running\",\"wait\":\"\",\"deadline_ms\":null,\"cancelled\":false}},{{\"id\":2,\"parent\":1,\"state\":\"blocked\",\"wait\":\"channel send\",\"deadline_ms\":480,\"cancelled\":false}}],\"channels\":[{{\"id\":1,\"depth\":4,\"capacity\":4,\"send_waiters\":1,\"recv_waiters\":0,\"closed\":false}}],\"effects\":{{\"compute\":1,\"waiting\":1,\"channel\":1,\"time\":0,\"io\":0}},\"resources\":{{\"workers\":4,\"running\":1,\"queued\":0,\"cancelled\":0,\"arenas\":0,\"arena_allocations\":0,\"arena_bytes\":0}}}}"
+    rendered: render(snapshot)
     assert(rendered.contains("task 2"))
     assert(rendered.contains("channel send"))
     assert(rendered.contains("depth 4/4"))
     assert(!rendered.contains("payload"))
 }
 #Test("runtime_window_is_optional_and_strictly_shaped") {
-    snapshot :: (runtime: String) -> "{{\"protocol\":\"jet.live.v1\",\"session_id\":\"s\",\"source_id\":\"app.jet\",\"build_id\":\"b\",\"revision\":\"r\",\"world_id\":\"w\",\"values\":[],\"schema_version\":1,\"pid\":42,\"start_id\":\"test\",\"captured_ms\":1,\"tasks\":[],\"channels\":[],\"effects\":{{\"compute\":0,\"waiting\":0,\"channel\":0,\"time\":0,\"io\":0}},\"resources\":{{\"workers\":0,\"running\":0,\"queued\":0,\"cancelled\":0,\"arenas\":0,\"arena_allocations\":0,\"arena_bytes\":0}}{runtime}}}"
+    snapshot: (runtime: String) -> "{{\"protocol\":\"jet.live.v1\",\"session_id\":\"s\",\"source_id\":\"app.jet\",\"build_id\":\"b\",\"revision\":\"r\",\"world_id\":\"w\",\"values\":[],\"schema_version\":1,\"pid\":42,\"start_id\":\"test\",\"captured_ms\":1,\"tasks\":[],\"channels\":[],\"effects\":{{\"compute\":0,\"waiting\":0,\"channel\":0,\"time\":0,\"io\":0}},\"resources\":{{\"workers\":0,\"running\":0,\"queued\":0,\"cancelled\":0,\"arenas\":0,\"arena_allocations\":0,\"arena_bytes\":0}}{runtime}}}"
     assert_eq(runtime_window(snapshot("")).unwrap(), .None)
     assert_eq(runtime_window(snapshot(",\"runtime\":{{\"elapsed_ns\":7,\"cpu_ns\":5,\"exit\":true}}")).unwrap(), .Val(LiveRuntimeWindow { elapsed_ns: 7, cpu_ns: .Val(5), exit: true }))
     assert_eq(runtime_window(snapshot(",\"runtime\":{{\"elapsed_ns\":7,\"cpu_ns\":null,\"exit\":false}}")).unwrap(), .Val(LiveRuntimeWindow { elapsed_ns: 7, cpu_ns: .None, exit: false }))
@@ -23,8 +23,8 @@ use {
 }
 // The runtime's raw record decodes into the jet.live.v1 view the canvas reads.
 #Test("raw_records_decode_into_the_live_view") {
-    words :: (out: &[U8], values: [U64]) -> { loop value in values -> out.extend_from_slice(value.to_le_bytes()) }
-    text :: (out: &[U8], value: String) -> {
+    words: (out: &[U8], values: [U64]) -> { loop value in values -> out.extend_from_slice(value.to_le_bytes()) }
+    text: (out: &[U8], value: String) -> {
         out.extend_from_slice(U64{value.len()}.to_le_bytes())
         out.extend_from_slice(value.as_bytes())
     }
@@ -35,15 +35,15 @@ use {
     text(&bytes, "channel send")
     words(&bytes, [2, 1, 0, 0, 0, 0, 1, 0, 0])
     words(&bytes, [0])
-    snapshot :: decode_raw_snapshot(bytes.copy(), .None).unwrap()
+    snapshot: decode_raw_snapshot(bytes.copy(), .None).unwrap()
     assert_eq(runtime_window(snapshot).unwrap(), .Val(LiveRuntimeWindow { elapsed_ns: 7, cpu_ns: .None, exit: true }))
-    rendered :: render(snapshot)
+    rendered: render(snapshot)
     assert(rendered.contains("world=world 1"))
     assert(rendered.contains("task 2     parent 3     blocked  wait=channel send"))
     assert(rendered.contains("effects: compute=0 waiting=1 channel=1 time=0 io=0"))
     assert(rendered.contains("channel 0     depth 0/∞"))
     assert(rendered.contains("(no runtime event observations)"))
-    bound :: decode_raw_snapshot(bytes.copy(), .Val("42 (a) b) S 0 0 0 0 0 0 0 0 0 0 5 2 0 0 0 0 0 0 1234 0")).unwrap()
+    bound: decode_raw_snapshot(bytes.copy(), .Val("42 (a) b) S 0 0 0 0 0 0 0 0 0 0 5 2 0 0 0 0 0 0 1234 0")).unwrap()
     assert(bound.contains("\"start_id\":\"1234\""))
     assert_eq(runtime_window(bound).unwrap(), .Val(LiveRuntimeWindow { elapsed_ns: 7, cpu_ns: .Val(40_000_000), exit: true }))
     assert(decode_raw_snapshot(bytes.copy(), .Val("42 (app) S 0 0 0 0 0 0 0 0 0 0 5 2 0 0 0 0 0 0 2001 0")).unwrap_err().contains("does not belong"))
@@ -55,11 +55,11 @@ use {
 #Test("reader_rejects_symlinks_and_open_permissions") {
     if selected_family() != "unix" -> return
     // GATE #4494: real filesystem symlink, process id and permission primitives.
-    pid :: std.process.id().saturating_add(1_000_000_000)
-    path :: snapshot_path(pid)
-    target :: path.with_extension("hostile-target")
-    _ :: fs.remove_file(path)
-    _ :: fs.remove_file(target)
+    pid: std.process.id().saturating_add(1_000_000_000)
+    path: snapshot_path(pid)
+    target: path.with_extension("hostile-target")
+    _: fs.remove_file(path)
+    _: fs.remove_file(target)
     fs.write(target, "attacker-controlled").unwrap()
     std.os.unix.fs.symlink(target, path).unwrap()
     assert(read(pid).unwrap_err().contains("not a regular file"))

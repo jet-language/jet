@@ -1,11 +1,11 @@
 
 use {
-    http :: core.http
-    client :: core.http.client
+    http: core.http
+    client: core.http.client
     core.http.[HTTPError]
 }
 
-fn request_dispatch(raw: [U8]) -> String HTTPError! {
+request_dispatch: fn(raw: [U8]) -> String HTTPError! {
     if http.parse_request(raw) == {
         .Ok(request) -> return Ok("dispatched:{request.path()}")
         .Err(error) -> {
@@ -18,7 +18,7 @@ fn request_dispatch(raw: [U8]) -> String HTTPError! {
     }
 }
 
-fn response_result(raw: [U8]) -> String HTTPError! {
+response_result: fn(raw: [U8]) -> String HTTPError! {
     if http.parse_response("http://example.test/", raw) == {
         .Ok(response) -> return Ok("accepted:{response.status()}")
         .Err(error) -> {
@@ -32,8 +32,8 @@ fn response_result(raw: [U8]) -> String HTTPError! {
 }
 
 
-fn invalid_request_header(name: String, value: String) -[Net, Time.Wait]> String {
-    req :: client.request("GET", "http://example.test/").header(name, value)
+invalid_request_header: fn(name: String, value: String) -[Net, Time.Wait]> String {
+    req: client.request("GET", "http://example.test/").header(name, value)
     if req.send() == {
         .Err(error) -> {
             if error == {
@@ -45,23 +45,23 @@ fn invalid_request_header(name: String, value: String) -[Net, Time.Wait]> String
     }
 }
 
-fn run() -[IO, Net, Time.Wait]> {
-    crlf :: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
-    bad_request :: "POST /secret HTTP/1.1{crlf}Host: local{crlf}Content-Length: 2{crlf}Transfer-Encoding: chunked{crlf}{crlf}ok".bytes()
-    good_request :: "POST /safe HTTP/1.1{crlf}Host: local{crlf}Content-Length: 2{crlf}{crlf}ok".bytes()
-    bad_response :: "HTTP/1.1 200 OK{crlf}Content-Length: 2{crlf}Transfer-Encoding: chunked{crlf}{crlf}ok".bytes()
-    bad_204 :: "HTTP/1.1 204 No Content{crlf}Content-Length: 0{crlf}{crlf}".bytes()
-    valid_304 :: "HTTP/1.1 304 Not Modified{crlf}Content-Length: 17{crlf}{crlf}".bytes()
-    good_response :: "HTTP/1.1 200 OK{crlf}Content-Length: 2{crlf}{crlf}ok".bytes()
-    malformed_request :: request_dispatch(bad_request) ?? panic("unexpected typed HTTP error")
-    valid_request :: request_dispatch(good_request) ?? panic("unexpected typed HTTP error")
-    malformed_response :: response_result(bad_response) ?? panic("unexpected typed HTTP error")
-    invalid_204 :: response_result(bad_204) ?? panic("unexpected typed HTTP error")
-    valid_304_result :: response_result(valid_304) ?? panic("unexpected typed HTTP error")
-    valid_response :: response_result(good_response) ?? panic("unexpected typed HTTP error")
-    bad_header_value :: String.from_bytes([U8]{97, 10, 98}) ?? panic("header value")
-    invalid_header_value :: invalid_request_header("X-Test", bad_header_value)
-    invalid_header :: invalid_request_header("bad name", "value")
+run: fn() -[IO, Net, Time.Wait]> {
+    crlf: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+    bad_request: "POST /secret HTTP/1.1{crlf}Host: local{crlf}Content-Length: 2{crlf}Transfer-Encoding: chunked{crlf}{crlf}ok".bytes()
+    good_request: "POST /safe HTTP/1.1{crlf}Host: local{crlf}Content-Length: 2{crlf}{crlf}ok".bytes()
+    bad_response: "HTTP/1.1 200 OK{crlf}Content-Length: 2{crlf}Transfer-Encoding: chunked{crlf}{crlf}ok".bytes()
+    bad_204: "HTTP/1.1 204 No Content{crlf}Content-Length: 0{crlf}{crlf}".bytes()
+    valid_304: "HTTP/1.1 304 Not Modified{crlf}Content-Length: 17{crlf}{crlf}".bytes()
+    good_response: "HTTP/1.1 200 OK{crlf}Content-Length: 2{crlf}{crlf}ok".bytes()
+    malformed_request: request_dispatch(bad_request) ?? panic("unexpected typed HTTP error")
+    valid_request: request_dispatch(good_request) ?? panic("unexpected typed HTTP error")
+    malformed_response: response_result(bad_response) ?? panic("unexpected typed HTTP error")
+    invalid_204: response_result(bad_204) ?? panic("unexpected typed HTTP error")
+    valid_304_result: response_result(valid_304) ?? panic("unexpected typed HTTP error")
+    valid_response: response_result(good_response) ?? panic("unexpected typed HTTP error")
+    bad_header_value: String.from_bytes([U8]{97, 10, 98}) ?? panic("header value")
+    invalid_header_value: invalid_request_header("X-Test", bad_header_value)
+    invalid_header: invalid_request_header("bad name", "value")
     print("malformed-request={malformed_request}")
     print("valid-request={valid_request}")
     print("malformed-response={malformed_response}")

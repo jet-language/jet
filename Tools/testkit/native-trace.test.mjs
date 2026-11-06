@@ -27,8 +27,8 @@ function fixture(t) {
     const jet = put(join(home, 'tools/jet'));
     const tools = Object.fromEntries(['cargo', 'rustc', 'rustup', 'ld.lld', 'clang', 'clang++', 'opt', 'llc', 'bwrap'].map(name => [name, put(join(home, 'tools', name))]));
     const name = 'Examples/features/lowlevel/ffi.jet', zero = 'Examples/zero.jet';
-    put(join(root, name), 'extern rust "base64@0.22" { fn encode(s: String) -> String = "base64::encode" }\n');
-    put(join(root, zero), 'fn run() { print("zero") }\n');
+    put(join(root, name), 'extern rust "base64@0.22" { encode: fn(s: String) -> String = "base64::encode" }\n');
+    put(join(root, zero), 'run: fn() { print("zero") }\n');
     const allowlistText = allowRow(name);
     const cache = ffiCaseCachePath(cacheRoot, name, declared);
     const contents = '[package]\nname = "jet_ffi_bridge"\nversion = "0.0.0"\nedition = "2021"\n\n[lib]\ncrate-type = ["staticlib"]\npath = "src/lib.rs"\n\n[dependencies]\nbase64 = "0.22"\n\n[profile.release]\nopt-level = 3\n';
@@ -76,7 +76,7 @@ test('case allowlist proves compiled fixture provenance and exact dependency uni
     assert.throws(() => readUserRustAllowlist(allowRow(name, declared, [name]), f.root));
     f.put(join(f.root, sources[1]), 'extern rust "base64@0.23" {}\n');
     assert.throws(() => readUserRustAllowlist(row, f.root));
-    for (const source of sources) f.put(join(f.root, source), 'fn run() {}\n');
+    for (const source of sources) f.put(join(f.root, source), 'run: fn() {}\n');
     assert.throws(() => readUserRustAllowlist(allowRow(name, {}, sources), f.root));
 });
 
@@ -178,7 +178,7 @@ test('retained sandbox binds exact readonly helper and writable output for build
 
 test('std-only fixed companions require their own marker and empty-dependency helper', t => {
     const f = fixture(t), companion = 'tests/ui/ffi_bad_type.fixed.jet';
-    const source = 'extern rust "std" { fn identity(s: String) -> String = "std::convert::identity" }\n';
+    const source = 'extern rust "std" { identity: fn(s: String) -> String = "std::convert::identity" }\n';
     f.put(join(f.root, f.name), source);
     f.put(join(f.root, companion), source);
     const allowlistText = allowRow(companion, {});
@@ -209,7 +209,7 @@ test('missing-Cargo marker clears only its private warmed helper and preserves P
     const f = fixture(t), name = 'tests/ui/ffi_no_cargo.jet';
     const cacheRoot = realpathSync(mkdtempSync(join(homedir(), '.jet-native-ffi-unit-')));
     t.after(() => rmSync(cacheRoot, { recursive: true, force: true }));
-    f.put(join(f.root, name), 'extern rust "base64@0.22" { fn encode(s: String) -> String = "base64::encode" }\n');
+    f.put(join(f.root, name), 'extern rust "base64@0.22" { encode: fn(s: String) -> String = "base64::encode" }\n');
     f.put(join(f.root, 'Tools/testkit/user-rust-ffi.allow'), allowRow(name));
     const cache = ffiCaseCachePath(cacheRoot, name, declared);
     const warmed = f.put(join(cache, 'helper/Cargo.toml'), f.contents);

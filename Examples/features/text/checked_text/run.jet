@@ -3,14 +3,14 @@
 // module, then imports them through the normal type namespace.
 use types.[Pattern, Query, Selector, Identity]
 
-module types
+types: module
 
-fn keep<T>(value: T) -> T { value.copy() }
+keep: fn<T>(value: T) -> T { value.copy() }
 
-fn run() {
-    pattern :: keep(Pattern{"literal {7}"})
+run: fn() {
+    pattern: keep(Pattern{"literal {7}"})
     print(pattern.raw())
-    pattern_source :: "dynamic pattern"
+    pattern_source: "dynamic pattern"
     // The `.Ok`/`.Err` match consumes the Result; a bound call would
     // propagate its failure.
     if Pattern.from(pattern_source) == {
@@ -18,25 +18,25 @@ fn run() {
         .Err(error) -> print(types.explain(error))
     }
 
-    query :: keep(Query{"select id where id = {7}"})
+    query: keep(Query{"select id where id = {7}"})
     print(query.raw())
-    query_source :: "not a query"
+    query_source: "not a query"
     if Query.from(query_source) == {
         .Ok(value) -> { print(value.raw()) }
         .Err(error) -> print(types.explain(error))
     }
 
-    selector :: keep(Selector{".item[data-id={7}]"})
+    selector: keep(Selector{".item[data-id={7}]"})
     print(selector.raw())
-    selector_source :: "missing selector"
+    selector_source: "missing selector"
     if Selector.from(selector_source) == {
         .Ok(value) -> { print(value.raw()) }
         .Err(error) -> print(types.explain(error))
     }
 
-    identity :: keep(Identity{"user+{7}@example.test"})
+    identity: keep(Identity{"user+{7}@example.test"})
     print(identity.raw())
-    identity_source :: "missing-at-sign"
+    identity_source: "missing-at-sign"
     if Identity.from(identity_source) == {
         .Ok(value) -> print(value.raw())
         .Err(error) -> print(types.explain(error))

@@ -2,18 +2,18 @@
 // No graph query executes an action, inspects a cache, or writes generated text.
 use core.build.[BuildGraph, BuildGraphAction, BuildGraphActionKey, BuildGraphFile, BuildGraphTarget]
 
-struct BuildSessionGraphResult { graph: BuildGraph? diagnostic: BuildSessionDiagnostic? }
-struct BuildSessionPlan { storage: Shared<BuildSessionState> default: Int }
-struct BuildSessionFinish { plan: BuildSessionPlan? diagnostics: [BuildSessionDiagnostic] }
+BuildSessionGraphResult: struct { graph: BuildGraph? diagnostic: BuildSessionDiagnostic? }
+BuildSessionPlan: struct { storage: Shared<BuildSessionState> default: Int }
+BuildSessionFinish: struct { plan: BuildSessionPlan? diagnostics: [BuildSessionDiagnostic] }
 
-fn build_session_contains_int(values: [Int], value: Int) -> Bool Never! {
+build_session_contains_int: fn(values: [Int], value: Int) -> Bool Never! {
     loop item in values { if item == value -> return true }
     false
 }
-fn build_session_append_int(values: &[Int], value: Int) Never! {
+build_session_append_int: fn(values: &[Int], value: Int) Never! {
     if !build_session_contains_int(values, value) -> &values.push(value)
 }
-fn build_session_cycle(edges: [[Int]], names: [String]) -> [String]? Never! {
+build_session_cycle: fn(edges: [[Int]], names: [String]) -> [String]? Never! {
     colors := [Int]{}
     loop _ in edges -> &colors.push(0)
     loop root in 0..<edges.len() {
@@ -22,15 +22,15 @@ fn build_session_cycle(edges: [[Int]], names: [String]) -> [String]? Never! {
         positions := [Int]{0}
         colors[root] = 1
         loop stack.len() > 0 {
-            last :: stack.len() - 1
-            node :: stack[last].copy()
+            last: stack.len() - 1
+            node: stack[last].copy()
             if positions[last] >= edges[node].len() {
                 colors[node] = 2
                 _ := &stack.pop()
                 _ := &positions.pop()
                 next
             }
-            child :: edges[node][positions[last]]
+            child: edges[node][positions[last]]
             positions[last] = positions[last] + 1
             if colors[child] == 2 -> next
             if colors[child] == 1 {
@@ -50,18 +50,18 @@ fn build_session_cycle(edges: [[Int]], names: [String]) -> [String]? Never! {
     }
     None
 }
-fn build_session_target_actions(state: BuildSessionState, id: Int, selected: &[Int]) Never! {
+build_session_target_actions: fn(state: BuildSessionState, id: Int, selected: &[Int]) Never! {
     pending := [Int]{id}
     seen := [Int]{}
     loop pending.len() > 0 {
-        current :: &pending.pop() ?? break
+        current: &pending.pop() ?? break
         if build_session_contains_int(seen, current) -> next
         &seen.push(current)
         loop action in state.targets[current].actions -> build_session_append_int(&selected, action)
         loop dependency in state.targets[current].deps -> &pending.push(dependency)
     }
 }
-fn build_session_prerequisites(state: BuildSessionState) -> [[Int]] Never! {
+build_session_prerequisites: fn(state: BuildSessionState) -> [[Int]] Never! {
     edges := [[Int]]{}
     loop _ in state.actions -> &edges.push([Int]{})
     loop target in state.targets {
@@ -79,7 +79,7 @@ fn build_session_prerequisites(state: BuildSessionState) -> [[Int]] Never! {
     }
     edges
 }
-fn build_session_validate(state: BuildSessionState, default: Int) -> BuildSessionDiagnostic? Never! {
+build_session_validate: fn(state: BuildSessionState, default: Int) -> BuildSessionDiagnostic? Never! {
     if default < -1 || default >= state.targets.len() -> return Val(build_session_error_diag(state, BuildSessionError.UnknownTarget{id: default}))
     target_edges := [[Int]]{}
     target_names := [String]{}
@@ -102,7 +102,7 @@ fn build_session_validate(state: BuildSessionState, default: Int) -> BuildSessio
     if build_session_cycle(build_session_prerequisites(state), action_names) == .Val(nodes) -> return Val(build_session_error_diag(state, BuildSessionError.ActionDependencyCycle{nodes: nodes}))
     None
 }
-fn build_session_project(state: BuildSessionState) -> BuildGraph Never! {
+build_session_project: fn(state: BuildSessionState) -> BuildGraph Never! {
     targets := [BuildGraphTarget]{}
     actions := [BuildGraphAction]{}
     keys := [BuildGraphActionKey]{}
@@ -114,9 +114,9 @@ fn build_session_project(state: BuildSessionState) -> BuildGraph Never! {
         &targets.push(BuildGraphTarget{id: id, name: target.name, kind: build_key_target_kind(target.kind), deps: target.deps, actions: target.actions, files: paths, plugin: target.plugin})
     }
     loop (id, action) in state.actions {
-        target :: build_session_action_target(state, id)
-        pools :: if action.pools.len() == 0 -> [String]{"cpu"} else -> action.pools
-        key :: build_session_action_key(state, id)
+        target: build_session_action_target(state, id)
+        pools: if action.pools.len() == 0 -> [String]{"cpu"} else -> action.pools
+        key: build_session_action_key(state, id)
         &actions.push(BuildGraphAction{id: id, name: action.name, kind: action.kind, inputs: action.inputs, outputs: action.outputs, target: target, caps: loop flag in action.caps -> build_session_cap_name(flag), pools: pools, legacy_wrapper: action.legacy, plugin: action.plugin, compiler_owned: action.compiler_owned, key: key, cache_hit: None})
         &keys.push(BuildGraphActionKey{action: action.name, key: key})
         loop output in action.outputs {
@@ -140,8 +140,8 @@ fn build_session_project(state: BuildSessionState) -> BuildGraph Never! {
             file_rows[path] = ^row
         }
         loop action_id in target.actions {
-            action :: state.actions[action_id]
-            owner :: build_session_action_target(state, action_id) ?? panic("checked target action lost its owner")
+            action: state.actions[action_id]
+            owner: build_session_action_target(state, action_id) ?? panic("checked target action lost its owner")
             action_paths := action.inputs
             loop path in action.outputs -> &action_paths.push(path)
             loop path in action_paths {
@@ -157,21 +157,21 @@ fn build_session_project(state: BuildSessionState) -> BuildGraph Never! {
     loop path in paths -> &files.push(file_rows.get(path) ?? panic("checked file index lost a path"))
     BuildGraph{targets: ^targets, actions: ^actions, action_keys: ^keys, cache_hits: [BuildGraphAction]{}, files: ^files, affected_files: [BuildGraphFile]{}, nodes: state.nodes}
 }
-fn build_session_graph(session: BuildSession, returned: BuildSessionValue) -> BuildSessionGraphResult Never! {
-    permit :: session.storage.guard_read()
+build_session_graph: fn(session: BuildSession, returned: BuildSessionValue) -> BuildSessionGraphResult Never! {
+    permit: session.storage.guard_read()
     if !permit.value.active -> return {graph: None, diagnostic: Val(build_session_diag(permit.value, "build context expired"))}
-    default :: build_session_handle(permit.value, returned, "BuildPlan") ?? return {graph: None, diagnostic: Val(build_session_diag(permit.value, "argument 1 must be a BuildPlan returned by this build"))}
+    default: build_session_handle(permit.value, returned, "BuildPlan") ?? return {graph: None, diagnostic: Val(build_session_diag(permit.value, "argument 1 must be a BuildPlan returned by this build"))}
     if build_session_validate(permit.value, default) == .Val(error) -> return {graph: None, diagnostic: Val(error)}
     {graph: Val(build_session_project(permit.value)), diagnostic: None}
 }
-fn build_session_finish(session: &BuildSession, returned: BuildSessionValue) -> BuildSessionFinish Never! {
+build_session_finish: fn(session: &BuildSession, returned: BuildSessionValue) -> BuildSessionFinish Never! {
     permit := session.storage.guard_edit()
     state := &permit.value
     if !state.active -> return {plan: None, diagnostics: [BuildSessionDiagnostic]{build_session_diag(state, "build context expired")}}
     state.active = false
-    // `fn build(b: Build)` returns nothing: the session it configured is the plan.
-    if returned != .Unit -> return {plan: None, diagnostics: [BuildSessionDiagnostic]{build_session_diag(state, "`fn build` returns nothing")}}
-    default :: state.default_target
+    // `build: fn(b: Build)` returns nothing: the session it configured is the plan.
+    if returned != .Unit -> return {plan: None, diagnostics: [BuildSessionDiagnostic]{build_session_diag(state, "`build: fn` returns nothing")}}
+    default: state.default_target
     if build_session_validate(state, default) == .Val(error) -> return {plan: None, diagnostics: [BuildSessionDiagnostic]{error}}
     {plan: Val(BuildSessionPlan{storage: session.storage, default: default}), diagnostics: state.diagnostics}
 }
@@ -181,10 +181,10 @@ fn build_session_finish(session: &BuildSession, returned: BuildSessionValue) -> 
 // importers compile; `jet build --lib` is the linkable native library); `unsupported` names
 // the selected targets the build neither compiles, checks nor produces with actions.
 // `options` are the build options fn build set, its layer of D-SETTING-ORDER1.
-struct BuildPlanExecutable { name: String source: String }
-struct BuildPlanSelection { executables: [BuildPlanExecutable] libraries: [BuildPlanExecutable] unsupported: [String] options: [BuildSessionOption] }
-fn build_plan_selection(plan: BuildSessionPlan) -> BuildPlanSelection Never! {
-    permit :: plan.storage.guard_read()
+BuildPlanExecutable: struct { name: String source: String }
+BuildPlanSelection: struct { executables: [BuildPlanExecutable] libraries: [BuildPlanExecutable] unsupported: [String] options: [BuildSessionOption] }
+build_plan_selection: fn(plan: BuildSessionPlan) -> BuildPlanSelection Never! {
+    permit: plan.storage.guard_read()
     order := [Int]{}
     visiting := [Int]{}
     pending := [Int]{}
@@ -198,13 +198,13 @@ fn build_plan_selection(plan: BuildSessionPlan) -> BuildPlanSelection Never! {
     }
     // Iterative post-order: a target follows every dependency it names.
     loop pending.len() > 0 {
-        current :: pending[pending.len() - 1]
+        current: pending[pending.len() - 1]
         if build_session_contains_int(order, current) {
-            _ :: &pending.pop()
+            _: &pending.pop()
             next
         }
         if build_session_contains_int(visiting, current) {
-            _ :: &pending.pop()
+            _: &pending.pop()
             &order.push(current)
             next
         }
@@ -217,7 +217,7 @@ fn build_plan_selection(plan: BuildSessionPlan) -> BuildPlanSelection Never! {
     libraries := [BuildPlanExecutable]{}
     unsupported := [String]{}
     loop index in order {
-        target :: permit.value.targets[index]
+        target: permit.value.targets[index]
         if target.kind == "executable" && target.sources.len() > 0 {
             &executables.push(BuildPlanExecutable{name: target.name.copy(), source: target.sources[0].copy()})
         } else if target.kind == "library" && target.sources.len() > 0 {
@@ -228,14 +228,14 @@ fn build_plan_selection(plan: BuildSessionPlan) -> BuildPlanSelection Never! {
     }
     {executables: executables, libraries: libraries, unsupported: unsupported, options: permit.value.options.copy()}
 }
-fn build_plan_graph(plan: BuildSessionPlan) -> BuildGraph Never! {
-    permit :: plan.storage.guard_read()
+build_plan_graph: fn(plan: BuildSessionPlan) -> BuildGraph Never! {
+    permit: plan.storage.guard_read()
     build_session_project(permit.value)
 }
 // The declared graph `jet build` hands its executor, in declaration order:
 // every handle id of the session indexes these lists. `default` is the
 // target `b.default(t)` selected, or -1 for every target.
-struct BuildPlanExecution {
+BuildPlanExecution: struct {
     toolchains: [BuildSessionToolchain]
     signing: [BuildSessionSigning]
     probes: [BuildSessionProbe]
@@ -244,25 +244,25 @@ struct BuildPlanExecution {
     targets: [BuildSessionTarget]
     default: Int
 }
-fn build_plan_execution(plan: BuildSessionPlan) -> BuildPlanExecution Never! {
-    permit :: plan.storage.guard_read()
+build_plan_execution: fn(plan: BuildSessionPlan) -> BuildPlanExecution Never! {
+    permit: plan.storage.guard_read()
     BuildPlanExecution{toolchains: permit.value.toolchains.copy(), signing: permit.value.signing.copy(), probes: permit.value.probes.copy(), plugins: permit.value.plugins.copy(), actions: permit.value.actions.copy(), targets: permit.value.targets.copy(), default: plan.default}
 }
-// Every module `fn build` generated, selected or not (`write_generated: on`
+// Every module `build: fn` generated, selected or not (`write_generated: on`
 // writes them all for inspection), in path order.
-fn build_plan_generated(plan: BuildSessionPlan) -> [BuildSessionGeneratedModule] Never! {
-    permit :: plan.storage.guard_read()
+build_plan_generated: fn(plan: BuildSessionPlan) -> [BuildSessionGeneratedModule] Never! {
+    permit: plan.storage.guard_read()
     generated := permit.value.generated.copy()
     &generated.sort_by((left: BuildSessionGeneratedModule, right: BuildSessionGeneratedModule) -> if left.path == right.path -> left.name <=> right.name else -> left.path <=> right.path)
     generated
 }
-// Every setting value `fn build` contributed (`b.contribute`), in call order.
-fn build_plan_contributions(plan: BuildSessionPlan) -> [BuildSessionContribution] Never! {
-    permit :: plan.storage.guard_read()
+// Every setting value `build: fn` contributed (`b.contribute`), in call order.
+build_plan_contributions: fn(plan: BuildSessionPlan) -> [BuildSessionContribution] Never! {
+    permit: plan.storage.guard_read()
     permit.value.contributions.copy()
 }
-fn build_plan_selected_generated(plan: BuildSessionPlan) -> [BuildSessionGeneratedModule] Never! {
-    permit :: plan.storage.guard_read()
+build_plan_selected_generated: fn(plan: BuildSessionPlan) -> [BuildSessionGeneratedModule] Never! {
+    permit: plan.storage.guard_read()
     selected_targets := [Int]{}
     selected_actions := [Int]{}
     paths := [String]{}
@@ -270,17 +270,17 @@ fn build_plan_selected_generated(plan: BuildSessionPlan) -> [BuildSessionGenerat
     if plan.default >= 0 -> &pending.push(plan.default)
     else { loop index in 0..<permit.value.targets.len() -> &pending.push(index) }
     loop pending.len() > 0 {
-        current :: &pending.pop() ?? break
+        current: &pending.pop() ?? break
         if build_session_contains_int(selected_targets, current) -> next
         &selected_targets.push(current)
         loop path in permit.value.targets[current].sources -> build_session_append_unique(&paths, path)
         loop action in permit.value.targets[current].actions -> build_session_append_int(&selected_actions, action)
         loop dependency in permit.value.targets[current].deps -> &pending.push(dependency)
     }
-    prerequisites :: build_session_prerequisites(permit.value)
+    prerequisites: build_session_prerequisites(permit.value)
     cursor := 0
     loop cursor < selected_actions.len() {
-        current :: selected_actions[cursor].copy()
+        current: selected_actions[cursor].copy()
         cursor += 1
         loop dep in prerequisites[current] -> build_session_append_int(&selected_actions, dep)
     }

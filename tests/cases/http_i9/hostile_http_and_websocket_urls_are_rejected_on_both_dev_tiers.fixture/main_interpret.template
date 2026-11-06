@@ -1,10 +1,10 @@
 
 use {
-    http_client :: core.http.client
-    ws :: core.net.ws
+    http_client: core.http.client
+    ws: core.net.ws
 }
 
-fn run() {
+run: fn() {
     if http_client.get("http://{cap:addr_interpret}/path\nInjected: yes") == {
         .Ok(_) -> print("http url accepted")
         .Err(error) -> {
@@ -13,7 +13,7 @@ fn run() {
         }
         else -> print("http url unexpected")
     }
-    method :: http_client.request("GET\nInjected", "http://{cap:addr_interpret}/method")
+    method: http_client.request("GET\nInjected", "http://{cap:addr_interpret}/method")
     if method.send() == {
         .Ok(_) -> print("method accepted")
         .Err(error) -> {
@@ -22,7 +22,7 @@ fn run() {
         }
         else -> print("method unexpected")
     }
-    header_name :: http_client.request("GET", "http://{cap:addr_interpret}/header-name")
+    header_name: http_client.request("GET", "http://{cap:addr_interpret}/header-name")
         .header("x-bad\nname", "value")
     if header_name.send() == {
         .Ok(_) -> print("header name accepted")
@@ -32,7 +32,7 @@ fn run() {
         }
         else -> print("header name unexpected")
     }
-    header_value :: http_client.request("GET", "http://{cap:addr_interpret}/header-value")
+    header_value: http_client.request("GET", "http://{cap:addr_interpret}/header-value")
         .header("x-safe", "bad\nvalue")
     if header_value.send() == {
         .Ok(_) -> print("header value accepted")
@@ -42,7 +42,7 @@ fn run() {
         }
         else -> print("header value unexpected")
     }
-    content_length :: http_client.request("POST", "http://{cap:addr_interpret}/content-length")
+    content_length: http_client.request("POST", "http://{cap:addr_interpret}/content-length")
         .header("Content-Length", "0")
         .body("body")
     if content_length.send() == {
@@ -53,7 +53,7 @@ fn run() {
         }
         else -> print("content length unexpected")
     }
-    transfer_encoding :: http_client.request("POST", "http://{cap:addr_interpret}/transfer-encoding")
+    transfer_encoding: http_client.request("POST", "http://{cap:addr_interpret}/transfer-encoding")
         .header("Transfer-Encoding", "chunked")
         .body("body")
     if transfer_encoding.send() == {
@@ -64,7 +64,7 @@ fn run() {
         }
         else -> print("transfer encoding unexpected")
     }
-    duplicate_host :: http_client.request("GET", "http://{cap:addr_interpret}/duplicate-host")
+    duplicate_host: http_client.request("GET", "http://{cap:addr_interpret}/duplicate-host")
         .header("Host", "one")
         .header("hOsT", "two")
     if duplicate_host.send() == {
@@ -75,7 +75,7 @@ fn run() {
         }
         else -> print("duplicate host unexpected")
     }
-    connection_host :: http_client.request("GET", "http://{cap:addr_interpret}/connection-host")
+    connection_host: http_client.request("GET", "http://{cap:addr_interpret}/connection-host")
         .header("cOnNeCtIoN", "hOsT")
     if connection_host.send() == {
         .Ok(_) -> print("connection host accepted")
@@ -85,7 +85,7 @@ fn run() {
         }
         else -> print("connection host unexpected")
     }
-    connection_length :: http_client.request("POST", "http://{cap:addr_interpret}/connection-length")
+    connection_length: http_client.request("POST", "http://{cap:addr_interpret}/connection-length")
         .header("Connection", "Content-Length")
         .body("body")
     if connection_length.send() == {
@@ -96,7 +96,7 @@ fn run() {
         }
         else -> print("connection length unexpected")
     }
-    connection_transfer :: http_client.request("POST", "http://{cap:addr_interpret}/connection-transfer")
+    connection_transfer: http_client.request("POST", "http://{cap:addr_interpret}/connection-transfer")
         .header("Connection", "tRaNsFeR-EnCoDiNg")
         .body("body")
     if connection_transfer.send() == {
@@ -107,7 +107,7 @@ fn run() {
         }
         else -> print("connection transfer unexpected")
     }
-    proxy_connection :: http_client.request("GET", "http://{cap:addr_interpret}/proxy-connection")
+    proxy_connection: http_client.request("GET", "http://{cap:addr_interpret}/proxy-connection")
         .header("pRoXy-CoNnEcTiOn", "keep-alive")
     if proxy_connection.send() == {
         .Ok(_) -> print("proxy connection accepted")
@@ -117,7 +117,7 @@ fn run() {
         }
         else -> print("proxy connection unexpected")
     }
-    keep_alive :: http_client.request("GET", "http://{cap:addr_interpret}/keep-alive")
+    keep_alive: http_client.request("GET", "http://{cap:addr_interpret}/keep-alive")
         .header("Keep-Alive", "timeout=5")
     if keep_alive.send() == {
         .Ok(_) -> print("keep-alive accepted")
@@ -127,7 +127,7 @@ fn run() {
         }
         else -> print("keep-alive unexpected")
     }
-    te :: http_client.request("GET", "http://{cap:addr_interpret}/te")
+    te: http_client.request("GET", "http://{cap:addr_interpret}/te")
         .header("TE", "trailers")
     if te.send() == {
         .Ok(_) -> print("te accepted")
@@ -137,7 +137,7 @@ fn run() {
         }
         else -> print("te unexpected")
     }
-    trailer :: http_client.request("GET", "http://{cap:addr_interpret}/trailer")
+    trailer: http_client.request("GET", "http://{cap:addr_interpret}/trailer")
         .header("Trailer", "x-trailer")
     if trailer.send() == {
         .Ok(_) -> print("trailer accepted")
@@ -147,7 +147,7 @@ fn run() {
         }
         else -> print("trailer unexpected")
     }
-    upgrade :: http_client.request("GET", "http://{cap:addr_interpret}/upgrade")
+    upgrade: http_client.request("GET", "http://{cap:addr_interpret}/upgrade")
         .header("Upgrade", "websocket")
     if upgrade.send() == {
         .Ok(_) -> print("upgrade accepted")
@@ -157,7 +157,7 @@ fn run() {
         }
         else -> print("upgrade unexpected")
     }
-    proxy_authenticate :: http_client.request("GET", "http://{cap:addr_interpret}/proxy-authenticate")
+    proxy_authenticate: http_client.request("GET", "http://{cap:addr_interpret}/proxy-authenticate")
         .header("Proxy-Authenticate", "Basic")
     if proxy_authenticate.send() == {
         .Ok(_) -> print("proxy authenticate accepted")
@@ -167,7 +167,7 @@ fn run() {
         }
         else -> print("proxy authenticate unexpected")
     }
-    proxy_authorization :: http_client.request("GET", "http://{cap:addr_interpret}/proxy-authorization")
+    proxy_authorization: http_client.request("GET", "http://{cap:addr_interpret}/proxy-authorization")
         .header("pRoXy-AuThOrIzAtIoN", "Basic secret")
     if proxy_authorization.send() == {
         .Ok(_) -> print("proxy authorization accepted")

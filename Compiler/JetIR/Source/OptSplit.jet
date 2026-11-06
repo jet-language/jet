@@ -18,9 +18,9 @@
 use jet_foundation.[Type]
 
 // Splits `f`'s Loops (the header comment); returns how many slots it split.
-fn ir_opt_split_loops(m: IRModule, f: &IRFunction) -> Int Never! {
-    count :: f.op.len()
-    slots :: f.slot_type.len()
+ir_opt_split_loops: fn(m: IRModule, f: &IRFunction) -> Int Never! {
+    count: f.op.len()
+    slots: f.slot_type.len()
     reads := [Int]{}
     // Per slot: its references, its writes and its last write.
     uses := [Int]{}
@@ -36,14 +36,14 @@ fn ir_opt_split_loops(m: IRModule, f: &IRFunction) -> Int Never! {
         loop slot in reads {
             if slot >= 0 && slot < slots -> uses[slot] = uses[slot] + 1
         }
-        written :: ir_x64_write(f, at)
+        written: ir_x64_write(f, at)
         if written >= 0 && written < slots {
             uses[written] = uses[written] + 1
             writes[written] = writes[written] + 1
             last_write[written] = at
         }
     }
-    splittable :: loop slot in 0..<slots -> ir_opt_splittable(m, f, slot, writes[slot], last_write[slot])
+    splittable: loop slot in 0..<slots -> ir_opt_splittable(m, f, slot, writes[slot], last_write[slot])
     // Per Loop with splits, in order: its rows of the split columns, from
     // first[row] for counts[row], and the Loop's instruction.
     first := [Int]{}
@@ -67,16 +67,16 @@ fn ir_opt_split_loops(m: IRModule, f: &IRFunction) -> Int Never! {
     touched := [Int]{}
     loop head in 0..<count {
         if f.op[head] != .Loop -> next
-        tail :: f.a[head]
+        tail: f.a[head]
         if tail <= head || tail >= count -> next
-        exits :: ir_opt_split_exits(f, head, tail)
+        exits: ir_opt_split_exits(f, head, tail)
         &touched.clear()
         loop at in head..<(tail + 1) {
             ir_x64_reads_into(f, at, &reads)
             loop slot in reads -> ir_opt_split_note(&mark, &inside, &changed, &touched, slot, head, false)
             ir_opt_split_note(&mark, &inside, &changed, &touched, ir_x64_write(f, at), head, true)
         }
-        start :: split_slot.len()
+        start: split_slot.len()
         loop slot in touched {
             if !splittable[slot] || inside[slot] == uses[slot] || (changed[slot] && !exits) -> next
             &split_slot.push(slot)
@@ -85,7 +85,7 @@ fn ir_opt_split_loops(m: IRModule, f: &IRFunction) -> Int Never! {
             &split_written.push(changed[slot])
         }
         if split_slot.len() == start -> next
-        row :: first.len()
+        row: first.len()
         &first.push(start)
         &counts.push(split_slot.len() - start)
         &heads.push(head)
@@ -101,12 +101,12 @@ fn ir_opt_split_loops(m: IRModule, f: &IRFunction) -> Int Never! {
     opens := [Int]{}
     code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
     loop at in 0..<count {
-        line :: f.code_line[at]
-        op :: f.op[at]
-        enter :: enter_of[at]
+        line: f.code_line[at]
+        op: f.op[at]
+        enter: enter_of[at]
         if enter >= 0 {
             loop k in first[enter]..<(first[enter] + counts[enter]) {
-                slot :: split_slot[k]
+                slot: split_slot[k]
                 ir_opt_code_put(&code, .Move, split_new[k], current[slot], -1, -1, line)
                 split_old[k] = current[slot]
                 current[slot] = split_new[k]
@@ -116,10 +116,10 @@ fn ir_opt_split_loops(m: IRModule, f: &IRFunction) -> Int Never! {
         // A Br past the Block around a Loop hands its written splits back
         // first, innermost Loop first.
         if op == .Br && f.a[at] >= 0 && f.a[at] < opens.len() {
-            target :: opens[opens.len() - 1 - f.a[at]]
+            target: opens[opens.len() - 1 - f.a[at]]
             row_at := open_rows.len() - 1
             loop row_at >= 0 && target < heads[open_rows[row_at]] - 1 {
-                row :: open_rows[row_at]
+                row: open_rows[row_at]
                 loop k in first[row]..<(first[row] + counts[row]) {
                     if split_written[k] -> ir_opt_code_put(&code, .Move, split_old[k], split_new[k], -1, -1, line)
                 }
@@ -129,12 +129,12 @@ fn ir_opt_split_loops(m: IRModule, f: &IRFunction) -> Int Never! {
         ir_opt_split_put(&code, &f, current, at)
         if op == .Block || op == .Loop || op == .If -> &opens.push(at)
         if op == .End -> _ := &opens.pop()
-        closing :: close_of[at]
+        closing: close_of[at]
         if closing >= 0 {
             loop k in first[closing]..<(first[closing] + counts[closing]) -> current[split_slot[k]] = split_old[k]
             _ := &open_rows.pop()
         }
-        back :: back_of[at]
+        back: back_of[at]
         if back >= 0 {
             loop k in first[back]..<(first[back] + counts[back]) {
                 if split_written[k] -> ir_opt_code_put(&code, .Move, split_old[k], split_new[k], -1, -1, line)
@@ -154,17 +154,17 @@ fn ir_opt_split_loops(m: IRModule, f: &IRFunction) -> Int Never! {
 // Whether `slot` may be split: a word (Bool, Int, Word or Pointer) held in
 // a general register, and no constant or frame address (one write by a
 // Const, a StackAddress or an Offset of a temp).
-fn ir_opt_splittable(m: IRModule, f: IRFunction, slot: Int, writes: Int, last: Int) -> Bool Never! {
-    row :: m.types[f.slot_type[slot]]
+ir_opt_splittable: fn(m: IRModule, f: IRFunction, slot: Int, writes: Int, last: Int) -> Bool Never! {
+    row: m.types[f.slot_type[slot]]
     if row.kind != .Bool && row.kind != .Int && row.kind != .Word && row.kind != .Pointer -> return false
     if ir_x64_class(ir_x64_shape(row)) != .General -> return false
     if writes != 1 || f.slot_kind[slot] != .Temp -> return true
-    op :: f.op[last]
+    op: f.op[last]
     op != .Const && op != .StackAddress && op != .Offset
 }
 
 // Counts a reference to `slot` (-1: none) in the Loop at `head`.
-fn ir_opt_split_note(mark: &[Int], inside: &[Int], changed: &[Bool], touched: &[Int], slot: Int, head: Int, write: Bool) Never! {
+ir_opt_split_note: fn(mark: &[Int], inside: &[Int], changed: &[Bool], touched: &[Int], slot: Int, head: Int, write: Bool) Never! {
     if slot < 0 || slot >= mark.len() -> return
     if mark[slot] != head {
         mark[slot] = head
@@ -180,11 +180,11 @@ fn ir_opt_split_note(mark: &[Int], inside: &[Int], changed: &[Bool], touched: &[
 // goes through the End of a Block around just it: the Block opens right
 // before the Loop and ends right after it, and no BrIf inside leaves
 // further.
-fn ir_opt_split_exits(f: IRFunction, head: Int, tail: Int) -> Bool Never! {
+ir_opt_split_exits: fn(f: IRFunction, head: Int, tail: Int) -> Bool Never! {
     if head == 0 || f.op[head - 1] != .Block || f.a[head - 1] != tail + 1 -> return false
     nest := 0
     loop at in (head + 1)..<tail {
-        op :: f.op[at]
+        op: f.op[at]
         if op == .Block || op == .Loop || op == .If -> nest += 1
         if op == .End -> nest -= 1
         if op == .BrIf && f.b[at] > nest + 1 -> return false
@@ -194,9 +194,9 @@ fn ir_opt_split_exits(f: IRFunction, head: Int, tail: Int) -> Bool Never! {
 
 // Puts instruction `at` with each slot it reads or writes under its
 // `current` name; renamed call arguments get a list of their own.
-fn ir_opt_split_put(code: &IROptCode, f: &IRFunction, current: [Int], at: Int) Never! {
-    op :: f.op[at]
-    form :: ir_x64_read_form(op)
+ir_opt_split_put: fn(code: &IROptCode, f: &IRFunction, current: [Int], at: Int) Never! {
+    op: f.op[at]
+    form: ir_x64_read_form(op)
     a := f.a[at]
     b := f.b[at]
     c := f.c[at]
@@ -207,13 +207,13 @@ fn ir_opt_split_put(code: &IROptCode, f: &IRFunction, current: [Int], at: Int) N
     if form == IR_X64_READS_ARGS || form == IR_X64_READS_A_ARGS {
         renamed := false
         loop index in b..<(b + c) {
-            value :: f.args[index]
+            value: f.args[index]
             if value >= 0 && current[value] != value -> renamed = true
         }
         if renamed {
-            start :: f.args.len()
+            start: f.args.len()
             loop index in b..<(b + c) {
-                value :: f.args[index]
+                value: f.args[index]
                 &f.args.push(if value >= 0 -> current[value] else -> value)
             }
             b = start
@@ -228,16 +228,16 @@ fn ir_opt_split_put(code: &IROptCode, f: &IRFunction, current: [Int], at: Int) N
 // Blocks hands the two back before it, the Block's End after it.
 #Test("A Loop gets slots of its own for the words it shares and hands written ones back on every way out") {
     m := ir_module_new()
-    word :: ir_type_row(&m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-    truth :: ir_type_row(&m, Type.Bool) ?? panic("no Bool row")
+    word: ir_type_row(&m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    truth: ir_type_row(&m, Type.Bool) ?? panic("no Bool row")
     f := ir_function_new("count", "test:split.jet::count", "", "split.jet", 1)
-    n :: ir_slot(&f, word, IRSlotKind.Param, ir_intern_name(&m, "n"), 1)
+    n: ir_slot(&f, word, IRSlotKind.Param, ir_intern_name(&m, "n"), 1)
     f.result = word
-    total :: ir_slot(&f, word, IRSlotKind.Local, ir_intern_name(&m, "total"), 2)
-    i :: ir_slot(&f, word, IRSlotKind.Local, ir_intern_name(&m, "i"), 3)
-    done :: ir_slot(&f, truth, IRSlotKind.Temp, -1, 0)
-    hit :: ir_slot(&f, truth, IRSlotKind.Temp, -1, 0)
-    one :: ir_slot(&f, word, IRSlotKind.Temp, -1, 0)
+    total: ir_slot(&f, word, IRSlotKind.Local, ir_intern_name(&m, "total"), 2)
+    i: ir_slot(&f, word, IRSlotKind.Local, ir_intern_name(&m, "i"), 3)
+    done: ir_slot(&f, truth, IRSlotKind.Temp, -1, 0)
+    hit: ir_slot(&f, truth, IRSlotKind.Temp, -1, 0)
+    one: ir_slot(&f, word, IRSlotKind.Temp, -1, 0)
     _ := ir_emit(&f, IROp.Const, total, 0, -1, -1, 2)
     _ := ir_emit(&f, IROp.Const, i, 0, -1, -1, 3)
     _ := ir_emit(&f, IROp.Block, -1, 17, -1, -1, 4)
@@ -262,8 +262,8 @@ fn ir_opt_split_put(code: &IROptCode, f: &IRFunction, current: [Int], at: Int) N
     // references them); n and the 1 keep their slots.
     assert_eq(f.op.len(), 25)
     assert(f.op[4] == .Move && f.a[4] == i && f.op[5] == .Move && f.a[5] == total && f.op[6] == .Loop)
-    inner_i :: f.dst[4]
-    inner_total :: f.dst[5]
+    inner_i: f.dst[4]
+    inner_total: f.dst[5]
     assert(f.op[7] == .Ge && f.a[7] == inner_i && f.b[7] == n)
     assert(f.op[15] == .Add && f.dst[15] == inner_total && f.a[15] == inner_total && f.b[15] == inner_i)
     assert(f.op[16] == .Const && f.dst[16] == one)

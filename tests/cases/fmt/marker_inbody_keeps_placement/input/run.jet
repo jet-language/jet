@@ -1,38 +1,38 @@
-struct Pixel {
+Pixel: struct {
     r: Int
-    #Layout :: (c)
-    #Equatable :: true
+    #Layout: (c)
+    #Equatable: true
 }
 
 #Codable
-struct Note {
+Note: struct {
     text: String
 }
 
-enum Shade {
+Shade: enum {
     Light
-    #Debug :: false
+    #Debug: false
     Dark
     Dim
 }
 
-trait Shape {
+Shape: trait {
     #MustUse
-    fn area(self) -> Int
+    area: fn(self) -> Int
 
-    fn twice(self) -> Int {
-        #Inline :: true
+    twice: fn(self) -> Int {
+        #Inline: true
         self.area() * 2
     }
 }
 
 #Error
-enum ReadErr {
+ReadErr: enum {
     Missing
 }
 
 #Error
-enum AppErr {
+AppErr: enum {
     Read(ReadErr)
 }
 
@@ -40,22 +40,22 @@ enum AppErr {
 impl ReadErr -> AppErr { AppErr.Read(self) }
 
 #Deprecated("old")
-module tools {
+tools: module {
     sources: { main: "tools.jet" }
 }
 
-module helpers {
-    #Deprecated :: ("old")
+helpers: module {
+    #Deprecated: ("old")
     sources: { main: "helpers.jet" }
 }
 
-fn area(pixel: Pixel) -> Int {
-    #Inline :: true
-    doubled :: pixel.r * 2
-    #Deprecated :: ("old")
+area: fn(pixel: Pixel) -> Int {
+    #Inline: true
+    doubled: pixel.r * 2
+    #Deprecated: ("old")
     doubled
 }
 
-fn run() {
+run: fn() {
     print(area(Pixel{r: 3}))
 }

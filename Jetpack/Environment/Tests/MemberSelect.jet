@@ -5,27 +5,27 @@
 use {
     jetpack_foundation.[PACKAGE_FILE]
     jet_foundation.[diagnostic_display_name]
-    files :: core.files
-    process :: core.process
+    files: core.files
+    process: core.process
 }
 
 // The text of tests/fixtures/jetpack-diagnostics/E1231.stderr and
 // E1295.stderr. It is written here because an embed may not leave this
 // package (E0957).
-MEMBER_SELECT_E1231_SNAPSHOT :: "Error [jet.UnknownWorkspaceMember]: `biling` is not a workspace member\n Why: A `-p` selector must name a member listed in the workspace index (`workspace.jet` `members:`).\n Fix: Did you mean: billing?\nMore: jet-lang.dev/e/E1231\n"
-MEMBER_SELECT_E1295_SNAPSHOT :: "Error [jet.UnknownGitRef]: Git ref `orgin/main` not found\n Why: `--affected-since` needs a resolvable git ref so Jet can diff member input hashes against that baseline (no commit matches that ref).\n Fix: Did you mean: main?\nMore: jet-lang.dev/e/E1295\n"
+MEMBER_SELECT_E1231_SNAPSHOT: "Error [jet.UnknownWorkspaceMember]: `biling` is not a workspace member\n Why: A `-p` selector must name a member listed in the workspace index (`workspace.jet` `members:`).\n Fix: Did you mean: billing?\nMore: jet-lang.dev/e/E1231\n"
+MEMBER_SELECT_E1295_SNAPSHOT: "Error [jet.UnknownGitRef]: Git ref `orgin/main` not found\n Why: `--affected-since` needs a resolvable git ref so Jet can diff member input hashes against that baseline (no commit matches that ref).\n Fix: Did you mean: main?\nMore: jet-lang.dev/e/E1295\n"
 
-fn env_select_test_snapshot(snapshot: String, diagnostic: Diagnostic) {
-    expected :: "Error [{diagnostic_display_name(diagnostic.code)}]: {diagnostic.what}\n Why: {diagnostic.why}\n Fix: {diagnostic.fix}\n"
+env_select_test_snapshot: fn(snapshot: String, diagnostic: Diagnostic) {
+    expected: "Error [{diagnostic_display_name(diagnostic.code)}]: {diagnostic.what}\n Why: {diagnostic.why}\n Fix: {diagnostic.fix}\n"
     assert(snapshot.starts_with(expected))
 }
 
-fn env_select_test_dir(label: String) -[FS]> String {
+env_select_test_dir: fn(label: String) -[FS]> String {
     files.tmpdir("jpk-select-{label}-") ?? panic("member select scratch")
 }
 
-fn env_select_test_member(root: String, name: String, path: String, deps: [String]) -[FS, Env]> WorkspacePlanMember {
-    dir :: files.join(root, path)
+env_select_test_member: fn(root: String, name: String, path: String, deps: [String]) -[FS, Env]> WorkspacePlanMember {
+    dir: files.join(root, path)
     files.create_dir_all(dir) ?? panic("member dir")
     deps_block := ""
     if deps.len() > 0 {
@@ -35,76 +35,76 @@ fn env_select_test_member(root: String, name: String, path: String, deps: [Strin
     }
     files.write(files.join(dir, PACKAGE_FILE), "name: \"{name}\"\nversion: \"1.0.0\"\n{deps_block}") ?? panic("member manifest")
     // A source file so the tree hash is non-empty and change-sensitive.
-    files.write(files.join(dir, "lib.jet"), "module {name} {{ }}\n") ?? panic("member source")
-    canonical :: files.canonicalize(dir) ?? ""
+    files.write(files.join(dir, "lib.jet"), "{name}: module {{ }}\n") ?? panic("member source")
+    canonical: files.canonicalize(dir) ?? ""
     WorkspacePlanMember{name, path, canonical_path: canonical}
 }
 
-fn env_select_test_plan(members: [WorkspacePlanMember]) -> WorkspacePlan {
+env_select_test_plan: fn(members: [WorkspacePlanMember]) -> WorkspacePlan {
     plan := WorkspacePlan.empty()
     plan.members = members
     plan
 }
 
-fn env_select_test_git(root: String, args: [String]) -[Exec, Time.Wait]> String {
+env_select_test_git: fn(root: String, args: [String]) -[Exec, Time.Wait]> String {
     argv := [String]{"git"}
     loop arg in args -> &argv.push(arg)
-    receipt :: process.cmd(argv).cwd(root).stdout(.Capture).stderr(.Capture).run() ?? panic("run git")
+    receipt: process.cmd(argv).cwd(root).stdout(.Capture).stderr(.Capture).run() ?? panic("run git")
     assert(receipt.success)
     receipt.output
 }
 
-fn env_select_test_commit_base(root: String) -[Exec, Time.Wait]> {
+env_select_test_commit_base: fn(root: String) -[Exec, Time.Wait]> {
     env_select_test_git(root, [String]{"init"})
     env_select_test_git(root, [String]{"config", "user.email", "test@example.com"})
     env_select_test_git(root, [String]{"config", "user.name", "test"})
     env_select_test_git(root, [String]{"add", "."})
-    _ :: env_select_test_git(root, [String]{"commit", "-m", "base"})
+    _: env_select_test_git(root, [String]{"commit", "-m", "base"})
 }
 
-fn env_select_test_names(members: [WorkspacePlanMember]) -> [String] {
+env_select_test_names: fn(members: [WorkspacePlanMember]) -> [String] {
     names := [String]{}
     loop member in members -> &names.push(member.name)
     names
 }
 
 #Test("bare selection selects all members") {
-    root :: env_select_test_dir("bare")
-    plan :: env_select_test_plan([WorkspacePlanMember]{
+    root: env_select_test_dir("bare")
+    plan: env_select_test_plan([WorkspacePlanMember]{
         env_select_test_member(root, "a", "packages/a", [String]{}),
         env_select_test_member(root, "b", "packages/b", [String]{})
     })
-    selected :: env_select_members(root, plan, SelectRequest.all()) ?? panic("bare selection")
+    selected: env_select_members(root, plan, SelectRequest.all()) ?? panic("bare selection")
     assert_eq(selected.len(), 2)
     files.remove_all(root).drop("test cleanup")
 }
 
 #Test("dependency order places local dependencies first") {
-    root :: env_select_test_dir("dependency-order")
-    dependent :: env_select_test_member(root, "app", "packages/app", [String]{"shared"})
-    dependency :: env_select_test_member(root, "shared", "packages/shared", [String]{})
-    ordered :: env_dependency_order(root, [WorkspacePlanMember]{dependent, dependency}) ?? panic("dependency order")
+    root: env_select_test_dir("dependency-order")
+    dependent: env_select_test_member(root, "app", "packages/app", [String]{"shared"})
+    dependency: env_select_test_member(root, "shared", "packages/shared", [String]{})
+    ordered: env_dependency_order(root, [WorkspacePlanMember]{dependent, dependency}) ?? panic("dependency order")
     assert(env_select_test_names(ordered) == [String]{"shared", "app"})
     files.remove_all(root).drop("test cleanup")
 }
 
 #Test("dash p isolates named members") {
-    root :: env_select_test_dir("dash-p")
-    plan :: env_select_test_plan([WorkspacePlanMember]{
+    root: env_select_test_dir("dash-p")
+    plan: env_select_test_plan([WorkspacePlanMember]{
         env_select_test_member(root, "billing", "packages/billing", [String]{}),
         env_select_test_member(root, "shared", "packages/shared", [String]{}),
         env_select_test_member(root, "ui", "packages/ui", [String]{})
     })
     request := SelectRequest.all()
     request.packages = [String]{"billing", "shared"}
-    selected :: env_select_members(root, plan, request) ?? panic("-p selection")
+    selected: env_select_members(root, plan, request) ?? panic("-p selection")
     assert(env_select_test_names(selected) == [String]{"billing", "shared"})
     files.remove_all(root).drop("test cleanup")
 }
 
 #Test("unknown dash p is E1231 with suggestion") {
-    root :: env_select_test_dir("unknown")
-    plan :: env_select_test_plan([WorkspacePlanMember]{env_select_test_member(root, "billing", "packages/billing", [String]{})})
+    root: env_select_test_dir("unknown")
+    plan: env_select_test_plan([WorkspacePlanMember]{env_select_test_member(root, "billing", "packages/billing", [String]{})})
     request := SelectRequest.all()
     request.packages = [String]{"biling"}
     if env_select_members(root, plan, request) == {
@@ -119,19 +119,19 @@ fn env_select_test_names(members: [WorkspacePlanMember]) -> [String] {
 }
 
 #Test("affected since includes dependents") {
-    root :: env_select_test_dir("deps")
+    root: env_select_test_dir("deps")
     // shared <- billing (billing depends on shared)
-    plan :: env_select_test_plan([WorkspacePlanMember]{
+    plan: env_select_test_plan([WorkspacePlanMember]{
         env_select_test_member(root, "shared", "packages/shared", [String]{}),
         env_select_test_member(root, "billing", "packages/billing", [String]{"shared"}),
         env_select_test_member(root, "ui", "packages/ui", [String]{})
     })
     env_select_test_commit_base(root)
-    base :: env_select_test_git(root, [String]{"rev-parse", "HEAD"}).trim()
-    files.write(files.join(root, "packages/shared/lib.jet"), "module shared {{ fn bump() {{}} }}\n") ?? panic("change shared")
+    base: env_select_test_git(root, [String]{"rev-parse", "HEAD"}).trim()
+    files.write(files.join(root, "packages/shared/lib.jet"), "shared: module {{ bump: fn() {{}} }}\n") ?? panic("change shared")
     request := SelectRequest.all()
     request.affected_since = Val(base)
-    names :: env_select_test_names(env_select_members(root, plan, request) ?? panic("affected since"))
+    names: env_select_test_names(env_select_members(root, plan, request) ?? panic("affected since"))
     assert(names.contains("shared"))
     assert(names.contains("billing"))
     assert(!names.contains("ui"))
@@ -139,8 +139,8 @@ fn env_select_test_names(members: [WorkspacePlanMember]) -> [String] {
 }
 
 #Test("bad affected since ref is E1295 with suggestion") {
-    root :: env_select_test_dir("badref")
-    plan :: env_select_test_plan([WorkspacePlanMember]{env_select_test_member(root, "a", "packages/a", [String]{})})
+    root: env_select_test_dir("badref")
+    plan: env_select_test_plan([WorkspacePlanMember]{env_select_test_member(root, "a", "packages/a", [String]{})})
     env_select_test_commit_base(root)
     env_select_test_git(root, [String]{"branch", "-M", "main"})
     request := SelectRequest.all()
@@ -157,16 +157,16 @@ fn env_select_test_names(members: [WorkspacePlanMember]) -> [String] {
 }
 
 #Test("affected vs cache detects a changed member") {
-    root :: env_select_test_dir("cache")
-    plan :: env_select_test_plan([WorkspacePlanMember]{
+    root: env_select_test_dir("cache")
+    plan: env_select_test_plan([WorkspacePlanMember]{
         env_select_test_member(root, "a", "packages/a", [String]{}),
         env_select_test_member(root, "b", "packages/b", [String]{})
     })
     env_record_member_input_hashes(root, plan.members)
-    files.write(files.join(root, "packages/a/lib.jet"), "module a {{ fn changed() {{}} }}\n") ?? panic("change a")
+    files.write(files.join(root, "packages/a/lib.jet"), "a: module {{ changed: fn() {{}} }}\n") ?? panic("change a")
     request := SelectRequest.all()
     request.affected = true
-    selected :: env_select_members(root, plan, request) ?? panic("affected")
+    selected: env_select_members(root, plan, request) ?? panic("affected")
     assert(env_select_test_names(selected) == [String]{"a"})
     files.remove_all(root).drop("test cleanup")
 }

@@ -4,14 +4,14 @@
 // zero end-of-archive blocks. Core's tar writer (`archive.tar_add`) fixes every
 // mode at 0644, so the header is encoded here, field for field as in Rust; a
 // path longer than the 100-byte name field is truncated, as there.
-fn image_build_tar(layer_files: [LayerFile]) -> [U8] Never! {
+image_build_tar: fn(layer_files: [LayerFile]) -> [U8] Never! {
     out := [U8]{}
     loop file in layer_files -> image_write_tar_entry(&out, file)
     loop _ in 0..<1024 -> &out.push(U8{0})
     out
 }
 
-fn image_write_tar_entry(out: &[U8], file: LayerFile) Never! {
+image_write_tar_entry: fn(out: &[U8], file: LayerFile) Never! {
     header := [U8]{}
     loop _ in 0..<512 -> &header.push(U8{0})
     image_tar_set(&header, 0, 100, file.path.bytes())
@@ -33,19 +33,19 @@ fn image_write_tar_entry(out: &[U8], file: LayerFile) Never! {
     image_tar_set(&header, 148, 8, field)
     loop byte in header -> &out.push(byte)
     loop byte in file.data -> &out.push(byte)
-    padding :: (512 - file.data.len() % 512) % 512
+    padding: (512 - file.data.len() % 512) % 512
     loop _ in 0..<padding -> &out.push(U8{0})
 }
 
 // Copy `bytes` into `header[offset..<offset + length]`, truncated to `length`;
 // the rest of the field stays NUL.
-fn image_tar_set(header: &[U8], offset: Int, length: Int, bytes: [U8]) Never! {
-    count :: if bytes.len() < length -> bytes.len() else -> length
+image_tar_set: fn(header: &[U8], offset: Int, length: Int, bytes: [U8]) Never! {
+    count: if bytes.len() < length -> bytes.len() else -> length
     loop i in 0..<count -> header[offset + i] = bytes[i]
 }
 
 // `value` as at least `digits` zero-padded octal digits, then a NUL.
-fn image_tar_octal(value: Int, digits: Int) -> [U8] Never! {
+image_tar_octal: fn(value: Int, digits: Int) -> [U8] Never! {
     reversed := [U8]{}
     rest := value
     loop {

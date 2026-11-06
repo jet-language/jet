@@ -1,30 +1,30 @@
 
-struct AddFields {
+AddFields: struct {
     impl Marker {
-        sites :: [.Type]
+        sites: [.Type]
 
-        fn expand(self, target: Target) {
-            type_name :: target.$name
+        expand: fn(self, target: Target) {
+            type_name: target.$name
             comptime loop field in target.$fields {
-                method :: "field_{field.$name}"
+                method: "field_{field.$name}"
                 impl $type_name {
-                    fn $method(self) -> String { field.$name }
+                    $method: fn(self) -> String { field.$name }
                 }
             }
         }
     }
 }
 
-struct Case { n: Int }
+Case: struct { n: Int }
 
 #AddFields
-struct Person { first: String  last: String }
+Person: struct { first: String  last: String }
 
-CASES :: comptime { [Case]{ Case{ n: 1 }, Case{ n: 2 } } }
+CASES: comptime { [Case]{ Case{ n: 1 }, Case{ n: 2 } } }
 
 comptime loop T in [Person] {
     impl T {
-        fn generated(self) -> String { "generated" }
+        generated: fn(self) -> String { "generated" }
     }
 }
 
@@ -34,8 +34,8 @@ comptime loop case in CASES {
     }
 }
 
-fn run() {
-    person :: Person{ first: "a", last: "b" }
+run: fn() {
+    person: Person{ first: "a", last: "b" }
     print(person.field_first())
     print(person.field_last())
     print(person.generated())

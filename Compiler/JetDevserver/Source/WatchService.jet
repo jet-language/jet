@@ -1,27 +1,27 @@
 // Unified typed dependency graph, event waits, deterministic invalidation and transactional replacement.
 use {
-    fs :: std.fs
-    env :: std.env
+    fs: std.fs
+    env: std.env
     std.collections.[VecDeque]
     // GATE #4494: channels, mutexes, atomics, native threads and blocking event waits.
     std.sync.[mpsc, Mutex, MutexGuard, Arc]
     std.sync.atomic.[AtomicBool, Ordering]
-    thread :: std.thread
+    thread: std.thread
     std.thread.[JoinHandle]
     std.ffi.[CString]
     std.time.[Duration, Instant, SystemTime]
     jet_driver.Diagnostics.[Diagnostic]
-    Loader :: jet_driver.Loader
+    Loader: jet_driver.Loader
     jet_driver.Syntax.[PACKAGE_FILE]
     jet_foundation.JSON.[foundation_json_escape]
     jet_foundation.Game.[JetGameChangeKind]
-    SHA256 :: jet_foundation.SHA256
+    SHA256: jet_foundation.SHA256
     core.sys.target.[selected_os]
 }
 
-enum RootKind {
+RootKind: enum {
     Import; Asset; HTML; Style; Manifest; Lock; Generated; BuildInput; TargetFact
-    fn as_str(self) -> String { if self == {
+    as_str: fn(self) -> String { if self == {
         .Import -> "import"
         .Asset -> "asset"
         .HTML -> "html"
@@ -33,18 +33,18 @@ enum RootKind {
         .TargetFact -> "target_fact"
     } }
 }
-struct PathStamp {
+PathStamp: struct {
     exists: Bool; mtime: SystemTime?; len: U64?; digest: String?
-    fn capture(path: OSPath) -> PathStamp {
+    capture: fn(path: OSPath) -> PathStamp {
         if fs.metadata(path) == {
             .Ok(meta) -> {
-                digest :: if meta.is_file() -> SHA256.sha256_file_hex(path).ok().map((d) -> "sha256-{d}") else -> None
+                digest: if meta.is_file() -> SHA256.sha256_file_hex(path).ok().map((d) -> "sha256-{d}") else -> None
                 PathStamp{exists: true, mtime: meta.modified().ok(), len: .Val(meta.len()), digest}
             }
             .Err(_) -> PathStamp{exists: false, mtime: None, len: None, digest: None}
         }
     }
-    fn changed_since(self, newer: PathStamp) -> Bool {
+    changed_since: fn(self, newer: PathStamp) -> Bool {
         if self.exists != newer.exists -> return true
         if (_0: self.digest.as_ref(), _1: newer.digest.as_ref()) == {
             (.Val(previous), .Val(current)) -> previous != current
@@ -53,36 +53,36 @@ struct PathStamp {
         }
     }
 }
-struct WatchWake {
+WatchWake: struct {
     sender: mpsc.Sender<()>
-    fn wake(self) -> () { _ :: self.sender.send(_) }
+    wake: fn(self) -> () { _: self.sender.send(_) }
 }
-struct EventWaiter {
+EventWaiter: struct {
     receiver: mpsc.Receiver<()>; wake: WatchWake; native: Watcher?
-    fn new(paths: [OSPath]) -> EventWaiter {
-        (sender, receiver) :: mpsc.channel()
-        native :: if selected_os() == "linux" -> Watcher.new(^paths, sender.clone()) else -> None
+    new: fn(paths: [OSPath]) -> EventWaiter {
+        (sender, receiver): mpsc.channel()
+        native: if selected_os() == "linux" -> Watcher.new(^paths, sender.clone()) else -> None
         EventWaiter{receiver, wake: WatchWake{sender}, native}
     }
-    fn refresh(self, paths: [OSPath]) -> () {
+    refresh: fn(self, paths: [OSPath]) -> () {
         if selected_os() == "linux" { if self.native == .Val(native) -> native.refresh(^paths) }
     }
-    fn wait(self, timeout: Duration?) -> Bool {
+    wait: fn(self, timeout: Duration?) -> Bool {
         if selected_os() == "linux" && self.native.is_some() {
             return if timeout == {
                 .Val(timeout) -> self.receiver.recv_timeout(timeout).is_ok()
                 .None -> self.receiver.recv().is_ok()
             }
         }
-        timeout :: timeout.unwrap_or(Duration.from_millis(WATCH_POLL_INTERVAL_MS))
-        _ :: self.receiver.recv_timeout(timeout)
+        timeout: timeout.unwrap_or(Duration.from_millis(WATCH_POLL_INTERVAL_MS))
+        _: self.receiver.recv_timeout(timeout)
         true
     }
-    fn coalesce(self, timeout: Duration) -> () {
+    coalesce: fn(self, timeout: Duration) -> () {
         if selected_os() == "linux" && self.native.is_some() {
-            deadline :: Instant.now() + timeout
+            deadline: Instant.now() + timeout
             loop {
-                remaining :: deadline.saturating_duration_since(Instant.now())
+                remaining: deadline.saturating_duration_since(Instant.now())
                 if remaining.is_zero() || self.receiver.recv_timeout(remaining).is_err() -> break
             }
             loop { if self.receiver.try_recv().is_err() -> break }
@@ -90,61 +90,61 @@ struct EventWaiter {
         }
         thread.sleep(timeout)
     }
-    fn wake_handle(self) -> WatchWake { self.wake.clone() }
+    wake_handle: fn(self) -> WatchWake { self.wake.clone() }
 }
-IN_NONBLOCK :: I32{0x800}
-IN_CLOEXEC :: I32{0x80000}
-IN_MASK :: U32{(0x00000002).bit_or(0x00000004).bit_or(0x00000008).bit_or(0x00000040).bit_or(0x00000080).bit_or(0x00000100).bit_or(0x00000200).bit_or(0x00000400).bit_or(0x00000800).bit_or(0x00004000)}
-POLLIN :: I16{0x001}
-POLLERR :: I16{0x008}
-POLLHUP :: I16{0x010}
-POLLNVAL :: I16{0x020}
+IN_NONBLOCK: I32{0x800}
+IN_CLOEXEC: I32{0x80000}
+IN_MASK: U32{(0x00000002).bit_or(0x00000004).bit_or(0x00000008).bit_or(0x00000040).bit_or(0x00000080).bit_or(0x00000100).bit_or(0x00000200).bit_or(0x00000400).bit_or(0x00000800).bit_or(0x00004000)}
+POLLIN: I16{0x001}
+POLLERR: I16{0x008}
+POLLHUP: I16{0x010}
+POLLNVAL: I16{0x020}
 #Repr("C")
-struct PollFd { fd: I32; events: I16; revents: I16 }
+PollFd: struct { fd: I32; events: I16; revents: I16 }
 // GATE #4494: Linux libc event descriptor ABI, only called under selected_os Linux dispatch.
 #FFI(c)
-fn close(fd: I32) -> I32
+close: fn(fd: I32) -> I32
 #FFI(c)
-fn inotify_add_watch(fd: I32, pathname: Ptr<I8>, mask: U32) -> I32
+inotify_add_watch: fn(fd: I32, pathname: Ptr<I8>, mask: U32) -> I32
 #FFI(c)
-fn inotify_init1(flags: I32) -> I32
+inotify_init1: fn(flags: I32) -> I32
 #FFI(c)
-fn pipe(fds: Ptr<I32>) -> I32
+pipe: fn(fds: Ptr<I32>) -> I32
 #FFI(c)
-fn poll(fds: Ptr<PollFd>, nfds: USize, timeout: I32) -> I32
+poll: fn(fds: Ptr<PollFd>, nfds: USize, timeout: I32) -> I32
 #FFI(c)
-fn read(fd: I32, buffer: Ptr<U8>, count: USize) -> ISize
+read: fn(fd: I32, buffer: Ptr<U8>, count: USize) -> ISize
 #FFI(c)
-fn write(fd: I32, buffer: Ptr<U8>, count: USize) -> ISize
-struct Watcher {
+write: fn(fd: I32, buffer: Ptr<U8>, count: USize) -> ISize
+Watcher: struct {
     paths: Arc<Mutex<[OSPath]>>; control_write: I32; stop: Arc<AtomicBool>; join: JoinHandle<()>?
-    fn new(paths: [OSPath], sender: mpsc.Sender<()>) -> Watcher? {
+    new: fn(paths: [OSPath], sender: mpsc.Sender<()>) -> Watcher? {
         pipes := [I32{0}, I32{0}]
         if pipe(&pipes.as_mut_ptr()) != 0 -> return None
-        paths :: normalize_paths(^paths); probe :: build_notify_fd(paths)
-        if probe < 0 { _ :: close(pipes[0]); _ :: close(pipes[1]); return None }
-        _ :: close(probe)
-        paths :: Arc.new(Mutex.new(paths)); stop :: Arc.new(AtomicBool.new(false))
-        thread_paths :: paths.clone(); thread_stop :: stop.clone()
-        join :: thread.Builder.new().name("jet-watch-events").spawn(() -> run(pipes[0], ^thread_paths, ^thread_stop, ^sender)).ok()
+        paths: normalize_paths(^paths); probe: build_notify_fd(paths)
+        if probe < 0 { _: close(pipes[0]); _: close(pipes[1]); return None }
+        _: close(probe)
+        paths: Arc.new(Mutex.new(paths)); stop: Arc.new(AtomicBool.new(false))
+        thread_paths: paths.clone(); thread_stop: stop.clone()
+        join: thread.Builder.new().name("jet-watch-events").spawn(() -> run(pipes[0], ^thread_paths, ^thread_stop, ^sender)).ok()
         if join == .Val(join) -> .Val(Watcher{paths, control_write: pipes[1], stop, join: .Val(join)}) else -> None
     }
-    fn refresh(self, paths: [OSPath]) -> () {
-        paths :: normalize_paths(^paths); current := self.paths.lock().unwrap_or_else((e) -> e.into_inner())
+    refresh: fn(self, paths: [OSPath]) -> () {
+        paths: normalize_paths(^paths); current := self.paths.lock().unwrap_or_else((e) -> e.into_inner())
         if current == paths -> return
         current = ^paths; drop(^current); self.signal()
     }
-    fn signal(self) -> () { byte :: [U8{1}]; _ :: write(self.control_write, byte.as_ptr(), byte.len()) }
+    signal: fn(self) -> () { byte: [U8{1}]; _: write(self.control_write, byte.as_ptr(), byte.len()) }
 }
 impl Watcher.Drop {
-    fn drop(self: Watcher) -> () {
+    drop: fn(self: Watcher) -> () {
         self.stop.store(true, Ordering.Release); self.signal()
-        if &self.join.take() == .Val(join) -> _ :: join.join()
-        _ :: close(self.control_write)
+        if &self.join.take() == .Val(join) -> _: join.join()
+        _: close(self.control_write)
     }
 }
-fn normalize_paths(paths: [OSPath]) -> [OSPath] { paths := ^paths; &paths.sort(); &paths.dedup(); ^paths }
-fn existing_directory(path: OSPath) -> OSPath? {
+normalize_paths: fn(paths: [OSPath]) -> [OSPath] { paths := ^paths; &paths.sort(); &paths.dedup(); ^paths }
+existing_directory: fn(path: OSPath) -> OSPath? {
     candidate := if path.is_dir() -> path.to_path_buf() else -> path.parent().unwrap_or(OSPath(".")).to_path_buf()
     loop {
         if candidate.is_dir() -> return .Val(^candidate)
@@ -154,8 +154,8 @@ fn existing_directory(path: OSPath) -> OSPath? {
         } else { return None }
     }
 }
-fn build_notify_fd(paths: [OSPath]) -> I32 {
-    fd :: inotify_init1(IN_NONBLOCK.bit_or(IN_CLOEXEC))
+build_notify_fd: fn(paths: [OSPath]) -> I32 {
+    fd: inotify_init1(IN_NONBLOCK.bit_or(IN_CLOEXEC))
     if fd < 0 -> return -1
     directories := paths.iter().filter_map((path) -> existing_directory(path)).collect()
     &directories.sort(); &directories.dedup(); watched := 0
@@ -164,118 +164,118 @@ fn build_notify_fd(paths: [OSPath]) -> I32 {
             if inotify_add_watch(fd, path.as_ptr(), IN_MASK) >= 0 -> watched += 1
         }
     }
-    if watched == 0 { _ :: close(fd); -1 } else { fd }
+    if watched == 0 { _: close(fd); -1 } else { fd }
 }
-fn run(control_read: I32, paths: Arc<Mutex<[OSPath]>>, stop: Arc<AtomicBool>, sender: mpsc.Sender<()>) -> () {
-    notify_fd := { paths :: paths.lock().unwrap_or_else((e) -> e.into_inner()); build_notify_fd(paths) }
+run: fn(control_read: I32, paths: Arc<Mutex<[OSPath]>>, stop: Arc<AtomicBool>, sender: mpsc.Sender<()>) -> () {
+    notify_fd := { paths: paths.lock().unwrap_or_else((e) -> e.into_inner()); build_notify_fd(paths) }
     loop {
         if stop.load(Ordering.Acquire) -> break
         fds := [PollFd{fd: control_read, events: POLLIN, revents: 0}, PollFd{fd: notify_fd, events: POLLIN, revents: 0}]
-        count :: if notify_fd >= 0 -> 2 else -> 1; result :: poll(&fds.as_mut_ptr(), count, -1)
+        count: if notify_fd >= 0 -> 2 else -> 1; result: poll(&fds.as_mut_ptr(), count, -1)
         if result < 0 {
             if std.io.Error.last_os_error().raw_os_error() == 4 -> next
             break
         }
         if fds[0].revents != 0 {
-            bytes := [U8; 64]{0}; _ :: read(control_read, &bytes.as_mut_ptr(), bytes.len())
+            bytes := [U8; 64]{0}; _: read(control_read, &bytes.as_mut_ptr(), bytes.len())
             if stop.load(Ordering.Acquire) -> break
-            if notify_fd >= 0 -> _ :: close(notify_fd)
-            paths :: paths.lock().unwrap_or_else((e) -> e.into_inner()); notify_fd = build_notify_fd(paths)
+            if notify_fd >= 0 -> _: close(notify_fd)
+            paths: paths.lock().unwrap_or_else((e) -> e.into_inner()); notify_fd = build_notify_fd(paths)
         }
         if notify_fd >= 0 && (fds[1].revents.bit_and((POLLIN.bit_or(POLLERR).bit_or(POLLHUP).bit_or(POLLNVAL)))) != 0 {
             buffer := [U8; 8192]{0}; changed := false
             loop {
-                count :: read(notify_fd, &buffer.as_mut_ptr(), buffer.len())
+                count: read(notify_fd, &buffer.as_mut_ptr(), buffer.len())
                 if count <= 0 -> break
                 changed = true
             }
-            if changed -> _ :: sender.send(_)
+            if changed -> _: sender.send(_)
         }
     }
-    if notify_fd >= 0 -> _ :: close(notify_fd)
-    _ :: close(control_read)
+    if notify_fd >= 0 -> _: close(notify_fd)
+    _: close(control_read)
 }
-enum ChangeKind { Created; Modified; Deleted; Renamed; Stale }
-struct InvalidationReceipt {
+ChangeKind: enum { Created; Modified; Deleted; Renamed; Stale }
+InvalidationReceipt: struct {
     generation: U64; changed: [OSPath]; closure: [OSPath]; kinds: [String]; change_kinds: [String]
     content_digests: [String?]; dev_entries: [DevWatchEntry]; edit_to_visible_ms: U128?
-    fn render(self) -> String {
-        elapsed :: self.edit_to_visible_ms.map((ms) -> "{ms}").unwrap_or("null")
+    render: fn(self) -> String {
+        elapsed: self.edit_to_visible_ms.map((ms) -> "{ms}").unwrap_or("null")
         "{{\"generation\":{self.generation},\"changed\":[{join_paths(self.changed)}],\"closure\":[{join_paths(self.closure)}],\"kinds\":[{join_quoted(self.kinds)}],\"change_kinds\":[{join_quoted(self.change_kinds)}],\"content_digests\":[{join_optional_quoted(self.content_digests)}],\"dev_entries\":[{join_dev_entries(self.dev_entries)}],\"edit_to_visible_ms\":{elapsed}}}"
     }
-    fn game_dev_entries(self) -> [DevWatchEntry] { &self.dev_entries }
+    game_dev_entries: fn(self) -> [DevWatchEntry] { &self.dev_entries }
 }
-struct DevWatchEntry {
+DevWatchEntry: struct {
     path: OSPath; change_kind: String; game_kind: JetGameChangeKind
     old_digest: String?; new_digest: String?; old_schema_id: String?; new_schema_id: String?
 }
-struct WatchNode { path: OSPath; kind: RootKind; stamp: PathStamp; is_dir: Bool }
-fn join_optional_quoted(items: [String?]) -> String {
+WatchNode: struct { path: OSPath; kind: RootKind; stamp: PathStamp; is_dir: Bool }
+join_optional_quoted: fn(items: [String?]) -> String {
     items.iter().map((item) -> item.as_ref().map((value) -> "\"{foundation_json_escape(value)}\"").unwrap_or("null")).collect().join(",")
 }
-fn join_quoted(items: [String]) -> String { items.iter().map((item) -> "\"{foundation_json_escape(item)}\"").collect().join(",") }
-fn join_dev_entries(entries: [DevWatchEntry]) -> String {
+join_quoted: fn(items: [String]) -> String { items.iter().map((item) -> "\"{foundation_json_escape(item)}\"").collect().join(",") }
+join_dev_entries: fn(entries: [DevWatchEntry]) -> String {
     entries.iter().map((entry) -> {
-        optional :: (value: String?) -> value.map((value) -> "\"{foundation_json_escape(value)}\"").unwrap_or("null")
+        optional: (value: String?) -> value.map((value) -> "\"{foundation_json_escape(value)}\"").unwrap_or("null")
         "{{\"path\":\"{foundation_json_escape(entry.path.display().to_string())}\",\"change_kind\":\"{entry.change_kind}\",\"game_kind\":\"{entry.game_kind.as_str()}\",\"old_digest\":{optional(entry.old_digest.as_ref())},\"new_digest\":{optional(entry.new_digest.as_ref())},\"old_schema_id\":{optional(entry.old_schema_id.as_ref())},\"new_schema_id\":{optional(entry.new_schema_id.as_ref())}}}"
     }).collect().join(",")
 }
-fn join_paths(paths: [OSPath]) -> String { paths.iter().map((p) -> "\"{foundation_json_escape(p.display().to_string())}\"").collect().join(",") }
-struct WatchGraph {
+join_paths: fn(paths: [OSPath]) -> String { paths.iter().map((p) -> "\"{foundation_json_escape(p.display().to_string())}\"").collect().join(",") }
+WatchGraph: struct {
     nodes: [OSPath:WatchNode]; asset_roots: [OSPath:Bool]; runtime_input_roots: [OSPath:Bool]
     game_paths: [OSPath:JetGameChangeKind]; game_schema_ids: [OSPath:(String?, String?)]
     reverse: [OSPath:[OSPath:Bool]]; forward: [OSPath:[OSPath:Bool]]; entry: OSPath?
-    fn default() -> WatchGraph { WatchGraph{nodes: {}, asset_roots: {}, runtime_input_roots: {}, game_paths: {}, game_schema_ids: {}, reverse: {}, forward: {}, entry: None} }
-    fn new() -> WatchGraph { WatchGraph.default() }
-    fn entry(self) -> OSPath? { self.entry.as_ref() }
-    fn node_count(self) -> USize { self.nodes.len() }
-    fn nodes(self) -> Iterator<WatchNode> {
+    default: fn() -> WatchGraph { WatchGraph{nodes: {}, asset_roots: {}, runtime_input_roots: {}, game_paths: {}, game_schema_ids: {}, reverse: {}, forward: {}, entry: None} }
+    new: fn() -> WatchGraph { WatchGraph.default() }
+    entry: fn(self) -> OSPath? { self.entry.as_ref() }
+    node_count: fn(self) -> USize { self.nodes.len() }
+    nodes: fn(self) -> Iterator<WatchNode> {
         paths := self.nodes.keys().cloned().collect(); &paths.sort()
         paths.into_iter().map((path) -> &self.nodes[path])
     }
-    fn reverse_edges(self) -> [OSPath:[OSPath:Bool]] { &self.reverse }
-    fn upsert(self: WatchGraph, path: OSPath, kind: RootKind) -> () { &self.upsert_with_dir_hint(^path, kind, false) }
-    fn upsert_with_dir_hint(self: WatchGraph, path: OSPath, kind: RootKind, dir_hint: Bool) -> () {
-        is_dir :: dir_hint || path.is_dir(); stamp :: PathStamp.capture(path)
+    reverse_edges: fn(self) -> [OSPath:[OSPath:Bool]] { &self.reverse }
+    upsert: fn(self: WatchGraph, path: OSPath, kind: RootKind) -> () { &self.upsert_with_dir_hint(^path, kind, false) }
+    upsert_with_dir_hint: fn(self: WatchGraph, path: OSPath, kind: RootKind, dir_hint: Bool) -> () {
+        is_dir: dir_hint || path.is_dir(); stamp: PathStamp.capture(path)
         &self.nodes.insert(path.clone(), WatchNode{path: ^path, kind, stamp, is_dir})
     }
-    fn link(self: WatchGraph, from: OSPath, to: OSPath) -> () {
+    link: fn(self: WatchGraph, from: OSPath, to: OSPath) -> () {
         &self.forward.entry(from.clone()).or_default().insert(to.clone(), true)
         &self.reverse.entry(^to).or_default().insert(^from, true)
     }
-    fn set_entry(self: WatchGraph, entry: OSPath) -> () { self.entry = .Val(entry.clone()); &self.upsert(^entry, .Import) }
-    fn register_asset_root(self: WatchGraph, path: OSPath) -> () {
-        path :: canonicalize_loose(path); &self.asset_roots.insert(path.clone(), true)
+    set_entry: fn(self: WatchGraph, entry: OSPath) -> () { self.entry = .Val(entry.clone()); &self.upsert(^entry, .Import) }
+    register_asset_root: fn(self: WatchGraph, path: OSPath) -> () {
+        path: canonicalize_loose(path); &self.asset_roots.insert(path.clone(), true)
         visited := [OSPath:Bool]{}; &self.add_asset_tree(path, &visited)
     }
-    fn asset_roots(self) -> [OSPath:Bool] { &self.asset_roots }
-    fn register_game_path(self: WatchGraph, path: OSPath, kind: JetGameChangeKind) -> () {
-        path :: canonicalize_loose(path); &self.game_paths.insert(path.clone(), kind)
+    asset_roots: fn(self) -> [OSPath:Bool] { &self.asset_roots }
+    register_game_path: fn(self: WatchGraph, path: OSPath, kind: JetGameChangeKind) -> () {
+        path: canonicalize_loose(path); &self.game_paths.insert(path.clone(), kind)
         if !self.nodes.contains_key(path) -> &self.upsert(path, .BuildInput)
     }
-    fn register_game_path_with_schema_ids(self: WatchGraph, path: OSPath, kind: JetGameChangeKind, old_schema_id: String?, new_schema_id: String?) -> () {
-        path :: canonicalize_loose(path); &self.register_game_path(path.clone(), kind)
+    register_game_path_with_schema_ids: fn(self: WatchGraph, path: OSPath, kind: JetGameChangeKind, old_schema_id: String?, new_schema_id: String?) -> () {
+        path: canonicalize_loose(path); &self.register_game_path(path.clone(), kind)
         &self.game_schema_ids.insert(path, (_0: ^old_schema_id, _1: ^new_schema_id))
     }
-    fn game_kind_for(self, path: OSPath) -> JetGameChangeKind? {
+    game_kind_for: fn(self, path: OSPath) -> JetGameChangeKind? {
         self.game_paths.get(path).copied().or_else(() -> self.nodes.get(path).and_then((node) -> if node.kind == {
             .Import -> .Val(.Script)
             .Asset -> .Val(.Asset)
             else -> None
         }))
     }
-    fn game_schema_ids_for(self, path: OSPath) -> (String?, String?) { self.game_schema_ids.get(path).cloned().unwrap_or((_0: None, _1: None)) }
-    fn discover_runtime_input_trees(self: WatchGraph) -> () {
+    game_schema_ids_for: fn(self, path: OSPath) -> (String?, String?) { self.game_schema_ids.get(path).cloned().unwrap_or((_0: None, _1: None)) }
+    discover_runtime_input_trees: fn(self: WatchGraph) -> () {
         roots := self.runtime_input_roots.keys().cloned().collect(); &roots.sort(); visited := [OSPath:Bool]{}
         loop root in roots { &self.add_new_runtime_tree(root, &visited) }
     }
-    fn add_new_runtime_tree(self: WatchGraph, path: OSPath, visited: [OSPath:Bool]) -> () {
-        path :: canonicalize_loose(path)
+    add_new_runtime_tree: fn(self: WatchGraph, path: OSPath, visited: [OSPath:Bool]) -> () {
+        path: canonicalize_loose(path)
         if visited.contains_key(path) -> return
         &visited.insert(path.clone(), true)
-        exists :: fs.metadata(path).is_ok()
-        expected_dir :: !exists && self.nodes.get(path).is_some_and((node) -> node.is_dir && !node.stamp.exists)
-        is_dir :: path.is_dir() || expected_dir
+        exists: fs.metadata(path).is_ok()
+        expected_dir: !exists && self.nodes.get(path).is_some_and((node) -> node.is_dir && !node.stamp.exists)
+        is_dir: path.is_dir() || expected_dir
         if &self.nodes.get_mut(path) == .Val(node) {
             if exists { node.is_dir = is_dir; if is_dir -> node.kind = .Asset }
         } else {
@@ -288,14 +288,14 @@ struct WatchGraph {
         &children.sort()
         loop child in children { &self.add_new_runtime_tree(child, &visited) }
     }
-    fn discover_asset_tree(self: WatchGraph) -> () {
+    discover_asset_tree: fn(self: WatchGraph) -> () {
         roots := self.asset_roots.keys().cloned().collect(); &roots.sort(); visited := [OSPath:Bool]{}
         loop root in roots { &self.add_new_asset_tree(root, &visited) }
     }
-    fn add_new_asset_tree(self: WatchGraph, path: OSPath, visited: [OSPath:Bool]) -> () {
-        path :: canonicalize_loose(path)
+    add_new_asset_tree: fn(self: WatchGraph, path: OSPath, visited: [OSPath:Bool]) -> () {
+        path: canonicalize_loose(path)
         if visited.contains_key(path) -> return
-        &visited.insert(path.clone(), true); is_dir :: path.is_dir(); exists :: fs.metadata(path).is_ok()
+        &visited.insert(path.clone(), true); is_dir: path.is_dir(); exists: fs.metadata(path).is_ok()
         if &self.nodes.get_mut(path) == .Val(node) { if exists -> node.is_dir = is_dir } else {
             &self.nodes.insert(path.clone(), WatchNode{path: path.clone(), kind: .Asset,
                 stamp: PathStamp{exists: false, mtime: None, len: None, digest: None}, is_dir})
@@ -304,15 +304,15 @@ struct WatchGraph {
         children := fs.read_dir(path).into_iter().flatten().filter_map((item) -> item.ok().map((item) -> item.path())).collect()
         &children.sort(); loop child in children { &self.add_new_asset_tree(child, &visited) }
     }
-    fn add_asset_tree(self: WatchGraph, path: OSPath, visited: [OSPath:Bool]) -> () {
-        path :: canonicalize_loose(path)
+    add_asset_tree: fn(self: WatchGraph, path: OSPath, visited: [OSPath:Bool]) -> () {
+        path: canonicalize_loose(path)
         if visited.contains_key(path) -> return
         &visited.insert(path.clone(), true); &self.upsert(path.clone(), .Asset)
         if !path.is_dir() -> return
         children := fs.read_dir(path).into_iter().flatten().filter_map((item) -> item.ok().map((item) -> item.path())).collect()
         &children.sort(); loop child in children { &self.add_asset_tree(child, &visited) }
     }
-    fn closure_of(self, seeds: [OSPath]) -> [OSPath] {
+    closure_of: fn(self, seeds: [OSPath]) -> [OSPath] {
         seen := [OSPath:Bool]{}; queue := VecDeque.new()
         loop seed in seeds {
             if !seen.contains_key(seed) { &seen.insert(seed.clone(), true); &queue.push_back(seed.clone()) }
@@ -329,16 +329,16 @@ struct WatchGraph {
         }
         result := seen.keys().cloned().collect(); &result.sort(); ^result
     }
-    fn watched_paths(self) -> [OSPath] { paths := self.nodes.keys().cloned().collect(); &paths.sort(); ^paths }
-    fn refresh_stamps(self: WatchGraph) -> () { loop node in &self.nodes.values_mut() { node.stamp = PathStamp.capture(node.path) } }
-    fn classify(path: OSPath) -> RootKind {
-        name :: path.file_name().and_then((n) -> n.to_str()).unwrap_or("").to_ascii_lowercase()
+    watched_paths: fn(self) -> [OSPath] { paths := self.nodes.keys().cloned().collect(); &paths.sort(); ^paths }
+    refresh_stamps: fn(self: WatchGraph) -> () { loop node in &self.nodes.values_mut() { node.stamp = PathStamp.capture(node.path) } }
+    classify: fn(path: OSPath) -> RootKind {
+        name: path.file_name().and_then((n) -> n.to_str()).unwrap_or("").to_ascii_lowercase()
         if name == PACKAGE_FILE || name.ends_with(".manifest") || name == "web.manifest.json" -> return .Manifest
         if name == "lock" || name.ends_with(".lock") || path.ends_with(".jet/lock") -> return .Lock
         if path.parent() == .Val(parent) {
             if parent.components().any((c) -> c.as_os_str() == "generated" || c.as_os_str() == ".jet-gen") -> return .Generated
         }
-        extension :: path.extension().and_then((e) -> e.to_str()).map((e) -> e.to_ascii_lowercase())
+        extension: path.extension().and_then((e) -> e.to_str()).map((e) -> e.to_ascii_lowercase())
         if extension == {
             .Val(lit0) && lit0 == "jet" -> .Import
             .Val("html") | .Val("htm") -> .HTML
@@ -348,13 +348,13 @@ struct WatchGraph {
             else -> if name.starts_with("target.") || name.contains("target_fact") -> .TargetFact else -> .BuildInput
         }
     }
-    fn from_entry(entry: OSPath, deps: [OSPath]) -> WatchGraph Diagnostic! {
-        graph := WatchGraph.new(); entry :: canonicalize_loose(entry); &graph.set_entry(entry.clone()); html_paths := [OSPath]{}
-        entry_dir :: entry.parent().unwrap_or(OSPath("."))
-        project :: Loader.find_manifest_root_checked(entry_dir).unwrap_or_else(() -> entry_dir.to_path_buf())
-        manifest :: Loader.manifest_path_checked(project)
-        stem :: entry.file_stem().and_then((s) -> s.to_str()).unwrap_or("app")
-        extras :: [(_0: manifest, _1: RootKind.Manifest), (_0: .Val(project.join(".jet/lock")), _1: RootKind.Lock),
+    from_entry: fn(entry: OSPath, deps: [OSPath]) -> WatchGraph Diagnostic! {
+        graph := WatchGraph.new(); entry: canonicalize_loose(entry); &graph.set_entry(entry.clone()); html_paths := [OSPath]{}
+        entry_dir: entry.parent().unwrap_or(OSPath("."))
+        project: Loader.find_manifest_root_checked(entry_dir).unwrap_or_else(() -> entry_dir.to_path_buf())
+        manifest: Loader.manifest_path_checked(project)
+        stem: entry.file_stem().and_then((s) -> s.to_str()).unwrap_or("app")
+        extras: [(_0: manifest, _1: RootKind.Manifest), (_0: .Val(project.join(".jet/lock")), _1: RootKind.Lock),
             (_0: .Val(entry_dir.join("{stem}.html")), _1: RootKind.HTML), (_0: .Val(project.join("{stem}.css")), _1: RootKind.Style),
             (_0: .Val(project.join("target.fact")), _1: RootKind.TargetFact)]
         loop (path, kind) in extras {
@@ -366,22 +366,22 @@ struct WatchGraph {
             }
         }
         loop dep in deps {
-            path :: canonicalize_loose(dep)
+            path: canonicalize_loose(dep)
             if path == entry -> next
-            kind :: WatchGraph.classify(path); &graph.upsert(path.clone(), kind); &graph.link(entry.clone(), path.clone())
+            kind: WatchGraph.classify(path); &graph.upsert(path.clone(), kind); &graph.link(entry.clone(), path.clone())
             if kind == RootKind.HTML -> &html_paths.push(path)
         }
         &graph.scan_html_references(html_paths); &graph.scan_runtime_inputs()
         Ok(^graph)
     }
-    fn scan_runtime_inputs(self: WatchGraph) -> () {
-        sources :: self.nodes().filter((node) -> node.kind == RootKind.Import || node.path.extension().and_then((e) -> e.to_str()).is_some_and((e) -> e.eq_ignore_ascii_case("jet"))).map((node) -> node.path.clone()).collect()
-        base :: self.entry.as_ref().and_then((path) -> path.parent()).unwrap_or(OSPath("."))
+    scan_runtime_inputs: fn(self: WatchGraph) -> () {
+        sources: self.nodes().filter((node) -> node.kind == RootKind.Import || node.path.extension().and_then((e) -> e.to_str()).is_some_and((e) -> e.eq_ignore_ascii_case("jet"))).map((node) -> node.path.clone()).collect()
+        base: self.entry.as_ref().and_then((path) -> path.parent()).unwrap_or(OSPath("."))
         inputs := [OSPath:Bool]{}
         loop source in sources {
             if fs.read_to_string(source).ok() == .Val(text) {
                 loop input in runtime_file_inputs(text) {
-                    path :: OSPath(input.path); path :: if path.is_absolute() -> canonicalize_loose(path) else -> canonicalize_loose(base.join(path))
+                    path: OSPath(input.path); path: if path.is_absolute() -> canonicalize_loose(path) else -> canonicalize_loose(base.join(path))
                     &inputs.entry(path).and_modify((is_dir) -> is_dir |= input.is_dir).or_insert(input.is_dir)
                 }
             }
@@ -389,12 +389,12 @@ struct WatchGraph {
         visited := [OSPath:Bool]{}; paths := inputs.keys().cloned().collect(); &paths.sort()
         loop input in paths { &self.add_runtime_input_tree(input, &visited, inputs[input]) }
     }
-    fn add_runtime_input_tree(self: WatchGraph, path: OSPath, visited: [OSPath:Bool], dir_hint: Bool) -> () { &self.add_runtime_input_node(path, &visited, dir_hint, true) }
-    fn add_runtime_input_node(self: WatchGraph, path: OSPath, visited: [OSPath:Bool], dir_hint: Bool, register_root: Bool) -> () {
-        path :: canonicalize_loose(path)
+    add_runtime_input_tree: fn(self: WatchGraph, path: OSPath, visited: [OSPath:Bool], dir_hint: Bool) -> () { &self.add_runtime_input_node(path, &visited, dir_hint, true) }
+    add_runtime_input_node: fn(self: WatchGraph, path: OSPath, visited: [OSPath:Bool], dir_hint: Bool, register_root: Bool) -> () {
+        path: canonicalize_loose(path)
         if visited.contains_key(path) -> return
-        &visited.insert(path.clone(), true); exists :: fs.metadata(path).is_ok(); is_dir :: path.is_dir() || (dir_hint && !exists)
-        kind :: if is_dir -> RootKind.Asset else -> WatchGraph.classify(path)
+        &visited.insert(path.clone(), true); exists: fs.metadata(path).is_ok(); is_dir: path.is_dir() || (dir_hint && !exists)
+        kind: if is_dir -> RootKind.Asset else -> WatchGraph.classify(path)
         if &self.nodes.get_mut(path) == .Val(node) { if exists { node.is_dir = is_dir; if is_dir -> node.kind = .Asset } } else { &self.upsert_with_dir_hint(path.clone(), kind, dir_hint && !exists) }
         if register_root && dir_hint -> &self.runtime_input_roots.insert(path.clone(), true)
         if self.entry == .Val(entry) -> &self.link(entry.clone(), path.clone())
@@ -402,13 +402,13 @@ struct WatchGraph {
         children := fs.read_dir(path).into_iter().flatten().filter_map((item) -> item.ok().map((item) -> item.path())).collect()
         &children.sort(); loop child in children { &self.add_runtime_input_node(child, &visited, false, false) }
     }
-    fn scan_html_references(self: WatchGraph, roots: [OSPath]) -> () {
+    scan_html_references: fn(self: WatchGraph, roots: [OSPath]) -> () {
         visited := [OSPath:Bool]{}; loop root in roots { &self.add_reference_tree(root, &visited) }
     }
-    fn add_reference_tree(self: WatchGraph, path: OSPath, visited: [OSPath:Bool]) -> () {
-        path :: canonicalize_loose(path)
+    add_reference_tree: fn(self: WatchGraph, path: OSPath, visited: [OSPath:Bool]) -> () {
+        path: canonicalize_loose(path)
         if visited.contains_key(path) -> return
-        &visited.insert(path.clone(), true); kind :: WatchGraph.classify(path); &self.upsert(path.clone(), kind)
+        &visited.insert(path.clone(), true); kind: WatchGraph.classify(path); &self.upsert(path.clone(), kind)
         if self.entry == .Val(entry) -> &self.link(entry.clone(), path.clone())
         if fs.read_to_string(path).ok() == .Val(source) {
             if path.parent() == .Val(parent) {
@@ -418,9 +418,9 @@ struct WatchGraph {
             }
         }
     }
-    fn discover(entry: OSPath) -> WatchGraph Diagnostic! {
-        entry_str :: entry.to_string_lossy()
-        deps :: if Loader.load_entry_with_overlays_and_dependencies(entry_str, [], false) == {
+    discover: fn(entry: OSPath) -> WatchGraph Diagnostic! {
+        entry_str: entry.to_string_lossy()
+        deps: if Loader.load_entry_with_overlays_and_dependencies(entry_str, [], false) == {
             (.Ok(bundle), deps) -> {
                 paths := ^deps
                 loop module_ref in bundle.modules { &paths.push(module_ref.path.clone()) }
@@ -438,28 +438,28 @@ struct WatchGraph {
     }
 }
 
-fn canonicalize_loose(path: OSPath) -> OSPath {
+canonicalize_loose: fn(path: OSPath) -> OSPath {
     fs.canonicalize(path).unwrap_or_else((_) -> if path.is_absolute() -> path.to_path_buf() else -> env.current_dir().unwrap_or(OSPath(".")).join(path))
 }
-struct RuntimeFileInput { path: String; is_dir: Bool }
-RUNTIME_FILE_INPUT_METHODS :: [(_0: "copy", _1: false), (_0: "copy_dir", _1: true), (_0: "exists", _1: false), (_0: "is_dir", _1: true), (_0: "list_dir", _1: true),
+RuntimeFileInput: struct { path: String; is_dir: Bool }
+RUNTIME_FILE_INPUT_METHODS: [(_0: "copy", _1: false), (_0: "copy_dir", _1: true), (_0: "exists", _1: false), (_0: "is_dir", _1: true), (_0: "list_dir", _1: true),
     (_0: "read", _1: false), (_0: "read_bytes", _1: false), (_0: "walk", _1: true), (_0: "walk_parallel", _1: true), (_0: "glob", _1: false), (_0: "stat", _1: false),
     (_0: "fixture", _1: false), (_0: "golden", _1: false), (_0: "corpus", _1: true), (_0: "corpus_entries", _1: true)]
-fn runtime_file_inputs(source: String) -> [RuntimeFileInput] {
-    inputs := [String:Bool]{}; bytes :: source.as_bytes()
+runtime_file_inputs: fn(source: String) -> [RuntimeFileInput] {
+    inputs := [String:Bool]{}; bytes: source.as_bytes()
     loop (method, is_dir) in RUNTIME_FILE_INPUT_METHODS {
-        marker :: ".{method}"; offset := USize{0}
+        marker: ".{method}"; offset := USize{0}
         loop {
             if source[offset..<source.len()].find(marker) == .Val(relative) {
-                start :: offset + relative; cursor := start + marker.len()
+                start: offset + relative; cursor := start + marker.len()
                 if bytes.get(cursor).is_some_and((b) -> b.is_ascii_alphanumeric() || b == 95) { offset = cursor; next }
                 loop { if !bytes.get(cursor).is_some_and((b) -> b.is_ascii_whitespace()) -> break; cursor += 1 }
                 if bytes.get(cursor) != .Val(U8{40}) { offset = cursor; next }
                 cursor += 1
                 loop { if !bytes.get(cursor).is_some_and((b) -> b.is_ascii_whitespace()) -> break; cursor += 1 }
                 if quoted_literal(source, cursor) == .Val(tuple_9) {
-                    value :: tuple_9._0
-                    end :: tuple_9._1
+                    value: tuple_9._0
+                    end: tuple_9._1
                     if !value.is_empty() && !value.contains('{') && !value.contains('}') && !value.contains("://") {
                         &inputs.entry(value.to_string()).and_modify((seen_dir) -> seen_dir |= is_dir).or_insert(is_dir)
                     }
@@ -471,11 +471,11 @@ fn runtime_file_inputs(source: String) -> [RuntimeFileInput] {
     paths := inputs.keys().cloned().collect(); &paths.sort()
     paths.into_iter().map((path) -> {is_dir: inputs[path], path}).collect()
 }
-fn quoted_literal(source: String, start: USize) -> (String, USize)? {
-    bytes :: source.as_bytes()
+quoted_literal: fn(source: String, start: USize) -> (String, USize)? {
+    bytes: source.as_bytes()
     if bytes.get(start) == .Val(quote) {
         if quote != 39 && quote != 34 -> return None
-        value_start :: start + 1; cursor := value_start
+        value_start: start + 1; cursor := value_start
         loop {
             if cursor >= bytes.len() -> break
             if bytes[cursor] == 92 { cursor = cursor.saturating_add(2) } else if bytes[cursor] == quote {
@@ -486,7 +486,7 @@ fn quoted_literal(source: String, start: USize) -> (String, USize)? {
     }
     None
 }
-fn local_reference_path(base: OSPath, raw: String) -> OSPath? {
+local_reference_path: fn(base: OSPath, raw: String) -> OSPath? {
     raw := raw.trim() // #4303
     if raw.split((ch) -> ch == '?' || ch == '#').next() == .Val(first) {
         reference := first.trim() // #4303
@@ -494,14 +494,14 @@ fn local_reference_path(base: OSPath, raw: String) -> OSPath? {
             || reference.starts_with("http:") || reference.starts_with("https:") || reference.starts_with("mailto:")
             || reference.starts_with("javascript:") || reference.contains('\\') -> return None
         reference := reference.trim_start_matches('/') // #4303
-        path :: OSPath(reference)
+        path: OSPath(reference)
         if path.is_absolute() -> return None
         return .Val(canonicalize_loose(base.join(path)))
     }
     None
 }
-fn referenced_paths(path: OSPath, source: String) -> [String] {
-    references := [String]{}; extension :: path.extension().and_then((e) -> e.to_str()).map((e) -> e.to_ascii_lowercase())
+referenced_paths: fn(path: OSPath, source: String) -> [String] {
+    references := [String]{}; extension: path.extension().and_then((e) -> e.to_str()).map((e) -> e.to_ascii_lowercase())
     if extension == "html" || extension == "htm" {
         loop attribute in ["src", "href", "poster", "srcset"] { extract_values_after(source, attribute, .Val(U8{61}), false, attribute == "srcset", &references) }
     }
@@ -511,12 +511,12 @@ fn referenced_paths(path: OSPath, source: String) -> [String] {
     }
     ^references
 }
-fn is_attribute_name_byte(byte: U8) -> Bool { byte.is_ascii_alphanumeric() || byte == 95 || byte == 45 }
-fn extract_values_after(source: String, keyword: String, delimiter: U8?, optional_parentheses: Bool, split_srcset: Bool, out: &[String]) -> () {
-    lower :: source.to_ascii_lowercase(); bytes :: lower.as_bytes(); offset := USize{0}
+is_attribute_name_byte: fn(byte: U8) -> Bool { byte.is_ascii_alphanumeric() || byte == 95 || byte == 45 }
+extract_values_after: fn(source: String, keyword: String, delimiter: U8?, optional_parentheses: Bool, split_srcset: Bool, out: &[String]) -> () {
+    lower: source.to_ascii_lowercase(); bytes: lower.as_bytes(); offset := USize{0}
     loop {
         if lower[offset..<lower.len()].find(keyword) == .Val(relative) {
-            start :: offset + relative; before :: start.checked_sub(1).and_then((i) -> bytes.get(i)); after :: bytes.get(start + keyword.len())
+            start: offset + relative; before: start.checked_sub(1).and_then((i) -> bytes.get(i)); after: bytes.get(start + keyword.len())
             if before.is_some_and((b) -> is_attribute_name_byte(b)) || after.is_some_and((b) -> is_attribute_name_byte(b)) {
                 offset = start + keyword.len(); next
             }
@@ -536,11 +536,11 @@ fn extract_values_after(source: String, keyword: String, delimiter: U8?, optiona
                 }
                 else -> { panic("unreachable delimiter") }
             }
-            quote :: bytes.get(cursor).copied().filter((b) -> b == 39 || b == 34)
+            quote: bytes.get(cursor).copied().filter((b) -> b == 39 || b == 34)
             if quote.is_some() -> cursor += 1
             if quote.is_none() && delimiter.is_none() { offset = start + keyword.len(); next }
-            value_start :: cursor
-            value_end :: if quote == {
+            value_start: cursor
+            value_end: if quote == {
                 .Val(quote) -> source[cursor..<source.len()].find(Char(quote)).map((i) -> cursor + i).unwrap_or(source.len())
                 .None -> source[cursor..<source.len()].find((ch) -> ch.is_ascii_whitespace() || ch == '>' || (delimiter == .Val(U8{40}) && ch == ')')).map((i) -> cursor + i).unwrap_or(source.len())
             }
@@ -555,38 +555,38 @@ fn extract_values_after(source: String, keyword: String, delimiter: U8?, optiona
     }
 }
 
-struct WatchSession {
+WatchSession: struct {
     graph: WatchGraph; generation: U64; applied_generation: U64; coalesce: Duration; edit_started: Instant?; events: EventWaiter
-    fn open(entry: OSPath) -> WatchSession Diagnostic! {
-        graph :: WatchGraph.discover(entry); events :: EventWaiter.new(graph.watched_paths())
+    open: fn(entry: OSPath) -> WatchSession Diagnostic! {
+        graph: WatchGraph.discover(entry); events: EventWaiter.new(graph.watched_paths())
         Ok(WatchSession{graph, generation: 0, applied_generation: 0, coalesce: Duration.from_millis(WATCH_COALESCE_MS), edit_started: None, events})
     }
-    fn from_graph(graph: WatchGraph) -> WatchSession {
-        events :: EventWaiter.new(graph.watched_paths())
+    from_graph: fn(graph: WatchGraph) -> WatchSession {
+        events: EventWaiter.new(graph.watched_paths())
         WatchSession{graph: ^graph, generation: 0, applied_generation: 0, coalesce: Duration.from_millis(WATCH_COALESCE_MS), edit_started: None, events}
     }
-    fn reopen(self: &WatchSession, entry: OSPath) Diagnostic! {
-        graph :: WatchGraph.discover(entry); self.events.refresh(graph.watched_paths())
+    reopen: fn(self: &WatchSession, entry: OSPath) Diagnostic! {
+        graph: WatchGraph.discover(entry); self.events.refresh(graph.watched_paths())
         self.graph = ^graph; self.generation = 0; self.applied_generation = 0; self.edit_started = None
     }
-    fn register_asset_root(self: WatchSession, path: OSPath) -> () { &self.graph.register_asset_root(^path); self.events.refresh(self.graph.watched_paths()) }
-    fn register_game_path(self: WatchSession, path: OSPath, kind: JetGameChangeKind) -> () { &self.graph.register_game_path(^path, kind); self.events.refresh(self.graph.watched_paths()) }
-    fn register_game_path_with_schema_ids(self: WatchSession, path: OSPath, kind: JetGameChangeKind, old_schema_id: String?, new_schema_id: String?) -> () {
+    register_asset_root: fn(self: WatchSession, path: OSPath) -> () { &self.graph.register_asset_root(^path); self.events.refresh(self.graph.watched_paths()) }
+    register_game_path: fn(self: WatchSession, path: OSPath, kind: JetGameChangeKind) -> () { &self.graph.register_game_path(^path, kind); self.events.refresh(self.graph.watched_paths()) }
+    register_game_path_with_schema_ids: fn(self: WatchSession, path: OSPath, kind: JetGameChangeKind, old_schema_id: String?, new_schema_id: String?) -> () {
         &self.graph.register_game_path_with_schema_ids(^path, kind, ^old_schema_id, ^new_schema_id); self.events.refresh(self.graph.watched_paths())
     }
-    fn graph(self) -> WatchGraph { &self.graph }
-    fn graph_mut(self: WatchSession) -> WatchGraph { &self.graph }
-    fn generation(self) -> U64 { self.generation }
-    fn mark_edit_started(self: WatchSession) -> () { self.edit_started = .Val(Instant.now()) }
-    fn wait_for_change_for(self: WatchSession, timeout: Duration?) -> Bool { self.events.refresh(self.graph.watched_paths()); self.events.wait(timeout) }
-    fn wake_handle(self) -> WatchWake { self.events.wake_handle() }
-    fn poll(self: WatchSession) -> InvalidationReceipt? {
+    graph: fn(self) -> WatchGraph { &self.graph }
+    graph_mut: fn(self: WatchSession) -> WatchGraph { &self.graph }
+    generation: fn(self) -> U64 { self.generation }
+    mark_edit_started: fn(self: WatchSession) -> () { self.edit_started = .Val(Instant.now()) }
+    wait_for_change_for: fn(self: WatchSession, timeout: Duration?) -> Bool { self.events.refresh(self.graph.watched_paths()); self.events.wait(timeout) }
+    wake_handle: fn(self) -> WatchWake { self.events.wake_handle() }
+    poll: fn(self: WatchSession) -> InvalidationReceipt? {
         &self.graph.discover_asset_tree(); &self.graph.discover_runtime_input_trees(); self.events.refresh(self.graph.watched_paths())
         changed := [OSPath]{}; change_kinds := [ChangeKind]{}
         loop node in self.graph.nodes() {
-            now :: PathStamp.capture(node.path)
+            now: PathStamp.capture(node.path)
             if !node.stamp.changed_since(now) -> next
-            kind :: if {
+            kind: if {
                 node.stamp.exists == false && now.exists == true -> ChangeKind.Created
                 node.stamp.exists == true && now.exists == false -> ChangeKind.Deleted
                 node.stamp.exists == true && now.exists == true -> ChangeKind.Modified
@@ -601,13 +601,13 @@ struct WatchSession {
         settled := [OSPath]{}; settled_kinds := [ChangeKind]{}; settled_root_kinds := [RootKind]{}
         settled_old_digests := [String?]{}; settled_digests := [String?]{}
         loop (path, change_kind) in changed.into_iter().zip(change_kinds.into_iter()) {
-            (root_kind, is_dir) :: self.graph.nodes.get(path).map((node) -> (_0: node.kind, _1: node.is_dir)).unwrap_or_else(() -> (_0: WatchGraph.classify(path), _1: path.is_dir()))
-            now :: PathStamp.capture(path)
-            previous :: self.graph.nodes.get(path).map((node) -> node.stamp.clone()).unwrap_or(PathStamp{exists: false, mtime: None, len: None, digest: None})
+            (root_kind, is_dir): self.graph.nodes.get(path).map((node) -> (_0: node.kind, _1: node.is_dir)).unwrap_or_else(() -> (_0: WatchGraph.classify(path), _1: path.is_dir()))
+            now: PathStamp.capture(path)
+            previous: self.graph.nodes.get(path).map((node) -> node.stamp.clone()).unwrap_or(PathStamp{exists: false, mtime: None, len: None, digest: None})
             if !previous.changed_since(now) && change_kind != ChangeKind.Renamed -> next
             if root_kind == RootKind.Asset && is_dir {
-                runtime_root :: self.graph.runtime_input_roots.contains_key(path)
-                report_transition :: runtime_root && (change_kind == ChangeKind.Created || change_kind == ChangeKind.Deleted)
+                runtime_root: self.graph.runtime_input_roots.contains_key(path)
+                report_transition: runtime_root && (change_kind == ChangeKind.Created || change_kind == ChangeKind.Deleted)
                 if !report_transition {
                     // Directory nodes are discovery sentinels; files carry resource changes.
                     if &self.graph.nodes.get_mut(path) == .Val(node) -> node.stamp = ^now
@@ -618,10 +618,10 @@ struct WatchSession {
             &settled_old_digests.push(previous.digest.clone()); &settled_digests.push(^now.digest)
         }
         if settled.is_empty() -> return None
-        self.generation += 1; generation :: self.generation
+        self.generation += 1; generation: self.generation
         if generation <= self.applied_generation {
-            stale_count :: settled.len(); stale_digests :: [String?].repeat(None, stale_count)
-            dev_entries :: make_dev_entries(self.graph, settled, settled_kinds, settled_root_kinds, stale_digests, stale_digests)
+            stale_count: settled.len(); stale_digests: [String?].repeat(None, stale_count)
+            dev_entries: make_dev_entries(self.graph, settled, settled_kinds, settled_root_kinds, stale_digests, stale_digests)
             return .Val(InvalidationReceipt{generation, changed: ^settled, closure: [],
                 kinds: settled_root_kinds.iter().map((kind) -> kind.as_str()).collect(), change_kinds: [String].repeat("stale", stale_count),
                 content_digests: stale_digests, dev_entries, edit_to_visible_ms: None})
@@ -629,52 +629,52 @@ struct WatchSession {
         loop path in settled {
             if &self.graph.nodes.get_mut(path) == .Val(node) -> node.stamp = PathStamp.capture(path) else -> &self.graph.upsert(path.clone(), WatchGraph.classify(path))
         }
-        closure :: self.graph.closure_of(settled); edit_to_visible_ms :: self.edit_started.map((started) -> started.elapsed().as_millis())
+        closure: self.graph.closure_of(settled); edit_to_visible_ms: self.edit_started.map((started) -> started.elapsed().as_millis())
         self.edit_started = None
-        dev_entries :: make_dev_entries(self.graph, settled, settled_kinds, settled_root_kinds, settled_old_digests, settled_digests)
+        dev_entries: make_dev_entries(self.graph, settled, settled_kinds, settled_root_kinds, settled_old_digests, settled_digests)
         .Val(InvalidationReceipt{generation, changed: ^settled, closure,
             kinds: settled_root_kinds.iter().map((kind) -> kind.as_str()).collect(),
             change_kinds: settled_kinds.iter().map((kind) -> change_kind_name(kind)).collect(),
             content_digests: ^settled_digests, dev_entries, edit_to_visible_ms})
     }
-    fn settle(self, paths: [OSPath]) -> () {
-        deadline :: Instant.now() + Duration.from_millis(WATCH_SETTLE_MAX_MS)
+    settle: fn(self, paths: [OSPath]) -> () {
+        deadline: Instant.now() + Duration.from_millis(WATCH_SETTLE_MAX_MS)
         previous := paths.iter().map((path) -> PathStamp.capture(path)).collect()
         loop {
             if Instant.now() >= deadline -> break
-            truncated :: paths.iter().zip(previous).any((pair) -> {
-                (path, now) :: pair
+            truncated: paths.iter().zip(previous).any((pair) -> {
+                (path, now): pair
                 now.len == 0 && self.graph.nodes.get(path).and_then((node) -> node.stamp.len).is_some_and((len) -> len > 0)
             })
             self.events.coalesce(self.coalesce)
-            current :: paths.iter().map((path) -> PathStamp.capture(path)).collect()
+            current: paths.iter().map((path) -> PathStamp.capture(path)).collect()
             if current == previous && !truncated -> return
             previous = ^current
         }
     }
-    fn acknowledge_with_dependencies(self: &WatchSession, receipt: InvalidationReceipt, dependencies: [OSPath]) Diagnostic! {
+    acknowledge_with_dependencies: fn(self: &WatchSession, receipt: InvalidationReceipt, dependencies: [OSPath]) Diagnostic! {
         if self.graph.entry().map((path) -> path.to_path_buf()) == .Val(entry) {
             desired_imports := [OSPath:Bool]{}
             loop path in [entry.clone()].into_iter().chain(dependencies.iter().map((path) -> canonicalize_loose(path))) {
                 if WatchGraph.classify(path) == RootKind.Import -> &desired_imports.insert(path, true)
             }
-            current_imports :: self.graph.nodes().filter((node) -> node.kind == RootKind.Import).map((node) -> (_0: node.path.clone(), _1: true)).collect()
-            topology_changed :: desired_imports.keys().any((path) -> !current_imports.contains_key(path))
+            current_imports: self.graph.nodes().filter((node) -> node.kind == RootKind.Import).map((node) -> (_0: node.path.clone(), _1: true)).collect()
+            topology_changed: desired_imports.keys().any((path) -> !current_imports.contains_key(path))
                 || current_imports.keys().any((path) -> !desired_imports.contains_key(path))
             if topology_changed -> return &self.acknowledge(receipt)
             if receipt.generation > self.applied_generation -> self.applied_generation = receipt.generation
             loop dependency in dependencies {
-                path :: canonicalize_loose(dependency)
+                path: canonicalize_loose(dependency)
                 if !self.graph.nodes.contains_key(path) -> &self.graph.upsert(path.clone(), WatchGraph.classify(path))
                 &self.graph.link(entry.clone(), path)
             }
             self.events.refresh(self.graph.watched_paths())
         } else { &self.acknowledge(receipt) }
     }
-    fn acknowledge(self: &WatchSession, receipt: InvalidationReceipt) Diagnostic! {
+    acknowledge: fn(self: &WatchSession, receipt: InvalidationReceipt) Diagnostic! {
         if receipt.generation > self.applied_generation -> self.applied_generation = receipt.generation
         if self.graph.entry().map((p) -> p.to_path_buf()) == .Val(entry) {
-            discovered :: WatchGraph.discover(entry)
+            discovered: WatchGraph.discover(entry)
             loop node in discovered.nodes() {
                 if !self.graph.nodes.contains_key(node.path) -> &self.graph.upsert(node.path.clone(), node.kind)
             }
@@ -686,30 +686,30 @@ struct WatchSession {
             loop path in discovered.runtime_input_roots.keys() { &self.graph.runtime_input_roots.insert(path.clone(), true) }
         }
     }
-    fn recover(self: WatchSession) -> () { &self.graph.refresh_stamps(); self.edit_started = None }
+    recover: fn(self: WatchSession) -> () { &self.graph.refresh_stamps(); self.edit_started = None }
 }
-fn detect_renames(changed: [OSPath], change_kinds: [ChangeKind], graph: WatchGraph) -> () {
-    deleted :: changed.iter().enumerate().filter((pair) -> change_kinds[pair._0] == ChangeKind.Deleted).map((pair) -> (_0: pair._0, _1: pair._1.clone())).collect()
-    created :: changed.iter().enumerate().filter((pair) -> change_kinds[pair._0] == ChangeKind.Created).map((pair) -> (_0: pair._0, _1: pair._1.clone())).collect()
+detect_renames: fn(changed: [OSPath], change_kinds: [ChangeKind], graph: WatchGraph) -> () {
+    deleted: changed.iter().enumerate().filter((pair) -> change_kinds[pair._0] == ChangeKind.Deleted).map((pair) -> (_0: pair._0, _1: pair._1.clone())).collect()
+    created: changed.iter().enumerate().filter((pair) -> change_kinds[pair._0] == ChangeKind.Created).map((pair) -> (_0: pair._0, _1: pair._1.clone())).collect()
     loop (di, dpath) in deleted {
-        dparent :: dpath.parent(); dkind :: graph.nodes.get(dpath).map((n) -> n.kind)
+        dparent: dpath.parent(); dkind: graph.nodes.get(dpath).map((n) -> n.kind)
         loop (_, cpath) in created {
             if cpath.parent() == dparent && graph.nodes.get(cpath).map((n) -> n.kind) == dkind && dpath != cpath -> change_kinds[di] = .Renamed
         }
     }
 }
-fn make_dev_entries(graph: WatchGraph, paths: [OSPath], change_kinds: [ChangeKind], root_kinds: [RootKind], old_digests: [String?], new_digests: [String?]) -> [DevWatchEntry] {
+make_dev_entries: fn(graph: WatchGraph, paths: [OSPath], change_kinds: [ChangeKind], root_kinds: [RootKind], old_digests: [String?], new_digests: [String?]) -> [DevWatchEntry] {
     paths.iter().enumerate().filter_map((pair) -> {
-        (index, path) :: pair
-        game_kind :: graph.game_kind_for(path).or_else(() -> if root_kinds.get(index) == .Val(.Asset) -> .Val(JetGameChangeKind.Asset) else -> None)
+        (index, path): pair
+        game_kind: graph.game_kind_for(path).or_else(() -> if root_kinds.get(index) == .Val(.Asset) -> .Val(JetGameChangeKind.Asset) else -> None)
         if game_kind == .Val(game_kind) {
-            (old_schema_id, new_schema_id) :: graph.game_schema_ids_for(path)
+            (old_schema_id, new_schema_id): graph.game_schema_ids_for(path)
             .Val(DevWatchEntry{path: path.clone(), change_kind: change_kinds.get(index).copied().map((kind) -> change_kind_name(kind)).unwrap_or("modified"),
                 game_kind, old_digest: old_digests.get(index).cloned().flatten(), new_digest: new_digests.get(index).cloned().flatten(), old_schema_id, new_schema_id})
         } else { None }
     }).collect()
 }
-fn change_kind_name(kind: ChangeKind) -> String { if kind == {
+change_kind_name: fn(kind: ChangeKind) -> String { if kind == {
     .Created -> "created"
     .Modified -> "modified"
     .Deleted -> "deleted"
@@ -719,40 +719,40 @@ fn change_kind_name(kind: ChangeKind) -> String { if kind == {
 // Persist remains at the shared runtime-heap owner.
 use {
     jet_foundation.Persist.[PersistEntry, PersistIdentity, PersistOutcome, PersistRejectReason, PersistStore]
-    Persist :: jet_foundation.Persist
+    Persist: jet_foundation.Persist
     jet_pkg_model.[Manifest]
     jet_foundation.[Diagnostic, foundation_json_escape]
     jetpack_foundation.[PACKAGE_FILE]
     core.files.[OSPath]
 }
-struct SessionSnapshot {
+SessionSnapshot: struct {
     generation: U64; artifact_token: String; source_id: String; build_id: String; revision: String; world_id: String; persist: PersistStore
-    fn new(generation: U64, artifact_token: String, persist: PersistStore) -> SessionSnapshot {
+    new: fn(generation: U64, artifact_token: String, persist: PersistStore) -> SessionSnapshot {
         SessionSnapshot{generation, artifact_token: ^artifact_token, source_id: "", build_id: "", revision: "", world_id: "", persist: ^persist}
     }
-    fn with_lineage(self: SessionSnapshot, source_id: String, build_id: String, revision: String, world_id: String) -> SessionSnapshot {
+    with_lineage: fn(self: SessionSnapshot, source_id: String, build_id: String, revision: String, world_id: String) -> SessionSnapshot {
         self := ^self; self.source_id = ^source_id; self.build_id = ^build_id; self.revision = ^revision; self.world_id = ^world_id; ^self
     }
-    fn with_persist(self: SessionSnapshot, persist: PersistStore) -> SessionSnapshot { self := ^self; self.persist = ^persist; ^self }
-    fn lineage_valid(self) -> Bool { [self.source_id, self.build_id, self.revision, self.world_id].iter().all((value) -> !value.is_empty() && !value.chars().any((c) -> c.is_control())) }
+    with_persist: fn(self: SessionSnapshot, persist: PersistStore) -> SessionSnapshot { self := ^self; self.persist = ^persist; ^self }
+    lineage_valid: fn(self) -> Bool { [self.source_id, self.build_id, self.revision, self.world_id].iter().all((value) -> !value.is_empty() && !value.chars().any((c) -> c.is_control())) }
 }
-enum HotReplacePolicy { Swap; Restart; Pin
-    fn default() -> HotReplacePolicy { .Swap }
+HotReplacePolicy: enum { Swap; Restart; Pin
+    default: fn() -> HotReplacePolicy { .Swap }
 }
-enum HotReplacePhase { Begun; Paused; Preflighted; Staged; Committed; RolledBack }
-struct HotReplaceTxn {
+HotReplacePhase: enum { Begun; Paused; Preflighted; Staged; Committed; RolledBack }
+HotReplaceTxn: struct {
     prior: SessionSnapshot; shared_prior: PersistStore; candidate: SessionSnapshot?; decisions: [PersistOutcome]
     policy: HotReplacePolicy; phase: HotReplacePhase; failure: String?
-    fn begin(prior: SessionSnapshot) -> HotReplaceTxn { HotReplaceTxn.begin_with_policy(^prior, .Swap) }
-    fn begin_with_policy(prior: SessionSnapshot, policy: HotReplacePolicy) -> HotReplaceTxn {
+    begin: fn(prior: SessionSnapshot) -> HotReplaceTxn { HotReplaceTxn.begin_with_policy(^prior, .Swap) }
+    begin_with_policy: fn(prior: SessionSnapshot, policy: HotReplacePolicy) -> HotReplaceTxn {
         HotReplaceTxn{shared_prior: Persist.shared_clone(), prior: ^prior, candidate: None, decisions: [], policy, phase: .Begun, failure: None}
     }
-    fn policy(self) -> HotReplacePolicy { self.policy }
-    fn pause(self: &HotReplaceTxn) Err! {
+    policy: fn(self) -> HotReplacePolicy { self.policy }
+    pause: fn(self: &HotReplaceTxn) Err! {
         if self.phase != HotReplacePhase.Begun -> return Err("hot replacement pause is out of order")
         self.phase = .Paused
     }
-    fn preflight(self: &HotReplaceTxn, candidate: SessionSnapshot) Err! {
+    preflight: fn(self: &HotReplaceTxn, candidate: SessionSnapshot) Err! {
         if self.phase != HotReplacePhase.Paused -> return Err("hot replacement preflight requires a paused world")
         if self.policy == HotReplacePolicy.Restart -> return &self.reject("explicit restart requested; swap was not attempted")
         if !candidate.lineage_valid() -> return &self.reject("candidate lineage is incomplete; live identity is unavailable")
@@ -761,7 +761,7 @@ struct HotReplaceTxn {
         if candidate.world_id != self.prior.world_id -> return &self.reject("world identity changed; restart required")
         &self.decisions.clear(); rejected := String?{None}
         loop entry in candidate.persist.entries() {
-            outcome :: self.prior.persist.plan_migrate(entry.module_ref, entry.name, entry.shape, entry.payload)
+            outcome: self.prior.persist.plan_migrate(entry.module_ref, entry.name, entry.shape, entry.payload)
             if outcome == (.Rejected{reason, prior}) -> rejected = .Val("`{prior.key()}`: {reason.message()}")
             &self.decisions.push(outcome)
         }
@@ -772,19 +772,19 @@ struct HotReplaceTxn {
         if rejected == .Val(reason) -> return &self.reject("hot replacement preflight rejected: {reason}")
         self.candidate = .Val(candidate.clone()); self.phase = .Preflighted
     }
-    fn stage(self: &HotReplaceTxn) Err! {
+    stage: fn(self: &HotReplaceTxn) Err! {
         if self.phase != HotReplacePhase.Preflighted || self.candidate.is_none() -> return Err("hot replacement stage requires successful preflight")
         self.phase = .Staged
     }
-    fn commit(self: HotReplaceTxn) -> Result<SessionSnapshot, (SessionSnapshot, String)> {
+    commit: fn(self: HotReplaceTxn) -> Result<SessionSnapshot, (SessionSnapshot, String)> {
         self := ^self
         if self.phase != HotReplacePhase.Staged {
-            reason :: &self.failure.take().unwrap_or("hot replacement was not staged; prior session kept")
+            reason: &self.failure.take().unwrap_or("hot replacement was not staged; prior session kept")
             Persist.shared_replace(^self.shared_prior)
             return .Err((_0: ^self.prior, _1: reason))
         }
         if &self.candidate.take() == .Val(candidate) {
-            generation :: self.prior.generation + 1
+            generation: self.prior.generation + 1
             next := ^candidate; next.generation = generation; next.artifact_token = "gen-{generation}"
             Persist.shared_replace(next.persist.clone()); self.phase = .Committed
             .Ok(^next)
@@ -793,24 +793,24 @@ struct HotReplaceTxn {
             .Err((_0: ^self.prior, _1: "hot replacement candidate disappeared"))
         }
     }
-    fn rollback(self: HotReplaceTxn, reason: String) -> SessionSnapshot {
+    rollback: fn(self: HotReplaceTxn, reason: String) -> SessionSnapshot {
         self.failure = .Val(^reason); Persist.shared_replace(self.shared_prior.clone()); self.phase = .RolledBack; self.prior.clone()
     }
-    fn reject(self: &HotReplaceTxn, reason: String) Err! { self.failure = .Val(reason.clone()); Err(^reason) }
-    fn phase(self) -> HotReplacePhase { self.phase }
-    fn decisions(self) -> [PersistOutcome] { &self.decisions }
-    fn candidate(self) -> SessionSnapshot? { self.candidate.as_ref() }
-    fn prior(self) -> SessionSnapshot { &self.prior }
+    reject: fn(self: &HotReplaceTxn, reason: String) Err! { self.failure = .Val(reason.clone()); Err(^reason) }
+    phase: fn(self) -> HotReplacePhase { self.phase }
+    decisions: fn(self) -> [PersistOutcome] { &self.decisions }
+    candidate: fn(self) -> SessionSnapshot? { self.candidate.as_ref() }
+    prior: fn(self) -> SessionSnapshot { &self.prior }
 }
-WATCH_POLL_INTERVAL_MS :: U64{5}
-WATCH_COALESCE_MS :: U64{4}
-WATCH_SETTLE_MAX_MS :: U64{250}
-EDIT_TO_VISIBLE_BUDGET_MS :: U128{2000}
-fn within_budget(receipt: InvalidationReceipt) -> Bool { receipt.edit_to_visible_ms.map((ms) -> ms <= EDIT_TO_VISIBLE_BUDGET_MS).unwrap_or(true) }
-fn any_stamp_changed(graph: WatchGraph) -> Bool { graph.nodes().any((node) -> { now :: PathStamp.capture(node.path); node.stamp.changed_since(now) }) }
-struct SessionBroker {
+WATCH_POLL_INTERVAL_MS: U64{5}
+WATCH_COALESCE_MS: U64{4}
+WATCH_SETTLE_MAX_MS: U64{250}
+EDIT_TO_VISIBLE_BUDGET_MS: U128{2000}
+within_budget: fn(receipt: InvalidationReceipt) -> Bool { receipt.edit_to_visible_ms.map((ms) -> ms <= EDIT_TO_VISIBLE_BUDGET_MS).unwrap_or(true) }
+any_stamp_changed: fn(graph: WatchGraph) -> Bool { graph.nodes().any((node) -> { now: PathStamp.capture(node.path); node.stamp.changed_since(now) }) }
+SessionBroker: struct {
     source_transactions: Mutex<()>
-    fn default() -> SessionBroker { SessionBroker{source_transactions: Mutex.new(_)} }
-    fn lock_source_transaction(self) -> MutexGuard<()> { self.source_transactions.lock().unwrap() }
+    default: fn() -> SessionBroker { SessionBroker{source_transactions: Mutex.new(_)} }
+    lock_source_transaction: fn(self) -> MutexGuard<()> { self.source_transactions.lock().unwrap() }
 }
 

@@ -6,7 +6,7 @@
 // through to Nix.
 
 // The adapter behind a resolved provider kind.
-enum ProviderAdapter {
+ProviderAdapter: enum {
     Nix
     Core
     Cran
@@ -18,7 +18,7 @@ enum ProviderAdapter {
 
     // Validate that the current provider authority still matches a recorded
     // cache binding.
-    fn validate_cache_authority(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) ProviderError! -[FS, Env, Net, Time.Wait]> {
+    validate_cache_authority: fn(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) ProviderError! -[FS, Env, Net, Time.Wait]> {
         if self == {
             .Nix -> NixProvider{}.validate_cache_authority(spec, table, ctx)
             .Cran -> CranProvider{}.validate_cache_authority(spec, table, ctx)
@@ -30,7 +30,7 @@ enum ProviderAdapter {
 
     // The exact current identity required to trust a cached output. A
     // provider that cannot derive it gets no early cache path.
-    fn cache_expectation(self, verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> CacheExpectation? Never! {
+    cache_expectation: fn(self, verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> CacheExpectation? Never! {
         if self == {
             .Nix -> NixProvider{}.cache_expectation(&verification, spec, table, ctx)
             .Core -> CoreProvider{}.cache_expectation(&verification, spec, table, ctx)
@@ -43,7 +43,7 @@ enum ProviderAdapter {
     }
 
     // The exact external approval subject of an executable provider action.
-    fn approval_facts(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> String? ProviderReason! {
+    approval_facts: fn(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> String? ProviderReason! {
         if self == {
             .Core -> CoreProvider{}.approval_facts(spec, table, ctx)
             else -> Ok(None)
@@ -52,7 +52,7 @@ enum ProviderAdapter {
 
     // Plan acquisition for this adapter's refs; the caller groups refs by
     // adapter so Nix can plan one shared closure.
-    fn plan_downloads(self, verification: &StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Net, Time, Time.Wait]> DownloadPlan ProviderError! {
+    plan_downloads: fn(self, verification: &StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Net, Time, Time.Wait]> DownloadPlan ProviderError! {
         if self == {
             .Nix -> NixProvider{}.plan_downloads(&verification, specs, table, ctx)
             .Core -> CoreProvider{}.plan_downloads(&verification, specs, table, ctx)
@@ -65,7 +65,7 @@ enum ProviderAdapter {
     }
 
     // Whether this adapter may repair an invalid indexed cache candidate.
-    fn can_repair(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env]> Bool Never! {
+    can_repair: fn(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env]> Bool Never! {
         if self == {
             .Nix -> NixProvider{}.can_repair(spec, table, ctx)
             else -> false
@@ -74,14 +74,14 @@ enum ProviderAdapter {
 
     // Whether this adapter has acquisition work to show; local Core paths are
     // already present.
-    fn requires_acquisition(self, spec: RefSpec, table: SourceTable) -> Bool Never! {
+    requires_acquisition: fn(self, spec: RefSpec, table: SourceTable) -> Bool Never! {
         if self == {
             .Core -> CoreProvider{}.requires_acquisition(spec, table)
             else -> true
         }
     }
 
-    fn realize(self, verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
+    realize: fn(self, verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
         if self == {
             .Nix -> NixProvider{}.realize(&verification, spec, table, ctx)
             .Core -> CoreProvider{}.realize(&verification, spec, table, ctx)
@@ -95,7 +95,7 @@ enum ProviderAdapter {
 }
 
 // The provider for an already-resolved kind.
-fn provider_for(kind: ProviderKind) -> ProviderAdapter Never! {
+provider_for: fn(kind: ProviderKind) -> ProviderAdapter Never! {
     if kind == {
         .Nix | .Infer -> ProviderAdapter.Nix
         .Core -> ProviderAdapter.Core
@@ -113,29 +113,29 @@ fn provider_for(kind: ProviderKind) -> ProviderAdapter Never! {
     }
 }
 
-fn provider_for_ref(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time.Wait, Rand]> ProviderAdapter Never! {
+provider_for_ref: fn(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time.Wait, Rand]> ProviderAdapter Never! {
     provider_for(provider_resolve_kind_in_context(spec, table, ctx))
 }
 
 // Check the provider authority recorded for a project cache binding.
-fn provider_validate_cache_authority(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) ProviderError! -[FS, Env, Exec, Net, Time.Wait, Rand]> {
+provider_validate_cache_authority: fn(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) ProviderError! -[FS, Env, Exec, Net, Time.Wait, Rand]> {
     if ctx.project_dir == None -> return
     provider_for_ref(spec, table, ctx).validate_cache_authority(spec, table, ctx)
 }
 
 // Independently derive every fact required to trust an existing cache record.
-fn provider_cache_expectation(verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> CacheExpectation? Never! {
+provider_cache_expectation: fn(verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> CacheExpectation? Never! {
     provider_for_ref(spec, table, ctx).cache_expectation(&verification, spec, table, ctx)
 }
 
 // The exact external approval subject for a provider action, without
 // executing package code.
-fn provider_approval_facts(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> String? ProviderReason! {
+provider_approval_facts: fn(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> String? ProviderReason! {
     provider_for_ref(spec, table, ctx).approval_facts(spec, table, ctx)
 }
 
 // The concrete source kind of a direct ecosystem root, if the ref names one.
-fn provider_direct_kind(source: RefSource) -> ProviderKind? Never! {
+provider_direct_kind: fn(source: RefSource) -> ProviderKind? Never! {
     if source == {
         .Cran -> Val(ProviderKind.Cran)
         .LuaRocks -> Val(ProviderKind.LuaRocks)
@@ -157,37 +157,37 @@ fn provider_direct_kind(source: RefSource) -> ProviderKind? Never! {
 // source). Offline never hits the network: it reuses a cached checkout if
 // present, else falls back to `nix`. Built-in sources, bare paths, and
 // `…@nixpkgs` named sources are concrete in the table and never probe.
-fn provider_resolve_kind(spec: RefSpec, table: SourceTable, offline: Bool, cache_dir: String) -[FS, Env, Exec, Time.Wait, Rand]> ProviderKind Never! {
+provider_resolve_kind: fn(spec: RefSpec, table: SourceTable, offline: Bool, cache_dir: String) -[FS, Env, Exec, Time.Wait, Rand]> ProviderKind Never! {
     if provider_direct_kind(spec.source) == {
         .Val(kind) -> return kind
         .None -> {}
     }
     if provider_cc_toolchain_is_reference(spec) -> return ProviderKind.JetPackage
-    name :: if spec.source == {
+    name: if spec.source == {
         .Named(name) -> name
         else -> { return ProviderKind.Nix }
     }
-    kind :: table.provider(name)
+    kind: table.provider(name)
     if kind != ProviderKind.Infer -> return kind
     // U9: peek the remote's package marker to choose core or nix.
-    upstream :: table.upstream(name) ?? return ProviderKind.Nix
+    upstream: table.upstream(name) ?? return ProviderKind.Nix
     provider_infer_remote_kind(upstream, offline, cache_dir)
 }
 
 // True when realizing this ref goes through the Nix compatibility provider.
-fn provider_uses_nix_provider(spec: RefSpec, table: SourceTable, offline: Bool, cache_dir: String) -[FS, Env, Exec, Time.Wait, Rand]> Bool Never! {
-    kind :: provider_resolve_kind(spec, table, offline, cache_dir)
+provider_uses_nix_provider: fn(spec: RefSpec, table: SourceTable, offline: Bool, cache_dir: String) -[FS, Env, Exec, Time.Wait, Rand]> Bool Never! {
+    kind: provider_resolve_kind(spec, table, offline, cache_dir)
     kind == ProviderKind.Nix || kind == ProviderKind.Infer
 }
 
 // Resolve an inferred project source without probing its remote when the
 // checked-in lock already proves the source is indexed nixpkgs.
-fn provider_uses_nix_provider_for_project(spec: RefSpec, table: SourceTable, offline: Bool, cache_dir: String, project_dir: String?) -[FS, Env, Exec, Time.Wait, Rand]> Bool Never! {
+provider_uses_nix_provider_for_project: fn(spec: RefSpec, table: SourceTable, offline: Bool, cache_dir: String, project_dir: String?) -[FS, Env, Exec, Time.Wait, Rand]> Bool Never! {
     if provider_cc_toolchain_is_reference(spec) -> return false
     provider_has_locked_nix_index_key(spec, table, project_dir, provider_host_nix_system()) || provider_uses_nix_provider(spec, table, offline, cache_dir)
 }
 
-fn provider_resolve_kind_in_context(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Time.Wait, Rand]> ProviderKind Never! {
+provider_resolve_kind_in_context: fn(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Time.Wait, Rand]> ProviderKind Never! {
     if provider_cc_toolchain_is_reference(spec) -> return ProviderKind.JetPackage
     if provider_has_locked_nix_index_key(spec, table, ctx.project_dir, provider_host_nix_system()) -> return ProviderKind.Nix
     provider_resolve_kind(spec, table, ctx.offline, ctx.store_dir)
@@ -197,11 +197,11 @@ fn provider_resolve_kind_in_context(spec: RefSpec, table: SourceTable, ctx: Prov
 // in first-seen order. Nix uses the signed index plus narinfo closure; native
 // release fixtures contribute their exact artifact length. Providers without
 // a byte-bearing metadata seam keep the total unknown instead of inventing it.
-fn provider_plan_downloads(verification: &StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> DownloadPlan ProviderError! {
+provider_plan_downloads: fn(verification: &StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> DownloadPlan ProviderError! {
     kinds := [ProviderKind]{}
     grouped := [[RefSpec]]{}
     loop spec in specs {
-        kind :: provider_resolve_kind_in_context(spec, table, ctx)
+        kind: provider_resolve_kind_in_context(spec, table, ctx)
         position := -1
         loop index in 0..<kinds.len() {
             if kinds[index] == kind -> position = index
@@ -224,7 +224,7 @@ fn provider_plan_downloads(verification: &StoreVerification, specs: [RefSpec], t
 // explicit compatibility output unless a locked nixpkgs ref is representable
 // by the signed index. Computed before dispatch, so a genuine v1 hole gets one
 // package-focused diagnostic without probing Nix.
-fn provider_needs_nix_bridge(spec: RefSpec, table: SourceTable, offline: Bool, cache_dir: String, project_dir: String?) -[FS, Env, Exec, Time.Wait, Rand]> NixBridgeNeed? Never! {
+provider_needs_nix_bridge: fn(spec: RefSpec, table: SourceTable, offline: Bool, cache_dir: String, project_dir: String?) -[FS, Env, Exec, Time.Wait, Rand]> NixBridgeNeed? Never! {
     if !provider_uses_nix_provider_for_project(spec, table, offline, cache_dir, project_dir) -> return None
     if provider_has_locked_nix_index_key(spec, table, project_dir, provider_host_nix_system()) -> return None
     Val(NixBridgeNeed{reference: spec.raw, package: spec.short_name()})
@@ -232,23 +232,23 @@ fn provider_needs_nix_bridge(spec: RefSpec, table: SourceTable, offline: Bool, c
 
 // An invalid indexed-Nix cache entry may be repaired by the path that created
 // it; other providers keep the Store's fail-closed integrity behavior.
-fn provider_can_repair_indexed_nix(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Time.Wait, Rand]> Bool Never! {
+provider_can_repair_indexed_nix: fn(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Time.Wait, Rand]> Bool Never! {
     provider_for_ref(spec, table, ctx).can_repair(spec, table, ctx)
 }
 
-fn provider_requires_acquisition(spec: RefSpec, table: SourceTable, offline: Bool, cache_dir: String) -[FS, Env, Exec, Time.Wait, Rand]> Bool Never! {
+provider_requires_acquisition: fn(spec: RefSpec, table: SourceTable, offline: Bool, cache_dir: String) -[FS, Env, Exec, Time.Wait, Rand]> Bool Never! {
     provider_for(provider_resolve_kind(spec, table, offline, cache_dir)).requires_acquisition(spec, table)
 }
 
 // Realize a ref through its provider. The resolver never knows which backend
 // runs; every result carries the refreshed shared provider facts.
-fn provider_realize(verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
+provider_realize: fn(verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
     realized := provider_for_ref(spec, table, ctx).realize(&verification, spec, table, ctx)
     provider_refresh_provider_facts(&realized.producer, realized.reference)
     Ok(realized)
 }
 
-fn provider_pack_kind(has_pack: Bool) -> ProviderKind Never! {
+provider_pack_kind: fn(has_pack: Bool) -> ProviderKind Never! {
     if has_pack -> ProviderKind.Core else -> ProviderKind.Nix
 }
 
@@ -259,30 +259,30 @@ fn provider_pack_kind(has_pack: Bool) -> ProviderKind Never! {
 //  2. A prior classification is reused (durable for an exact commit).
 //  3. Offline with no cache defaults to `nix`.
 //  4. Online: a depth-1, tree-filtered peek; any failure is `nix`.
-fn provider_infer_remote_kind(upstream: String, offline: Bool, cache_dir: String) -[FS, Env, Exec, Time.Wait, Rand]> ProviderKind Never! {
-    remote :: RemoteSource.parse(upstream) ?? return ProviderKind.Nix
-    cache :: provider_source_cache_dir(cache_dir, remote)
+provider_infer_remote_kind: fn(upstream: String, offline: Bool, cache_dir: String) -[FS, Env, Exec, Time.Wait, Rand]> ProviderKind Never! {
+    remote: RemoteSource.parse(upstream) ?? return ProviderKind.Nix
+    cache: provider_source_cache_dir(cache_dir, remote)
     if files.is_dir(cache) {
         return provider_pack_kind(files.is_file(files.join(cache, PACKAGE_FILE)))
     }
-    exact :: if remote.rev == {
+    exact: if remote.rev == {
         .Val(rev) -> rev.bytes().len() == 40 && provider_is_ascii_hex(rev)
         .None -> false
     }
-    parent :: files.dirname(cache_dir)
-    durable :: files.join(files.join(if parent == "" -> cache_dir else -> parent, "source-kinds"), pkg_sha256_hex(upstream.bytes()))
+    parent: files.dirname(cache_dir)
+    durable: files.join(files.join(if parent == "" -> cache_dir else -> parent, "source-kinds"), pkg_sha256_hex(upstream.bytes()))
     if exact {
         if files.read(durable) == {
             .Ok(text) -> {
-                kind :: provider_pack_kind(text.trim() == "core")
+                kind: provider_pack_kind(text.trim() == "core")
                 return kind
             }
             .Err(_) -> {}
         }
     }
     if offline -> return ProviderKind.Nix
-    has_pack :: provider_remote_has_pack_jet(remote)
-    kind :: provider_pack_kind(has_pack)
+    has_pack: provider_remote_has_pack_jet(remote)
+    kind: provider_pack_kind(has_pack)
     if exact {
         files.create_dir_all(files.dirname(durable)).drop("the durable classification is a cache")
         files.write(durable, if has_pack -> "core" else -> "nix").drop("the durable classification is a cache")
@@ -291,9 +291,9 @@ fn provider_infer_remote_kind(upstream: String, offline: Bool, cache_dir: String
 }
 
 // ASCII hexadecimal digits in either case.
-fn provider_is_ascii_hex(value: String) -> Bool Never! {
+provider_is_ascii_hex: fn(value: String) -> Bool Never! {
     loop byte in value.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if !((code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102)) -> return false
     }
     true
@@ -304,28 +304,28 @@ fn provider_is_ascii_hex(value: String) -> Bool Never! {
 // throwaway repo, then `git ls-tree FETCH_HEAD` for the markers. A configured
 // `origin` registers the promisor remote so the deferred root tree is lazily
 // fetched. Any failure is "no package marker".
-fn provider_remote_has_pack_jet(remote: RemoteSource) -[FS, Env, Exec, Time.Wait, Rand]> Bool Never! {
+provider_remote_has_pack_jet: fn(remote: RemoteSource) -[FS, Env, Exec, Time.Wait, Rand]> Bool Never! {
     if provider_network_denied() -> return false
     if !provider_git_available() -> return false
     if !provider_remote_revision_is_safe(remote.rev) -> return false
-    tmp :: provider_exclusive_temp_dir(sys.temp_dir(), "jetpack-peek") ?? return false
-    has_pack :: provider_peek_pack_markers(tmp, remote)
+    tmp: provider_exclusive_temp_dir(sys.temp_dir(), "jetpack-peek") ?? return false
+    has_pack: provider_peek_pack_markers(tmp, remote)
     provider_remove_tree_quiet(tmp)
     has_pack
 }
 
 // The peek itself, inside the throwaway repo `tmp`.
-fn provider_peek_pack_markers(tmp: String, remote: RemoteSource) -[Env, Exec, Time.Wait]> Bool Never! {
-    rev :: remote.rev ?? "HEAD"
-    set_up :: provider_git_in(tmp, [String]{"init", "--quiet"}) && provider_git_in(tmp, [String]{"remote", "add", "origin", remote.url})
-    fetched :: set_up && provider_git_in(tmp, [String]{"fetch", "--quiet", "--depth", "1", "--filter=tree:0", "origin", rev})
+provider_peek_pack_markers: fn(tmp: String, remote: RemoteSource) -[Env, Exec, Time.Wait]> Bool Never! {
+    rev: remote.rev ?? "HEAD"
+    set_up: provider_git_in(tmp, [String]{"init", "--quiet"}) && provider_git_in(tmp, [String]{"remote", "add", "origin", remote.url})
+    fetched: set_up && provider_git_in(tmp, [String]{"fetch", "--quiet", "--depth", "1", "--filter=tree:0", "origin", rev})
     if !fetched -> return false
-    listing :: provider_git_output_in(tmp, [String]{"ls-tree", "FETCH_HEAD", PACKAGE_FILE}) ?? return false
+    listing: provider_git_output_in(tmp, [String]{"ls-tree", "FETCH_HEAD", PACKAGE_FILE}) ?? return false
     listing != ""
 }
 
 // Run one hardened Git command inside `dir`; true on success.
-fn provider_git_in(dir: String, args: [String]) -[Env, Exec, Time.Wait]> Bool Never! {
+provider_git_in: fn(dir: String, args: [String]) -[Env, Exec, Time.Wait]> Bool Never! {
     if foundation_hardened_git_command().arg("-C").arg(dir).args_extend(args).run() == {
         .Ok(receipt) -> receipt.success
         .Err(_) -> false
@@ -333,7 +333,7 @@ fn provider_git_in(dir: String, args: [String]) -[Env, Exec, Time.Wait]> Bool Ne
 }
 
 // The standard output of one successful hardened Git command inside `dir`.
-fn provider_git_output_in(dir: String, args: [String]) -[Env, Exec, Time.Wait]> String? Never! {
+provider_git_output_in: fn(dir: String, args: [String]) -[Env, Exec, Time.Wait]> String? Never! {
     if foundation_hardened_git_command().arg("-C").arg(dir).args_extend(args).run() == {
         .Ok(receipt) -> if receipt.success -> Val(receipt.output) else -> None
         .Err(_) -> None

@@ -1,86 +1,86 @@
 // Pure parser combinators over UTF-8 text. Input.pos is a byte offset, but
 // predicate scans advance only at validated scalar boundaries.
-use unicode :: core.text
+use unicode: core.text
 
-struct Input {
+Input: struct {
     text: String
     pos: Int
 }
 
-struct Took {
+Took: struct {
     next: Input
     chunk: String
 }
 
-struct Digit {
+Digit: struct {
     next: Input
     n: Int
 }
 
-fn input(text: String) -> Input Never! { {text: text, pos: 0} }
+input: fn(text: String) -> Input Never! { {text: text, pos: 0} }
 
-fn remaining(src: Input) -> String Never! {
-    raw :: src.text.bytes()
+remaining: fn(src: Input) -> String Never! {
+    raw: src.text.bytes()
     if src.pos < 0 || src.pos >= raw.len() -> return ""
     String.from_bytes(slice_rest(raw, src.pos)) ?? ""
 }
 
-fn eof(src: Input) -> Bool Never! { src.pos >= src.text.bytes().len() }
+eof: fn(src: Input) -> Bool Never! { src.pos >= src.text.bytes().len() }
 
-fn peek(src: Input) -> U8? Never! {
-    raw :: src.text.bytes()
+peek: fn(src: Input) -> U8? Never! {
+    raw: src.text.bytes()
     if src.pos < 0 || src.pos >= raw.len() -> return None
     Val(raw[src.pos])
 }
 
-fn take_n(src: Input, n: Int) -> Took? Never! {
-    raw :: src.text.bytes()
+take_n: fn(src: Input, n: Int) -> Took? Never! {
+    raw: src.text.bytes()
     if n < 0 || src.pos < 0 || src.pos + n > raw.len() -> return None
-    chunk :: String.from_bytes(slice_range(raw, src.pos, src.pos + n)) ?? return None
+    chunk: String.from_bytes(slice_range(raw, src.pos, src.pos + n)) ?? return None
     Val(Took{next: Input{text: src.text, pos: src.pos + n}, chunk: chunk})
 }
 
-fn tag(src: Input, lit: String) -> Took? Never! {
-    got :: take_n(src, lit.bytes().len()) ?? return None
+tag: fn(src: Input, lit: String) -> Took? Never! {
+    got: take_n(src, lit.bytes().len()) ?? return None
     if got.chunk != lit -> return None
     Val(got)
 }
 
-fn take_while(src: Input, predicate: String) -> Took Never! {
-    raw :: src.text.bytes()
+take_while: fn(src: Input, predicate: String) -> Took Never! {
+    raw: src.text.bytes()
     i := src.pos
     loop i < raw.len() {
-        width :: utf8_width(raw, i)
-        scalar :: String.from_bytes(slice_range(raw, i, i + width)) ?? break
+        width: utf8_width(raw, i)
+        scalar: String.from_bytes(slice_range(raw, i, i + width)) ?? break
         if !pred_scalar(predicate, scalar) -> break
         i = i + width
     }
-    chunk :: String.from_bytes(slice_range(raw, src.pos, i)) ?? ""
+    chunk: String.from_bytes(slice_range(raw, src.pos, i)) ?? ""
     {next: Input{text: src.text, pos: i}, chunk: chunk}
 }
 
-fn skip_ws(src: Input) -> Input Never! { take_while(src, "space").next }
+skip_ws: fn(src: Input) -> Input Never! { take_while(src, "space").next }
 
-fn digit(src: Input) -> Digit? Never! {
-    b :: peek(src) ?? return None
+digit: fn(src: Input) -> Digit? Never! {
+    b: peek(src) ?? return None
     if b < 48 || b > 57 -> return None
-    nxt :: take_n(src, 1) ?? return None
+    nxt: take_n(src, 1) ?? return None
     Val(Digit{next: nxt.next, n: Int.from_u8(b) - 48})
 }
 
-fn int_dec(src: Input) -> Digit? Never! {
+int_dec: fn(src: Input) -> Digit? Never! {
     cur := skip_ws(src) ?? return None
     sign := 1
-    b :: peek(cur) ?? return None
+    b: peek(cur) ?? return None
     if b == 45 || b == 43 {
         if b == 45 -> sign = -1
-        taken :: take_n(cur, 1) ?? return None
+        taken: take_n(cur, 1) ?? return None
         cur = taken.next
     }
     acc := 0
     saw := false
     loop {
-        d :: digit(cur) ?? break
+        d: digit(cur) ?? break
         saw = true
         acc = acc * 10 + d.n
         cur = d.next
@@ -89,7 +89,7 @@ fn int_dec(src: Input) -> Digit? Never! {
     return Val(Digit{next: cur, n: acc * sign})
 }
 
-fn pred_scalar(kind: String, scalar: String) -> Bool Never! {
+pred_scalar: fn(kind: String, scalar: String) -> Bool Never! {
     if kind == "space" -> return unicode.is_whitespace(scalar)
     if kind == "digit" -> return unicode.is_numeric(scalar)
     if kind == "alpha" -> return unicode.is_alphabetic(scalar)
@@ -97,9 +97,9 @@ fn pred_scalar(kind: String, scalar: String) -> Bool Never! {
     false
 }
 
-fn utf8_width(raw: [U8], at: Int) -> Int {
+utf8_width: fn(raw: [U8], at: Int) -> Int {
     if at < 0 || at >= raw.len() -> return 1
-    b :: raw[at]
+    b: raw[at]
     if b < 128 -> return 1
     if b >= 194 && b <= 223 && at + 1 < raw.len() && raw[at + 1] >= 128 && raw[at + 1] <= 191 -> return 2
     if b >= 224 && b <= 239 && at + 2 < raw.len() && raw[at + 1] >= 128 && raw[at + 1] <= 191 && raw[at + 2] >= 128 && raw[at + 2] <= 191 -> return 3
@@ -107,7 +107,7 @@ fn utf8_width(raw: [U8], at: Int) -> Int {
     1
 }
 
-fn slice_range(raw: [U8], start: Int, end: Int) -> [U8] Never! {
+slice_range: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     out := [U8]{}
     lo := start
     hi := end
@@ -122,4 +122,4 @@ fn slice_range(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     }
 }
 
-fn slice_rest(raw: [U8], start: Int) -> [U8] { slice_range(raw, start, raw.len()) }
+slice_rest: fn(raw: [U8], start: Int) -> [U8] { slice_range(raw, start, raw.len()) }

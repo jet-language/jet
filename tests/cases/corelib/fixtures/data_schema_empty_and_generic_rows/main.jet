@@ -1,35 +1,35 @@
-package {
+package: {
     name: "data_schema_empty_and_generic_rows"
 }
 
-use data :: core.data
+use data: core.data
 
-struct Ticket {
+Ticket: struct {
     team: String
     minutes: Float
 }
 
-struct Empty {
+Empty: struct {
 
 }
 
-struct Box<T> {
+Box: struct<T> {
     value: T
 }
 
-struct Pair<A, B> {
+Pair: struct<A, B> {
     left: A
     right: B
 }
 
-fn show(label: String, cols: [data.DataColumn]) {
+show: fn(label: String, cols: [data.DataColumn]) {
     print("{label}:{cols.len()}")
     loop c in cols {
         print("  {c.name}:{c.type_name}")
     }
 }
 
-fn run() {
+run: fn() {
     show("empty_rows", data.schema([Ticket]{}))
     show("rows", data.schema([Ticket]{Ticket{team: "Core", minutes: 4.0}}))
     show("explicit", data.schema<Ticket>([Ticket]{}))

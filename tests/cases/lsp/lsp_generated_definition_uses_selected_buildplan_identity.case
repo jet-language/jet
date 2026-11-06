@@ -8,7 +8,7 @@ send lsp0: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{
 recv lsp0
 stdout: ~ "definitionProvider" # original predicate
 send lsp0: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
-send lsp0: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"fn build(b: Build) {\\n    b.generate(\\\"right\\\") {\\n        fn generated_value() -> String { \\\"right\\\" }\\n    }\\n    b.generate(\\\"left\\\") {\\n        fn generated_value() -> String { \\\"left\\\" }\\n    }\\n    app :: b.add_executable(\\\"app\\\", [\\\"main.jet\\\", \\\".jet/generated/main/left.jet\\\"], [])\\n    b.default(app)\\n}\\nfn run() {\\n    generated_value()\\n}\\n\"}}}"
+send lsp0: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"build: fn(b: Build) {\\n    b.generate(\\\"right\\\") {\\n        generated_value: fn() -> String { \\\"right\\\" }\\n    }\\n    b.generate(\\\"left\\\") {\\n        generated_value: fn() -> String { \\\"left\\\" }\\n    }\\n    app: b.add_executable(\\\"app\\\", [\\\"main.jet\\\", \\\".jet/generated/main/left.jet\\\"], [])\\n    b.default(app)\\n}\\nrun: fn() {\\n    generated_value()\\n}\\n\"}}}"
 recv lsp0
 stdout: ~ "publishDiagnostics" # original predicate
 send lsp0: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":11,\"character\":10}}}"
@@ -21,7 +21,7 @@ stdout: ~ "\"generator\":\"left\"" # original predicate
 stdout: ~ "\"schema\":null" # original predicate
 stdout: ~ "\"source\":\".jet/generated/main/left.jet\"" # original predicate
 stdout: ~ "\"plugin\":null" # original predicate
-stdout: ~ "\"range\":{\"start\":{\"line\":0,\"character\":3},\"end\":{\"line\":0,\"character\":18}}" # original predicate
+stdout: ~ "\"range\":{\"start\":{\"line\":0,\"character\":0},\"end\":{\"line\":0,\"character\":15}}" # original predicate
 send lsp0: "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{}}"
 recv lsp0
 stdout: ~ "result" # original predicate
@@ -34,7 +34,7 @@ send lsp1: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{
 recv lsp1
 stdout: ~ "definitionProvider" # original predicate
 send lsp1: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
-send lsp1: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"fn build(b: Build) {\\n    b.generate(\\\"left\\\") {\\n        fn generated_value() -> String { \\\"left\\\" }\\n    }\\n    b.generate(\\\"right\\\") {\\n        fn generated_value() -> String { \\\"right\\\" }\\n    }\\n    app :: b.add_executable(\\\"app\\\", [\\\"main.jet\\\", \\\".jet/generated/main/right.jet\\\"], [])\\n    b.default(app)\\n}\\nfn run() {\\n    generated_value()\\n}\\n\"}}}"
+send lsp1: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"build: fn(b: Build) {\\n    b.generate(\\\"left\\\") {\\n        generated_value: fn() -> String { \\\"left\\\" }\\n    }\\n    b.generate(\\\"right\\\") {\\n        generated_value: fn() -> String { \\\"right\\\" }\\n    }\\n    app: b.add_executable(\\\"app\\\", [\\\"main.jet\\\", \\\".jet/generated/main/right.jet\\\"], [])\\n    b.default(app)\\n}\\nrun: fn() {\\n    generated_value()\\n}\\n\"}}}"
 recv lsp1
 stdout: ~ "publishDiagnostics" # original predicate
 send lsp1: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":11,\"character\":10}}}"
@@ -47,7 +47,7 @@ stdout: ~ "\"generator\":\"right\"" # original predicate
 stdout: ~ "\"schema\":null" # original predicate
 stdout: ~ "\"source\":\".jet/generated/main/right.jet\"" # original predicate
 stdout: ~ "\"plugin\":null" # original predicate
-stdout: ~ "\"range\":{\"start\":{\"line\":0,\"character\":3},\"end\":{\"line\":0,\"character\":18}}" # original predicate
+stdout: ~ "\"range\":{\"start\":{\"line\":0,\"character\":0},\"end\":{\"line\":0,\"character\":15}}" # original predicate
 send lsp1: "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{}}"
 recv lsp1
 stdout: ~ "result" # original predicate

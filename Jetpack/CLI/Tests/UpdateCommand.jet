@@ -1,8 +1,8 @@
 // Claims for `jetpack update` scope selection, channel-source discovery, and
 // the failed-build shell guard (Rust jetpack::CLI::update_search_info tests).
 
-fn cli_update_test_scope(args: [String]) -> (deps: Bool, tools: Bool) {
-    scopes :: cli_update_scopes(cli_parse_args_for("update", args))
+cli_update_test_scope: fn(args: [String]) -> (deps: Bool, tools: Bool) {
+    scopes: cli_update_scopes(cli_parse_args_for("update", args))
     (deps: scopes.deps, tools: scopes.tools)
 }
 
@@ -16,10 +16,10 @@ fn cli_update_test_scope(args: [String]) -> (deps: Bool, tools: Bool) {
 }
 
 #Test("cli update sees env sources from every module") {
-    source :: "\nmodule env.dev {{\n    sources: {{ default: NixOS/nixpkgs/nixos-unstable@github }}\n    packages: [default.ripgrep]\n}}\nmodule env.full {{\n    sources: {{ tools: NixOS/nixpkgs/nixpkgs-unstable@github }}\n    packages: [tools.jq]\n}}\n"
-    dir :: files.tmpdir("jetpack-update-sources-") ?? panic("claim scratch dir")
-    plan :: envmodel_evaluate_env(source, dir) ?? panic("evaluate env")
-    sources :: cli_channel_sources(plan.table)
+    source: "\nenv.dev: module {{\n    sources: {{ default: NixOS/nixpkgs/nixos-unstable@github }}\n    packages: [default.ripgrep]\n}}\nenv.full: module {{\n    sources: {{ tools: NixOS/nixpkgs/nixpkgs-unstable@github }}\n    packages: [tools.jq]\n}}\n"
+    dir: files.tmpdir("jetpack-update-sources-") ?? panic("claim scratch dir")
+    plan: envmodel_evaluate_env(source, dir) ?? panic("evaluate env")
+    sources: cli_channel_sources(plan.table)
     names := [String]{}
     channels := [String]{}
     loop channel_source in sources {
@@ -32,10 +32,10 @@ fn cli_update_test_scope(args: [String]) -> (deps: Bool, tools: Bool) {
 }
 
 #Test("cli failed shell rejects a recorded scratch escape") {
-    root :: files.tmpdir("jet-failed-shell-") ?? panic("claim scratch dir")
-    roots :: HangarRoots{root: root, dev_mode: false}
+    root: files.tmpdir("jet-failed-shell-") ?? panic("claim scratch dir")
+    roots: HangarRoots{root: root, dev_mode: false}
     files.create_dir_all(files.join(roots.hangar_dir(), "failed-scratch/pkg-1")) ?? panic("create failed scratch")
-    outside :: files.join(root, "outside")
+    outside: files.join(root, "outside")
     files.create_dir_all(outside) ?? panic("create outside")
     attempt := BuildAttempt.new("pkg", "pkg@1", "fixture", "recipe", "source")
     attempt.id = "pkg-1"

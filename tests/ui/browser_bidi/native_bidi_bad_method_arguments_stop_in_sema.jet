@@ -1,19 +1,19 @@
 
-use browser :: core.web.browser
+use browser: core.web.browser
 
-fn run() {
-    profile :: browser.profile("bidi-2025.5") ?? return
-    timeout :: browser.timeout(500) ?? return
-    session :: browser.connect_profile("ws://127.0.0.1:1", profile, timeout) ?? return
-    context :: session.context() ?? return
-    page :: context.page() ?? return
-    locator :: page.get_by_role("button", "Save")
-    text :: page.get_by_text("Save")
-    label :: page.get_by_label("Name")
-    placeholder :: page.get_by_placeholder("email")
-    test_id :: page.get_by_test_id("save")
-    css :: page.get_by_css("button.save")
-    protocol :: session.protocol("bidi") ?? return
+run: fn() {
+    profile: browser.profile("bidi-2025.5") ?? return
+    timeout: browser.timeout(500) ?? return
+    session: browser.connect_profile("ws://127.0.0.1:1", profile, timeout) ?? return
+    context: session.context() ?? return
+    page: context.page() ?? return
+    locator: page.get_by_role("button", "Save")
+    text: page.get_by_text("Save")
+    label: page.get_by_label("Name")
+    placeholder: page.get_by_placeholder("email")
+    test_id: page.get_by_test_id("save")
+    css: page.get_by_css("button.save")
+    protocol: session.protocol("bidi") ?? return
 
     session.subscribe(1) ?? return
     &session.next_event("soon") ?? return
@@ -24,7 +24,7 @@ fn run() {
     session.fulfill_request(1, "200", 3) ?? return
     session.protocol(1) ?? return
     page.goto(1) ?? return
-    wrong_locator :: page.get_by_role(1, 2)
+    wrong_locator: page.get_by_role(1, 2)
     page.get_by_text(1)
     page.get_by_label(1)
     page.get_by_placeholder(1)
@@ -35,7 +35,7 @@ fn run() {
     locator.fill(1) ?? return
     locator.press(1) ?? return
     protocol.send(1, 2) ?? return
-    event_name :: "log.entryAdded"
+    event_name: "log.entryAdded"
     session.subscribe(^event_name) ?? return
     session.close(1) ?? return
 }

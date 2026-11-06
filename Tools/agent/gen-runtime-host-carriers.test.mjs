@@ -59,7 +59,7 @@ test('regeneration restores the canonical output bytes', () => fixture((tree, ru
 test('generated Jet helpers have one declaration per function', () => fixture((tree, run) => {
   success(run());
   const source = readFileSync(join(tree, outputs[0]), 'utf8');
-  const names = [...source.matchAll(/\bfn\s+([A-Za-z_]\w*)\s*\(/g)].map(match => match[1]);
+  const names = [...source.matchAll(/^([A-Za-z_]\w*): fn\(/gm)].map(match => match[1]);
   assert.equal(new Set(names).size, names.length);
   assert.equal(names.filter(name => name === 'host_arguments_refused').length, 1);
 }));

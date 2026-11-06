@@ -1,29 +1,29 @@
 use core.[net, time]
 
 #CLI
-struct Args {
+Args: struct {
     port: String
 }
 
-fn worker(receiver: Receiver<Int>, sender: Sender<Int>) {
+worker: fn(receiver: Receiver<Int>, sender: Sender<Int>) {
     loop value in receiver {
         time.sleep(1ms)
         sender.send(value * value)
     }
 }
 
-fn run_batch(count: Int, jobs: Sender<Int>, results: Receiver<Int>) -> Int {
+run_batch: fn(count: Int, jobs: Sender<Int>, results: Receiver<Int>) -> Int {
     loop value in 1..count -> jobs.send(value)
     sum := 0
     loop _ in 0..<count -> sum += results.receive() ?? 0
     sum
 }
 
-fn response(command: String, jobs: Sender<Int>, results: Receiver<Int>) -> String {
+response: fn(command: String, jobs: Sender<Int>, results: Receiver<Int>) -> String {
     if command == "ready" -> return "ready"
     if command == "shutdown" -> return "bye"
     if command.starts_with("batch ") {
-        count :: Int.parse(command.after("batch ")) ?? 0
+        count: Int.parse(command.after("batch ")) ?? 0
         if count > 0 && count <= 32 {
             return "batch {count} total {run_batch(count, jobs, results)}"
         }
@@ -31,16 +31,16 @@ fn response(command: String, jobs: Sender<Int>, results: Receiver<Int>) -> Strin
     "error"
 }
 
-fn run(args: Args) {
-    { sender: jobs_sender, receiver: jobs_receiver } :: channel<Int>(capacity: 32)
-    { sender: results_sender, receiver: results_receiver } :: channel<Int>(capacity: 32)
+run: fn(args: Args) {
+    { sender: jobs_sender, receiver: jobs_receiver }: channel<Int>(capacity: 32)
+    { sender: results_sender, receiver: results_receiver }: channel<Int>(capacity: 32)
     task.group _workers(limit: 4) {
-        <: worker1..worker4 :> :: task worker(jobs_receiver.copy(), results_sender.copy())
-        listener :: net.tcp_listen("127.0.0.1:{args.port}")
+        <: worker1..worker4 :>: task worker(jobs_receiver.copy(), results_sender.copy())
+        listener: net.tcp_listen("127.0.0.1:{args.port}")
         loop {
             stream := &listener.accept()
-            command :: "{stream.read_text(1024).trim()}"
-            reply :: response(command, jobs_sender.copy(), results_receiver.copy())
+            command: "{stream.read_text(1024).trim()}"
+            reply: response(command, jobs_sender.copy(), results_receiver.copy())
             stream.write_text("{reply}\n")
             stream.close()
             if command == "shutdown" {

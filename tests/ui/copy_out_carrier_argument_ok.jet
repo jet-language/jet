@@ -1,25 +1,25 @@
 // A carrier built for a read or write argument is a view of the caller's
 // value for the call: it is never dropped, so no copy is made.
-struct Res { name: String }
+Res: struct { name: String }
 impl Res.Close {
-    fn close(^self) { print("close {self.name}") }
+    close: fn(^self) { print("close {self.name}") }
 }
 
-fn peek(r: Res?) -> Int {
+peek: fn(r: Res?) -> Int {
     if r == .Val(inner) -> return inner.name.len()
     0
 }
 
-fn peek_result(r: Res Err!) -> Int {
+peek_result: fn(r: Res Err!) -> Int {
     if r == .Ok(inner) -> return inner.name.len()
     0
 }
 
-fn wrap(env: Res) -> Int {
+wrap: fn(env: Res) -> Int {
     peek(Val(env)) + peek_result(Ok(env))
 }
 
-fn run() {
+run: fn() {
     owned := Res{name: "kept"}
     print(wrap(owned))
 }

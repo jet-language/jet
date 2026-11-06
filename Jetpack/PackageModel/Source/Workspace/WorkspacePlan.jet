@@ -5,25 +5,25 @@
 // definition without depending on each other.
 use {
     jet_foundation.[Diagnostic, diagnostic_from_registry]
-    jetpack_foundation.[MODULE_FIELD_MEMBERS, MODULE_INTERNAL_PREFIX, NS_WORKSPACE, WORKSPACE_FILE]
+    jetpack_foundation.[MODULE_FIELD_MEMBERS, NS_WORKSPACE, WORKSPACE_FILE]
     jet_lexer.[
-        TOKEN_BLOCK_COMMENT, TOKEN_COLON, TOKEN_DOT, TOKEN_IDENT, TOKEN_KW_MODULE, TOKEN_LBRACE, TOKEN_LINE_COMMENT,
-        TOKEN_RBRACE, Token, TokenTables, lex, token_text,
+        TOKEN_BLOCK_COMMENT, TOKEN_COLON, TOKEN_DOT, TOKEN_IDENT, TOKEN_KW_MODULE, TOKEN_LBRACE,
+        TOKEN_LINE_COMMENT, TOKEN_RBRACE, Token, TokenTables, lex, token_text,
     ]
-    files :: core.files
+    files: core.files
 }
 
 // The role of a declaration-resolved workspace source. `workspace.jet` is
 // the index; another top-level declaration establishes an
 // authority boundary but is not a workspace index.
-enum WorkspaceSourceRole {
+WorkspaceSourceRole: enum {
     Index
     Authority
 }
 
 // The one declaration-resolved workspace source every authority lookup
 // uses. Consumers revalidate `checked` before authority-sensitive work.
-struct WorkspaceSource {
+WorkspaceSource: struct {
     path: String
     source: String
     role: WorkspaceSourceRole
@@ -31,7 +31,7 @@ struct WorkspaceSource {
 }
 
 // The result of evaluating a workspace declaration.
-struct WorkspacePlan {
+WorkspacePlan: struct {
     // Member packages in source order (the order `members:` produced them).
     members: [WorkspacePlanMember]
     // Tier-1: content-addressed inputs a `members:` expression
@@ -45,13 +45,13 @@ struct WorkspacePlan {
     // reusable only while the source bytes keep this identity.
     source_digest: String
 
-    fn empty() -> WorkspacePlan Never! {
+    empty: fn() -> WorkspacePlan Never! {
         WorkspacePlan{members: [WorkspacePlanMember]{}, comptime_inputs: [ComptimeInput]{}, overlay_policy: OverlayPolicy.empty(), source_digest: ""}
     }
 }
 
 // One workspace member package (Rust `WorkspacePlan::WorkspaceMember`).
-struct WorkspacePlanMember {
+WorkspacePlanMember: struct {
     // Package name read from the member's `package.jet` (or its path).
     name: String
     // Package directory relative to the workspace root.
@@ -64,15 +64,15 @@ struct WorkspacePlanMember {
 // A workspace source that could not be resolved, as its registered
 // diagnostic.
 #Error
-struct WorkspaceSourceError {
+WorkspaceSourceError: struct {
     diagnostic: Diagnostic
 
-    fn message(self) -> String Never! {
+    message: fn(self) -> String Never! {
         self.diagnostic.what
     }
 }
 
-// Resolve the one top-level `.jet` source that declares `module workspace`.
+// Resolve the one top-level `.jet` source that declares `workspace: module`.
 // The filename and declaration jointly select the role: a declared
 // `workspace.jet` is the strict index; a workspace module in
 // another top-level file is an authority boundary evaluated only for
@@ -81,8 +81,8 @@ struct WorkspaceSourceError {
 // than an absent workspace, so callers never fall through to an outer
 // authority or a stale lock. A missing directory is no workspace.
 // The caller shares `cache` with every other discovery scan in its session.
-fn pkg_resolve_workspace_source(cache: &WorkspaceDeclarationCache, dir: String) -[FS, Env]> WorkspaceSource? WorkspaceSourceError! {
-    resolver :: AuthorityResolver.open(dir) ?? {
+pkg_resolve_workspace_source: fn(cache: &WorkspaceDeclarationCache, dir: String) -[FS, Env]> WorkspaceSource? WorkspaceSourceError! {
+    resolver: AuthorityResolver.open(dir) ?? {
         if err.is_missing() -> return Ok(None)
         return Err(WorkspaceSourceError{diagnostic: err.workspace_diagnostic()})
     }
@@ -94,19 +94,19 @@ fn pkg_resolve_workspace_source(cache: &WorkspaceDeclarationCache, dir: String) 
 
 // E0995: the canonical workspace source is present but has no workspace
 // declaration. Shared so discovery and evaluation cannot drift.
-fn pkg_e0995_no_workspace_module() -> Diagnostic Never! {
+pkg_e0995_no_workspace_module: fn() -> Diagnostic Never! {
     diagnostic_from_registry(
         "E0995",
         None,
-        "`{WORKSPACE_FILE}` must declare `module {NS_WORKSPACE} {{ … }}`",
-        "`{WORKSPACE_FILE}` is the monorepo workspace index; it must contain exactly one `module {NS_WORKSPACE} {{ members: … }}` body",
-        "write `module {NS_WORKSPACE} {{ members: find(\"./packages\") }}` in `{WORKSPACE_FILE}`"
+        "`{WORKSPACE_FILE}` must declare `{NS_WORKSPACE}: module {{ … }}`",
+        "`{WORKSPACE_FILE}` is the monorepo workspace index; it must contain exactly one `{NS_WORKSPACE}: module {{ members: … }}` body",
+        "write `{NS_WORKSPACE}: module {{ members: find(\"./packages\") }}` in `{WORKSPACE_FILE}`"
     )
 }
 
 // What one lex of a workspace candidate source says about its declaration.
-struct WorkspaceDeclarationProbe {
-    // A top-level `module workspace` declaration is present.
+WorkspaceDeclarationProbe: struct {
+    // A top-level `workspace: module` declaration is present.
     declares_module: Bool
     // That declaration's source also names the `members:` index field.
     declares_members: Bool
@@ -115,55 +115,49 @@ struct WorkspaceDeclarationProbe {
 // Root discovery shares this owned cache across its workspace-source probes.
 // Each distinct source is lexed once per discovery session, keyed by its byte
 // length and SHA-256; repeated scans must use the same cache.
-struct WorkspaceDeclarationCache {
+WorkspaceDeclarationCache: struct {
     priv probes: [String: WorkspaceDeclarationProbe]
     // Lexes actually performed by this session, excluding memo hits.
     lexes: Int{0}
 
-    fn new() -> WorkspaceDeclarationCache Never! {
+    new: fn() -> WorkspaceDeclarationCache Never! {
         WorkspaceDeclarationCache{probes: [String: WorkspaceDeclarationProbe]{}}
     }
 }
 
-fn pkg_workspace_declaration_probe(cache: &WorkspaceDeclarationCache, src: String) -> WorkspaceDeclarationProbe Never! {
-    bytes :: src.bytes()
-    key :: "{bytes.len()}:{pkg_sha256_hex(bytes)}"
+pkg_workspace_declaration_probe: fn(cache: &WorkspaceDeclarationCache, src: String) -> WorkspaceDeclarationProbe Never! {
+    bytes: src.bytes()
+    key: "{bytes.len()}:{pkg_sha256_hex(bytes)}"
     if cache.probes.get(key) == .Val(probe) -> return probe
     cache.lexes += 1
-    probe :: pkg_lex_workspace_declaration(bytes)
+    probe: pkg_lex_workspace_declaration(bytes)
     cache.probes[key] = probe
     probe
 }
 
 // Lex `src` once; both declaration facts come from the same comment-free
 // token list.
-fn pkg_lex_workspace_declaration(src: [U8]) -> WorkspaceDeclarationProbe Never! {
-    lexed :: lex(src)
+pkg_lex_workspace_declaration: fn(src: [U8]) -> WorkspaceDeclarationProbe Never! {
+    lexed: lex(src)
     tokens := [Token]{}
     loop token in lexed.tokens {
         if token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT -> next
         &tokens.push(token)
     }
-    declares_module :: pkg_workspace_tokens_declare_module(tokens, lexed.tables)
+    declares_module: pkg_workspace_tokens_declare_module(tokens, lexed.tables)
     WorkspaceDeclarationProbe{declares_module: declares_module, declares_members: declares_module && pkg_workspace_tokens_name_members(tokens, lexed.tables)}
 }
 
-// A top-level `workspace: module` token run (or the retired `module
-// workspace` pair).
-fn pkg_workspace_tokens_declare_module(tokens: [Token], tables: TokenTables) -> Bool Never! {
+// A top-level `workspace: module` head (not after a `.`).
+pkg_workspace_tokens_declare_module: fn(tokens: [Token], tables: TokenTables) -> Bool Never! {
     depth := 0
-    loop index in 0..<(tokens.len() - 1) {
-        kind :: tokens[index].kind
+    loop index in 0..<tokens.len() {
+        kind: tokens[index].kind
         if {
             kind == TOKEN_LBRACE -> depth += 1
             kind == TOKEN_RBRACE -> depth -= 1
-            kind == TOKEN_KW_MODULE && depth == 0 -> {
-                next_token :: tokens[index + 1]
-                name :: token_text(tables, next_token)
-                if next_token.kind == TOKEN_IDENT && name == NS_WORKSPACE && !name.starts_with(MODULE_INTERNAL_PREFIX) -> return true
-            }
-            kind == TOKEN_IDENT && depth == 0 && index + 2 < tokens.len() && tokens[index + 1].kind == TOKEN_COLON && tokens[index + 2].kind == TOKEN_KW_MODULE -> {
-                if token_text(tables, tokens[index]) == NS_WORKSPACE && (index == 0 || tokens[index - 1].kind != TOKEN_DOT) -> return true
+            kind == TOKEN_IDENT && depth == 0 && index + 2 < tokens.len() -> {
+                if tokens[index + 1].kind == TOKEN_COLON && tokens[index + 2].kind == TOKEN_KW_MODULE && token_text(tables, tokens[index]) == NS_WORKSPACE && (index == 0 || tokens[index - 1].kind != TOKEN_DOT) -> return true
             }
             else -> {}
         }
@@ -172,39 +166,39 @@ fn pkg_workspace_tokens_declare_module(tokens: [Token], tables: TokenTables) -> 
 }
 
 // The `members:` field name appears among the tokens.
-fn pkg_workspace_tokens_name_members(tokens: [Token], tables: TokenTables) -> Bool Never! {
+pkg_workspace_tokens_name_members: fn(tokens: [Token], tables: TokenTables) -> Bool Never! {
     loop token in tokens {
         if token.kind == TOKEN_IDENT && token_text(tables, token) == MODULE_FIELD_MEMBERS -> return true
     }
     false
 }
 
-// Cheap token probe for a top-level `module workspace` declaration. Full
+// Cheap token probe for a top-level `workspace: module` declaration. Full
 // parsing stays in the EnvModel workspace evaluator.
-fn pkg_declares_workspace_module(cache: &WorkspaceDeclarationCache, src: String) -> Bool Never! {
+pkg_declares_workspace_module: fn(cache: &WorkspaceDeclarationCache, src: String) -> Bool Never! {
     pkg_workspace_declaration_probe(&cache, src).declares_module
 }
 
 // True when a workspace declaration also supplies a `members:` index field.
 // A top-level `.jet` file that lists members is an index, not
 // authority-only metadata.
-fn pkg_declares_workspace_members(cache: &WorkspaceDeclarationCache, src: String) -> Bool Never! {
+pkg_declares_workspace_members: fn(cache: &WorkspaceDeclarationCache, src: String) -> Bool Never! {
     pkg_workspace_declaration_probe(&cache, src).declares_members
 }
 
 // E1239: the workspace authority must have one declaration source. Each
 // path is shown by its file name.
-fn pkg_e1239_ambiguous_workspace(paths: [String]) -> Diagnostic Never! {
+pkg_e1239_ambiguous_workspace: fn(paths: [String]) -> Diagnostic Never! {
     names := [String]{}
     loop path in paths {
-        name :: files.basename(path)
+        name: files.basename(path)
         &names.push(if name == "" -> path else -> name)
     }
     diagnostic_from_registry(
         "E1239",
         None,
-        "`module workspace` is declared in more than one file: `{names.join("`, `")}`",
-        "the workspace authority is discovered by declaration, so exactly one file may declare `module workspace {{ … }}`",
+        "`workspace: module` is declared in more than one file: `{names.join("`, `")}`",
+        "the workspace authority is discovered by declaration, so exactly one file may declare `workspace: module {{ … }}`",
         "keep one declaration and delete the others"
     )
 }

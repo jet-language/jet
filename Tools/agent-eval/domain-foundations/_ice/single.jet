@@ -1,13 +1,13 @@
-struct Meter {
+Meter: struct {
     priv value: Float
 }
-fn meter(value: Float) -> Meter { Meter{ value: value } }
-fn checked_add(left: Meter, right: Meter) -> Meter Err! {
-    sum :: left.value + right.value
+meter: fn(value: Float) -> Meter { Meter{ value: value } }
+checked_add: fn(left: Meter, right: Meter) -> Meter Err! {
+    sum: left.value + right.value
     if !sum.is_finite() -> return Err("meter sum is not finite")
     return Ok(Meter{ value: sum })
 }
-fn run() {
-    position :: checked_add(meter(1.0), meter(2.0)) ?? panic("sum failed")
+run: fn() {
+    position: checked_add(meter(1.0), meter(2.0)) ?? panic("sum failed")
     print("{position.value}")
 }

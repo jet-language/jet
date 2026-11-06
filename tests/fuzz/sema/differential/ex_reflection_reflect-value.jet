@@ -4,24 +4,24 @@
 // `.type_name()` and `.display()` always work — `.display()` shows exactly
 // what `"{x}"` would; `.fields()` is populated for a struct receiver and
 // empty for anything else (primitives, enums, …).
-use reflect :: core.reflect
+use reflect: core.reflect
 
-struct Point {
+Point: struct {
     x: Int
     y: Int
 
     impl Display {
-        fn display(self) -> String { "({self.x}, {self.y})" }
+        display: fn(self) -> String { "({self.x}, {self.y})" }
     }
 }
 
-fn run() {
-    p :: Point{x: 3, y: 4}
-    v :: reflect.of(p)
+run: fn() {
+    p: Point{x: 3, y: 4}
+    v: reflect.of(p)
     print(v.type_name())
     print(v.display())
     loop f in v.fields() -> print("{f.name()} = {f.value().display()}")
-    n :: reflect.of(42)
+    n: reflect.of(42)
     print(n.type_name())
     print(n.display())
     print(n.fields().len())

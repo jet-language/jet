@@ -22,7 +22,7 @@
 // The shape the runtime's exports were written for. A Core definition of the
 // same name with any other shape is not a record, so a changed Core type is
 // reported at its route instead of being marshaled with stale offsets.
-struct IRRecordSchema {
+IRRecordSchema: struct {
     jet_name: String
     // An enum's variant names in the runtime's order ("" for a struct).
     variants: String
@@ -30,7 +30,7 @@ struct IRRecordSchema {
     fields: String
 }
 
-IR_RECORD_SCHEMAS :: comptime { [IRRecordSchema]{
+IR_RECORD_SCHEMAS: comptime { [IRRecordSchema]{
     {jet_name: "Err", variants: "", fields: "message,code,cause"},
     {jet_name: "IOContext", variants: "", fields: "operation,resource,os_code,cause"},
     {jet_name: "IOError", variants: "InvalidInput,NotFound,PermissionDenied,TimedOut,Cancelled,Closed,Protocol,Other,ResourceLimit,AlreadyExists,Unsupported", fields: ""},
@@ -42,12 +42,12 @@ IR_RECORD_SCHEMAS :: comptime { [IRRecordSchema]{
 
 // A schema entry is `name` or, for a generated row, `name=kind`: the carrier
 // the runtime's export reads or writes for that member.
-fn ir_record_entry_name(entry: String) -> String Never! {
+ir_record_entry_name: fn(entry: String) -> String Never! {
     entry.split("=").to_list()[0]
 }
 
 // The runtime ordinal of the schema variant `name` (its schema position).
-fn ir_record_variant_position(schema: IRRecordSchema, name: String) -> Int? Never! {
+ir_record_variant_position: fn(schema: IRRecordSchema, name: String) -> Int? Never! {
     loop (position, entry) in schema.variants.split(",").to_list() {
         if ir_record_entry_name(entry) == name -> return Val(position)
     }

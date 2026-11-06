@@ -1,17 +1,17 @@
-use ps_matrix_files :: core.files
+use ps_matrix_files: core.files
 
 // Rust: tests/process_sessions.rs:710-763. The original host-column check is
 // implied: every native column must name the expected fixture test, and
 // `other` must be unsupported, whichever host runs the guard.
-fn ps_matrix_expected_test(capability: String) -> String {
+ps_matrix_expected_test: fn(capability: String) -> String {
     if capability.starts_with("terminal-") -> return "native_fixture_terminal_bytes_resize_and_closed_stream"
     return "native_fixture_controls_the_full_tree_on_interrupt_timeout_and_drop"
 }
 
-fn ps_matrix_check() {
-    path :: "tests/fixtures/process_sessions/compatibility.tsv"
-    matrix :: ps_matrix_files.read(path) ?? panic("read process-session compatibility matrix")
-    expected :: [String]{
+ps_matrix_check: fn() {
+    path: "tests/fixtures/process_sessions/compatibility.tsv"
+    matrix: ps_matrix_files.read(path) ?? panic("read process-session compatibility matrix")
+    expected: [String]{
         "terminal-byte-stream",
         "terminal-resize",
         "terminal-input-and-close",
@@ -36,11 +36,11 @@ fn ps_matrix_check() {
     assert(rows.len() == expected.len(), "{path}: {rows.len()} rows; expected {expected.len()}")
     i := 0
     loop row in rows {
-        fields :: row.split("\t").to_list()
+        fields: row.split("\t").to_list()
         assert(fields.len() == 6, "malformed matrix row: {row}")
         assert(fields[0] == expected[i], "{path}: row {i} is {fields[0]}; expected {expected[i]}")
         assert(fields[1] == "session_fixture.jet", "{path}: wrong fixture: {row}")
-        want :: ps_matrix_expected_test(expected[i])
+        want: ps_matrix_expected_test(expected[i])
         assert(fields[2] == want && fields[3] == want && fields[4] == want, "matrix does not describe the fixture evidence: {row}")
         assert(fields[5] == "unsupported", "matrix does not describe the fixture evidence: {row}")
         i += 1

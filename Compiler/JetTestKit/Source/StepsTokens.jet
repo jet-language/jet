@@ -1,32 +1,32 @@
 use {
-    process :: core.process
-    sys :: core.sys
-    files :: core.files
+    process: core.process
+    sys: core.sys
+    files: core.files
 }
 
-fn kit_steps_tool(alternatives: String) -> String? {
+kit_steps_tool: fn(alternatives: String) -> String? {
     loop name in alternatives.split("|") {
         if name == "" -> return None
-        found :: process.which(name)
+        found: process.which(name)
         if found != None -> return found
     }
     None
 }
 
-fn kit_steps_dll_suffix() -> String {
+kit_steps_dll_suffix: fn() -> String {
     if sys.family() == "windows" -> return ".dll"
-    name :: sys.name()
+    name: sys.name()
     if name == "macos" || name == "darwin" -> return ".dylib"
     ".so"
 }
 
-fn kit_steps_exe_suffix() -> String {
+kit_steps_exe_suffix: fn() -> String {
     if sys.family() == "windows" -> return ".exe"
     ""
 }
 
 // The host-dependent file-name suffix tokens: `{sys:dll-suffix}` and `{sys:exe-suffix}`.
-fn kit_steps_sys_expand(text: String) -> String {
+kit_steps_sys_expand: fn(text: String) -> String {
     expanded := text
     if expanded.contains("{{sys:dll-suffix}}") -> expanded = expanded.replace("{{sys:dll-suffix}}", kit_steps_dll_suffix())
     if expanded.contains("{{sys:exe-suffix}}") -> expanded = expanded.replace("{{sys:exe-suffix}}", kit_steps_exe_suffix())
@@ -34,9 +34,9 @@ fn kit_steps_sys_expand(text: String) -> String {
 }
 
 // Exact Layout.rs:709-719 host_triple table. Unknown pairs retain its fallback.
-fn kit_steps_host_triple() -> String {
-    arch :: kit_steps_host_arch()
-    os :: kit_steps_host_name()
+kit_steps_host_triple: fn() -> String {
+    arch: kit_steps_host_arch()
+    os: kit_steps_host_name()
     if arch == "x86_64" || arch == "aarch64" {
         if os == "linux" -> return "{arch}-unknown-linux-gnu"
         if os == "windows" -> return "{arch}-pc-windows-msvc"
@@ -46,12 +46,12 @@ fn kit_steps_host_triple() -> String {
     "{arch}-unknown-{os}"
 }
 
-fn kit_steps_runtime_expand(text: String, context: KitStepCtx, state: KitStepState) -> String? {
+kit_steps_runtime_expand: fn(text: String, context: KitStepCtx, state: KitStepState) -> String? {
     expanded := kit_steps_expand(text, context.env, context.work, context.scratch, state.built)
     // Inner loop bindings shadow outer ones: the newest binding of a name wins.
-    count :: state.bindings.len()
+    count: state.bindings.len()
     loop offset in 0..<count {
-        binding :: state.bindings[count - 1 - offset]
+        binding: state.bindings[count - 1 - offset]
         if binding.value == {
             .Text(value) -> expanded = expanded.replace("{{{binding.name}}}", value)
             else -> {}
@@ -65,7 +65,7 @@ fn kit_steps_runtime_expand(text: String, context: KitStepCtx, state: KitStepSta
     loop reserved in state.free_ports -> expanded = expanded.replace("{{free-port:{reserved.name}}}", "{reserved.port}")
     if expanded.contains("{{free-port:") -> return None
     loop capture in state.captures {
-        token :: "{{cap:{capture.name}}}"
+        token: "{{cap:{capture.name}}}"
         if capture.value == {
             .Text(value) -> expanded = expanded.replace(token, value)
             else -> { if expanded.contains(token) -> return None }
@@ -75,17 +75,17 @@ fn kit_steps_runtime_expand(text: String, context: KitStepCtx, state: KitStepSta
     rest := expanded
     result := ""
     loop {
-        start :: kit_steps_byte_index(rest, "{{tool:") ?? break
-        after :: start + 6
-        end :: kit_steps_byte_index(kit_steps_byte_slice(rest, after, rest.count_bytes()), "}}") ?? return None
-        tool :: kit_steps_tool(kit_steps_byte_slice(rest, after, after + end)) ?? return None
+        start: kit_steps_byte_index(rest, "{{tool:") ?? break
+        after: start + 6
+        end: kit_steps_byte_index(kit_steps_byte_slice(rest, after, rest.count_bytes()), "}}") ?? return None
+        tool: kit_steps_tool(kit_steps_byte_slice(rest, after, after + end)) ?? return None
         result = "{result}{kit_steps_byte_slice(rest, 0, start)}{tool}"
         rest = kit_steps_byte_slice(rest, after + end + 1, rest.count_bytes())
     }
     Val("{result}{rest}")
 }
 
-fn kit_steps_resolve_step(original: KitStep, context: KitStepCtx, state: KitStepState) -> KitStep? {
+kit_steps_resolve_step: fn(original: KitStep, context: KitStepCtx, state: KitStepState) -> KitStep? {
     step := original
     conditional_env := false
     loop variable in original.environment {
@@ -138,7 +138,7 @@ fn kit_steps_resolve_step(original: KitStep, context: KitStepCtx, state: KitStep
 }
 
 // Expands the subject paths of assertions against the captures known so far.
-fn kit_steps_resolve_assertions(original: [KitAssertion], context: KitStepCtx, state: KitStepState) -> [KitAssertion]? {
+kit_steps_resolve_assertions: fn(original: [KitAssertion], context: KitStepCtx, state: KitStepState) -> [KitAssertion]? {
     assertions := original
     loop i in 0..<assertions.len() {
         // NonZ assertion conditions are selected after the command. Leave its
@@ -152,35 +152,35 @@ fn kit_steps_resolve_assertions(original: [KitAssertion], context: KitStepCtx, s
     Val(assertions)
 }
 
-fn kit_steps_replacements(original: [KitReplacement], context: KitStepCtx, state: KitStepState) -> [KitReplacement]? {
+kit_steps_replacements: fn(original: [KitReplacement], context: KitStepCtx, state: KitStepState) -> [KitReplacement]? {
     rules := [KitReplacement]{}
     loop rule in original {
-        from :: if rule.literal_from -> rule.from else -> kit_steps_runtime_expand(rule.from, context, state) ?? return None
+        from: if rule.literal_from -> rule.from else -> kit_steps_runtime_expand(rule.from, context, state) ?? return None
         if from == "" -> return None
         &rules.push(KitReplacement{from: from, to: rule.to, literal_from: rule.literal_from})
     }
     Val(rules)
 }
 
-fn kit_steps_replace(text: String, rules: [KitReplacement], context: KitStepCtx, state: KitStepState, normalized: Bool, source_name: String) -> String {
+kit_steps_replace: fn(text: String, rules: [KitReplacement], context: KitStepCtx, state: KitStepState, normalized: Bool, source_name: String) -> String {
     result := text
     loop rule in rules {
         from := rule.from
-        to :: rule.to
+        to: rule.to
         if normalized && !rule.literal_from -> from = kit_steps_normalize(from, context.env, context.work, context.scratch, context.plan.normalize, state.built, source_name)
         result = result.replace(from, to)
     }
     result
 }
 
-fn kit_steps_free_port_names(text: String) -> [String]? {
+kit_steps_free_port_names: fn(text: String) -> [String]? {
     names := [String]{}
     rest := text
     loop {
-        start :: kit_steps_byte_index(rest, "{{free-port:") ?? break
-        after :: start + 11
-        end :: kit_steps_byte_index(kit_steps_byte_slice(rest, after, rest.count_bytes()), "}}") ?? return None
-        name :: kit_steps_byte_slice(rest, after, after + end)
+        start: kit_steps_byte_index(rest, "{{free-port:") ?? break
+        after: start + 11
+        end: kit_steps_byte_index(kit_steps_byte_slice(rest, after, rest.count_bytes()), "}}") ?? return None
+        name: kit_steps_byte_slice(rest, after, after + end)
         if name == "" || name.contains(" ") || name.contains("{{") || name.contains(":") -> return None
         &names.push(name)
         rest = kit_steps_byte_slice(rest, after + end + 1, rest.count_bytes())
@@ -190,13 +190,13 @@ fn kit_steps_free_port_names(text: String) -> [String]? {
 
 // Every free-port name the case uses: the ones its lines name, then the ones in the template files its
 // `write` and `send` steps expand, which the parser never reads.
-fn kit_steps_case_port_names(context: KitStepCtx) -> [String] {
+kit_steps_case_port_names: fn(context: KitStepCtx) -> [String] {
     names := context.plan.free_ports
     loop step in context.plan.steps {
         if step.literal_input -> next
-        template :: if step.action == "write" && step.argv.len() == 3 -> step.argv[2] else if step.action == "send" && step.argv.len() == 1 -> step.argv[0] else -> ""
+        template: if step.action == "write" && step.argv.len() == 3 -> step.argv[2] else if step.action == "send" && step.argv.len() == 1 -> step.argv[0] else -> ""
         if template == "" -> next
-        text :: files.read(kit_steps_snapshot_path(context.snapshots, context.plan.fixture, template)) ?? next
+        text: files.read(kit_steps_snapshot_path(context.snapshots, context.plan.fixture, template)) ?? next
         loop name in (kit_steps_free_port_names(text) ?? []) {
             if !kit_expect_named(names, name) -> &names.push(name)
         }
@@ -207,16 +207,16 @@ fn kit_steps_case_port_names(context: KitStepCtx) -> [String] {
 // One probe run reserves every port a case names: the probe holds all its listeners until it has printed
 // them, so the ports are distinct. The probe is built in the case's own scratch, never in the shared tree,
 // so parallel cases do not race on one build output.
-fn kit_steps_free_ports(context: KitStepCtx, count: Int) -> [Int] Err! {
-    directory :: files.join(context.scratch, "free-port")
+kit_steps_free_ports: fn(context: KitStepCtx, count: Int) -> [Int] Err! {
+    directory: files.join(context.scratch, "free-port")
     files.create_dir_all(directory) ?? return Err("free-port probe directory: {err}")
-    probe :: files.join(directory, "free_port.jet")
+    probe: files.join(directory, "free_port.jet")
     files.copy(files.join(context.env.root, "Tools/testkit/probes/free_port.jet"), probe) ?? return Err("free-port probe copy: {err}")
-    result :: kit_exec_invoke(context.env, [context.env.jet, "run", probe, "--", "{count}"], directory, context.scratch, "") ?? return Err("free-port probe: {err}")
+    result: kit_exec_invoke(context.env, [context.env.jet, "run", probe, "--", "{count}"], directory, context.scratch, "") ?? return Err("free-port probe: {err}")
     if result.code != 0 || kit_exec_process_failure(result) != None -> return Err("free-port probe failed (exit {result.code}): {result.error} {result.stderr}")
     ports := [Int]{}
     loop line in result.stdout.trim().split("\n") {
-        port :: Int.parse(line.copy()) ?? return Err("free-port probe printed a line that is not a port")
+        port: Int.parse(line.copy()) ?? return Err("free-port probe printed a line that is not a port")
         if port < 1 || port > 65535 -> return Err("free-port probe returned an invalid port")
         &ports.push(port)
     }

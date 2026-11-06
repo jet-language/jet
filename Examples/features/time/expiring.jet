@@ -1,10 +1,10 @@
 // core.time.expiring expired and remaining_ms are Core source: a deadline is
 // still valid at its own tick, expires on the next one, and the remaining time
 // clamps at zero and saturates at Int's maximum.
-use expiring :: core.time.expiring
+use expiring: core.time.expiring
 
-fn run() {
-    ticks :: [Int]{999, 1000, 1001}
+run: fn() {
+    ticks: [Int]{999, 1000, 1001}
     loop now in ticks -> print("deadline 1000 at {now}: expired={expiring.expired(1000, now)} remaining_ms={expiring.remaining_ms(1000, now)}")
     print("saturated: {expiring.remaining_ms(9223372036854775807, -5)}")
     print("negative ttl: expired={expiring.expired(-1, 0)} remaining_ms={expiring.remaining_ms(-1, 0)}")

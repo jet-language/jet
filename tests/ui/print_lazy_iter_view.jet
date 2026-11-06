@@ -1,32 +1,32 @@
 // One-pass sources cannot be shown because that would consume them.
-use http :: core.http
+use http: core.http
 
-struct Box<T> {
+Box: struct<T> {
     value: T
 }
 
-fn count() -> Stream<Int> {
+count: fn() -> Stream<Int> {
     yield 1
 }
 
-fn run() {
-    nums :: [1, 2, 3]
-    doubled :: nums.map((n: Int) -> (n * 2))
+run: fn() {
+    nums: [1, 2, 3]
+    doubled: nums.map((n: Int) -> (n * 2))
     print(doubled)
-    other :: nums.filter((n: Int) -> (n > 1))
+    other: nums.filter((n: Int) -> (n > 1))
     print("view: {other}")
 
-    chunks :: http.Body.empty().chunks()
+    chunks: http.Body.empty().chunks()
     print(chunks)
     print("chunks: {chunks}")
 
-    stream :: count()
+    stream: count()
     print(stream)
     print("stream: {stream}")
 
     // Containers and unrelated generic applications remain printable.
     print([1, 2, 3])
     print(Box<Int>{value: 1})
-    lazy_nums :: nums.lazy()
+    lazy_nums: nums.lazy()
     print(lazy_nums)
 }

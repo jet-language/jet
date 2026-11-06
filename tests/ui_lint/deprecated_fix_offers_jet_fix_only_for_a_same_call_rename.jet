@@ -1,25 +1,25 @@
 // L2001 offers `jet fix` only where a rename applies: `total` takes the same
 // call as `add`, but `scaled` needs another argument and `stats.mean` isn't in
 // scope, so `double` and `average` are edited by hand.
-fn total(a: Int, b: Int) -> Int {
+total: fn(a: Int, b: Int) -> Int {
     a + b
 }
 
 #Deprecated(since: "1.2", use: "total")
-fn add(a: Int, b: Int) -> Int {
+add: fn(a: Int, b: Int) -> Int {
     total(a, b)
 }
 
-fn scaled(a: Int, by: Int) -> Int {
+scaled: fn(a: Int, by: Int) -> Int {
     a * by
 }
 
 #Deprecated(since: "1.2", use: "scaled")
-fn double(a: Int) -> Int {
+double: fn(a: Int) -> Int {
     scaled(a, 2)
 }
 
-fn run() {
+run: fn() {
     print(add(1, 2))
     print(double(4))
     print(average(2, 4))
@@ -27,6 +27,6 @@ fn run() {
 
 // `stats.mean` isn't in scope here, so renaming a call to `mean` can't work.
 #Deprecated(since: "1.2", use: "stats.mean")
-fn average(a: Int, b: Int) -> Int {
+average: fn(a: Int, b: Int) -> Int {
     a + b
 }

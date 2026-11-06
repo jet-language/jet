@@ -1,20 +1,20 @@
 use core.[files, time]
 
 #CLI
-struct Args {
+Args: struct {
     input: String
 }
 
-fn parse_millis(stamp: String) -> Int {
+parse_millis: fn(stamp: String) -> Int {
     (time.parse_rfc3339(stamp) ?? panic("bad timestamp")).to_unix_ms()
 }
 
-fn bump(counts: &[String:Int], key: String) {
+bump: fn(counts: &[String:Int], key: String) {
     counts[key] = (counts.get(key) ?? 0) + 1
 }
 
-fn run(args: Args) IOError! {
-    input :: files.open(args.input.copy())
+run: fn(args: Args) IOError! {
+    input: files.open(args.input.copy())
     level_counts := [String:Int]{}
     error_components := [String:Int]{}
     first := ""
@@ -22,14 +22,14 @@ fn run(args: Args) IOError! {
     first_ms := 0
     last_ms := 0
     loop line in input.lines() {
-        first_fields :: line.split_once(" ") ?? panic("bad line")
-        rest :: first_fields.after
-        second_fields :: rest.split_once(" ") ?? panic("bad line")
-        third_fields :: second_fields.after.split_once(" ") ?? panic("bad line")
-        stamp :: first_fields.before
-        level :: second_fields.before
-        component :: third_fields.before
-        millis :: parse_millis(stamp)
+        first_fields: line.split_once(" ") ?? panic("bad line")
+        rest: first_fields.after
+        second_fields: rest.split_once(" ") ?? panic("bad line")
+        third_fields: second_fields.after.split_once(" ") ?? panic("bad line")
+        stamp: first_fields.before
+        level: second_fields.before
+        component: third_fields.before
+        millis: parse_millis(stamp)
         if first == "" {
             first = stamp.copy()
             first_ms = millis

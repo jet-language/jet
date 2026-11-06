@@ -1,22 +1,22 @@
 
-struct FunctionNotAllowed {
+FunctionNotAllowed: struct {
     impl Diagnostic {
-        code :: "E0927"
-        fn what(self) -> String { "the function is not allowed" }
-        fn why(self) -> String { "the test rule rejects this declaration" }
-        fn fix(self) -> String { "remove the marker" }
+        code: "E0927"
+        what: fn(self) -> String { "the function is not allowed" }
+        why: fn(self) -> String { "the test rule rejects this declaration" }
+        fix: fn(self) -> String { "remove the marker" }
     }
 }
 
-struct RejectsFunction {
+RejectsFunction: struct {
     impl Marker {
-        sites :: [.Function]
+        sites: [.Function]
 
-        fn expand(self, target: Target) {
+        expand: fn(self, target: Target) {
             reject(FunctionNotAllowed{})
         }
     }
 }
 
 #RejectsFunction
-fn run() {}
+run: fn() {}

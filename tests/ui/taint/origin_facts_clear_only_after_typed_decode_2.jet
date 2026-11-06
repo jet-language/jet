@@ -1,16 +1,16 @@
 
 use {
-    files :: core.files
-    json :: core.encoding.json
+    files: core.files
+    json: core.encoding.json
 }
 
 #Codable
-struct Config {
+Config: struct {
     name: String
 }
 
-fn run() {
-    raw :: files.read("config.json") ?? return Err("test")
-    config :: json.decode<Config>(raw) ?? return Err("test")
+run: fn() {
+    raw: files.read("config.json") ?? return Err("test")
+    config: json.decode<Config>(raw) ?? return Err("test")
     SQL.raw(config.name)
 }

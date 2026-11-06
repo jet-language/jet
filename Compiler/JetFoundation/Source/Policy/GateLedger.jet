@@ -1,6 +1,6 @@
 // Canonical authority-gate read model.
 
-enum GateKind {
+GateKind: enum {
     Unsafe
     Impure
     DependencyGrant
@@ -23,7 +23,7 @@ enum GateKind {
     LinkOverride
 }
 
-fn gate_kind_policy_key(kind: GateKind) -> PolicyKey Never! {
+gate_kind_policy_key: fn(kind: GateKind) -> PolicyKey Never! {
     if kind == {
         .Unsafe -> PolicyKey.Unsafe
         .Impure -> PolicyKey.Impure
@@ -44,11 +44,11 @@ fn gate_kind_policy_key(kind: GateKind) -> PolicyKey Never! {
     }
 }
 
-fn gate_kind_name(kind: GateKind) -> String Never! {
+gate_kind_name: fn(kind: GateKind) -> String Never! {
     policy_key_name(gate_kind_policy_key(kind))
 }
 
-fn gate_kind_parse(value: String) -> GateKind? Never! {
+gate_kind_parse: fn(value: String) -> GateKind? Never! {
     if value.trim().to_ascii_lower() == {
         "unsafe" | "unsafe_region" | "unsafe_fn" -> Val(GateKind.Unsafe)
         "impure" -> Val(GateKind.Impure)
@@ -70,14 +70,14 @@ fn gate_kind_parse(value: String) -> GateKind? Never! {
     }
 }
 
-fn gate_kind_is_security(kind: GateKind) -> Bool Never! {
+gate_kind_is_security: fn(kind: GateKind) -> Bool Never! {
     if kind == {
         .Unsafe | .Impure | .DependencyGrant | .BuildFlag | .SessionFlag | .TrustGrant | .ForcePin | .Nondeterministic | .CheckRemoval | .LinkOverride -> true
         else -> false
     }
 }
 
-fn gate_kind_order(kind: GateKind) -> Int Never! {
+gate_kind_order: fn(kind: GateKind) -> Int Never! {
     if kind == {
         .Unsafe -> 0
         .CheckRemoval -> 1
@@ -98,7 +98,7 @@ fn gate_kind_order(kind: GateKind) -> Int Never! {
     }
 }
 
-struct GateOperation {
+GateOperation: struct {
     kind: String
     span: Span
     required: [String]
@@ -106,7 +106,7 @@ struct GateOperation {
     discharged: Bool
 }
 
-struct GateEntry {
+GateEntry: struct {
     kind: GateKind
     domain: String
     scope: String
@@ -120,17 +120,17 @@ struct GateEntry {
     operations: [GateOperation]
 }
 
-struct GateDiagnostic {
+GateDiagnostic: struct {
     source: String
     diagnostic: Diagnostic
 }
 
-struct GateLedger {
+GateLedger: struct {
     rows: [GateEntry]{[GateEntry]{}}
     diagnostic_rows: [GateDiagnostic]{[GateDiagnostic]{}}
 }
 
-fn gate_same_fact(left: GateEntry, right: GateEntry) -> Bool Never! {
+gate_same_fact: fn(left: GateEntry, right: GateEntry) -> Bool Never! {
     if left.kind != right.kind || left.domain != right.domain || left.scope != right.scope || left.subject != right.subject || left.detail != right.detail {
         return false
     }
@@ -138,7 +138,7 @@ fn gate_same_fact(left: GateEntry, right: GateEntry) -> Bool Never! {
     left.span != None && left.span == right.span && left.source == right.source
 }
 
-fn gate_ledger_push(ledger: &GateLedger, entry: ^GateEntry) Never! {
+gate_ledger_push: fn(ledger: &GateLedger, entry: ^GateEntry) Never! {
     written := entry
     if written.provenance.len() == 0 -> &written.provenance.push(written.source)
     loop index in 0..<ledger.rows.len() {
@@ -157,29 +157,29 @@ fn gate_ledger_push(ledger: &GateLedger, entry: ^GateEntry) Never! {
     &ledger.rows.push(^written)
 }
 
-fn gate_entry_compare(left: GateEntry, right: GateEntry) -> Ordering Never! {
-    order :: gate_kind_order(left.kind) <=> gate_kind_order(right.kind)
+gate_entry_compare: fn(left: GateEntry, right: GateEntry) -> Ordering Never! {
+    order: gate_kind_order(left.kind) <=> gate_kind_order(right.kind)
     if order != Ordering.Equal -> return order
-    source :: left.source <=> right.source
+    source: left.source <=> right.source
     if source != Ordering.Equal -> return source
     if left.span == .None && right.span != None -> return Ordering.Greater
     if left.span != None && right.span == .None -> return Ordering.Less
     if left.span == .Val(a) && right.span == .Val(b) {
-        start :: a.start <=> b.start
+        start: a.start <=> b.start
         if start != Ordering.Equal -> return start
-        end :: a.end <=> b.end
+        end: a.end <=> b.end
         if end != Ordering.Equal -> return end
     }
-    subject :: left.subject <=> right.subject
+    subject: left.subject <=> right.subject
     if subject != Ordering.Equal -> return subject
     left.detail <=> right.detail
 }
 
-fn gate_ledger_sort(ledger: &GateLedger) Never! {
+gate_ledger_sort: fn(ledger: &GateLedger) Never! {
     ledger.rows = loop fresh_item in ledger.rows -> fresh_item
     &ledger.rows.sort_by((left: GateEntry, right: GateEntry) -> gate_entry_compare(left, right))
 }
 
-fn gate_source_entry(kind: GateKind, domain: String, scope: String, source: String, span: Span, subject: String, reason: String?, detail: String, status: String) -> GateEntry Never! {
+gate_source_entry: fn(kind: GateKind, domain: String, scope: String, source: String, span: Span, subject: String, reason: String?, detail: String, status: String) -> GateEntry Never! {
     GateEntry{kind: kind, domain: domain, scope: scope, source: source, span: Val(span), subject: subject, reason: reason, status: Val(status), detail: detail, provenance: ["{source}:{span.start}..{span.end}"], operations: []}
 }

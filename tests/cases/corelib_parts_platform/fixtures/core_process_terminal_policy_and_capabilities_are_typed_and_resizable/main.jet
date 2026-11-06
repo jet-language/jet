@@ -1,18 +1,18 @@
-package {
+package: {
     name: "terminal_policy"
     version: "0.1.0"
     authority: { allow: [Exec, IO, Time.Wait] }
 }
 
-use process :: core.process
+use process: core.process
 
-fn run() -[Exec, IO, Time.Wait]> {
-    policy :: TerminalPolicy{
+run: fn() -[Exec, IO, Time.Wait]> {
+    policy: TerminalPolicy{
         size: TerminalSize{ cols: 120, rows: 40 },
         mode: .Raw
     }
-    plan :: process.cmd(["echo", "hi"]).terminal(policy)
-    facts :: plan.abilities()
+    plan: process.cmd(["echo", "hi"]).terminal(policy)
+    facts: plan.abilities()
     print(facts.has(TerminalFact.terminal))
     print(facts.has(TerminalFact.resize))
     print(facts.has(TerminalFact.raw))
@@ -21,7 +21,7 @@ fn run() -[Exec, IO, Time.Wait]> {
         .Ok(_) -> { print("terminal:ok") }
         .Err(_) -> { print("terminal:unavailable") }
     }
-    child :: process.cmd(["echo", "plain"]).stdout(.Capture).spawn() ?? panic("spawn failed")
+    child: process.cmd(["echo", "plain"]).stdout(.Capture).spawn() ?? panic("spawn failed")
     if child.terminal == {
         .Val(session) -> {
             session.resize(TerminalSize{ cols: 80, rows: 24 }) ?? panic("resize failed")
@@ -29,6 +29,6 @@ fn run() -[Exec, IO, Time.Wait]> {
         }
         .None -> { print("plain child has no terminal") }
     }
-    waited :: child.wait() ?? panic("wait failed")
+    waited: child.wait() ?? panic("wait failed")
     print(waited.output.trim())
 }

@@ -1,14 +1,14 @@
 
 use {
-    encoding :: core.encoding
-    json :: core.encoding.json
-    files :: core.files
+    encoding: core.encoding
+    json: core.encoding.json
+    files: core.files
 }
 
-fn run() {
+run: fn() {
     limits := encoding.EncodingLimits.safe()
     limits.max_item_bytes = 1
-    output :: files.create("{work}/partial.json") ?? panic("create")
+    output: files.create("{work}/partial.json") ?? panic("create")
     writer := json.writer(^output, limits) ?? panic("writer")
     &writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
     if &writer.write(encoding.DataEvent.Text("ab")) == {

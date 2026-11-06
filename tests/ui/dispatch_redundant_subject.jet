@@ -1,12 +1,12 @@
 // E0994 (D-IF3): the `==` on the `if` already matches each arm head against
 // the subject, so repeating `subject ==` on an arm is redundant. The redundant
 // prefix is this fixtures subject and must stay.
-enum Conn {
+Conn: enum {
     Active(Int)
     Closed
 }
 
-fn describe(c: Conn) -> String {
+describe: fn(c: Conn) -> String {
     if c == {
         c == .Active(id) -> { return "live:{id}" }
         .Closed -> { return "closed" }
@@ -14,4 +14,4 @@ fn describe(c: Conn) -> String {
     return "unknown"
 }
 
-fn run() { print(describe(Conn.Active(7))) }
+run: fn() { print(describe(Conn.Active(7))) }

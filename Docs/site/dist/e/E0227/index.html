@@ -36,32 +36,23 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Call the function directly with the mark, or pass a lambda that makes that call.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0227</code>: <code>tests/ui/marked_function_value.stderr</code>.</p>
-<pre class="diag">Error [jet.MarkedFunctionValue]: `bump` can&#39;t be used as a function value because its parameter `x` is `&amp;`
-  --&gt; tests/ui/marked_function_value.jet:25:28
+<p>First UI snapshot mentioning <code>E0227</code>: <code>tests/ui/function_value_access_cannot_erase.stderr</code>.</p>
+<pre class="diag">Error [jet.MarkedFunctionValue]: `edit` can&#39;t be used as a function value because its parameter `value` is `&amp;`
+  --&gt; tests/ui/function_value_access_cannot_erase.jet:10:20
     |
- 25 |     hooks :: Hooks{on_int: bump, on_text: consume}
-    |                            ^^^^
- Why: A function type gives each parameter plain read access, so a value of `bump` would drop the `&amp;` its callers must write
- Fix: Call `bump` directly with the `&amp;` mark, or pass a lambda that makes that call
+ 10 |     edit_callback: edit
+    |                    ^^^^
+ Why: A function type gives each parameter plain read access, so a value of `edit` would drop the `&amp;` its callers must write
+ Fix: Call `edit` directly with the `&amp;` mark, or pass a lambda that makes that call
 More: jet-lang.dev/e/E0227
 
-Error [jet.MarkedFunctionValue]: `consume` can&#39;t be used as a function value because its parameter `s` is `^`
-  --&gt; tests/ui/marked_function_value.jet:25:43
+Error [jet.MarkedFunctionValue]: `consume` can&#39;t be used as a function value because its parameter `value` is `^`
+  --&gt; tests/ui/function_value_access_cannot_erase.jet:11:23
     |
- 25 |     hooks :: Hooks{on_int: bump, on_text: consume}
-    |                                           ^^^^^^^
+ 11 |     consume_callback: consume
+    |                       ^^^^^^^
  Why: A function type gives each parameter plain read access, so a value of `consume` would drop the `^` its callers must write
  Fix: Call `consume` directly with the `^` mark, or pass a lambda that makes that call
-More: jet-lang.dev/e/E0227
-
-Error [jet.MarkedFunctionValue]: `bump` can&#39;t be used as a function value because its parameter `x` is `&amp;`
-  --&gt; tests/ui/marked_function_value.jet:26:15
-    |
- 26 |     call_with(bump)
-    |               ^^^^
- Why: A function type gives each parameter plain read access, so a value of `bump` would drop the `&amp;` its callers must write
- Fix: Call `bump` directly with the `&amp;` mark, or pass a lambda that makes that call
 More: jet-lang.dev/e/E0227
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

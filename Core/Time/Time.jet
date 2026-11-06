@@ -1,4 +1,4 @@
-package {
+package: {
     name: "core.time"
     version: "0.0.1"
     edition: "2026"
@@ -8,7 +8,7 @@ package {
         time: .Library{ entry: time }
     }
 }
-use core :: core
+use core: core
 
 
 // Civil calendars, validation, codecs, wall-clock policy, and monotonic points
@@ -17,39 +17,39 @@ use core :: core
 // `t + 5min` remains an Instant and `b - a` remains a Duration.
 
 /// A running stopwatch started at a host monotonic nanosecond sample.
-struct Stopwatch {
+Stopwatch: struct {
     start_ns: Int
 }
 
 impl Stopwatch {
     /// Whole milliseconds since `start()`.
-    fn elapsed_millis(self) -[Time]> Int Never! { duration_as_ms(elapsed(self)) }
+    elapsed_millis: fn(self) -[Time]> Int Never! { duration_as_ms(elapsed(self)) }
 }
 
 /// The offset of `zone` from UTC in seconds at the Unix epoch. Numeric and UTC
 /// zones have exactly one offset.
-fn utcoffset(zone: Zone) -> Int Never! {
+utcoffset: fn(zone: Zone) -> Int Never! {
     zoned(from_unix_seconds(0), zone).offset_seconds()
 }
 
-fn gmtime(seconds: Int) -> DateTime Never! { from_unix_seconds(seconds) }
+gmtime: fn(seconds: Int) -> DateTime Never! { from_unix_seconds(seconds) }
 
-fn ctime(seconds: Int) -> String Never! { asctime(gmtime(seconds)) }
+ctime: fn(seconds: Int) -> String Never! { asctime(gmtime(seconds)) }
 
-fn asctime(dt: DateTime) -> String Never! {
-    days :: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
-    months :: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-    date :: dt.date()
+asctime: fn(dt: DateTime) -> String Never! {
+    days: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+    months: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    date: dt.date()
     "{days[date.weekday()]} {months[date.month() - 1]} {pad2(date.day(), 2)} {pad2(dt.hour(), 2)}:{pad2(dt.minute(), 2)}:{pad2(dt.second(), 2)} {date.year()}"
 }
 
-fn start() -[Time]> Stopwatch Never! {
+start: fn() -[Time]> Stopwatch Never! {
     core.time.__reject_uncontrolled("clock")
     Stopwatch{start_ns: core.time.__host_monotonic_ns()}
 }
 
 // D-AUTH-AMBIENT2: waiting is the `Time.Wait` leaf, so sleeping needs no clock grant.
-fn sleep(duration: Duration) Never! -[Time.Wait]> {
+sleep: fn(duration: Duration) Never! -[Time.Wait]> {
     // Even a zero or negative delay is a deadline/cancellation wait boundary.
     // The shared scheduler clamps the delay and owns pre/post wait checks.
     core.time.__sleep_ns(duration.ns)
@@ -57,7 +57,7 @@ fn sleep(duration: Duration) Never! -[Time.Wait]> {
 
 /// Wall-clock time as Unix nanoseconds. `time.instant()` is the monotonic
 /// point for measuring; this is the timestamp for stamps, nonces, and expiry.
-fn unix_ns() -[Time]> Int Never! {
+unix_ns: fn() -[Time]> Int Never! {
     now_utc().to_unix_ns() ?? panic("the wall clock is outside the Unix nanosecond range")
 }
 
@@ -66,82 +66,82 @@ fn unix_ns() -[Time]> Int Never! {
 // deliberately retain the shared state so a caller's later tick remains live.
 // System clocks use the raw host monotonic epoch, not world/replay selection;
 // their labeled state keeps the elapsed sample and millisecond offset distinct.
-enum __ClockState {
+__ClockState: enum {
     Manual(Int)
     System(started_ns: Int, offset_ms: Int)
 }
-struct Clock { state: Shared<__ClockState> }
-struct __ClockObserver { state: Shared<__ClockState> }
+Clock: struct { state: Shared<__ClockState> }
+__ClockObserver: struct { state: Shared<__ClockState> }
 
-fn clock_state_now(state: __ClockState) -> Int Never! {
+clock_state_now: fn(state: __ClockState) -> Int Never! {
     if state == {
         .Manual(value) -> value
         .System(started_ns, offset_ms) -> {
-            elapsed_ns :: core.time.__clock_mono_ns() - started_ns
-            elapsed_ms :: civil_clamp(elapsed_ns /% 1000000, 0, time_int_max())
+            elapsed_ns: core.time.__clock_mono_ns() - started_ns
+            elapsed_ms: civil_clamp(elapsed_ns /% 1000000, 0, time_int_max())
             saturating_add_ns(offset_ms, elapsed_ms)
         }
     }
 }
 
 impl Clock {
-    fn new(seed: Int) -> Clock Never! {
+    new: fn(seed: Int) -> Clock Never! {
         Clock{state: shared __ClockState.Manual(seed)}
     }
-    fn system() -[Time]> Clock Never! {
+    system: fn() -[Time]> Clock Never! {
         Clock{state: shared __ClockState.System{started_ns: core.time.__clock_mono_ns(), offset_ms: 0}}
     }
-    fn now(self) -> Int Never! {
-        guard :: self.state.guard_read()
+    now: fn(self) -> Int Never! {
+        guard: self.state.guard_read()
         clock_state_now(guard.value)
     }
-    fn set(&self, value: Int) Never! {
+    set: fn(&self, value: Int) Never! {
         guard := self.state.guard_edit()
         if guard.value == {
             .Manual(_) -> guard.value = __ClockState.Manual(value)
             .System(_, _) -> {
-                current :: clock_state_now(guard.value)
-                started :: core.time.__clock_mono_ns()
-                offset :: if value > current -> value else -> current
+                current: clock_state_now(guard.value)
+                started: core.time.__clock_mono_ns()
+                offset: if value > current -> value else -> current
                 guard.value = __ClockState.System{started_ns: started, offset_ms: offset}
             }
         }
     }
-    fn tick(&self, millis: Int) -> Int Never! {
-        next :: saturating_add_ns(self.now(), millis)
+    tick: fn(&self, millis: Int) -> Int Never! {
+        next: saturating_add_ns(self.now(), millis)
         &self.set(next)
         self.now()
     }
-    fn advance(&self, to_ms: Int) -> Int Never! {
+    advance: fn(&self, to_ms: Int) -> Int Never! {
         &self.set(to_ms)
         self.now()
     }
-    fn wait(&self, duration: Duration) -> Int Never! {
-        next :: saturating_add_ns(self.now(), duration.ns /% 1000000)
+    wait: fn(&self, duration: Duration) -> Int Never! {
+        next: saturating_add_ns(self.now(), duration.ns /% 1000000)
         &self.set(next)
         self.now()
     }
-    fn __observer(self) -> __ClockObserver Never! {
+    __observer: fn(self) -> __ClockObserver Never! {
         __ClockObserver{state: self.state.copy()}
     }
     // Borrow, do not semantically copy, the input to its own copy route.
     // System rebase order is fresh start then original-state snapshot.
-    fn __fork(self) -> Clock Never! {
-        guard :: self.state.guard_read()
+    __fork: fn(self) -> Clock Never! {
+        guard: self.state.guard_read()
         if guard.value == {
             .Manual(now) -> Clock.new(now)
             .System(_, _) -> {
-                started :: core.time.__clock_mono_ns()
-                offset :: clock_state_now(guard.value)
+                started: core.time.__clock_mono_ns()
+                offset: clock_state_now(guard.value)
                 Clock{state: shared __ClockState.System{started_ns: started, offset_ms: offset}}
             }
         }
     }
-    fn __show(self) -> String Never! { "Clock {{ now: {self.now()} }}" }
+    __show: fn(self) -> String Never! { "Clock {{ now: {self.now()} }}" }
 }
 impl __ClockObserver {
-    fn now(self) -> Int Never! {
-        guard :: self.state.guard_read()
+    now: fn(self) -> Int Never! {
+        guard: self.state.guard_read()
         clock_state_now(guard.value)
     }
 }
@@ -150,35 +150,35 @@ impl __ClockObserver {
 // Main's owner-approved private-field correction keeps deadline mutation out
 // of the public API; payload access always checks the strict expiry boundary.
 #!Debug
-struct ExpiringValue<T> {
+ExpiringValue: struct<T> {
     value: T
     deadline_ms: Int
 }
 
 impl ExpiringValue {
-    fn new<T>(value: T, ttl: Duration, clock: Clock) -> ExpiringValue<T> Never! {
+    new: fn<T>(value: T, ttl: Duration, clock: Clock) -> ExpiringValue<T> Never! {
         ExpiringValue<T>{value: value, deadline_ms: __expiry_deadline(clock.now(), ttl)}
     }
 
-    fn get(self, clock: Clock) -> T Expired! {
+    get: fn(self, clock: Clock) -> T Expired! {
         if clock.now() > self.deadline_ms -> return Err(Expired{})
         Ok(self.value.copy())
     }
 
-    fn is_valid(self, clock: Clock) -> Bool Never! { clock.now() <= self.deadline_ms }
+    is_valid: fn(self, clock: Clock) -> Bool Never! { clock.now() <= self.deadline_ms }
 
-    fn expires_at_ms(self) -> Int Never! { self.deadline_ms }
-    fn __show(self) -> String Never! { "Expiring(deadline={self.deadline_ms})" }
+    expires_at_ms: fn(self) -> Int Never! { self.deadline_ms }
+    __show: fn(self) -> String Never! { "Expiring(deadline={self.deadline_ms})" }
 }
 
 // The two expiry wrappers share the same saturating millisecond policy.
-fn __expiry_deadline(now_ms: Int, ttl: Duration) -> Int Never! {
+__expiry_deadline: fn(now_ms: Int, ttl: Duration) -> Int Never! {
     saturating_add_ns(now_ms, ttl.ns /% 1000000)
 }
 
 #Test("ExpiringValue observes original clocks and expires strictly after its deadline") {
     clock := Clock.new(100)
-    cached :: ExpiringValue.new("fresh", Duration{ns: 2000000}, clock)
+    cached: ExpiringValue.new("fresh", Duration{ns: 2000000}, clock)
     &clock.tick(2)
     assert_eq(cached.get(clock) ?? panic("equality must remain valid"), "fresh")
     assert(cached.is_valid(clock))
@@ -193,24 +193,24 @@ fn __expiry_deadline(now_ms: Int, ttl: Duration) -> Int Never! {
 }
 
 #Test("ExpiringValue zero and negative TTL preserve open expiry boundaries") {
-    clock :: Clock.new(100)
-    zero :: ExpiringValue.new(17, Duration{ns: 0}, clock)
+    clock: Clock.new(100)
+    zero: ExpiringValue.new(17, Duration{ns: 0}, clock)
     assert_eq(zero.get(clock) ?? panic("zero TTL is valid at equality"), 17)
-    negative :: ExpiringValue.new(17, Duration{ns: -1000000}, clock)
+    negative: ExpiringValue.new(17, Duration{ns: -1000000}, clock)
     if negative.get(clock) == {
         .Err(_) -> {}
         .Ok(_) -> assert(false)
     }
-    high :: Clock.new(time_int_max())
-    saturated :: ExpiringValue.new(17, Duration{ns: 1000000}, high)
+    high: Clock.new(time_int_max())
+    saturated: ExpiringValue.new(17, Duration{ns: 1000000}, high)
     assert_eq(saturated.get(high) ?? panic("saturated deadline remains valid"), 17)
     assert(saturated.is_valid(high))
 }
 impl Clock.Equatable {
     // Equality compares stored timelines, never an effectful host sample.
-    fn equal(self, rhs: Clock) -> Bool {
-        left :: self.state.guard_read()
-        right :: rhs.state.guard_read()
+    equal: fn(self, rhs: Clock) -> Bool {
+        left: self.state.guard_read()
+        right: rhs.state.guard_read()
         if left.value == {
             .Manual(value) -> if right.value == {
                 .Manual(other) -> value == other
@@ -225,13 +225,13 @@ impl Clock.Equatable {
 }
 
 #Test("Clock equality compares stored manual and system state without sampling") {
-    manual :: Clock.new(4)
+    manual: Clock.new(4)
     assert(manual.equal(Clock.new(4)))
     assert(!manual.equal(Clock.new(5)))
-    system :: Clock{state: shared __ClockState.System{started_ns: 0, offset_ms: 4}}
-    same :: Clock{state: shared __ClockState.System{started_ns: 0, offset_ms: 4}}
-    later :: Clock{state: shared __ClockState.System{started_ns: 1, offset_ms: 4}}
-    shifted :: Clock{state: shared __ClockState.System{started_ns: 0, offset_ms: 5}}
+    system: Clock{state: shared __ClockState.System{started_ns: 0, offset_ms: 4}}
+    same: Clock{state: shared __ClockState.System{started_ns: 0, offset_ms: 4}}
+    later: Clock{state: shared __ClockState.System{started_ns: 1, offset_ms: 4}}
+    shifted: Clock{state: shared __ClockState.System{started_ns: 0, offset_ms: 5}}
     assert(system.equal(same))
     assert(!system.equal(later))
     assert(!system.equal(shifted))
@@ -240,9 +240,9 @@ impl Clock.Equatable {
 }
 
 #Test("Clock manual forks are independent while observers retain identity") {
-    original :: Clock.new(100)
-    observer :: original.__observer()
-    fork :: original.__fork()
+    original: Clock.new(100)
+    observer: original.__observer()
+    fork: original.__fork()
     assert_eq(&fork.tick(25), 125)
     assert_eq(original.now(), 100)
     assert_eq(observer.now(), 100)
@@ -260,47 +260,47 @@ impl Clock.Equatable {
 }
 
 #Test("Clock ordinary and nested aggregate copies fork the timeline") {
-    original :: Clock.new(0)
-    duplicate :: original.copy()
+    original: Clock.new(0)
+    duplicate: original.copy()
     assert_eq(&duplicate.tick(1), 1)
     assert_eq(original.now(), 0)
-    clocks :: [Clock]{original}
-    copied :: clocks.copy()
+    clocks: [Clock]{original}
+    copied: clocks.copy()
     assert_eq(&copied[0].advance(2), 2)
     assert_eq(clocks[0].now(), 0)
 }
 
 #Test("Clock Show and Debug keep the existing nominal rendering") {
-    value :: Clock.new(5)
+    value: Clock.new(5)
     assert_eq("{value}", "Clock {{ now: 5 }}")
     assert_eq("{value:Debug}", "Clock {{ now: 5 }}")
 }
 
-fn time_int_min() -> Int Never! { -9223372036854775808 }
-fn time_int_max() -> Int Never! { 9223372036854775807 }
+time_int_min: fn() -> Int Never! { -9223372036854775808 }
+time_int_max: fn() -> Int Never! { 9223372036854775807 }
 
 // Whether `value` is inside (-10^18, 10^18): an inline Int, so comparing
 // it there skips the boxed Int64 bounds. Two such values add or subtract
 // to less than 2 * 10^18 in magnitude, well inside Int64.
-fn time_int_near(value: Int) -> Bool Never! {
+time_int_near: fn(value: Int) -> Bool Never! {
     value > -1000000000000000000 && value < 1000000000000000000
 }
 
-fn saturating_add_ns(a: Int, b: Int) -> Int Never! {
+saturating_add_ns: fn(a: Int, b: Int) -> Int Never! {
     if time_int_near(a) && time_int_near(b) -> return a + b
     if b > 0 && a > time_int_max() - b -> return time_int_max()
     if b < 0 && a < time_int_min() - b -> return time_int_min()
     a + b
 }
 
-fn saturating_sub_ns(a: Int, b: Int) -> Int {
+saturating_sub_ns: fn(a: Int, b: Int) -> Int {
     if time_int_near(a) && time_int_near(b) -> return a - b
     if b > 0 && a < time_int_min() + b -> return time_int_min()
     if b < 0 && a > time_int_max() + b -> return time_int_max()
     a - b
 }
 
-fn saturating_scale_ns(value: Int, scale: Int) -> Int Never! {
+saturating_scale_ns: fn(value: Int, scale: Int) -> Int Never! {
     if value == 0 -> return 0
     if value > 0 && value > time_int_max() /% scale -> return time_int_max()
     if value < 0 && value < time_int_min() /% scale -> return time_int_min()
@@ -308,13 +308,13 @@ fn saturating_scale_ns(value: Int, scale: Int) -> Int Never! {
 }
 
 /// Gregorian leap years, including year zero and negative years.
-fn is_leap_year(year: Int) -> Bool Never! {
+is_leap_year: fn(year: Int) -> Bool Never! {
     (year %% 4 == 0 && year %% 100 != 0) || year %% 400 == 0
 }
 
 /// Number of days in a Gregorian month. Unrecognized months retain the
 /// civil carrier's 30-day result; constructors constrain months separately.
-fn days_in_month(year: Int, month: Int) -> Int Never! {
+days_in_month: fn(year: Int, month: Int) -> Int Never! {
     if month == 1 || month == 3 || month == 5 || month == 7 || month == 8 || month == 10 || month == 12 -> return 31
     if month == 2 {
         if is_leap_year(year) -> return 29
@@ -324,35 +324,35 @@ fn days_in_month(year: Int, month: Int) -> Int Never! {
 }
 
 /// Weekday index with Sunday as 0.
-fn weekday(date: LocalDate) -> Int Never! { date.weekday() }
+weekday: fn(date: LocalDate) -> Int Never! { date.weekday() }
 
-fn isoformat_date(date: LocalDate) -> String Never! { "{pad2(date.year(), 4)}-{pad2(date.month(), 2)}-{pad2(date.day(), 2)}" }
+isoformat_date: fn(date: LocalDate) -> String Never! { "{pad2(date.year(), 4)}-{pad2(date.month(), 2)}-{pad2(date.day(), 2)}" }
 
-fn isoformat_time(t: LocalTime) -> String Never! {
-    base :: "{pad2(t.hour(), 2)}:{pad2(t.minute(), 2)}:{pad2(t.second(), 2)}"
+isoformat_time: fn(t: LocalTime) -> String Never! {
+    base: "{pad2(t.hour(), 2)}:{pad2(t.minute(), 2)}:{pad2(t.second(), 2)}"
     if t.nanosecond() == 0 -> return base
     "{base}.{pad2(t.nanosecond(), 9)}"
 }
 
-fn isoformat(dt: DateTime) -> String Never! { "{isoformat_date(dt.date())}T{isoformat_time(dt.time())}" }
+isoformat: fn(dt: DateTime) -> String Never! { "{isoformat_date(dt.date())}T{isoformat_time(dt.time())}" }
 
 // Copy literal UTF-8 bytes unchanged; only complete output is decoded.
 // Native cutover still requires borrowed String.bytes and consuming from_bytes
 // ownership; bootstrap materialization is not allocation/retention parity.
-fn strftime(format: String, dt: DateTime) -> String Never! {
-    days :: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
-    days_long :: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
-    months_short :: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-    months_long :: ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
-    date :: dt.date()
-    day :: date.weekday()
-    day_of_year :: date.day_of_year()
-    raw :: format.bytes()
+strftime: fn(format: String, dt: DateTime) -> String Never! {
+    days: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+    days_long: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+    months_short: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    months_long: ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+    date: dt.date()
+    day: date.weekday()
+    day_of_year: date.day_of_year()
+    raw: format.bytes()
     out := [U8]{}
     i := 0
     loop i < raw.len() {
         if raw[i] != (U8{37}) {
-            start :: i
+            start: i
             loop i < raw.len() && raw[i] != (U8{37}) -> i = i + 1
             loop j in start..<i -> &out.push(raw[j])
             next
@@ -361,8 +361,8 @@ fn strftime(format: String, dt: DateTime) -> String Never! {
             &out.push(U8{37})
             break
         }
-        code :: raw[i + 1]
-        piece :: if code == {
+        code: raw[i + 1]
+        piece: if code == {
             37 -> "%"
             65 -> days_long[day]
             97 -> days[day]
@@ -392,7 +392,7 @@ fn strftime(format: String, dt: DateTime) -> String Never! {
                 ""
             }
         }
-        piece_raw :: piece.bytes()
+        piece_raw: piece.bytes()
         loop b in piece_raw -> &out.push(b)
         i = i + 2
     }
@@ -400,132 +400,132 @@ fn strftime(format: String, dt: DateTime) -> String Never! {
 }
 
 
-fn unix_seconds(dt: DateTime) -> Int Never! { dt.to_timestamp() }
+unix_seconds: fn(dt: DateTime) -> Int Never! { dt.to_timestamp() }
 
-fn unix_ms(dt: DateTime) -> Int Never! { dt.to_unix_ms() }
+unix_ms: fn(dt: DateTime) -> Int Never! { dt.to_unix_ms() }
 
-fn add_days(date: LocalDate, days: Int) -> LocalDate Never! { date.add_days(days) }
+add_days: fn(date: LocalDate, days: Int) -> LocalDate Never! { date.add_days(days) }
 
-fn add_duration(dt: DateTime, duration: Duration) -> DateTime Never! { dt.plus_duration(duration) }
+add_duration: fn(dt: DateTime, duration: Duration) -> DateTime Never! { dt.plus_duration(duration) }
 
-fn since(later: DateTime, earlier: DateTime) -> Duration Never! { later.difference(earlier) }
+since: fn(later: DateTime, earlier: DateTime) -> Duration Never! { later.difference(earlier) }
 
-fn duration_seconds(seconds: Int) -> Duration Never! { duration_ns(saturating_scale_ns(seconds, 1000000000)) }
+duration_seconds: fn(seconds: Int) -> Duration Never! { duration_ns(saturating_scale_ns(seconds, 1000000000)) }
 
-fn duration_ms(ms: Int) -> Duration Never! { duration_ns(saturating_scale_ns(ms, 1000000)) }
+duration_ms: fn(ms: Int) -> Duration Never! { duration_ns(saturating_scale_ns(ms, 1000000)) }
 
 /// `Duration` is the compiler-owned nanosecond quantity, so it is built
 /// through its checked constructor; every Int is a valid nanosecond count.
-fn duration_ns(ns: Int) -> Duration Never! { Duration.nanoseconds(ns) ?? panic("every Int is a nanosecond Duration") }
+duration_ns: fn(ns: Int) -> Duration Never! { Duration.nanoseconds(ns) ?? panic("every Int is a nanosecond Duration") }
 
-fn duration_as_seconds(d: Duration) -> Int Never! { d.ns /% 1000000000 }
+duration_as_seconds: fn(d: Duration) -> Int Never! { d.ns /% 1000000000 }
 
-fn elapsed(watch: Stopwatch) -[Time]> Duration Never! {
+elapsed: fn(watch: Stopwatch) -[Time]> Duration Never! {
     duration_ns(saturating_sub_ns(core.time.__host_monotonic_ns(), watch.start_ns))
 }
 
-fn compare_date(a: LocalDate, b: LocalDate) -> Int Never! {
-    days :: a.diff_days(b)
+compare_date: fn(a: LocalDate, b: LocalDate) -> Int Never! {
+    days: a.diff_days(b)
     if days < 0 -> return -1
     if days > 0 -> return 1
     0
 }
 
-fn date_equals(a: LocalDate, b: LocalDate) -> Bool Never! { a == b }
+date_equals: fn(a: LocalDate, b: LocalDate) -> Bool Never! { a == b }
 
-fn pad2(n: Int, width: Int) -> String {
+pad2: fn(n: Int, width: Int) -> String {
     s := "{n}"
     loop s.bytes().len() < width -> s = "0{s}"
     s
 }
 
-fn combine(date: LocalDate, t: LocalTime) -> DateTime Never! {
+combine: fn(date: LocalDate, t: LocalTime) -> DateTime Never! {
     datetime(date.year(), date.month(), date.day(), t.hour(), t.minute(), t.second()).add_nanoseconds(t.nanosecond())
 }
 
-fn date_of(dt: DateTime) -> LocalDate Never! { dt.date() }
+date_of: fn(dt: DateTime) -> LocalDate Never! { dt.date() }
 
-fn time_of(dt: DateTime) -> LocalTime Never! { dt.time() }
+time_of: fn(dt: DateTime) -> LocalTime Never! { dt.time() }
 
-fn replace_date(dt: DateTime, date: LocalDate) -> DateTime Never! { combine(date, dt.time()) }
+replace_date: fn(dt: DateTime, date: LocalDate) -> DateTime Never! { combine(date, dt.time()) }
 
-fn replace_time(dt: DateTime, t: LocalTime) -> DateTime Never! { combine(dt.date(), t) }
+replace_time: fn(dt: DateTime, t: LocalTime) -> DateTime Never! { combine(dt.date(), t) }
 
-fn isoweekday(date: LocalDate) -> Int Never! { date.iso_weekday() }
+isoweekday: fn(date: LocalDate) -> Int Never! { date.iso_weekday() }
 
-fn weekday_sun0(date: LocalDate) -> Int Never! { date.weekday() }
+weekday_sun0: fn(date: LocalDate) -> Int Never! { date.weekday() }
 
-fn duration_minutes(minutes: Int) -> Duration Never! { duration_ns(saturating_scale_ns(minutes, 60000000000)) }
+duration_minutes: fn(minutes: Int) -> Duration Never! { duration_ns(saturating_scale_ns(minutes, 60000000000)) }
 
-fn duration_hours(hours: Int) -> Duration Never! { duration_ns(saturating_scale_ns(hours, 3600000000000)) }
+duration_hours: fn(hours: Int) -> Duration Never! { duration_ns(saturating_scale_ns(hours, 3600000000000)) }
 
-fn duration_days(days: Int) -> Duration Never! { duration_ns(saturating_scale_ns(days, 86400000000000)) }
+duration_days: fn(days: Int) -> Duration Never! { duration_ns(saturating_scale_ns(days, 86400000000000)) }
 
-fn duration_as_ms(d: Duration) -> Int Never! { d.ns /% 1000000 }
+duration_as_ms: fn(d: Duration) -> Int Never! { d.ns /% 1000000 }
 
-fn duration_as_minutes(d: Duration) -> Int Never! { d.ns /% 60000000000 }
+duration_as_minutes: fn(d: Duration) -> Int Never! { d.ns /% 60000000000 }
 
-fn duration_as_hours(d: Duration) -> Int Never! { d.ns /% 3600000000000 }
+duration_as_hours: fn(d: Duration) -> Int Never! { d.ns /% 3600000000000 }
 
-fn add_seconds(dt: DateTime, seconds: Int) -> DateTime Never! { add_duration(dt, duration_seconds(seconds)) }
+add_seconds: fn(dt: DateTime, seconds: Int) -> DateTime Never! { add_duration(dt, duration_seconds(seconds)) }
 
-fn add_minutes(dt: DateTime, minutes: Int) -> DateTime Never! { add_duration(dt, duration_minutes(minutes)) }
+add_minutes: fn(dt: DateTime, minutes: Int) -> DateTime Never! { add_duration(dt, duration_minutes(minutes)) }
 
-fn add_hours(dt: DateTime, hours: Int) -> DateTime Never! { add_duration(dt, duration_hours(hours)) }
+add_hours: fn(dt: DateTime, hours: Int) -> DateTime Never! { add_duration(dt, duration_hours(hours)) }
 
-fn start_of_day(date: LocalDate) -> DateTime Never! { datetime(date.year(), date.month(), date.day(), 0, 0, 0) }
+start_of_day: fn(date: LocalDate) -> DateTime Never! { datetime(date.year(), date.month(), date.day(), 0, 0, 0) }
 
-fn end_of_day(date: LocalDate) -> DateTime Never! {
+end_of_day: fn(date: LocalDate) -> DateTime Never! {
     datetime(date.year(), date.month(), date.day(), 23, 59, 59).add_nanoseconds(999999999)
 }
 
-fn date_before(a: LocalDate, b: LocalDate) -> Bool Never! { a < b }
+date_before: fn(a: LocalDate, b: LocalDate) -> Bool Never! { a < b }
 
-fn date_after(a: LocalDate, b: LocalDate) -> Bool Never! { a > b }
+date_after: fn(a: LocalDate, b: LocalDate) -> Bool Never! { a > b }
 
-fn between(dt: DateTime, start: DateTime, end: DateTime) -> Bool Never! { dt >= start && dt <= end }
+between: fn(dt: DateTime, start: DateTime, end: DateTime) -> Bool Never! { dt >= start && dt <= end }
 
-fn duration_zero() -> Duration Never! { duration_ns(0) }
+duration_zero: fn() -> Duration Never! { duration_ns(0) }
 
-fn duration_is_zero(d: Duration) -> Bool Never! { d.ns == 0 }
+duration_is_zero: fn(d: Duration) -> Bool Never! { d.ns == 0 }
 
-fn duration_abs(d: Duration) -> Duration Never! {
+duration_abs: fn(d: Duration) -> Duration Never! {
     if d.ns == time_int_min() -> return duration_ns(time_int_max())
     if d.ns < 0 -> return duration_ns(0 - d.ns)
     d.copy()
 }
 
-fn duration_add(a: Duration, b: Duration) -> Duration Never! {
+duration_add: fn(a: Duration, b: Duration) -> Duration Never! {
     duration_ns(saturating_add_ns(a.ns, b.ns))
 }
 
-fn duration_sub(a: Duration, b: Duration) -> Duration Never! {
+duration_sub: fn(a: Duration, b: Duration) -> Duration Never! {
     duration_ns(saturating_sub_ns(a.ns, b.ns))
 }
 
-fn min_date(a: LocalDate, b: LocalDate) -> LocalDate Never! {
+min_date: fn(a: LocalDate, b: LocalDate) -> LocalDate Never! {
     if a <= b -> return a.copy()
     b.copy()
 }
 
-fn max_date(a: LocalDate, b: LocalDate) -> LocalDate Never! {
+max_date: fn(a: LocalDate, b: LocalDate) -> LocalDate Never! {
     if a >= b -> return a.copy()
     b.copy()
 }
 
-fn days_between(a: LocalDate, b: LocalDate) -> Int Never! { b.diff_days(a) }
+days_between: fn(a: LocalDate, b: LocalDate) -> Int Never! { b.diff_days(a) }
 // Compatibility spellings shared by Python-style date/time surfaces.
-fn fromhours(hours: Int) -> Duration Never! { duration_hours(hours) }
+fromhours: fn(hours: Int) -> Duration Never! { duration_hours(hours) }
 
-fn before(a: LocalDate, b: LocalDate) -> Bool Never! { date_before(a, b) }
+before: fn(a: LocalDate, b: LocalDate) -> Bool Never! { date_before(a, b) }
 
-fn after(a: LocalDate, b: LocalDate) -> Bool Never! { date_after(a, b) }
+after: fn(a: LocalDate, b: LocalDate) -> Bool Never! { date_after(a, b) }
 
-fn dayofweek(date: LocalDate) -> Int Never! { weekday(date) }
+dayofweek: fn(date: LocalDate) -> Int Never! { weekday(date) }
 
-fn todate(dt: DateTime) -> LocalDate Never! { date_of(dt) }
+todate: fn(dt: DateTime) -> LocalDate Never! { date_of(dt) }
 
-fn totime(dt: DateTime) -> LocalTime Never! { time_of(dt) }
+totime: fn(dt: DateTime) -> LocalTime Never! { time_of(dt) }
 
 #Test("Gregorian predicates preserve signed years and month defaults") {
     assert(is_leap_year(-400))
@@ -541,80 +541,80 @@ fn totime(dt: DateTime) -> LocalTime Never! { time_of(dt) }
 
 // Civil carriers own their validation and arithmetic here, not in an emitter.
 #Error
-struct TimeError { reason: String }
+TimeError: struct { reason: String }
 impl TimeError {
-    fn new(reason: String) -> TimeError Never! { TimeError{reason: reason} }
+    new: fn(reason: String) -> TimeError Never! { TimeError{reason: reason} }
 }
-struct LocalDate { date_y: Int, date_m: Int, date_d: Int }
-struct LocalTime { hour_value: Int, minute_value: Int, second_value: Int, nanos: Int }
-struct DateTime { secs: Int, nanos: Int, leap_second: Bool }
-struct Period { years_value: Int, months_value: Int, days_value: Int }
-struct ZoneInfo { offset: Int, is_dst: Bool }
-struct ZoneTransition { at: Int, info: Int }
-struct ZoneData { transitions: [ZoneTransition], infos: [ZoneInfo] }
+LocalDate: struct { date_y: Int, date_m: Int, date_d: Int }
+LocalTime: struct { hour_value: Int, minute_value: Int, second_value: Int, nanos: Int }
+DateTime: struct { secs: Int, nanos: Int, leap_second: Bool }
+Period: struct { years_value: Int, months_value: Int, days_value: Int }
+ZoneInfo: struct { offset: Int, is_dst: Bool }
+ZoneTransition: struct { at: Int, info: Int }
+ZoneData: struct { transitions: [ZoneTransition], infos: [ZoneInfo] }
 // Zone tables never change after construction; plain borrowed reads do not
 // acquire scheduler permits or add Time / Time.Wait to civil operations.
-struct Zone { name_value: String, data: ZoneData }
-struct ZonedDateTime { instant: DateTime, zone_value: Zone }
-struct Instant { start_ns: Int }
+Zone: struct { name_value: String, data: ZoneData }
+ZonedDateTime: struct { instant: DateTime, zone_value: Zone }
+Instant: struct { start_ns: Int }
 
-fn civil_clamp(value: Int, low: Int, high: Int) -> Int Never! {
+civil_clamp: fn(value: Int, low: Int, high: Int) -> Int Never! {
     if value < low -> return low
     if value > high -> return high
     value
 }
 // Int64 saturation. The Int64 bounds are boxed Ints, so a value well inside
 // them (every timestamp near now) returns without comparing against them.
-fn civil_i64(value: Int) -> Int Never! {
+civil_i64: fn(value: Int) -> Int Never! {
     if time_int_near(value) -> return value
     civil_clamp(value, time_int_min(), time_int_max())
 }
-fn civil_mod(value: Int, divisor: Int) -> Int Never! {
-    remainder :: value %% divisor
+civil_mod: fn(value: Int, divisor: Int) -> Int Never! {
+    remainder: value %% divisor
     if remainder < 0 -> return remainder + divisor
     remainder
 }
 // `/%` already rounds toward negative infinity.
-fn civil_floor(value: Int, divisor: Int) -> Int Never! { value /% divisor }
-fn civil_negated(value: Int) -> Int Never! { civil_i64(-value) }
-fn civil_abs(value: Int) -> Int Never! {
+civil_floor: fn(value: Int, divisor: Int) -> Int Never! { value /% divisor }
+civil_negated: fn(value: Int) -> Int Never! { civil_i64(-value) }
+civil_abs: fn(value: Int) -> Int Never! {
     if value < 0 -> return civil_negated(value)
     value
 }
-fn civil_sign(value: Int) -> Int Never! {
+civil_sign: fn(value: Int) -> Int Never! {
     if value < 0 -> return -1
     if value > 0 -> return 1
     0
 }
-fn civil_order(left: Int, right: Int) -> Ordering Never! {
+civil_order: fn(left: Int, right: Int) -> Ordering Never! {
     if left < right -> return Ordering.Less
     if left > right -> return Ordering.Greater
     Ordering.Equal
 }
-fn civil_year(year: Int) -> String Never! {
+civil_year: fn(year: Int) -> String Never! {
     if year < 0 -> return "-{pad2(civil_abs(year), 4)}"
     pad2(year, 4)
 }
-fn civil_signed_pad(value: Int, width: Int) -> String Never! {
+civil_signed_pad: fn(value: Int, width: Int) -> String Never! {
     if value < 0 -> return "-{pad2(-value, width - 1)}"
     pad2(value, width)
 }
-fn new(year: Int, month: Int, day: Int) -> LocalDate Never! {
-    m :: civil_clamp(month, 1, 12)
+new: fn(year: Int, month: Int, day: Int) -> LocalDate Never! {
+    m: civil_clamp(month, 1, 12)
     LocalDate{date_y: year, date_m: m, date_d: civil_clamp(day, 1, days_in_month(year, m))}
 }
-fn civil_month_offset(year: Int, month: Int) -> Int Never! {
-    offset :: (367 * month - 362) /% 12
+civil_month_offset: fn(year: Int, month: Int) -> Int Never! {
+    offset: (367 * month - 362) /% 12
     if month <= 2 -> return offset
     if is_leap_year(year) -> return offset - 1
     offset - 2
 }
-fn civil_day(date: LocalDate) -> Int Never! {
-    y :: date.date_y - 1
+civil_day: fn(date: LocalDate) -> Int Never! {
+    y: date.date_y - 1
     365 * y + civil_floor(y, 4) - civil_floor(y, 100) + civil_floor(y, 400) + civil_month_offset(date.date_y, date.date_m) + date.date_d - 1
 }
-fn civil_from_day(day: Int) -> LocalDate Never! {
-    era :: civil_floor(day, 146097)
+civil_from_day: fn(day: Int) -> LocalDate Never! {
+    era: civil_floor(day, 146097)
     year := era * 400 + 1 + civil_mod(day, 146097) /% 365
     loop civil_day(new(year, 1, 1)) > day -> year = year - 1
     loop civil_day(new(year + 1, 1, 1)) <= day -> year = year + 1
@@ -627,38 +627,38 @@ fn civil_from_day(day: Int) -> LocalDate Never! {
     new(year, month, remaining + 1)
 }
 impl LocalDate {
-    fn year(self) -> Int Never! { self.date_y }
-    fn month(self) -> Int Never! { self.date_m }
-    fn day(self) -> Int Never! { self.date_d }
-    fn to_string(self) -> String Never! { "{civil_year(self.date_y)}-{pad2(self.date_m, 2)}-{pad2(self.date_d, 2)}" }
-    fn weekday(self) -> Int Never! { civil_mod(civil_day(self) + 1, 7) }
-    fn iso_weekday(self) -> Int Never! { civil_mod(civil_day(self), 7) + 1 }
-    fn day_of_year(self) -> Int Never! { civil_day(self) - civil_day(new(self.date_y, 1, 1)) + 1 }
-    fn quarter_of_year(self) -> Int Never! { (self.date_m - 1) /% 3 + 1 }
-    fn days_in_month(self) -> Int Never! { days_in_month(self.date_y, self.date_m) }
-    fn is_leap_year(self) -> Bool Never! { is_leap_year(self.date_y) }
-    fn replace(self, year: Int, month: Int, day: Int) -> LocalDate Never! { new(year, month, day) }
-    fn add_days(self, days: Int) -> LocalDate Never! { civil_from_day(civil_day(self) + days) }
-    fn add_months(self, months: Int) -> LocalDate Never! {
-        total :: self.date_m - 1 + months
+    year: fn(self) -> Int Never! { self.date_y }
+    month: fn(self) -> Int Never! { self.date_m }
+    day: fn(self) -> Int Never! { self.date_d }
+    to_string: fn(self) -> String Never! { "{civil_year(self.date_y)}-{pad2(self.date_m, 2)}-{pad2(self.date_d, 2)}" }
+    weekday: fn(self) -> Int Never! { civil_mod(civil_day(self) + 1, 7) }
+    iso_weekday: fn(self) -> Int Never! { civil_mod(civil_day(self), 7) + 1 }
+    day_of_year: fn(self) -> Int Never! { civil_day(self) - civil_day(new(self.date_y, 1, 1)) + 1 }
+    quarter_of_year: fn(self) -> Int Never! { (self.date_m - 1) /% 3 + 1 }
+    days_in_month: fn(self) -> Int Never! { days_in_month(self.date_y, self.date_m) }
+    is_leap_year: fn(self) -> Bool Never! { is_leap_year(self.date_y) }
+    replace: fn(self, year: Int, month: Int, day: Int) -> LocalDate Never! { new(year, month, day) }
+    add_days: fn(self, days: Int) -> LocalDate Never! { civil_from_day(civil_day(self) + days) }
+    add_months: fn(self, months: Int) -> LocalDate Never! {
+        total: self.date_m - 1 + months
         new(self.date_y + civil_floor(total, 12), civil_mod(total, 12) + 1, self.date_d)
     }
-    fn diff_days(self, other: LocalDate) -> Int Never! { civil_day(self) - civil_day(other) }
-    fn add_period(self, value: Period) -> LocalDate Never! { self.add_months(saturating_add_ns(saturating_scale_ns(value.years_value, 12), value.months_value)).add_days(value.days_value) }
-    fn subtract_period(self, value: Period) -> LocalDate Never! { self.add_period(value.negated()) }
-    fn iso_week_year(self) -> Int Never! { self.add_days(4 - self.iso_weekday()).date_y }
-    fn iso_week(self) -> Int Never! {
-        thursday :: self.add_days(4 - self.iso_weekday())
-        january :: new(thursday.date_y, 1, 4)
-        first :: january.add_days(1 - january.iso_weekday())
+    diff_days: fn(self, other: LocalDate) -> Int Never! { civil_day(self) - civil_day(other) }
+    add_period: fn(self, value: Period) -> LocalDate Never! { self.add_months(saturating_add_ns(saturating_scale_ns(value.years_value, 12), value.months_value)).add_days(value.days_value) }
+    subtract_period: fn(self, value: Period) -> LocalDate Never! { self.add_period(value.negated()) }
+    iso_week_year: fn(self) -> Int Never! { self.add_days(4 - self.iso_weekday()).date_y }
+    iso_week: fn(self) -> Int Never! {
+        thursday: self.add_days(4 - self.iso_weekday())
+        january: new(thursday.date_y, 1, 4)
+        first: january.add_days(1 - january.iso_weekday())
         civil_floor(thursday.add_days(1 - thursday.iso_weekday()).diff_days(first), 7) + 1
     }
-    fn truncate(self, unit: String) -> LocalDate Never! {
+    truncate: fn(self, unit: String) -> LocalDate Never! {
         if unit == "year" -> return new(self.date_y, 1, 1)
         if unit == "month" -> return new(self.date_y, self.date_m, 1)
         self.copy()
     }
-    fn with(self, year: Int, month: Int, day: Int, overflow: String{"constrain"}) -> LocalDate TimeError! {
+    with: fn(self, year: Int, month: Int, day: Int, overflow: String{"constrain"}) -> LocalDate TimeError! {
         if overflow == "constrain" || overflow == "clamp" -> return Ok(new(year, month, day))
         if overflow == "reject" {
             if month >= 1 && month <= 12 && day >= 1 && day <= days_in_month(year, month) -> return Ok(new(year, month, day))
@@ -666,104 +666,104 @@ impl LocalDate {
         }
         Err(TimeError.new("invalid overflow policy: {overflow}"))
     }
-    fn until(self, other: LocalDate, largest_unit: String{"day"}, smallest_unit: String{"day"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! {
+    until: fn(self, other: LocalDate, largest_unit: String{"day"}, smallest_unit: String{"day"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! {
         duration_ns(civil_i64(civil_round(other.diff_days(self) * 86400000000000, smallest_unit, increment, rounding_mode)))
     }
-    fn since(self, other: LocalDate, largest_unit: String{"day"}, smallest_unit: String{"day"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! { other.until(self, largest_unit, smallest_unit, rounding_mode, increment) }
-    fn format(self, pattern: String) -> String Never! { civil_format(pattern, self, local_time(0, 0, 0), None) }
-    fn format_checked(self, pattern: String) -> String TextError! { civil_format_checked(pattern, self, local_time(0, 0, 0), None) }
+    since: fn(self, other: LocalDate, largest_unit: String{"day"}, smallest_unit: String{"day"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! { other.until(self, largest_unit, smallest_unit, rounding_mode, increment) }
+    format: fn(self, pattern: String) -> String Never! { civil_format(pattern, self, local_time(0, 0, 0), None) }
+    format_checked: fn(self, pattern: String) -> String TextError! { civil_format_checked(pattern, self, local_time(0, 0, 0), None) }
 }
 impl LocalDate.Equatable {
-    fn equal(self, rhs: LocalDate) -> Bool { self.date_y == rhs.date_y && self.date_m == rhs.date_m && self.date_d == rhs.date_d }
+    equal: fn(self, rhs: LocalDate) -> Bool { self.date_y == rhs.date_y && self.date_m == rhs.date_m && self.date_d == rhs.date_d }
 }
-impl LocalDate.Comparable { fn compare(self, rhs: LocalDate) -> Ordering { civil_order(civil_day(self), civil_day(rhs)) } }
-impl LocalDate.Display { fn display(self) -> String { self.to_string() } }
-impl LocalDate.Debug { fn debug(^self) -> String { self.to_string() } }
+impl LocalDate.Comparable { compare: fn(self, rhs: LocalDate) -> Ordering { civil_order(civil_day(self), civil_day(rhs)) } }
+impl LocalDate.Display { display: fn(self) -> String { self.to_string() } }
+impl LocalDate.Debug { debug: fn(^self) -> String { self.to_string() } }
 
-fn local_time(hour: Int, minute: Int, second: Int) -> LocalTime Never! { civil_time(hour, minute, second, 0) }
-fn time(hour: Int, minute: Int, second: Int) -> LocalTime Never! { local_time(hour, minute, second) }
-fn civil_time(hour: Int, minute: Int, second: Int, nanos: Int) -> LocalTime Never! {
+local_time: fn(hour: Int, minute: Int, second: Int) -> LocalTime Never! { civil_time(hour, minute, second, 0) }
+time: fn(hour: Int, minute: Int, second: Int) -> LocalTime Never! { local_time(hour, minute, second) }
+civil_time: fn(hour: Int, minute: Int, second: Int, nanos: Int) -> LocalTime Never! {
     LocalTime{hour_value: civil_clamp(hour, 0, 23), minute_value: civil_clamp(minute, 0, 59), second_value: civil_clamp(second, 0, 59), nanos: civil_clamp(nanos, 0, 999999999)}
 }
-fn civil_time_ns(value: LocalTime) -> Int Never! { (value.hour_value * 3600 + value.minute_value * 60 + value.second_value) * 1000000000 + value.nanos }
-fn civil_time_from_ns(value: Int) -> LocalTime Never! {
-    total :: civil_mod(value, 86400000000000)
-    seconds :: total /% 1000000000
+civil_time_ns: fn(value: LocalTime) -> Int Never! { (value.hour_value * 3600 + value.minute_value * 60 + value.second_value) * 1000000000 + value.nanos }
+civil_time_from_ns: fn(value: Int) -> LocalTime Never! {
+    total: civil_mod(value, 86400000000000)
+    seconds: total /% 1000000000
     civil_time(seconds /% 3600, (seconds /% 60) %% 60, seconds %% 60, total %% 1000000000)
 }
 impl LocalTime {
-    fn hour(self) -> Int Never! { self.hour_value }
-    fn minute(self) -> Int Never! { self.minute_value }
-    fn second(self) -> Int Never! { self.second_value }
-    fn millisecond(self) -> Int Never! { self.nanos /% 1000000 }
-    fn microsecond(self) -> Int Never! { self.nanos /% 1000 }
-    fn nanosecond(self) -> Int Never! { self.nanos }
-    fn to_string(self) -> String Never! { isoformat_time(self) }
-    fn add_duration(self, value: Duration) -> LocalTime Never! { civil_time_from_ns(civil_time_ns(self) + value.ns) }
-    fn subtract_duration(self, value: Duration) -> LocalTime Never! { civil_time_from_ns(civil_time_ns(self) + civil_negated(value.ns)) }
-    fn round(self, unit: String, increment: Int{1}, rounding_mode: String{"half_expand"}) -> LocalTime Never! { civil_time_from_ns(civil_round(civil_time_ns(self), unit, increment, rounding_mode)) }
-    fn truncate(self, unit: String, increment: Int{1}) -> LocalTime Never! { self.round(unit, increment, "trunc") }
-    fn floor(self, unit: String, increment: Int{1}) -> LocalTime Never! { self.round(unit, increment, "floor") }
-    fn ceil(self, unit: String, increment: Int{1}) -> LocalTime Never! { self.round(unit, increment, "ceil") }
-    fn until(self, other: LocalTime, largest_unit: String{"second"}, smallest_unit: String{"nanosecond"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! {
+    hour: fn(self) -> Int Never! { self.hour_value }
+    minute: fn(self) -> Int Never! { self.minute_value }
+    second: fn(self) -> Int Never! { self.second_value }
+    millisecond: fn(self) -> Int Never! { self.nanos /% 1000000 }
+    microsecond: fn(self) -> Int Never! { self.nanos /% 1000 }
+    nanosecond: fn(self) -> Int Never! { self.nanos }
+    to_string: fn(self) -> String Never! { isoformat_time(self) }
+    add_duration: fn(self, value: Duration) -> LocalTime Never! { civil_time_from_ns(civil_time_ns(self) + value.ns) }
+    subtract_duration: fn(self, value: Duration) -> LocalTime Never! { civil_time_from_ns(civil_time_ns(self) + civil_negated(value.ns)) }
+    round: fn(self, unit: String, increment: Int{1}, rounding_mode: String{"half_expand"}) -> LocalTime Never! { civil_time_from_ns(civil_round(civil_time_ns(self), unit, increment, rounding_mode)) }
+    truncate: fn(self, unit: String, increment: Int{1}) -> LocalTime Never! { self.round(unit, increment, "trunc") }
+    floor: fn(self, unit: String, increment: Int{1}) -> LocalTime Never! { self.round(unit, increment, "floor") }
+    ceil: fn(self, unit: String, increment: Int{1}) -> LocalTime Never! { self.round(unit, increment, "ceil") }
+    until: fn(self, other: LocalTime, largest_unit: String{"second"}, smallest_unit: String{"nanosecond"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! {
         duration_ns(civil_i64(civil_round(civil_time_ns(other) - civil_time_ns(self), smallest_unit, increment, rounding_mode)))
     }
-    fn since(self, other: LocalTime, largest_unit: String{"second"}, smallest_unit: String{"nanosecond"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! { other.until(self, largest_unit, smallest_unit, rounding_mode, increment) }
-    fn format(self, pattern: String) -> String Never! { civil_format(pattern, new(1970, 1, 1), self, None) }
-    fn format_checked(self, pattern: String) -> String TextError! { civil_format_checked(pattern, new(1970, 1, 1), self, None) }
+    since: fn(self, other: LocalTime, largest_unit: String{"second"}, smallest_unit: String{"nanosecond"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! { other.until(self, largest_unit, smallest_unit, rounding_mode, increment) }
+    format: fn(self, pattern: String) -> String Never! { civil_format(pattern, new(1970, 1, 1), self, None) }
+    format_checked: fn(self, pattern: String) -> String TextError! { civil_format_checked(pattern, new(1970, 1, 1), self, None) }
 }
-impl LocalTime.Equatable { fn equal(self, rhs: LocalTime) -> Bool { civil_time_ns(self) == civil_time_ns(rhs) } }
-impl LocalTime.Comparable { fn compare(self, rhs: LocalTime) -> Ordering { civil_order(civil_time_ns(self), civil_time_ns(rhs)) } }
-impl LocalTime.Display { fn display(self) -> String { self.to_string() } }
-impl LocalTime.Debug { fn debug(^self) -> String { self.to_string() } }
+impl LocalTime.Equatable { equal: fn(self, rhs: LocalTime) -> Bool { civil_time_ns(self) == civil_time_ns(rhs) } }
+impl LocalTime.Comparable { compare: fn(self, rhs: LocalTime) -> Ordering { civil_order(civil_time_ns(self), civil_time_ns(rhs)) } }
+impl LocalTime.Display { display: fn(self) -> String { self.to_string() } }
+impl LocalTime.Debug { debug: fn(^self) -> String { self.to_string() } }
 
-fn period(years: Int, months: Int, days: Int) -> Period Never! { Period{years_value: years, months_value: months, days_value: days} }
-fn period_days(days: Int) -> Period Never! { period(0, 0, days) }
-fn period_months(months: Int) -> Period Never! { period(0, months, 0) }
-fn period_years(years: Int) -> Period Never! { period(years, 0, 0) }
+period: fn(years: Int, months: Int, days: Int) -> Period Never! { Period{years_value: years, months_value: months, days_value: days} }
+period_days: fn(days: Int) -> Period Never! { period(0, 0, days) }
+period_months: fn(months: Int) -> Period Never! { period(0, months, 0) }
+period_years: fn(years: Int) -> Period Never! { period(years, 0, 0) }
 impl Period {
-    fn years(self) -> Int Never! { self.years_value }
-    fn months(self) -> Int Never! { self.months_value }
-    fn days(self) -> Int Never! { self.days_value }
-    fn to_string(self) -> String Never! { "P{self.years_value}Y{self.months_value}M{self.days_value}D" }
-    fn sign(self) -> Int Never! {
+    years: fn(self) -> Int Never! { self.years_value }
+    months: fn(self) -> Int Never! { self.months_value }
+    days: fn(self) -> Int Never! { self.days_value }
+    to_string: fn(self) -> String Never! { "P{self.years_value}Y{self.months_value}M{self.days_value}D" }
+    sign: fn(self) -> Int Never! {
         if self.years_value != 0 -> return civil_sign(self.years_value)
         if self.months_value != 0 -> return civil_sign(self.months_value)
         civil_sign(self.days_value)
     }
-    fn is_zero(self) -> Bool Never! { self.years_value == 0 && self.months_value == 0 && self.days_value == 0 }
-    fn abs(self) -> Period Never! { period(civil_abs(self.years_value), civil_abs(self.months_value), civil_abs(self.days_value)) }
-    fn negated(self) -> Period Never! { period(civil_negated(self.years_value), civil_negated(self.months_value), civil_negated(self.days_value)) }
-    fn add(self, other: Period) -> Period Never! { period(saturating_add_ns(self.years_value, other.years_value), saturating_add_ns(self.months_value, other.months_value), saturating_add_ns(self.days_value, other.days_value)) }
-    fn sub(self, other: Period) -> Period Never! { self.add(other.negated()) }
-    fn total_in(self, unit: String, anchor: LocalDate | DateTime) -> Float Never! {
+    is_zero: fn(self) -> Bool Never! { self.years_value == 0 && self.months_value == 0 && self.days_value == 0 }
+    abs: fn(self) -> Period Never! { period(civil_abs(self.years_value), civil_abs(self.months_value), civil_abs(self.days_value)) }
+    negated: fn(self) -> Period Never! { period(civil_negated(self.years_value), civil_negated(self.months_value), civil_negated(self.days_value)) }
+    add: fn(self, other: Period) -> Period Never! { period(saturating_add_ns(self.years_value, other.years_value), saturating_add_ns(self.months_value, other.months_value), saturating_add_ns(self.days_value, other.days_value)) }
+    sub: fn(self, other: Period) -> Period Never! { self.add(other.negated()) }
+    total_in: fn(self, unit: String, anchor: LocalDate | DateTime) -> Float Never! {
         if anchor == {
             .LocalDate(date) -> date.period_total(self, unit)
             .DateTime(datetime) -> datetime.period_total(self, unit)
         }
     }
 }
-impl Period.Display { fn display(self) -> String { self.to_string() } }
-impl Period.Debug { fn debug(^self) -> String { self.to_string() } }
-impl Period.Equatable { fn equal(self, rhs: Period) -> Bool { self.years_value == rhs.years_value && self.months_value == rhs.months_value && self.days_value == rhs.days_value } }
+impl Period.Display { display: fn(self) -> String { self.to_string() } }
+impl Period.Debug { debug: fn(^self) -> String { self.to_string() } }
+impl Period.Equatable { equal: fn(self, rhs: Period) -> Bool { self.years_value == rhs.years_value && self.months_value == rhs.months_value && self.days_value == rhs.days_value } }
 impl LocalDate {
-    fn period_total(self, value: Period, unit: String) -> Float Never! {
-        end :: self.add_period(value)
-        months :: saturating_add_ns(saturating_scale_ns(value.years_value, 12), value.months_value)
-        anchor :: self.add_months(months)
-        residual :: Float{end.diff_days(anchor)}
+    period_total: fn(self, value: Period, unit: String) -> Float Never! {
+        end: self.add_period(value)
+        months: saturating_add_ns(saturating_scale_ns(value.years_value, 12), value.months_value)
+        anchor: self.add_months(months)
+        residual: Float{end.diff_days(anchor)}
         if unit == "day" || unit == "days" || unit == "d" -> return Float{end.diff_days(self)}
         if unit == "week" || unit == "weeks" || unit == "w" -> return Float{end.diff_days(self)} / 7.0
         if unit == "month" || unit == "months" -> return Float{months} + residual / Float{anchor.days_in_month()}
         if unit == "year" || unit == "years" || unit == "y" {
-            year_days :: Float{if anchor.is_leap_year() -> 366 else -> 365}
+            year_days: Float{if anchor.is_leap_year() -> 366 else -> 365}
             return Float{months} / 12.0 + residual / year_days
         }
         0.0
     }
 }
 
-fn civil_unit_ns(unit: String) -> Int? Never! {
+civil_unit_ns: fn(unit: String) -> Int? Never! {
     if unit == "nanosecond" || unit == "nanoseconds" || unit == "ns" -> return Val(1)
     if unit == "microsecond" || unit == "microseconds" || unit == "us" || unit == "µs" -> return Val(1000)
     if unit == "millisecond" || unit == "milliseconds" || unit == "ms" -> return Val(1000000)
@@ -774,28 +774,28 @@ fn civil_unit_ns(unit: String) -> Int? Never! {
     if unit == "week" || unit == "weeks" || unit == "w" -> return Val(604800000000000)
     None
 }
-fn civil_round(value: Int, unit: String, increment: Int, mode: String) -> Int Never! {
+civil_round: fn(value: Int, unit: String, increment: Int, mode: String) -> Int Never! {
     if increment <= 0 -> return value
-    size :: civil_unit_ns(unit) ?? return value
-    quantum :: size * increment
-    trunc :: value /% quantum
-    remainder :: value %% quantum
+    size: civil_unit_ns(unit) ?? return value
+    quantum: size * increment
+    trunc: value /% quantum
+    remainder: value %% quantum
     if remainder == 0 -> return value
-    away :: trunc + civil_sign(value)
-    floor :: if value < 0 -> trunc - 1 else -> trunc
-    ceil :: if value > 0 -> trunc + 1 else -> trunc
+    away: trunc + civil_sign(value)
+    floor: if value < 0 -> trunc - 1 else -> trunc
+    ceil: if value > 0 -> trunc + 1 else -> trunc
     if mode == "trunc" || mode == "toward_zero" -> return trunc * quantum
     if mode == "expand" || mode == "away_from_zero" -> return away * quantum
     if mode == "floor" -> return floor * quantum
     if mode == "ceil" -> return ceil * quantum
     // Round in the exact intermediate domain, then clamp the final Duration.
     // Date differences can exceed i64 nanoseconds before rounding.
-    twice :: (if remainder < 0 -> -remainder else -> remainder) * 2
-    half_trunc :: mode == "half_trunc" || mode == "halfTrunc" || mode == "half-toward-zero"
-    half_expand :: mode == "half_expand" || mode == "halfExpand" || mode == "half-away-from-zero"
-    half_even :: mode == "half_even" || mode == "halfEven"
-    half_ceil :: mode == "half_ceil" || mode == "halfCeil" || mode == "half-toward-positive"
-    half_floor :: mode == "half_floor" || mode == "halfFloor" || mode == "half-toward-negative"
+    twice: (if remainder < 0 -> -remainder else -> remainder) * 2
+    half_trunc: mode == "half_trunc" || mode == "halfTrunc" || mode == "half-toward-zero"
+    half_expand: mode == "half_expand" || mode == "halfExpand" || mode == "half-away-from-zero"
+    half_even: mode == "half_even" || mode == "halfEven"
+    half_ceil: mode == "half_ceil" || mode == "halfCeil" || mode == "half-toward-positive"
+    half_floor: mode == "half_floor" || mode == "halfFloor" || mode == "half-toward-negative"
     if !half_trunc && !half_expand && !half_even && !half_ceil && !half_floor -> return value
     if twice < quantum -> return trunc * quantum
     if twice > quantum -> return away * quantum
@@ -804,112 +804,112 @@ fn civil_round(value: Int, unit: String, increment: Int, mode: String) -> Int Ne
     if half_floor -> return floor * quantum
     away * quantum
 }
-fn __datetime_literal(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int, nanosecond: Int) -> DateTime Never! {
+__datetime_literal: fn(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int, nanosecond: Int) -> DateTime Never! {
     civil_timestamp(civil_utc(new(year, month, day), local_time(hour, minute, second)), nanosecond, hour == 23 && minute == 59 && second == 60)
 }
-fn datetime(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> DateTime Never! { __datetime_literal(year, month, day, hour, minute, second, 0) }
-fn from_timestamp(seconds: Int) -> DateTime Never! { civil_timestamp(seconds, 0, false) }
-fn from_unix_seconds(seconds: Int) -> DateTime Never! { civil_unix_parts(seconds, 0) }
-fn from_unix_ms(value: Int) -> DateTime Never! { civil_unix_parts(civil_floor(value, 1000), civil_mod(value, 1000) * 1000000) }
-fn from_unix_microseconds(value: Int) -> DateTime Never! { civil_unix_parts(civil_floor(value, 1000000), civil_mod(value, 1000000) * 1000) }
-fn from_unix_nanoseconds(value: Int) -> DateTime Never! { civil_unix_parts(civil_floor(value, 1000000000), civil_mod(value, 1000000000)) }
-fn civil_timestamp(seconds: Int, nanos: Int, leap: Bool) -> DateTime Never! {
+datetime: fn(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> DateTime Never! { __datetime_literal(year, month, day, hour, minute, second, 0) }
+from_timestamp: fn(seconds: Int) -> DateTime Never! { civil_timestamp(seconds, 0, false) }
+from_unix_seconds: fn(seconds: Int) -> DateTime Never! { civil_unix_parts(seconds, 0) }
+from_unix_ms: fn(value: Int) -> DateTime Never! { civil_unix_parts(civil_floor(value, 1000), civil_mod(value, 1000) * 1000000) }
+from_unix_microseconds: fn(value: Int) -> DateTime Never! { civil_unix_parts(civil_floor(value, 1000000), civil_mod(value, 1000000) * 1000) }
+from_unix_nanoseconds: fn(value: Int) -> DateTime Never! { civil_unix_parts(civil_floor(value, 1000000000), civil_mod(value, 1000000000)) }
+civil_timestamp: fn(seconds: Int, nanos: Int, leap: Bool) -> DateTime Never! {
     DateTime{secs: civil_i64(seconds + civil_floor(nanos, 1000000000)), nanos: civil_mod(nanos, 1000000000), leap_second: leap}
 }
-fn civil_leap_epoch(seconds: Int) -> Bool Never! {
+civil_leap_epoch: fn(seconds: Int) -> Bool Never! {
     if seconds < 78796800 || seconds > 1483228800 -> return false
-    epochs :: [Int]{78796800, 94694400, 126230400, 157766400, 189302400, 220924800, 252460800, 283996800, 315532800, 362793600, 394329600, 425865600, 489024000, 567993600, 631152000, 662688000, 709948800, 741484800, 773020800, 820454400, 867715200, 915148800, 1136073600, 1230768000, 1341100800, 1435708800, 1483228800}
+    epochs: [Int]{78796800, 94694400, 126230400, 157766400, 189302400, 220924800, 252460800, 283996800, 315532800, 362793600, 394329600, 425865600, 489024000, 567993600, 631152000, 662688000, 709948800, 741484800, 773020800, 820454400, 867715200, 915148800, 1136073600, 1230768000, 1341100800, 1435708800, 1483228800}
     epochs.contains(seconds)
 }
-fn civil_unix_parts(seconds: Int, nanos: Int) -> DateTime Never! {
+civil_unix_parts: fn(seconds: Int, nanos: Int) -> DateTime Never! {
     if civil_leap_epoch(seconds) -> return civil_timestamp(seconds - 1, nanos, true)
     civil_timestamp(seconds, nanos, false)
 }
-fn civil_datetime_ns(value: DateTime) -> Int Never! {
-    leap :: if value.leap_second -> 1000000000 else -> 0
+civil_datetime_ns: fn(value: DateTime) -> Int Never! {
+    leap: if value.leap_second -> 1000000000 else -> 0
     value.secs * 1000000000 + value.nanos + leap
 }
-fn civil_datetime_from_ns(value: Int) -> DateTime Never! { civil_unix_parts(civil_i64(civil_floor(value, 1000000000)), civil_mod(value, 1000000000)) }
-fn civil_utc(date: LocalDate, value: LocalTime) -> Int Never! {
-    base :: civil_i64((civil_day(date) - 719162) * 86400)
+civil_datetime_from_ns: fn(value: Int) -> DateTime Never! { civil_unix_parts(civil_i64(civil_floor(value, 1000000000)), civil_mod(value, 1000000000)) }
+civil_utc: fn(date: LocalDate, value: LocalTime) -> Int Never! {
+    base: civil_i64((civil_day(date) - 719162) * 86400)
     civil_i64(base + value.hour_value * 3600 + value.minute_value * 60 + value.second_value)
 }
-fn civil_checked_epoch(value: Int, unit: String) -> Int RangeError! {
+civil_checked_epoch: fn(value: Int, unit: String) -> Int RangeError! {
     // Whole seconds strictly inside ±9223372036 put `value` inside Int64
     // without comparing it against the boxed bounds.
-    seconds :: value /% 1000000000
+    seconds: value /% 1000000000
     if seconds > -9223372036 && seconds < 9223372036 -> return Ok(value)
     if value < time_int_min() || value > time_int_max() -> return Err(RangeError{reason: "E2704: Unix epoch {unit} do not fit in Int"})
     Ok(value)
 }
 impl DateTime {
-    fn date(self) -> LocalDate Never! { civil_from_day(719162 + civil_floor(self.secs, 86400)) }
-    fn year(self) -> Int Never! { self.date().date_y }
-    fn month(self) -> Int Never! { self.date().date_m }
-    fn day(self) -> Int Never! { self.date().date_d }
-    fn weekday(self) -> Int Never! { self.date().weekday() }
-    fn time(self) -> LocalTime Never! {
-        seconds :: civil_mod(self.secs, 86400)
+    date: fn(self) -> LocalDate Never! { civil_from_day(719162 + civil_floor(self.secs, 86400)) }
+    year: fn(self) -> Int Never! { self.date().date_y }
+    month: fn(self) -> Int Never! { self.date().date_m }
+    day: fn(self) -> Int Never! { self.date().date_d }
+    weekday: fn(self) -> Int Never! { self.date().weekday() }
+    time: fn(self) -> LocalTime Never! {
+        seconds: civil_mod(self.secs, 86400)
         t := civil_time(seconds /% 3600, (seconds /% 60) %% 60, seconds %% 60, self.nanos)
         if self.leap_second -> t.second_value = 60
         t
     }
-    fn hour(self) -> Int Never! { civil_mod(self.secs, 86400) /% 3600 }
-    fn minute(self) -> Int Never! { civil_mod(civil_floor(self.secs, 60), 60) }
-    fn second(self) -> Int Never! {
+    hour: fn(self) -> Int Never! { civil_mod(self.secs, 86400) /% 3600 }
+    minute: fn(self) -> Int Never! { civil_mod(civil_floor(self.secs, 60), 60) }
+    second: fn(self) -> Int Never! {
         if self.leap_second -> return 60
         civil_mod(self.secs, 60)
     }
-    fn millisecond(self) -> Int Never! { self.nanos /% 1000000 }
-    fn microsecond(self) -> Int Never! { self.nanos /% 1000 }
-    fn nanosecond(self) -> Int Never! { self.nanos }
-    fn to_timestamp(self) -> Int Never! {
+    millisecond: fn(self) -> Int Never! { self.nanos /% 1000000 }
+    microsecond: fn(self) -> Int Never! { self.nanos /% 1000 }
+    nanosecond: fn(self) -> Int Never! { self.nanos }
+    to_timestamp: fn(self) -> Int Never! {
         if self.leap_second -> return civil_i64(self.secs + 1)
         self.secs
     }
-    fn to_unix_s(self) -> Int Never! { civil_i64(civil_floor(civil_datetime_ns(self), 1000000000)) }
-    fn to_unix_ms(self) -> Int Never! { civil_i64(civil_floor(civil_datetime_ns(self), 1000000)) }
-    fn to_unix_us(self) -> Int RangeError! { civil_checked_epoch(civil_floor(civil_datetime_ns(self), 1000), "microseconds") }
-    fn to_unix_ns(self) -> Int RangeError! { civil_checked_epoch(civil_datetime_ns(self), "nanoseconds") }
-    fn to_string(self) -> String Never! { "{self.date().to_string()} {pad2(self.hour(), 2)}:{pad2(self.minute(), 2)}:{pad2(self.second(), 2)} UTC" }
-    fn format_rfc3339(self) -> String Never! { "{self.date().to_string()}T{self.time().to_string()}Z" }
-    fn format(self, pattern: String) -> String Never! { civil_format(pattern, self.date(), self.time(), None) }
-    fn format_checked(self, pattern: String) -> String TextError! { civil_format_checked(pattern, self.date(), self.time(), None) }
-    fn add_nanoseconds(self, value: Int) -> DateTime Never! {
+    to_unix_s: fn(self) -> Int Never! { civil_i64(civil_floor(civil_datetime_ns(self), 1000000000)) }
+    to_unix_ms: fn(self) -> Int Never! { civil_i64(civil_floor(civil_datetime_ns(self), 1000000)) }
+    to_unix_us: fn(self) -> Int RangeError! { civil_checked_epoch(civil_floor(civil_datetime_ns(self), 1000), "microseconds") }
+    to_unix_ns: fn(self) -> Int RangeError! { civil_checked_epoch(civil_datetime_ns(self), "nanoseconds") }
+    to_string: fn(self) -> String Never! { "{self.date().to_string()} {pad2(self.hour(), 2)}:{pad2(self.minute(), 2)}:{pad2(self.second(), 2)} UTC" }
+    format_rfc3339: fn(self) -> String Never! { "{self.date().to_string()}T{self.time().to_string()}Z" }
+    format: fn(self, pattern: String) -> String Never! { civil_format(pattern, self.date(), self.time(), None) }
+    format_checked: fn(self, pattern: String) -> String TextError! { civil_format_checked(pattern, self.date(), self.time(), None) }
+    add_nanoseconds: fn(self, value: Int) -> DateTime Never! {
         if value == 0 -> return self.copy()
         civil_datetime_from_ns(civil_datetime_ns(self) + value)
     }
-    fn plus_duration(self, value: Duration) -> DateTime Never! { self.add_nanoseconds(value.ns) }
-    fn subtract_duration(self, value: Duration) -> DateTime Never! { self.add_nanoseconds(civil_negated(value.ns)) }
-    fn difference(self, other: DateTime) -> Duration Never! { duration_ns(civil_i64(civil_datetime_ns(self) - civil_datetime_ns(other))) }
-    fn add_period(self, value: Period) -> DateTime Never! {
-        d :: self.date().add_period(value)
+    plus_duration: fn(self, value: Duration) -> DateTime Never! { self.add_nanoseconds(value.ns) }
+    subtract_duration: fn(self, value: Duration) -> DateTime Never! { self.add_nanoseconds(civil_negated(value.ns)) }
+    difference: fn(self, other: DateTime) -> Duration Never! { duration_ns(civil_i64(civil_datetime_ns(self) - civil_datetime_ns(other))) }
+    add_period: fn(self, value: Period) -> DateTime Never! {
+        d: self.date().add_period(value)
         __datetime_literal(d.date_y, d.date_m, d.date_d, self.hour(), self.minute(), self.second(), self.nanos)
     }
-    fn subtract_period(self, value: Period) -> DateTime Never! { self.add_period(value.negated()) }
-    fn round(self, unit: String, increment: Int{1}, rounding_mode: String{"half_expand"}) -> DateTime Never! {
-        total :: civil_round(civil_datetime_ns(self), unit, increment, rounding_mode)
+    subtract_period: fn(self, value: Period) -> DateTime Never! { self.add_period(value.negated()) }
+    round: fn(self, unit: String, increment: Int{1}, rounding_mode: String{"half_expand"}) -> DateTime Never! {
+        total: civil_round(civil_datetime_ns(self), unit, increment, rounding_mode)
         civil_timestamp(civil_i64(civil_floor(total, 1000000000)), civil_mod(total, 1000000000), false)
     }
-    fn truncate(self, unit: String, increment: Int{1}) -> DateTime Never! { self.round(unit, increment, "trunc") }
-    fn floor(self, unit: String, increment: Int{1}) -> DateTime Never! { self.round(unit, increment, "floor") }
-    fn ceil(self, unit: String, increment: Int{1}) -> DateTime Never! { self.round(unit, increment, "ceil") }
-    fn until(self, other: DateTime, largest_unit: String{"second"}, smallest_unit: String{"nanosecond"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! {
+    truncate: fn(self, unit: String, increment: Int{1}) -> DateTime Never! { self.round(unit, increment, "trunc") }
+    floor: fn(self, unit: String, increment: Int{1}) -> DateTime Never! { self.round(unit, increment, "floor") }
+    ceil: fn(self, unit: String, increment: Int{1}) -> DateTime Never! { self.round(unit, increment, "ceil") }
+    until: fn(self, other: DateTime, largest_unit: String{"second"}, smallest_unit: String{"nanosecond"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! {
         duration_ns(civil_i64(civil_round(civil_datetime_ns(other) - civil_datetime_ns(self), smallest_unit, increment, rounding_mode)))
     }
-    fn since(self, other: DateTime, largest_unit: String{"second"}, smallest_unit: String{"nanosecond"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! { other.until(self, largest_unit, smallest_unit, rounding_mode, increment) }
-    fn replace(self, year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> DateTime Never! { __datetime_literal(year, month, day, hour, minute, second, self.nanos) }
-    fn with(self, year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int, overflow: String{"constrain"}) -> DateTime TimeError! {
-        date :: self.date().with(year, month, day, overflow)
-        valid_second :: (second >= 0 && second <= 59) || (hour == 23 && minute == 59 && second == 60)
+    since: fn(self, other: DateTime, largest_unit: String{"second"}, smallest_unit: String{"nanosecond"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! { other.until(self, largest_unit, smallest_unit, rounding_mode, increment) }
+    replace: fn(self, year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> DateTime Never! { __datetime_literal(year, month, day, hour, minute, second, self.nanos) }
+    with: fn(self, year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int, overflow: String{"constrain"}) -> DateTime TimeError! {
+        date: self.date().with(year, month, day, overflow)
+        valid_second: (second >= 0 && second <= 59) || (hour == 23 && minute == 59 && second == 60)
         if overflow == "reject" && (hour < 0 || hour > 23 || minute < 0 || minute > 59 || !valid_second) -> return Err(TimeError.new("time fields are outside the valid range: {civil_signed_pad(hour, 2)}:{civil_signed_pad(minute, 2)}:{civil_signed_pad(second, 2)}"))
         Ok(__datetime_literal(date.date_y, date.date_m, date.date_d, hour, minute, second, self.nanos))
     }
-    fn in_zone(self, value: Zone) -> ZonedDateTime Never! { ZonedDateTime{instant: self, zone_value: value} }
+    in_zone: fn(self, value: Zone) -> ZonedDateTime Never! { ZonedDateTime{instant: self, zone_value: value} }
 }
-impl DateTime.Equatable { fn equal(self, rhs: DateTime) -> Bool { self.secs == rhs.secs && self.nanos == rhs.nanos && self.leap_second == rhs.leap_second } }
+impl DateTime.Equatable { equal: fn(self, rhs: DateTime) -> Bool { self.secs == rhs.secs && self.nanos == rhs.nanos && self.leap_second == rhs.leap_second } }
 impl DateTime.Comparable {
-    fn compare(self, rhs: DateTime) -> Ordering {
+    compare: fn(self, rhs: DateTime) -> Ordering {
         if self.secs != rhs.secs -> return civil_order(self.secs, rhs.secs)
         if self.leap_second != rhs.leap_second {
             if self.leap_second -> return Ordering.Greater
@@ -918,110 +918,110 @@ impl DateTime.Comparable {
         civil_order(self.nanos, rhs.nanos)
     }
 }
-impl DateTime.Display { fn display(self) -> String { self.to_string() } }
-impl DateTime.Debug { fn debug(^self) -> String { self.to_string() } }
+impl DateTime.Display { display: fn(self) -> String { self.to_string() } }
+impl DateTime.Debug { debug: fn(^self) -> String { self.to_string() } }
 impl DateTime {
-    fn period_total(self, value: Period, unit: String) -> Float Never! {
-        end :: self.add_period(value)
-        months :: saturating_add_ns(saturating_scale_ns(value.years_value, 12), value.months_value)
-        date :: self.date().add_months(months)
-        anchor :: __datetime_literal(date.date_y, date.date_m, date.date_d, self.hour(), self.minute(), self.second(), self.nanos)
-        residual :: Float{civil_datetime_ns(end) - civil_datetime_ns(anchor)}
+    period_total: fn(self, value: Period, unit: String) -> Float Never! {
+        end: self.add_period(value)
+        months: saturating_add_ns(saturating_scale_ns(value.years_value, 12), value.months_value)
+        date: self.date().add_months(months)
+        anchor: __datetime_literal(date.date_y, date.date_m, date.date_d, self.hour(), self.minute(), self.second(), self.nanos)
+        residual: Float{civil_datetime_ns(end) - civil_datetime_ns(anchor)}
         if unit == "month" || unit == "months" -> return Float{months} + residual / (Float{date.days_in_month()} * 86400000000000.0)
         if unit == "year" || unit == "years" || unit == "y" {
-            year_days :: Float{if date.is_leap_year() -> 366 else -> 365}
+            year_days: Float{if date.is_leap_year() -> 366 else -> 365}
             return Float{months} / 12.0 + residual / (year_days * 86400000000000.0)
         }
-        scale :: civil_unit_ns(unit) ?? return 0.0
+        scale: civil_unit_ns(unit) ?? return 0.0
         Float{civil_datetime_ns(end) - civil_datetime_ns(self)} / Float{scale}
     }
 }
 
-fn civil_integer(value: String, label: String) -> Int TimeError! {
-    raw :: value.bytes()
+civil_integer: fn(value: String, label: String) -> Int TimeError! {
+    raw: value.bytes()
     start := 0
     if raw.len() > 0 && (raw[0] == (U8{43}) || raw[0] == (U8{45})) -> start = 1
     if start >= raw.len() -> return Err(TimeError{reason: "bad {label}: {value}"})
     loop i in start..<raw.len() {
         if raw[i] < (U8{48}) || raw[i] > (U8{57}) -> return Err(TimeError{reason: "bad {label}: {value}"})
     }
-    parsed :: Int.parse(value) ?? return Err(TimeError{reason: "bad {label}: {value}"})
+    parsed: Int.parse(value) ?? return Err(TimeError{reason: "bad {label}: {value}"})
     if !time_int_near(parsed) && (parsed < time_int_min() || parsed > time_int_max()) -> return Err(TimeError{reason: "bad {label}: {value}"})
     Ok(parsed)
 }
-fn civil_digits(value: String) -> Bool Never! {
+civil_digits: fn(value: String) -> Bool Never! {
     loop byte in value.bytes() {
         if byte < (U8{48}) || byte > (U8{57}) -> return false
     }
     true
 }
-fn civil_ascii(value: String) -> Bool Never! {
+civil_ascii: fn(value: String) -> Bool Never! {
     loop byte in value.bytes() {
         if byte >= (U8{128}) -> return false
     }
     true
 }
-fn civil_find_byte(raw: [U8], byte: U8, start: Int) -> Int Never! {
+civil_find_byte: fn(raw: [U8], byte: U8, start: Int) -> Int Never! {
     loop i in start..<raw.len() {
         if raw[i] == byte -> return i
     }
     -1
 }
-fn civil_slice(raw: [U8], start: Int, end: Int) -> String Never! {
+civil_slice: fn(raw: [U8], start: Int, end: Int) -> String Never! {
     out := [U8]{}
     loop i in start..<end -> &out.push(raw[i])
     String.from_bytes(out) ?? panic("civil-time string slice is not UTF-8")
 }
-fn civil_split(value: String, separator: String) -> (head: String, tail: String)? Never! {
-    pair :: value.split_once(separator) ?? return None
+civil_split: fn(value: String, separator: String) -> (head: String, tail: String)? Never! {
+    pair: value.split_once(separator) ?? return None
     Val((head: pair.before, tail: pair.after))
 }
-fn parse(value: String) -> LocalDate TimeError! { civil_parse_date(value, true, true) }
-fn civil_parse_date(value: String, signed_year: Bool, require_fields: Bool) -> LocalDate TimeError! {
-    raw :: value.bytes()
+parse: fn(value: String) -> LocalDate TimeError! { civil_parse_date(value, true, true) }
+civil_parse_date: fn(value: String, signed_year: Bool, require_fields: Bool) -> LocalDate TimeError! {
+    raw: value.bytes()
     start := 0
     if signed_year && raw.len() > 0 && raw[0] == (U8{45}) -> start = 1
-    first :: civil_find_byte(raw, U8{45}, start)
+    first: civil_find_byte(raw, U8{45}, start)
     second := -1
     if first >= 0 -> second = civil_find_byte(raw, U8{45}, first + 1)
     if first < 0 || second < 0 -> return Err(TimeError{reason: "invalid date: {value}"})
-    year_text :: civil_slice(raw, 0, first)
-    month_text :: civil_slice(raw, first + 1, second)
-    day_text :: civil_slice(raw, second + 1, raw.len())
+    year_text: civil_slice(raw, 0, first)
+    month_text: civil_slice(raw, first + 1, second)
+    day_text: civil_slice(raw, second + 1, raw.len())
     if require_fields && (year_text.len() == 0 || month_text.len() == 0 || day_text.len() == 0) -> return Err(TimeError{reason: "invalid date: {value}"})
-    year :: civil_integer(year_text, "year")
-    month :: civil_integer(month_text, "month")
-    day :: civil_integer(day_text, "day")
+    year: civil_integer(year_text, "year")
+    month: civil_integer(month_text, "month")
+    day: civil_integer(day_text, "day")
     if month < 1 || month > 12 || day < 1 || day > days_in_month(year, month) -> return Err(TimeError{reason: "date out of range: {value}"})
     Ok(new(year, month, day))
 }
-fn civil_iso_week(year: Int, week: Int, weekday: Int) -> LocalDate? Never! {
+civil_iso_week: fn(year: Int, week: Int, weekday: Int) -> LocalDate? Never! {
     if week < 1 || week > 53 || weekday < 1 || weekday > 7 -> return None
-    january :: new(year, 1, 4)
-    date :: january.add_days(1 - january.iso_weekday()).add_days((week - 1) * 7 + weekday - 1)
+    january: new(year, 1, 4)
+    date: january.add_days(1 - january.iso_weekday()).add_days((week - 1) * 7 + weekday - 1)
     if date.iso_week_year() == year && date.iso_week() == week -> return Val(date)
     None
 }
-fn from_iso_week(year: Int, week: Int, weekday: Int) -> LocalDate TimeError! {
-    date :: civil_iso_week(year, week, weekday) ?? return Err(TimeError{reason: "ISO week date out of range: {year}-W{civil_signed_pad(week, 2)}-{weekday}"})
+from_iso_week: fn(year: Int, week: Int, weekday: Int) -> LocalDate TimeError! {
+    date: civil_iso_week(year, week, weekday) ?? return Err(TimeError{reason: "ISO week date out of range: {year}-W{civil_signed_pad(week, 2)}-{weekday}"})
     Ok(date)
 }
-fn parse_iso_week_date(value: String) -> LocalDate TimeError! {
-    parts :: civil_split(value, "-W") ?? return Err(TimeError{reason: "invalid ISO week date: {value}"})
-    rest :: civil_split(parts.tail, "-") ?? return Err(TimeError{reason: "invalid ISO week date: {value}"})
+parse_iso_week_date: fn(value: String) -> LocalDate TimeError! {
+    parts: civil_split(value, "-W") ?? return Err(TimeError{reason: "invalid ISO week date: {value}"})
+    rest: civil_split(parts.tail, "-") ?? return Err(TimeError{reason: "invalid ISO week date: {value}"})
     if parts.head.len() == 0 || rest.head.bytes().len() != 2 || rest.tail.bytes().len() != 1 || !civil_digits(rest.head) || !civil_digits(rest.tail) -> return Err(TimeError{reason: "invalid ISO week date: {value}"})
-    year :: civil_integer(parts.head, "ISO week year")
-    week :: civil_integer(rest.head, "ISO week")
-    weekday :: civil_integer(rest.tail, "ISO weekday")
-    date :: civil_iso_week(year, week, weekday) ?? return Err(TimeError{reason: "ISO week date out of range: {value}"})
+    year: civil_integer(parts.head, "ISO week year")
+    week: civil_integer(rest.head, "ISO week")
+    weekday: civil_integer(rest.tail, "ISO weekday")
+    date: civil_iso_week(year, week, weekday) ?? return Err(TimeError{reason: "ISO week date out of range: {value}"})
     Ok(date)
 }
-struct CivilTimeParts { hour: Int, minute: Int, second: Int, nanos: Int }
-fn civil_time_parts(value: String, fractions: Bool) -> CivilTimeParts TimeError! {
-    h :: civil_split(value, ":") ?? return Err(TimeError{reason: "invalid time: {value}"})
-    m :: civil_split(h.tail, ":") ?? return Err(TimeError{reason: "invalid time: {value}"})
-    hour :: civil_integer(h.head, "hour")
-    minute :: civil_integer(m.head, "minute")
+CivilTimeParts: struct { hour: Int, minute: Int, second: Int, nanos: Int }
+civil_time_parts: fn(value: String, fractions: Bool) -> CivilTimeParts TimeError! {
+    h: civil_split(value, ":") ?? return Err(TimeError{reason: "invalid time: {value}"})
+    m: civil_split(h.tail, ":") ?? return Err(TimeError{reason: "invalid time: {value}"})
+    hour: civil_integer(h.head, "hour")
+    minute: civil_integer(m.head, "minute")
     seconds := m.tail
     nanos := 0
     if fractions {
@@ -1036,23 +1036,23 @@ fn civil_time_parts(value: String, fractions: Bool) -> CivilTimeParts TimeError!
             .None -> {}
         }
     }
-    second :: civil_integer(seconds, "second")
+    second: civil_integer(seconds, "second")
     Ok(CivilTimeParts{hour: hour, minute: minute, second: second, nanos: nanos})
 }
-fn parse_time(value: String) -> LocalTime TimeError! {
-    parts :: civil_time_parts(value, true)
+parse_time: fn(value: String) -> LocalTime TimeError! {
+    parts: civil_time_parts(value, true)
     if parts.hour < 0 || parts.hour > 23 || parts.minute < 0 || parts.minute > 59 || parts.second < 0 || parts.second > 59 -> return Err(TimeError{reason: "time out of range: {value}"})
     Ok(civil_time(parts.hour, parts.minute, parts.second, parts.nanos))
 }
-fn civil_rfc_time(value: String) -> (time: LocalTime, leap: Bool) TimeError! {
-    parts :: civil_time_parts(value, true)
+civil_rfc_time: fn(value: String) -> (time: LocalTime, leap: Bool) TimeError! {
+    parts: civil_time_parts(value, true)
     if parts.hour < 0 || parts.hour > 23 || parts.minute < 0 || parts.minute > 59 || parts.second < 0 || parts.second > 60 || (parts.second == 60 && (parts.hour != 23 || parts.minute != 59)) -> return Err(TimeError{reason: "time out of range: {value}"})
     Ok((time: civil_time(parts.hour, parts.minute, parts.second, parts.nanos), leap: parts.second == 60))
 }
 // The value of the two ASCII digits at `at`, or -1 when one is not a digit.
-fn civil_two_digits(raw: [U8], at: Int) -> Int Never! {
-    high :: raw[at]
-    low :: raw[at + 1]
+civil_two_digits: fn(raw: [U8], at: Int) -> Int Never! {
+    high: raw[at]
+    low: raw[at + 1]
     if high < (U8{48}) || high > (U8{57}) || low < (U8{48}) || low > (U8{57}) -> return -1
     Int.from_u8(high) * 10 + Int.from_u8(low) - 528
 }
@@ -1061,19 +1061,19 @@ fn civil_two_digits(raw: [U8], at: Int) -> Int Never! {
 // the general path below accepts in this shape, with the same fields, so
 // None (any other shape, a field out of range, a leap second) hands the
 // value to the general path for its result or its error.
-fn civil_rfc3339_fixed(value: String) -> DateTime? Never! {
-    raw :: value.bytes()
-    n :: raw.len()
+civil_rfc3339_fixed: fn(value: String) -> DateTime? Never! {
+    raw: value.bytes()
+    n: raw.len()
     if n < 20 || raw[4] != (U8{45}) || raw[7] != (U8{45}) || raw[10] != (U8{84}) || raw[13] != (U8{58}) || raw[16] != (U8{58}) -> return None
-    century :: civil_two_digits(raw, 0)
-    year_low :: civil_two_digits(raw, 2)
-    month :: civil_two_digits(raw, 5)
-    day :: civil_two_digits(raw, 8)
-    hour :: civil_two_digits(raw, 11)
-    minute :: civil_two_digits(raw, 14)
-    second :: civil_two_digits(raw, 17)
+    century: civil_two_digits(raw, 0)
+    year_low: civil_two_digits(raw, 2)
+    month: civil_two_digits(raw, 5)
+    day: civil_two_digits(raw, 8)
+    hour: civil_two_digits(raw, 11)
+    minute: civil_two_digits(raw, 14)
+    second: civil_two_digits(raw, 17)
     if century < 0 || year_low < 0 -> return None
-    year :: century * 100 + year_low
+    year: century * 100 + year_low
     if month < 1 || month > 12 || day < 1 || day > days_in_month(year, month) || hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59 -> return None
     at := 19
     nanos := 0
@@ -1096,8 +1096,8 @@ fn civil_rfc3339_fixed(value: String) -> DateTime? Never! {
     if n - at == 1 && raw[at] == (U8{90}) {
         offset = 0
     } else if n - at == 6 && (raw[at] == (U8{43}) || raw[at] == (U8{45})) && raw[at + 3] == (U8{58}) {
-        offset_hour :: civil_two_digits(raw, at + 1)
-        offset_minute :: civil_two_digits(raw, at + 4)
+        offset_hour: civil_two_digits(raw, at + 1)
+        offset_minute: civil_two_digits(raw, at + 4)
         if offset_hour < 0 || offset_hour > 23 || offset_minute < 0 || offset_minute > 59 -> return None
         offset = offset_hour * 3600 + offset_minute * 60
         if raw[at] == (U8{45}) -> offset = -offset
@@ -1109,53 +1109,53 @@ fn civil_rfc3339_fixed(value: String) -> DateTime? Never! {
     // A year of at most 9999 keeps the seconds below 4 * 10^11 in magnitude:
     // inside time_int_near, so civil_utc's civil_i64, saturating_sub_ns and
     // civil_timestamp's civil_i64 return their operands unchanged.
-    seconds :: (civil_day(LocalDate{date_y: year, date_m: month, date_d: day}) - 719162) * 86400 + hour * 3600 + minute * 60 + second - offset
+    seconds: (civil_day(LocalDate{date_y: year, date_m: month, date_d: day}) - 719162) * 86400 + hour * 3600 + minute * 60 + second - offset
     Val(DateTime{secs: seconds, nanos: nanos, leap_second: false})
 }
-fn parse_rfc3339(value: String) -> DateTime TimeError! {
+parse_rfc3339: fn(value: String) -> DateTime TimeError! {
     if civil_rfc3339_fixed(value) == .Val(fixed) -> return Ok(fixed)
-    parts :: civil_split(value, "T") ?? return Err(TimeError{reason: "invalid RFC3339 datetime: {value}"})
+    parts: civil_split(value, "T") ?? return Err(TimeError{reason: "invalid RFC3339 datetime: {value}"})
     if !civil_ascii(parts.tail) -> return Err(TimeError{reason: "invalid RFC3339 datetime: {value}"})
-    date :: parse(parts.head)
-    suffix :: civil_rfc_suffix(parts.tail, value, "RFC3339 datetime needs Z or an offset")
-    t :: civil_rfc_time(suffix.head)
-    offset :: civil_parse_offset(suffix.tail)
+    date: parse(parts.head)
+    suffix: civil_rfc_suffix(parts.tail, value, "RFC3339 datetime needs Z or an offset")
+    t: civil_rfc_time(suffix.head)
+    offset: civil_parse_offset(suffix.tail)
     if t.leap && offset != 0 -> return Err(TimeError{reason: "time out of range: {suffix.head}"})
-    seconds :: saturating_sub_ns(civil_utc(date, t.time), offset)
+    seconds: saturating_sub_ns(civil_utc(date, t.time), offset)
     if t.leap && !civil_leap_epoch(civil_i64(seconds + 1)) -> return Err(TimeError{reason: "time out of range: {suffix.head}"})
     Ok(civil_timestamp(seconds, t.time.nanos, t.leap))
 }
-fn civil_rfc_suffix(rest: String, whole: String, reason: String) -> (head: String, tail: String) TimeError! {
-    raw :: rest.bytes()
+civil_rfc_suffix: fn(rest: String, whole: String, reason: String) -> (head: String, tail: String) TimeError! {
+    raw: rest.bytes()
     if raw.len() > 0 && raw[raw.len() - 1] == (U8{90}) -> return Ok((head: civil_slice(raw, 0, raw.len() - 1), tail: "Z"))
     if raw.len() >= 6 -> return Ok((head: civil_slice(raw, 0, raw.len() - 6), tail: civil_slice(raw, raw.len() - 6, raw.len())))
     Err(TimeError{reason: "{reason}: {whole}"})
 }
-fn civil_parse_offset(value: String) -> Int TimeError! {
+civil_parse_offset: fn(value: String) -> Int TimeError! {
     if value == "Z" -> return Ok(0)
-    raw :: value.bytes()
+    raw: value.bytes()
     if raw.len() != 6 || raw[3] != (U8{58}) || (raw[0] != (U8{45}) && raw[0] != (U8{43})) -> return Err(TimeError{reason: "bad RFC3339 offset: {value}"})
-    h :: civil_slice(raw, 1, 3)
-    m :: civil_slice(raw, 4, 6)
+    h: civil_slice(raw, 1, 3)
+    m: civil_slice(raw, 4, 6)
     if !civil_digits(h) || !civil_digits(m) -> return Err(TimeError{reason: "bad RFC3339 offset: {value}"})
-    hour :: civil_integer(h, "RFC3339 offset hour")
-    minute :: civil_integer(m, "RFC3339 offset minute")
+    hour: civil_integer(h, "RFC3339 offset hour")
+    minute: civil_integer(m, "RFC3339 offset minute")
     if hour > 23 || minute > 59 -> return Err(TimeError{reason: "RFC3339 offset out of range: {value}"})
-    offset :: hour * 3600 + minute * 60
+    offset: hour * 3600 + minute * 60
     if raw[0] == (U8{45}) -> return Ok(-offset)
     Ok(offset)
 }
 
-fn utc() -> Zone Never! {
-    data :: ZoneData{transitions: [ZoneTransition]{}, infos: [ZoneInfo]{ZoneInfo{offset: 0, is_dst: false}}}
+utc: fn() -> Zone Never! {
+    data: ZoneData{transitions: [ZoneTransition]{}, infos: [ZoneInfo]{ZoneInfo{offset: 0, is_dst: false}}}
     Zone{name_value: "UTC", data: data}
 }
 // The fixed-offset zone a `±HH:MM` offset names; a zero offset is UTC.
-fn civil_fixed_zone(offset: Int) -> Zone Never! {
+civil_fixed_zone: fn(offset: Int) -> Zone Never! {
     if offset == 0 -> return utc()
     Zone{name_value: civil_offset(offset), data: ZoneData{transitions: [ZoneTransition]{}, infos: [ZoneInfo]{ZoneInfo{offset: offset, is_dst: false}}}}
 }
-fn zone(name: String) -[Env, FS.Read]> Zone TimeError! {
+zone: fn(name: String) -[Env, FS.Read]> Zone TimeError! {
     if name == "UTC" || name == "Etc/UTC" || name == "Z" -> return Ok(utc())
     if name.starts_with("+") || name.starts_with("-") -> return Ok(civil_fixed_zone(civil_parse_offset(name)))
     if name.contains("..") || name.starts_with("/") || name.starts_with("\\") -> return Err(TimeError{reason: "invalid time zone name: {name}"})
@@ -1176,7 +1176,7 @@ fn zone(name: String) -[Env, FS.Read]> Zone TimeError! {
     }
     Err(TimeError{reason: "unknown IANA time zone: {name}; set JET_TZDB_DIR or TZDIR to an IANA TZif database"})
 }
-fn civil_be(bytes: [U8], start: Int, width: Int, signed: Bool) -> Int TimeError! {
+civil_be: fn(bytes: [U8], start: Int, width: Int, signed: Bool) -> Int TimeError! {
     if start < 0 || start + width > bytes.len() -> return Err(TimeError{reason: "truncated tzif"})
     value := 0
     loop i in start..<(start + width) -> value = value * 256 + Int{bytes[i]}
@@ -1187,7 +1187,7 @@ fn civil_be(bytes: [U8], start: Int, width: Int, signed: Bool) -> Int TimeError!
     }
     Ok(value)
 }
-fn civil_tzif_header(bytes: [U8], base: Int) -> (version: Int, counts: [Int]) TimeError! {
+civil_tzif_header: fn(bytes: [U8], base: Int) -> (version: Int, counts: [Int]) TimeError! {
     if base < 0 || base + 4 > bytes.len() -> return Err(TimeError{reason: "invalid tzif header"})
     if bytes[base] != (U8{84}) || bytes[base + 1] != (U8{90}) || bytes[base + 2] != (U8{105}) || bytes[base + 3] != (U8{102}) -> return Err(TimeError{reason: "invalid tzif header"})
     version := 0
@@ -1196,15 +1196,15 @@ fn civil_tzif_header(bytes: [U8], base: Int) -> (version: Int, counts: [Int]) Ti
     loop i in 0..<6 -> &counts.push(civil_be(bytes, base + 20 + i * 4, 4, false))
     Ok((version: version, counts: counts))
 }
-fn civil_tzif(name: String, bytes: [U8]) -> Zone TimeError! {
-    header :: civil_tzif_header(bytes, 0)
+civil_tzif: fn(name: String, bytes: [U8]) -> Zone TimeError! {
+    header: civil_tzif_header(bytes, 0)
     counts := header.counts
     base := 44
     width := 4
     if header.version == 50 || header.version == 51 || header.version == 52 {
-        block :: counts[3] * 5 + counts[4] * 6 + counts[5] + counts[2] * 8 + counts[0] + counts[1]
+        block: counts[3] * 5 + counts[4] * 6 + counts[5] + counts[2] * 8 + counts[0] + counts[1]
         base = 44 + block
-        second :: civil_tzif_header(bytes, base)
+        second: civil_tzif_header(bytes, base)
         counts = second.counts
         base = base + 44
         width = 8
@@ -1215,13 +1215,13 @@ fn civil_tzif(name: String, bytes: [U8]) -> Zone TimeError! {
         &times.push(civil_be(bytes, pos, width, true))
         pos = pos + width
     }
-    indices :: pos
+    indices: pos
     if indices + counts[3] > bytes.len() -> return Err(TimeError{reason: "truncated tzif index"})
     pos = pos + counts[3]
     infos := [ZoneInfo]{}
-    type_count :: if counts[4] < 1 -> 1 else -> counts[4]
+    type_count: if counts[4] < 1 -> 1 else -> counts[4]
     loop _ in 0..<type_count {
-        offset :: civil_be(bytes, pos, 4, true)
+        offset: civil_be(bytes, pos, 4, true)
         dst := false
         if pos + 4 < bytes.len() -> dst = bytes[pos + 4] != (U8{0})
         &infos.push(ZoneInfo{offset: offset, is_dst: dst})
@@ -1229,39 +1229,39 @@ fn civil_tzif(name: String, bytes: [U8]) -> Zone TimeError! {
     }
     transitions := [ZoneTransition]{}
     loop i in 0..<times.len() -> &transitions.push(ZoneTransition{at: times[i], info: civil_clamp(Int{bytes[indices + i]}, 0, infos.len() - 1)})
-    data :: ZoneData{transitions: transitions, infos: infos}
+    data: ZoneData{transitions: transitions, infos: infos}
     Ok(Zone{name_value: name, data: data})
 }
-fn civil_zone_info(value: Zone, seconds: Int) -> ZoneInfo Never! {
+civil_zone_info: fn(value: Zone, seconds: Int) -> ZoneInfo Never! {
     lo := 0
     hi := value.data.transitions.len()
     loop lo < hi {
-        mid :: (lo + hi) /% 2
+        mid: (lo + hi) /% 2
         if value.data.transitions[mid].at <= seconds -> lo = mid + 1 else -> hi = mid
     }
     index := 0
     if lo > 0 -> index = value.data.transitions[lo - 1].info
     value.data.infos[index]
 }
-fn civil_local_parts(value: Zone, seconds: Int) -> (date: LocalDate, time: LocalTime, offset: Int) Never! {
-    offset :: civil_zone_info(value, seconds).offset
-    local :: from_timestamp(saturating_add_ns(seconds, offset))
+civil_local_parts: fn(value: Zone, seconds: Int) -> (date: LocalDate, time: LocalTime, offset: Int) Never! {
+    offset: civil_zone_info(value, seconds).offset
+    local: from_timestamp(saturating_add_ns(seconds, offset))
     (date: local.date(), time: local.time(), offset: offset)
 }
-fn civil_local_matches(value: Zone, date: LocalDate, t: LocalTime, offset: Int, seconds: Int) -> Bool Never! {
-    parts :: civil_local_parts(value, seconds)
+civil_local_matches: fn(value: Zone, date: LocalDate, t: LocalTime, offset: Int, seconds: Int) -> Bool Never! {
+    parts: civil_local_parts(value, seconds)
     parts.offset == offset && parts.date == date && parts.time.hour() == t.hour() && parts.time.minute() == t.minute() && parts.time.second() == t.second()
 }
-fn civil_local_utc(value: Zone, date: LocalDate, t: LocalTime, disambiguation: String) -> Int TimeError! {
+civil_local_utc: fn(value: Zone, date: LocalDate, t: LocalTime, disambiguation: String) -> Int TimeError! {
     if disambiguation != "compatible" && disambiguation != "earlier" && disambiguation != "later" && disambiguation != "reject" -> return Err(TimeError{reason: "invalid disambiguation: {disambiguation}"})
-    local :: civil_utc(date, t)
+    local: civil_utc(date, t)
     offsets := [Int]{}
     first := Int?{None}
     last := Int?{None}
     loop info in value.data.infos {
         if offsets.contains(info.offset) -> next
         &offsets.push(info.offset)
-        candidate :: saturating_sub_ns(local, info.offset)
+        candidate: saturating_sub_ns(local, info.offset)
         if !civil_local_matches(value, date, t, info.offset, candidate) -> next
         if first == .Val(minimum) {
             if candidate < minimum -> first = Val(candidate)
@@ -1275,17 +1275,17 @@ fn civil_local_utc(value: Zone, date: LocalDate, t: LocalTime, disambiguation: S
         }
     }
     if first == .Val(minimum) {
-        maximum :: last ?? minimum
+        maximum: last ?? minimum
         if minimum == maximum || disambiguation == "compatible" || disambiguation == "earlier" -> return Ok(minimum)
         if disambiguation == "later" -> return Ok(maximum)
         return Err(TimeError{reason: "ambiguous local time in {value.name_value}"})
     }
     loop i in 0..<value.data.transitions.len() {
-        transition :: value.data.transitions[i]
+        transition: value.data.transitions[i]
         before_index := 0
         if i > 0 -> before_index = value.data.transitions[i - 1].info
-        before :: value.data.infos[before_index].offset
-        after :: value.data.infos[transition.info].offset
+        before: value.data.infos[before_index].offset
+        after: value.data.infos[transition.info].offset
         if after > before && local >= saturating_add_ns(transition.at, before) && local < saturating_add_ns(transition.at, after) {
             if disambiguation == "earlier" -> return Ok(saturating_sub_ns(local, after))
             if disambiguation == "reject" -> return Err(TimeError{reason: "nonexistent local time in {value.name_value}"})
@@ -1295,21 +1295,21 @@ fn civil_local_utc(value: Zone, date: LocalDate, t: LocalTime, disambiguation: S
     if disambiguation == "reject" -> return Err(TimeError{reason: "local time is not valid in {value.name_value}"})
     Err(TimeError{reason: "could not resolve local time in {value.name_value}"})
 }
-fn civil_local_compatible(value: Zone, date: LocalDate, t: LocalTime) -> Int Never! {
+civil_local_compatible: fn(value: Zone, date: LocalDate, t: LocalTime) -> Int Never! {
     civil_local_utc(value, date, t, "compatible") ?? saturating_sub_ns(civil_utc(date, t), civil_zone_info(value, civil_utc(date, t)).offset)
 }
 impl Zone {
-    fn name(self) -> String Never! {
+    name: fn(self) -> String Never! {
         self.name_value.copy()
     }
-    fn to_string(self) -> String Never! { self.name() }
-    fn next_transition(self, utc_seconds: Int) -> Int? Never! {
+    to_string: fn(self) -> String Never! { self.name() }
+    next_transition: fn(self, utc_seconds: Int) -> Int? Never! {
         loop transition in self.data.transitions {
             if transition.at > utc_seconds -> return Val(transition.at)
         }
         None
     }
-    fn previous_transition(self, utc_seconds: Int) -> Int? Never! {
+    previous_transition: fn(self, utc_seconds: Int) -> Int? Never! {
         i := self.data.transitions.len()
         loop i > 0 {
             i = i - 1
@@ -1317,117 +1317,117 @@ impl Zone {
         }
         None
     }
-    fn start_of_day(self, date: LocalDate) -> ZonedDateTime Never! { zoned(from_timestamp(civil_local_compatible(self, date, local_time(0, 0, 0))), self) }
-    fn hours_in_day(self, date: LocalDate) -> Int Never! {
-        first :: civil_local_compatible(self, date, local_time(0, 0, 0))
-        last :: civil_local_compatible(self, date.add_days(1), local_time(0, 0, 0))
+    start_of_day: fn(self, date: LocalDate) -> ZonedDateTime Never! { zoned(from_timestamp(civil_local_compatible(self, date, local_time(0, 0, 0))), self) }
+    hours_in_day: fn(self, date: LocalDate) -> Int Never! {
+        first: civil_local_compatible(self, date, local_time(0, 0, 0))
+        last: civil_local_compatible(self, date.add_days(1), local_time(0, 0, 0))
         saturating_sub_ns(last, first) /% 3600
     }
 }
-impl Zone.Display { fn display(self) -> String { self.to_string() } }
-impl Zone.Debug { fn debug(^self) -> String { self.to_string() } }
-fn zoned(value: DateTime, zone: Zone) -> ZonedDateTime Never! { ZonedDateTime{instant: value, zone_value: zone} }
-fn zoned_local(date: LocalDate, t: LocalTime, zone: Zone, disambiguation: String{"compatible"}) -> ZonedDateTime TimeError! {
-    seconds :: civil_local_utc(zone, date, t, disambiguation)
+impl Zone.Display { display: fn(self) -> String { self.to_string() } }
+impl Zone.Debug { debug: fn(^self) -> String { self.to_string() } }
+zoned: fn(value: DateTime, zone: Zone) -> ZonedDateTime Never! { ZonedDateTime{instant: value, zone_value: zone} }
+zoned_local: fn(date: LocalDate, t: LocalTime, zone: Zone, disambiguation: String{"compatible"}) -> ZonedDateTime TimeError! {
+    seconds: civil_local_utc(zone, date, t, disambiguation)
     Ok(zoned(civil_timestamp(seconds, t.nanos, false), zone))
 }
-fn civil_zoned_parts(value: ZonedDateTime) -> (date: LocalDate, time: LocalTime, offset: Int) Never! {
+civil_zoned_parts: fn(value: ZonedDateTime) -> (date: LocalDate, time: LocalTime, offset: Int) Never! {
     if value.instant.leap_second && value.zone_value.name_value == "UTC" -> return (date: value.instant.date(), time: value.instant.time(), offset: 0)
     civil_local_parts(value.zone_value, value.instant.to_timestamp())
 }
 impl ZonedDateTime {
-    fn date(self) -> LocalDate Never! { civil_zoned_parts(self).date }
-    fn time(self) -> LocalTime Never! { civil_zoned_parts(self).time }
-    fn offset_seconds(self) -> Int Never! { civil_zoned_parts(self).offset }
-    fn is_dst(self) -> Bool Never! { civil_zone_info(self.zone_value, self.instant.to_timestamp()).is_dst }
-    fn to_datetime(self) -> DateTime Never! { self.instant }
-    fn zone(self) -> Zone Never! { self.zone_value }
-    fn add_duration(self, value: Duration) -> ZonedDateTime Never! { zoned(self.instant.plus_duration(value), self.zone_value) }
-    fn subtract_duration(self, value: Duration) -> ZonedDateTime Never! { zoned(self.instant.subtract_duration(value), self.zone_value) }
-    fn add_period(self, value: Period) -> ZonedDateTime Never! {
-        date :: self.date().add_period(value)
-        t :: self.time()
+    date: fn(self) -> LocalDate Never! { civil_zoned_parts(self).date }
+    time: fn(self) -> LocalTime Never! { civil_zoned_parts(self).time }
+    offset_seconds: fn(self) -> Int Never! { civil_zoned_parts(self).offset }
+    is_dst: fn(self) -> Bool Never! { civil_zone_info(self.zone_value, self.instant.to_timestamp()).is_dst }
+    to_datetime: fn(self) -> DateTime Never! { self.instant }
+    zone: fn(self) -> Zone Never! { self.zone_value }
+    add_duration: fn(self, value: Duration) -> ZonedDateTime Never! { zoned(self.instant.plus_duration(value), self.zone_value) }
+    subtract_duration: fn(self, value: Duration) -> ZonedDateTime Never! { zoned(self.instant.subtract_duration(value), self.zone_value) }
+    add_period: fn(self, value: Period) -> ZonedDateTime Never! {
+        date: self.date().add_period(value)
+        t: self.time()
         zoned_local(date, t, self.zone_value, "compatible") ?? zoned(from_timestamp(civil_local_compatible(self.zone_value, date, t)), self.zone_value)
     }
-    fn subtract_period(self, value: Period) -> ZonedDateTime Never! { self.add_period(value.negated()) }
-    fn with_time(self, t: LocalTime, disambiguation: String{"compatible"}) -> ZonedDateTime TimeError! {
+    subtract_period: fn(self, value: Period) -> ZonedDateTime Never! { self.add_period(value.negated()) }
+    with_time: fn(self, t: LocalTime, disambiguation: String{"compatible"}) -> ZonedDateTime TimeError! {
         zoned_local(self.date(), t, self.zone_value, disambiguation)
     }
-    fn with_zone(self, zone: Zone) -> ZonedDateTime Never! { zoned(self.instant, zone) }
-    fn until(self, other: ZonedDateTime, largest_unit: String{"second"}, smallest_unit: String{"nanosecond"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! { self.instant.until(other.instant, largest_unit, smallest_unit, rounding_mode, increment) }
-    fn since(self, other: ZonedDateTime, largest_unit: String{"second"}, smallest_unit: String{"nanosecond"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! { other.until(self, largest_unit, smallest_unit, rounding_mode, increment) }
-    fn next_transition(self) -> Int? Never! { self.zone_value.next_transition(self.instant.to_timestamp()) }
-    fn previous_transition(self) -> Int? Never! { self.zone_value.previous_transition(self.instant.to_timestamp()) }
-    fn start_of_day(self) -> ZonedDateTime Never! { self.zone_value.start_of_day(self.date()) }
-    fn hours_in_day(self) -> Int Never! { self.zone_value.hours_in_day(self.date()) }
-    fn format(self, pattern: String) -> String Never! { civil_format(pattern, self.date(), self.time(), Val((name: self.zone_value.name(), offset: self.offset_seconds()))) }
-    fn format_checked(self, pattern: String) -> String TextError! { civil_format_checked(pattern, self.date(), self.time(), Val((name: self.zone_value.name(), offset: self.offset_seconds()))) }
-    fn to_string(self) -> String Never! { "{self.date().to_string()} {self.time().to_string()} {self.zone_value.name()} ({civil_offset(self.offset_seconds())})" }
-    fn format_rfc9557(self) -> String Never! {
-        parts :: civil_zoned_parts(self)
+    with_zone: fn(self, zone: Zone) -> ZonedDateTime Never! { zoned(self.instant, zone) }
+    until: fn(self, other: ZonedDateTime, largest_unit: String{"second"}, smallest_unit: String{"nanosecond"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! { self.instant.until(other.instant, largest_unit, smallest_unit, rounding_mode, increment) }
+    since: fn(self, other: ZonedDateTime, largest_unit: String{"second"}, smallest_unit: String{"nanosecond"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! { other.until(self, largest_unit, smallest_unit, rounding_mode, increment) }
+    next_transition: fn(self) -> Int? Never! { self.zone_value.next_transition(self.instant.to_timestamp()) }
+    previous_transition: fn(self) -> Int? Never! { self.zone_value.previous_transition(self.instant.to_timestamp()) }
+    start_of_day: fn(self) -> ZonedDateTime Never! { self.zone_value.start_of_day(self.date()) }
+    hours_in_day: fn(self) -> Int Never! { self.zone_value.hours_in_day(self.date()) }
+    format: fn(self, pattern: String) -> String Never! { civil_format(pattern, self.date(), self.time(), Val((name: self.zone_value.name(), offset: self.offset_seconds()))) }
+    format_checked: fn(self, pattern: String) -> String TextError! { civil_format_checked(pattern, self.date(), self.time(), Val((name: self.zone_value.name(), offset: self.offset_seconds()))) }
+    to_string: fn(self) -> String Never! { "{self.date().to_string()} {self.time().to_string()} {self.zone_value.name()} ({civil_offset(self.offset_seconds())})" }
+    format_rfc9557: fn(self) -> String Never! {
+        parts: civil_zoned_parts(self)
         fraction := ""
         if self.instant.nanos != 0 -> fraction = ".{pad2(self.instant.nanos, 9)}"
-        suffix :: if parts.offset == 0 -> "Z" else -> civil_offset(parts.offset)
+        suffix: if parts.offset == 0 -> "Z" else -> civil_offset(parts.offset)
         "{parts.date.to_string()}T{pad2(parts.time.hour(), 2)}:{pad2(parts.time.minute(), 2)}:{pad2(parts.time.second(), 2)}{fraction}{suffix}[{self.zone_value.name()}]"
     }
 }
 impl ZonedDateTime.Equatable {
-    fn equal(self, rhs: ZonedDateTime) -> Bool {
+    equal: fn(self, rhs: ZonedDateTime) -> Bool {
         self.instant == rhs.instant && self.zone_value.name_value == rhs.zone_value.name_value
     }
 }
-impl ZonedDateTime.Comparable { fn compare(self, rhs: ZonedDateTime) -> Ordering { self.instant.compare(rhs.instant) } }
-impl ZonedDateTime.Display { fn display(self) -> String { self.to_string() } }
-impl ZonedDateTime.Debug { fn debug(^self) -> String { self.to_string() } }
-fn parse_zoned(value: String) -[Env, FS.Read]> ZonedDateTime TimeError! {
-    raw :: value.bytes()
+impl ZonedDateTime.Comparable { compare: fn(self, rhs: ZonedDateTime) -> Ordering { self.instant.compare(rhs.instant) } }
+impl ZonedDateTime.Display { display: fn(self) -> String { self.to_string() } }
+impl ZonedDateTime.Debug { debug: fn(^self) -> String { self.to_string() } }
+parse_zoned: fn(value: String) -[Env, FS.Read]> ZonedDateTime TimeError! {
+    raw: value.bytes()
     if raw.len() == 0 || raw[raw.len() - 1] != (U8{93}) -> return Err(TimeError{reason: "RFC9557 datetime needs a [zone]: {value}"})
     split := raw.len() - 1
     loop split > 0 && raw[split] != (U8{91}) -> split = split - 1
     if raw[split] != (U8{91}) -> return Err(TimeError{reason: "RFC9557 datetime needs a [zone]: {value}"})
-    dt :: civil_slice(raw, 0, split)
-    zone :: zone(civil_slice(raw, split + 1, raw.len() - 1))
-    parts :: civil_split(dt, "T") ?? return Err(TimeError{reason: "invalid RFC9557 datetime: {value}"})
+    dt: civil_slice(raw, 0, split)
+    zone: zone(civil_slice(raw, split + 1, raw.len() - 1))
+    parts: civil_split(dt, "T") ?? return Err(TimeError{reason: "invalid RFC9557 datetime: {value}"})
     if !civil_ascii(parts.tail) -> return Err(TimeError{reason: "invalid RFC9557 datetime: {value}"})
-    suffix :: civil_rfc_suffix(parts.tail, value, "RFC9557 datetime needs an offset")
-    offset :: civil_parse_offset(suffix.tail)
-    date :: parse(parts.head)
-    parsed :: parse_rfc3339(dt)
+    suffix: civil_rfc_suffix(parts.tail, value, "RFC9557 datetime needs an offset")
+    offset: civil_parse_offset(suffix.tail)
+    date: parse(parts.head)
+    parsed: parse_rfc3339(dt)
     t := parsed.time()
     if !parsed.leap_second -> t = parse_time(suffix.head)
-    seconds :: saturating_sub_ns(civil_utc(date, t), offset)
+    seconds: saturating_sub_ns(civil_utc(date, t), offset)
     if !civil_local_matches(zone, date, t, offset, seconds) -> return Err(TimeError{reason: "RFC9557 offset does not match zone {zone.name()}"})
     Ok(zoned(civil_timestamp(seconds, parsed.nanos, parsed.leap_second), zone))
 }
-fn civil_offset(value: Int) -> String Never! {
-    sign :: if value < 0 -> "-" else -> "+"
-    abs :: civil_abs(value)
+civil_offset: fn(value: Int) -> String Never! {
+    sign: if value < 0 -> "-" else -> "+"
+    abs: civil_abs(value)
     "{sign}{pad2(abs /% 3600, 2)}:{pad2((abs /% 60) %% 60, 2)}"
 }
 
-fn civil_format(pattern: String, date: LocalDate, t: LocalTime, zone: (name: String, offset: Int)?) -> String Never! {
-    weekdays :: [String]{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
-    weekdays_full :: [String]{"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"}
-    months :: [String]{"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"}
-    months_full :: [String]{"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"}
-    weekday :: weekdays[date.iso_weekday() - 1]
-    weekday_full :: weekdays_full[date.iso_weekday() - 1]
-    month_short :: months[date.month() - 1]
-    month_full :: months_full[date.month() - 1]
-    year :: civil_year(date.year())
-    year_short :: pad2(civil_mod(date.year(), 100), 2)
-    month :: pad2(date.month(), 2)
-    day :: pad2(date.day(), 2)
-    doy :: pad2(date.day_of_year(), 3)
-    hour :: pad2(t.hour(), 2)
-    hour12 :: pad2(((t.hour() + 11) %% 12) + 1, 2)
-    minute :: pad2(t.minute(), 2)
-    second :: pad2(t.second(), 2)
-    nanos :: pad2(t.nanosecond(), 9)
-    micros :: pad2(t.microsecond(), 6)
-    millis :: pad2(t.millisecond(), 3)
-    meridiem :: if t.hour() < 12 -> "AM" else -> "PM"
-    space_day :: if date.day() < 10 -> " {date.day()}" else -> "{date.day()}"
+civil_format: fn(pattern: String, date: LocalDate, t: LocalTime, zone: (name: String, offset: Int)?) -> String Never! {
+    weekdays: [String]{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
+    weekdays_full: [String]{"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"}
+    months: [String]{"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"}
+    months_full: [String]{"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"}
+    weekday: weekdays[date.iso_weekday() - 1]
+    weekday_full: weekdays_full[date.iso_weekday() - 1]
+    month_short: months[date.month() - 1]
+    month_full: months_full[date.month() - 1]
+    year: civil_year(date.year())
+    year_short: pad2(civil_mod(date.year(), 100), 2)
+    month: pad2(date.month(), 2)
+    day: pad2(date.day(), 2)
+    doy: pad2(date.day_of_year(), 3)
+    hour: pad2(t.hour(), 2)
+    hour12: pad2(((t.hour() + 11) %% 12) + 1, 2)
+    minute: pad2(t.minute(), 2)
+    second: pad2(t.second(), 2)
+    nanos: pad2(t.nanosecond(), 9)
+    micros: pad2(t.microsecond(), 6)
+    millis: pad2(t.millisecond(), 3)
+    meridiem: if t.hour() < 12 -> "AM" else -> "PM"
+    space_day: if date.day() < 10 -> " {date.day()}" else -> "{date.day()}"
     name := ""
     offset := ""
     if zone == .Val(value) {
@@ -1436,7 +1436,7 @@ fn civil_format(pattern: String, date: LocalDate, t: LocalTime, zone: (name: Str
     }
     // Ordered replacement is deliberately the permissive native contract.
     // Inserted names are subject to subsequent replacements as well.
-    pairs :: [(token: String, value: String)]{
+    pairs: [(token: String, value: String)]{
         (token: "%%", value: "%"), (token: "%A", value: weekday_full), (token: "%a", value: weekday),
         (token: "%B", value: month_full), (token: "%b", value: month_short), (token: "%Y", value: year),
         (token: "%y", value: year_short), (token: "%m", value: month), (token: "%d", value: day),
@@ -1456,24 +1456,24 @@ fn civil_format(pattern: String, date: LocalDate, t: LocalTime, zone: (name: Str
     if zone != None -> out = out.replace("VV", name).replace("XXX", offset)
     out
 }
-fn civil_scalar_width(byte: U8) -> Int Never! {
+civil_scalar_width: fn(byte: U8) -> Int Never! {
     if byte < (U8{128}) -> return 1
     if byte < (U8{224}) -> return 2
     if byte < (U8{240}) -> return 3
     4
 }
-fn civil_byte_character(byte: U8) -> String Never! {
+civil_byte_character: fn(byte: U8) -> String Never! {
     if byte < (U8{128}) -> return String.from_bytes([U8]{byte}) ?? ""
     String.from_bytes([U8]{U8{192 + Int{byte} /% 64}, U8{128 + Int{byte} %% 64}}) ?? ""
 }
-fn civil_format_checked(pattern: String, date: LocalDate, t: LocalTime, zone: (name: String, offset: Int)?) -> String TextError! {
-    tokens :: [String]{"SSSSSSSSS", "EEEE", "MMMM", "yyyy", "DDD", "XXX", "SSSSSS", "MMM", "EEE", "VV", "MM", "dd", "HH", "mm", "ss", "SSS"}
-    raw :: pattern.bytes()
+civil_format_checked: fn(pattern: String, date: LocalDate, t: LocalTime, zone: (name: String, offset: Int)?) -> String TextError! {
+    tokens: [String]{"SSSSSSSSS", "EEEE", "MMMM", "yyyy", "DDD", "XXX", "SSSSSS", "MMM", "EEE", "VV", "MM", "dd", "HH", "mm", "ss", "SSS"}
+    raw: pattern.bytes()
     normalized := ""
     literals := [(marker: String, value: String)]{}
     i := 0
     loop i < raw.len() {
-        byte :: raw[i]
+        byte: raw[i]
         if byte == (U8{39}) {
             i = i + 1
             literal := ""
@@ -1489,20 +1489,20 @@ fn civil_format_checked(pattern: String, date: LocalDate, t: LocalTime, zone: (n
                         break
                     }
                 } else {
-                    width :: civil_scalar_width(raw[i])
+                    width: civil_scalar_width(raw[i])
                     literal = "{literal}{civil_slice(raw, i, i + width)}"
                     i = i + width
                 }
             }
             if !closed -> return Err(TextError{message: "E2703: unterminated format literal"})
-            marker :: "{literals.len()}"
+            marker: "{literals.len()}"
             normalized = "{normalized}{marker}"
             &literals.push((marker: marker, value: literal))
             next
         }
         if byte == (U8{37}) {
             if i + 1 >= raw.len() -> return Err(TextError{message: "E2703: format ends after `%`"})
-            code :: civil_byte_character(raw[i + 1])
+            code: civil_byte_character(raw[i + 1])
             if !([String]{"%", "A", "a", "B", "b", "Y", "y", "m", "d", "e", "j", "H", "I", "M", "S", "p", "z", "Z", "F", "T", "R", "D", "f"}.contains(code)) -> return Err(TextError{message: "E2703: unsupported format token `%{code}`"})
             if (code == "z" || code == "Z") && zone == None -> return Err(TextError{message: "E2703: format token `%{code}` requires a zone"})
             normalized = "{normalized}%{code}"
@@ -1511,7 +1511,7 @@ fn civil_format_checked(pattern: String, date: LocalDate, t: LocalTime, zone: (n
         }
         if (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122})) {
             token := ""
-            rest :: civil_slice(raw, i, raw.len())
+            rest: civil_slice(raw, i, raw.len())
             loop candidate in tokens {
                 if rest.starts_with(candidate) {
                     token = candidate
@@ -1524,7 +1524,7 @@ fn civil_format_checked(pattern: String, date: LocalDate, t: LocalTime, zone: (n
             i = i + token.bytes().len()
             next
         }
-        width :: civil_scalar_width(byte)
+        width: civil_scalar_width(byte)
         normalized = "{normalized}{civil_slice(raw, i, i + width)}"
         i = i + width
     }
@@ -1534,44 +1534,44 @@ fn civil_format_checked(pattern: String, date: LocalDate, t: LocalTime, zone: (n
 }
 
 // Clock selection belongs beside the civil values; providers expose samples.
-fn now_utc() -[Time]> DateTime Never! {
+now_utc: fn() -[Time]> DateTime Never! {
     if core.time.__world_wall_ms() == .Val(millis) -> return civil_timestamp(civil_floor(millis, 1000), civil_mod(millis, 1000) * 1000000, false)
     if core.time.__wall_override_ms() == .Val(millis) -> return civil_timestamp(civil_floor(millis, 1000), civil_mod(millis, 1000) * 1000000, false)
-    sample :: core.time.__wall_sample()
+    sample: core.time.__wall_sample()
     if sample.before_epoch -> return from_timestamp(0)
     civil_timestamp(sample.seconds, sample.nanoseconds, false)
 }
-fn now() -[Time]> DateTime Never! { now_utc() }
-fn today() -[Time]> LocalDate Never! { now_utc().date() }
-fn civil_monotonic_ns() -[Time]> Int Never! {
+now: fn() -[Time]> DateTime Never! { now_utc() }
+today: fn() -[Time]> LocalDate Never! { now_utc().date() }
+civil_monotonic_ns: fn() -[Time]> Int Never! {
     if core.time.__controlled_monotonic_ns() == .Val(value) -> return value
     if core.time.__world_monotonic_ns() == .Val(value) -> return value
     civil_i64(core.time.__host_monotonic_ns())
 }
-fn instant() -[Time]> Instant Never! { Instant{start_ns: civil_monotonic_ns()} }
-fn sleep_until(deadline: Instant) Never! -[Time]> {
-    remaining :: saturating_sub_ns(deadline.start_ns, civil_monotonic_ns())
+instant: fn() -[Time]> Instant Never! { Instant{start_ns: civil_monotonic_ns()} }
+sleep_until: fn(deadline: Instant) Never! -[Time]> {
+    remaining: saturating_sub_ns(deadline.start_ns, civil_monotonic_ns())
     sleep(duration_ns(remaining))
 }
 impl Instant {
-    fn elapsed(self) -[Time]> Duration Never! { duration_ns(saturating_sub_ns(civil_monotonic_ns(), self.start_ns)) }
-    fn elapsed_millis(self) -[Time]> Int Never! { self.elapsed().ns /% 1000000 }
-    fn plus_duration(self, value: Duration) -> Instant Never! { Instant{start_ns: saturating_add_ns(self.start_ns, value.ns)} }
-    fn minus_duration(self, value: Duration) -> Instant Never! { Instant{start_ns: saturating_sub_ns(self.start_ns, value.ns)} }
-    fn difference(self, other: Instant) -> Duration Never! { duration_ns(saturating_sub_ns(self.start_ns, other.start_ns)) }
-    fn to_string(self) -> String Never! { "Instant" }
+    elapsed: fn(self) -[Time]> Duration Never! { duration_ns(saturating_sub_ns(civil_monotonic_ns(), self.start_ns)) }
+    elapsed_millis: fn(self) -[Time]> Int Never! { self.elapsed().ns /% 1000000 }
+    plus_duration: fn(self, value: Duration) -> Instant Never! { Instant{start_ns: saturating_add_ns(self.start_ns, value.ns)} }
+    minus_duration: fn(self, value: Duration) -> Instant Never! { Instant{start_ns: saturating_sub_ns(self.start_ns, value.ns)} }
+    difference: fn(self, other: Instant) -> Duration Never! { duration_ns(saturating_sub_ns(self.start_ns, other.start_ns)) }
+    to_string: fn(self) -> String Never! { "Instant" }
 }
-impl Instant.Equatable { fn equal(self, rhs: Instant) -> Bool { self.start_ns == rhs.start_ns } }
-impl Instant.Comparable { fn compare(self, rhs: Instant) -> Ordering { civil_order(self.start_ns, rhs.start_ns) } }
-impl Instant.Display { fn display(self) -> String { self.to_string() } }
-impl Instant.Debug { fn debug(^self) -> String { self.to_string() } }
+impl Instant.Equatable { equal: fn(self, rhs: Instant) -> Bool { self.start_ns == rhs.start_ns } }
+impl Instant.Comparable { compare: fn(self, rhs: Instant) -> Ordering { civil_order(self.start_ns, rhs.start_ns) } }
+impl Instant.Display { display: fn(self) -> String { self.to_string() } }
+impl Instant.Debug { debug: fn(^self) -> String { self.to_string() } }
 
 // Wire codecs intentionally differ from strict public civil parsers.
-fn civil_codec_day(date: LocalDate) -> Int Never! {
-    y :: date.date_y - 1
+civil_codec_day: fn(date: LocalDate) -> Int Never! {
+    y: date.date_y - 1
     365 * y + y /% 4 - y /% 100 + y /% 400 + civil_month_offset(date.date_y, date.date_m) + date.date_d - 1
 }
-fn civil_codec_date_from_day(day: Int) -> LocalDate Never! {
+civil_codec_date_from_day: fn(day: Int) -> LocalDate Never! {
     year := day /% 365 + 1
     loop civil_codec_day(new(year, 1, 1)) > day -> year = year - 1
     loop civil_codec_day(new(year + 1, 1, 1)) <= day -> year = year + 1
@@ -1583,13 +1583,13 @@ fn civil_codec_date_from_day(day: Int) -> LocalDate Never! {
     }
     new(year, month, remaining + 1)
 }
-fn civil_codec_date_text(value: LocalDate) -> String Never! {
+civil_codec_date_text: fn(value: LocalDate) -> String Never! {
     "{civil_signed_pad(value.date_y, 4)}-{pad2(value.date_m, 2)}-{pad2(value.date_d, 2)}"
 }
-fn civil_codec_datetime(value: String) -> DateTime TimeError! {
-    parts :: civil_split(value, "T") ?? return Err(TimeError{reason: "invalid RFC3339 datetime: {value}"})
-    date :: civil_parse_date(parts.head, false, false)
-    raw :: parts.tail.bytes()
+civil_codec_datetime: fn(value: String) -> DateTime TimeError! {
+    parts: civil_split(value, "T") ?? return Err(TimeError{reason: "invalid RFC3339 datetime: {value}"})
+    date: civil_parse_date(parts.head, false, false)
+    raw: parts.tail.bytes()
     zone_pos := civil_find_byte(raw, U8{90}, 0)
     if zone_pos < 0 {
         loop i in 0..<raw.len() {
@@ -1602,8 +1602,8 @@ fn civil_codec_datetime(value: String) -> DateTime TimeError! {
         }
     }
     if zone_pos < 0 -> return Err(TimeError{reason: "RFC3339 datetime needs Z or an offset: {value}"})
-    time_text :: civil_slice(raw, 0, zone_pos)
-    zone_text :: civil_slice(raw, zone_pos, raw.len())
+    time_text: civil_slice(raw, 0, zone_pos)
+    zone_text: civil_slice(raw, zone_pos, raw.len())
     clean := time_text.copy()
     nanos := 0
     if civil_split(time_text, ".") == .Val(fraction) {
@@ -1613,7 +1613,7 @@ fn civil_codec_datetime(value: String) -> DateTime TimeError! {
         loop scalar in fraction.tail.chars() {
             if count == 9 -> break
             count = count + 1
-            text :: "{scalar}"
+            text: "{scalar}"
             if civil_ascii(text) && civil_digits(text) -> digits = "{digits}{text}"
         }
         if digits != "" {
@@ -1621,30 +1621,30 @@ fn civil_codec_datetime(value: String) -> DateTime TimeError! {
             nanos = Int.parse(digits) ?? 0
         }
     }
-    t :: civil_time_parts(clean, false)
-    leap :: t.second == 60
+    t: civil_time_parts(clean, false)
+    leap: t.second == 60
     if t.hour < 0 || t.hour > 23 || t.minute < 0 || t.minute > 59 || t.second < 0 || t.second > 60 || (leap && (t.hour != 23 || t.minute != 59)) -> return Err(TimeError{reason: "time out of range: {clean}"})
     offset := 0
     if zone_text != "Z" {
-        zone_raw :: zone_text.bytes()
-        rest :: civil_slice(zone_raw, 1, zone_raw.len())
-        fields :: civil_split(rest, ":") ?? return Err(TimeError{reason: "bad RFC3339 offset: {zone_text}"})
-        hour :: civil_integer(fields.head, "RFC3339 offset hour")
-        minute :: civil_integer(fields.tail, "RFC3339 offset minute")
-        sign :: if zone_raw[0] == (U8{45}) -> -1 else -> 1
+        zone_raw: zone_text.bytes()
+        rest: civil_slice(zone_raw, 1, zone_raw.len())
+        fields: civil_split(rest, ":") ?? return Err(TimeError{reason: "bad RFC3339 offset: {zone_text}"})
+        hour: civil_integer(fields.head, "RFC3339 offset hour")
+        minute: civil_integer(fields.tail, "RFC3339 offset minute")
+        sign: if zone_raw[0] == (U8{45}) -> -1 else -> 1
         offset = sign * (hour * 3600 + minute * 60)
     }
     if leap && offset != 0 -> return Err(TimeError{reason: "time out of range: {clean}"})
-    second :: if leap -> 59 else -> t.second
-    seconds :: saturating_sub_ns(saturating_add_ns(saturating_scale_ns(civil_codec_day(date) - 719162, 86400), t.hour * 3600 + t.minute * 60 + second), offset)
+    second: if leap -> 59 else -> t.second
+    seconds: saturating_sub_ns(saturating_add_ns(saturating_scale_ns(civil_codec_day(date) - 719162, 86400), t.hour * 3600 + t.minute * 60 + second), offset)
     Ok(civil_timestamp(seconds, nanos, leap))
 }
 impl LocalDate.Encode {
-    fn encode(self) -> Dyn { Dyn.Text(civil_codec_date_text(self)) }
+    encode: fn(self) -> Dyn { Dyn.Text(civil_codec_date_text(self)) }
 }
 impl LocalDate.Decode {
-    fn decode(tree: Dyn) -> LocalDate [FieldError]! {
-        text :: tree.decode<String>()
+    decode: fn(tree: Dyn) -> LocalDate [FieldError]! {
+        text: tree.decode<String>()
         if civil_parse_date(text, false, false) == {
             .Ok(value) -> Ok(value)
             .Err(error) -> Err([FieldError]{FieldError{path: "", reason: "expected Date: {error.reason}"}})
@@ -1652,11 +1652,11 @@ impl LocalDate.Decode {
     }
 }
 impl LocalTime.Encode {
-    fn encode(self) -> Dyn { Dyn.Text("{pad2(self.hour(), 2)}:{pad2(self.minute(), 2)}:{pad2(civil_clamp(self.second(), 0, 59), 2)}") }
+    encode: fn(self) -> Dyn { Dyn.Text("{pad2(self.hour(), 2)}:{pad2(self.minute(), 2)}:{pad2(civil_clamp(self.second(), 0, 59), 2)}") }
 }
 impl LocalTime.Decode {
-    fn decode(tree: Dyn) -> LocalTime [FieldError]! {
-        text :: tree.decode<String>()
+    decode: fn(tree: Dyn) -> LocalTime [FieldError]! {
+        text: tree.decode<String>()
         if civil_time_parts(text, false) == {
             .Ok(parts) -> {
                 if parts.hour < 0 || parts.hour > 23 || parts.minute < 0 || parts.minute > 59 || parts.second < 0 || parts.second > 59 -> return Err([FieldError]{FieldError{path: "", reason: "expected LocalTime: time out of range: {text}"}})
@@ -1667,16 +1667,16 @@ impl LocalTime.Decode {
     }
 }
 impl DateTime.Encode {
-    fn encode(self) -> Dyn {
-        date :: civil_codec_date_from_day(719162 + civil_floor(self.secs, 86400))
-        fraction :: if self.nanos == 0 -> "" else -> ".{pad2(self.nanos, 9)}"
-        second :: civil_mod(self.secs, 60) + (if self.leap_second -> 1 else -> 0)
+    encode: fn(self) -> Dyn {
+        date: civil_codec_date_from_day(719162 + civil_floor(self.secs, 86400))
+        fraction: if self.nanos == 0 -> "" else -> ".{pad2(self.nanos, 9)}"
+        second: civil_mod(self.secs, 60) + (if self.leap_second -> 1 else -> 0)
         Dyn.Text("{civil_codec_date_text(date)}T{pad2(self.hour(), 2)}:{pad2(self.minute(), 2)}:{pad2(second, 2)}{fraction}Z")
     }
 }
 impl DateTime.Decode {
-    fn decode(tree: Dyn) -> DateTime [FieldError]! {
-        text :: tree.decode<String>()
+    decode: fn(tree: Dyn) -> DateTime [FieldError]! {
+        text: tree.decode<String>()
         if civil_codec_datetime(text) == {
             .Ok(value) -> Ok(value)
             .Err(error) -> Err([FieldError]{FieldError{path: "", reason: "expected DateTime: {error.reason}"}})
@@ -1687,11 +1687,11 @@ impl DateTime.Decode {
 // Dyn.parse_datetime reads it (Foundation DynDateTime.parse_rfc3339): the
 // instant at its fixed offset, in the zone that offset names.
 impl ZonedDateTime.Decode {
-    fn decode(tree: Dyn) -> ZonedDateTime [FieldError]! {
+    decode: fn(tree: Dyn) -> ZonedDateTime [FieldError]! {
         if tree == {
             .DateTime(value) -> Ok(value.copy())
             .Text(text) -> {
-                value :: civil_dyn_datetime(text) ?? return Err([FieldError]{FieldError{path: "", reason: "expected RFC 3339 date-time with a minute-aligned offset"}})
+                value: civil_dyn_datetime(text) ?? return Err([FieldError]{FieldError{path: "", reason: "expected RFC 3339 date-time with a minute-aligned offset"}})
                 Ok(value)
             }
             else -> Err([FieldError]{FieldError{path: "", reason: "expected ZonedDateTime, found {civil_dyn_kind(tree)}"}})
@@ -1699,7 +1699,7 @@ impl ZonedDateTime.Decode {
     }
 }
 // The decode diagnostic's name for a Dyn variant (dyn_kind).
-fn civil_dyn_kind(tree: Dyn) -> String Never! {
+civil_dyn_kind: fn(tree: Dyn) -> String Never! {
     if tree == {
         .Null -> "null"
         .Bool(_) -> "Bool"
@@ -1714,7 +1714,7 @@ fn civil_dyn_kind(tree: Dyn) -> String Never! {
     }
 }
 // The decimal value of the ASCII digits raw[start..<end], None past a non-digit.
-fn civil_dyn_number(raw: [U8], start: Int, end: Int) -> Int? Never! {
+civil_dyn_number: fn(raw: [U8], start: Int, end: Int) -> Int? Never! {
     value := 0
     loop i in start..<end {
         if raw[i] < (U8{48}) || raw[i] > (U8{57}) -> return None
@@ -1724,18 +1724,18 @@ fn civil_dyn_number(raw: [U8], start: Int, end: Int) -> Int? Never! {
 }
 // `YYYY-MM-DDTHH:MM:SS[.fraction](Z|±HH:MM)`; a fixed offset names its zone
 // "±HH:MM" and a zero offset is UTC.
-fn civil_dyn_datetime(text: String) -> ZonedDateTime? Never! {
-    raw :: text.bytes()
+civil_dyn_datetime: fn(text: String) -> ZonedDateTime? Never! {
+    raw: text.bytes()
     if raw.len() < 20 || !civil_ascii(text) -> return None
-    separator :: raw[10]
+    separator: raw[10]
     if raw[4] != (U8{45}) || raw[7] != (U8{45}) || raw[13] != (U8{58}) || raw[16] != (U8{58}) -> return None
     if separator != (U8{84}) && separator != (U8{116}) && separator != (U8{32}) -> return None
-    year :: civil_dyn_number(raw, 0, 4) ?? return None
-    month :: civil_dyn_number(raw, 5, 7) ?? return None
-    day :: civil_dyn_number(raw, 8, 10) ?? return None
-    hour :: civil_dyn_number(raw, 11, 13) ?? return None
-    minute :: civil_dyn_number(raw, 14, 16) ?? return None
-    second :: civil_dyn_number(raw, 17, 19) ?? return None
+    year: civil_dyn_number(raw, 0, 4) ?? return None
+    month: civil_dyn_number(raw, 5, 7) ?? return None
+    day: civil_dyn_number(raw, 8, 10) ?? return None
+    hour: civil_dyn_number(raw, 11, 13) ?? return None
+    minute: civil_dyn_number(raw, 14, 16) ?? return None
+    second: civil_dyn_number(raw, 17, 19) ?? return None
     if month < 1 || month > 12 -> return None
     if day < 1 || day > days_in_month(year, month) || hour > 23 || minute > 59 || second > 60 -> return None
     at := 19
@@ -1743,7 +1743,7 @@ fn civil_dyn_datetime(text: String) -> ZonedDateTime? Never! {
     if raw[19] == (U8{46}) {
         at = 20
         loop at < raw.len() && raw[at] >= (U8{48}) && raw[at] <= (U8{57}) -> at = at + 1
-        count :: at - 20
+        count: at - 20
         if count == 0 || count > 9 -> return None
         nanos = civil_dyn_number(raw, 20, at) ?? return None
         scaled := count
@@ -1753,41 +1753,41 @@ fn civil_dyn_datetime(text: String) -> ZonedDateTime? Never! {
         }
     }
     offset := 0
-    rest :: raw.len() - at
+    rest: raw.len() - at
     if rest == 6 && (raw[at] == (U8{43}) || raw[at] == (U8{45})) && raw[at + 3] == (U8{58}) {
-        hours :: civil_dyn_number(raw, at + 1, at + 3) ?? return None
-        minutes :: civil_dyn_number(raw, at + 4, at + 6) ?? return None
+        hours: civil_dyn_number(raw, at + 1, at + 3) ?? return None
+        minutes: civil_dyn_number(raw, at + 4, at + 6) ?? return None
         if hours > 23 || minutes > 59 -> return None
         offset = hours * 3600 + minutes * 60
         if raw[at] == (U8{45}) -> offset = -offset
     } else if rest != 1 || (raw[at] != (U8{90}) && raw[at] != (U8{122})) {
         return None
     }
-    seconds :: civil_utc(new(year, month, day), civil_time(hour, minute, second, 0)) - offset
+    seconds: civil_utc(new(year, month, day), civil_time(hour, minute, second, 0)) - offset
     Val(zoned(civil_timestamp(seconds, nanos, second == 60), civil_fixed_zone(offset)))
 }
 
 impl DateTime {
     // Sema has already validated the complete literal. Ordinary source dispatch
     // keeps the runtime construction on the same parser as runtime strings.
-    fn __literal(text: String) -> DateTime Never! {
+    __literal: fn(text: String) -> DateTime Never! {
         parse_rfc3339(text) ?? panic("a checked DateTime literal became invalid")
     }
 }
 
 impl LocalDate {
-    fn today() -[Time]> LocalDate Never! { today() }
+    today: fn() -[Time]> LocalDate Never! { today() }
 }
 impl Instant {
-    fn __now() -[Time]> Instant Never! { instant() }
-    fn __add(left: Instant, right: Duration) -> Instant Never! { left.plus_duration(right) }
-    fn __delta_add(left: Duration, right: Instant) -> Instant Never! { right.plus_duration(left) }
-    fn __subtract(left: Instant, right: Duration) -> Instant Never! { left.minus_duration(right) }
-    fn __difference(left: Instant, right: Instant) -> Duration Never! { left.difference(right) }
+    __now: fn() -[Time]> Instant Never! { instant() }
+    __add: fn(left: Instant, right: Duration) -> Instant Never! { left.plus_duration(right) }
+    __delta_add: fn(left: Duration, right: Instant) -> Instant Never! { right.plus_duration(left) }
+    __subtract: fn(left: Instant, right: Duration) -> Instant Never! { left.minus_duration(right) }
+    __difference: fn(left: Instant, right: Instant) -> Duration Never! { left.difference(right) }
 }
 
 #Test("Civil dates preserve Gregorian arithmetic and TimeError overflow reasons") {
-    leap :: new(2024, 2, 29)
+    leap: new(2024, 2, 29)
     assert_eq(leap.weekday(), 4)
     assert_eq(leap.iso_weekday(), 4)
     assert_eq(leap.iso_week(), 9)
@@ -1808,26 +1808,26 @@ impl Instant {
 }
 
 #Test("DateTime retains negative epochs, leap seconds, and nanosecond arithmetic") {
-    negative :: from_unix_nanoseconds(-1)
+    negative: from_unix_nanoseconds(-1)
     assert_eq(negative.format_rfc3339(), "1969-12-31T23:59:59.999999999Z")
     assert_eq(negative.to_unix_s(), -1)
     assert_eq(negative.to_unix_ns() ?? panic("Unix ns"), -1)
-    leap :: parse_rfc3339("2016-12-31T23:59:60.123456789Z") ?? panic("leap second")
+    leap: parse_rfc3339("2016-12-31T23:59:60.123456789Z") ?? panic("leap second")
     assert_eq(leap.second(), 60)
     assert_eq(leap.nanosecond(), 123456789)
     assert_eq(leap.add_nanoseconds(1000000000).format_rfc3339(), "2017-01-01T00:00:00.123456789Z")
-    offset :: parse_rfc3339("2024-03-01T12:00:00+02:30") ?? panic("offset")
+    offset: parse_rfc3339("2024-03-01T12:00:00+02:30") ?? panic("offset")
     assert_eq(offset.format_rfc3339(), "2024-03-01T09:30:00Z")
     assert_eq(datetime(2024, 2, 29, 12, 34, 56).round("minute").minute(), 35)
 }
 
 #Test("Period totals and local-time rounding keep calendar and duration units distinct") {
-    anchor :: new(2024, 1, 31)
+    anchor: new(2024, 1, 31)
     assert_eq(period_months(1).total_in("days", anchor), 29.0)
     assert_eq(period_months(1).total_in("months", anchor), 1.0)
     assert_eq(period(0, -1, 2).sign(), -1)
     assert_eq(period(time_int_min(), 0, 0).abs().years(), time_int_max())
-    t :: parse_time("23:59:59.123456789") ?? panic("local time")
+    t: parse_time("23:59:59.123456789") ?? panic("local time")
     assert_eq(t.add_duration(duration_seconds(2)).to_string(), "00:00:01.123456789")
     assert_eq(t.round("second").to_string(), "23:59:59")
     assert_eq(t.ceil("second").to_string(), "00:00:00")
@@ -1835,13 +1835,13 @@ impl Instant {
 }
 
 #Test("Zoned local resolution keeps gap and overlap disambiguation") {
-    data :: ZoneData{transitions: [ZoneTransition]{ZoneTransition{at: 3600, info: 1}, ZoneTransition{at: 10800, info: 0}}, infos: [ZoneInfo]{ZoneInfo{offset: 0, is_dst: false}, ZoneInfo{offset: 3600, is_dst: true}}}
-    z :: Zone{name_value: "test", data: data}
-    day :: new(1970, 1, 1)
-    gap :: local_time(1, 30, 0)
+    data: ZoneData{transitions: [ZoneTransition]{ZoneTransition{at: 3600, info: 1}, ZoneTransition{at: 10800, info: 0}}, infos: [ZoneInfo]{ZoneInfo{offset: 0, is_dst: false}, ZoneInfo{offset: 3600, is_dst: true}}}
+    z: Zone{name_value: "test", data: data}
+    day: new(1970, 1, 1)
+    gap: local_time(1, 30, 0)
     assert_eq((zoned_local(day, gap, z, "earlier") ?? panic("earlier")).to_datetime().to_timestamp(), 1800)
     assert_eq((zoned_local(day, gap, z, "later") ?? panic("later")).to_datetime().to_timestamp(), 5400)
-    overlap :: local_time(3, 30, 0)
+    overlap: local_time(3, 30, 0)
     assert_eq((zoned_local(day, overlap, z, "earlier") ?? panic("earlier")).to_datetime().to_timestamp(), 9000)
     assert_eq((zoned_local(day, overlap, z, "later") ?? panic("later")).to_datetime().to_timestamp(), 12600)
     assert_eq(z.next_transition(3600) ?? -1, 10800)
@@ -1850,9 +1850,9 @@ impl Instant {
 }
 
 #Test("Zoned equality compares instant and immutable zone name without a guard") {
-    first :: zoned(from_timestamp(0), utc())
-    same_name :: Zone{name_value: "UTC", data: ZoneData{transitions: [ZoneTransition]{}, infos: [ZoneInfo]{ZoneInfo{offset: 3600, is_dst: false}}}}
-    other_name :: Zone{name_value: "other", data: same_name.data}
+    first: zoned(from_timestamp(0), utc())
+    same_name: Zone{name_value: "UTC", data: ZoneData{transitions: [ZoneTransition]{}, infos: [ZoneInfo]{ZoneInfo{offset: 3600, is_dst: false}}}}
+    other_name: Zone{name_value: "other", data: same_name.data}
     assert_eq(same_name.name(), "UTC")
     assert_eq(other_name.name(), "other")
     assert_eq(first, zoned(from_timestamp(0), utc()))
@@ -1864,14 +1864,14 @@ impl Instant {
 }
 
 #Test("Civil codecs retain their permissive wire policy separately from public parsers") {
-    date :: Dyn.Text("2024-2-29").decode<LocalDate>() ?? panic("Date codec")
+    date: Dyn.Text("2024-2-29").decode<LocalDate>() ?? panic("Date codec")
     assert_eq(date.to_string(), "2024-02-29")
     assert_eq(date.encode(), Dyn.Text("2024-02-29"))
-    t :: Dyn.Text("1:2:3").decode<LocalTime>() ?? panic("LocalTime codec")
+    t: Dyn.Text("1:2:3").decode<LocalTime>() ?? panic("LocalTime codec")
     assert_eq(t.to_string(), "01:02:03")
     assert_eq(parse_time("01:02:03.123456789") ?? panic("time"), t.add_duration(duration_ns(123456789)))
     assert_eq((parse_time("01:02:03.123456789") ?? panic("time")).encode(), Dyn.Text("01:02:03"))
-    invalid_times :: [String]{"-1:2:3", "24:2:3", "1:-1:3", "1:60:3", "1:2:-1", "1:2:60"}
+    invalid_times: [String]{"-1:2:3", "24:2:3", "1:-1:3", "1:60:3", "1:2:-1", "1:2:60"}
     loop text in invalid_times {
         if Dyn.Text(text).decode<LocalTime>() == {
             .Err(errors) -> {
@@ -1890,15 +1890,15 @@ impl Instant {
         }
         .Ok(_) -> assert(false)
     }
-    dt :: Dyn.Text("2024-02-29T01:02:03.1a2Z").decode<DateTime>() ?? panic("DateTime codec")
+    dt: Dyn.Text("2024-02-29T01:02:03.1a2Z").decode<DateTime>() ?? panic("DateTime codec")
     assert_eq(dt.nanosecond(), 120000000)
     assert_eq(dt.encode(), Dyn.Text("2024-02-29T01:02:03.120000000Z"))
     assert_eq(new(-1, 1, 1).encode(), Dyn.Text("-001-01-01"))
 }
 
 #Test("Instant arithmetic is a source point with saturating duration differences") {
-    first :: Instant{start_ns: 100}
-    last :: first.plus_duration(duration_ns(25))
+    first: Instant{start_ns: 100}
+    last: first.plus_duration(duration_ns(25))
     assert_eq(last.difference(first).ns, 25)
     assert_eq(last.minus_duration(duration_ns(25)), first)
     assert_eq(Instant{start_ns: time_int_max()}.plus_duration(duration_ns(1)).start_ns, time_int_max())
@@ -1906,7 +1906,7 @@ impl Instant {
 }
 
 #Test("Date alias receivers retain projections and ISO year boundaries") {
-    date :: LocalDate{new(2021, 1, 1)}
+    date: LocalDate{new(2021, 1, 1)}
     assert_eq(date.year(), 2021)
     assert_eq(date.month(), 1)
     assert_eq(date.day(), 1)
@@ -1924,7 +1924,7 @@ impl Instant {
 }
 
 #Test("Date alias arithmetic preserves leap clamps and signed periods") {
-    date :: LocalDate{new(2024, 2, 29)}
+    date: LocalDate{new(2024, 2, 29)}
     assert_eq(date.quarter_of_year(), 1)
     assert_eq(new(2024, 12, 1).quarter_of_year(), 4)
     assert_eq(date.days_in_month(), 29)
@@ -1941,7 +1941,7 @@ impl Instant {
 }
 
 #Test("Date alias truncation formatting and rounded differences preserve errors") {
-    date :: LocalDate{new(2024, 2, 29)}
+    date: LocalDate{new(2024, 2, 29)}
     assert_eq(date.truncate("year"), new(2024, 1, 1))
     assert_eq(date.truncate("month"), new(2024, 2, 1))
     assert_eq(date.truncate("unknown"), date)
@@ -1979,8 +1979,8 @@ impl Instant {
 }
 
 #Test("Date duration rounding keeps wide intermediates until the final clamp") {
-    first :: new(1, 1, 1)
-    later :: first.add_days(150000)
+    first: new(1, 1, 1)
+    later: first.add_days(150000)
     // 150000 days is above half a 200000-day quantum, even though both
     // magnitudes exceed the final signed nanosecond Duration range.
     assert_eq(first.until(later, "day", "day", "half_expand", 200000).ns, time_int_max())
@@ -1990,8 +1990,8 @@ impl Instant {
 }
 
 #Test("Stopwatch start and elapsed share the host monotonic epoch") {
-    watch :: start()
-    later :: core.time.__host_monotonic_ns()
+    watch: start()
+    later: core.time.__host_monotonic_ns()
     assert(watch.start_ns <= later)
     assert(elapsed(watch).ns >= 0)
     assert(watch.elapsed_millis() >= 0)

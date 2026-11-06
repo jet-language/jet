@@ -1,20 +1,20 @@
 
-#SingleUse struct Lock {
+#SingleUse Lock: struct {
     resource: String,
 }
-fn acquire(resource: String) -> Lock {
+acquire: fn(resource: String) -> Lock {
     return Lock{ resource: resource }
 }
-fn release(lock: ^Lock) {
+release: fn(lock: ^Lock) {
     print(lock.resource)
 }
 
 
-fn make() -> Lock {
-    db :: acquire("db")
+make: fn() -> Lock {
+    db: acquire("db")
     return db
 }
-fn run() {
-    held :: make()
+run: fn() {
+    held: make()
     release(^held)
 }

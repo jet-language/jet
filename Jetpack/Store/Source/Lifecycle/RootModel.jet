@@ -4,20 +4,20 @@
 // exact proposed set. Target sets are sorted, duplicate-free lists; root maps
 // are keyed by the root id text and always walked in sorted key order.
 
-STORE_LIFECYCLE_MAX_ROOTS :: 4096
-STORE_LIFECYCLE_MAX_TARGETS_PER_ROOT :: 4096
-STORE_LIFECYCLE_MAX_TOTAL_TARGETS :: 65536
-STORE_LIFECYCLE_MAX_RECOVERY_WORK :: 1000000
-STORE_LIFECYCLE_MAX_IDENTITY_BYTES :: 512
+STORE_LIFECYCLE_MAX_ROOTS: 4096
+STORE_LIFECYCLE_MAX_TARGETS_PER_ROOT: 4096
+STORE_LIFECYCLE_MAX_TOTAL_TARGETS: 65536
+STORE_LIFECYCLE_MAX_RECOVERY_WORK: 1000000
+STORE_LIFECYCLE_MAX_IDENTITY_BYTES: 512
 
-enum RootKind {
+RootKind: enum {
     ProjectLock
     ProfileGeneration
     Toolchain
     ExternalConsumer
     Manual
 
-    fn wire(self) -> String Never! {
+    wire: fn(self) -> String Never! {
         if self == {
             .ProjectLock -> "project-lock"
             .ProfileGeneration -> "profile-generation"
@@ -27,7 +27,7 @@ enum RootKind {
         }
     }
 
-    fn parse(value: String) -> RootKind StoreError! {
+    parse: fn(value: String) -> RootKind StoreError! {
         if value == {
             "project-lock" -> Ok(RootKind.ProjectLock)
             "profile-generation" -> Ok(RootKind.ProfileGeneration)
@@ -40,70 +40,70 @@ enum RootKind {
 }
 
 // The stable identity of one root.
-struct RootID {
+RootID: struct {
     priv value: String
 
-    fn new(value: String) -> RootID StoreError! {
+    new: fn(value: String) -> RootID StoreError! {
         store_lifecycle_validate_identity("root id", value)
         Ok(RootID{value})
     }
 
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         self.value
     }
 }
 
 // The producer that owns a root.
-struct ProducerID {
+ProducerID: struct {
     priv value: String
 
-    fn new(value: String) -> ProducerID StoreError! {
+    new: fn(value: String) -> ProducerID StoreError! {
         store_lifecycle_validate_identity("producer", value)
         Ok(ProducerID{value})
     }
 
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         self.value
     }
 }
 
 // The producer's witness for one incarnation.
-struct RootWitness {
+RootWitness: struct {
     priv value: String
 
-    fn new(value: String) -> RootWitness StoreError! {
+    new: fn(value: String) -> RootWitness StoreError! {
         store_lifecycle_validate_identity("witness", value)
         Ok(RootWitness{value})
     }
 
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         self.value
     }
 }
 
 // A never-reused, nonzero root incarnation.
-struct Incarnation {
+Incarnation: struct {
     priv value: Int
 
-    fn new(value: Int) -> Incarnation StoreError! {
+    new: fn(value: Int) -> Incarnation StoreError! {
         if value == 0 -> return Err(StoreError.InvalidData("lifecycle incarnation must be nonzero"))
         Ok(Incarnation{value})
     }
 
-    fn get(self) -> Int Never! {
+    get: fn(self) -> Int Never! {
         self.value
     }
 }
 
 // Unix seconds recorded by a lifecycle transition.
-struct LifecycleTimestamp {
+LifecycleTimestamp: struct {
     priv value: Int
 
-    fn from_unix_seconds(value: Int) -> LifecycleTimestamp Never! {
+    from_unix_seconds: fn(value: Int) -> LifecycleTimestamp Never! {
         LifecycleTimestamp{value}
     }
 
-    fn get(self) -> Int Never! {
+    get: fn(self) -> Int Never! {
         self.value
     }
 }
@@ -111,11 +111,11 @@ struct LifecycleTimestamp {
 // Compare-and-swap token for a durable root incarnation: the never-reused
 // incarnation, then the durable root revision. Both are persisted so a retry
 // after a crash cannot accept an older mutation.
-struct RootEtag {
+RootEtag: struct {
     priv incarnation: Int
     priv revision: Int
 
-    fn new(incarnation: Int, revision: Int) -> RootEtag StoreError! {
+    new: fn(incarnation: Int, revision: Int) -> RootEtag StoreError! {
         Incarnation.new(incarnation)
         if revision == 0 -> return Err(StoreError.InvalidData("lifecycle root revision must be nonzero"))
         Ok(RootEtag{incarnation, revision})
@@ -123,42 +123,42 @@ struct RootEtag {
 
     // `<incarnation>.<revision>`. A zero revision is accepted for a stale
     // caller token such as `1.0`; durable roots always carry a nonzero one.
-    fn parse(value: String) -> RootEtag StoreError! {
-        parts :: value.split_once(".") ?? return Err(StoreError.InvalidData("lifecycle root etag must be `<incarnation>.<revision>`"))
+    parse: fn(value: String) -> RootEtag StoreError! {
+        parts: value.split_once(".") ?? return Err(StoreError.InvalidData("lifecycle root etag must be `<incarnation>.<revision>`"))
         if parts.after.contains(".") -> return Err(StoreError.InvalidData("lifecycle root etag has too many components"))
-        incarnation :: store_lifecycle_parse_u64(parts.before) ?? return Err(StoreError.InvalidData("lifecycle root etag has an invalid incarnation"))
-        revision :: store_lifecycle_parse_u64(parts.after) ?? return Err(StoreError.InvalidData("lifecycle root etag has an invalid revision"))
+        incarnation: store_lifecycle_parse_u64(parts.before) ?? return Err(StoreError.InvalidData("lifecycle root etag has an invalid incarnation"))
+        revision: store_lifecycle_parse_u64(parts.after) ?? return Err(StoreError.InvalidData("lifecycle root etag has an invalid revision"))
         Incarnation.new(incarnation)
         Ok(RootEtag{incarnation, revision})
     }
 
-    fn render(self) -> String Never! {
+    render: fn(self) -> String Never! {
         "{self.incarnation}.{self.revision}"
     }
 
     // The token a replacement of `root` receives.
-    fn next_after(root: LifecycleRoot) -> RootEtag StoreError! {
+    next_after: fn(root: LifecycleRoot) -> RootEtag StoreError! {
         RootEtag.new(root.identity.incarnation.get() + 1, root.revision + 1)
     }
 }
 
 // Optional metadata of manually retained roots.
-struct RootMetadata {
+RootMetadata: struct {
     priv label: String?
     priv reference: String?
     priv expires_at: LifecycleTimestamp?
 
-    fn empty() -> RootMetadata Never! {
+    empty: fn() -> RootMetadata Never! {
         RootMetadata{label: None, reference: None, expires_at: None}
     }
 
-    fn manual(label: String, reference: String, expires_at: LifecycleTimestamp?) -> RootMetadata StoreError! {
-        metadata :: RootMetadata{label: Val(label), reference: Val(reference), expires_at}
+    manual: fn(label: String, reference: String, expires_at: LifecycleTimestamp?) -> RootMetadata StoreError! {
+        metadata: RootMetadata{label: Val(label), reference: Val(reference), expires_at}
         metadata.validate()
         Ok(metadata)
     }
 
-    fn validate(self) StoreError! {
+    validate: fn(self) StoreError! {
         if self.label == {
             .Val(label) -> store_lifecycle_validate_identity("root label", label)
             .None -> {}
@@ -169,7 +169,7 @@ struct RootMetadata {
         }
     }
 
-    fn is_expired(self, now: LifecycleTimestamp) -> Bool Never! {
+    is_expired: fn(self, now: LifecycleTimestamp) -> Bool Never! {
         if self.expires_at == {
             .Val(expires_at) -> expires_at.get() <= now.get()
             .None -> false
@@ -178,24 +178,24 @@ struct RootMetadata {
 }
 
 // The typed identity a producer supplies for one root incarnation.
-struct RootIdentity {
+RootIdentity: struct {
     priv kind: RootKind
     priv id: RootID
     priv producer: ProducerID
     priv incarnation: Incarnation
     priv witness: RootWitness
 
-    fn new(kind: RootKind, id: RootID, producer: ProducerID, incarnation: Incarnation, witness: RootWitness) -> RootIdentity Never! {
+    new: fn(kind: RootKind, id: RootID, producer: ProducerID, incarnation: Incarnation, witness: RootWitness) -> RootIdentity Never! {
         RootIdentity{kind, id, producer, incarnation, witness}
     }
 }
 
-enum RootPhase {
+RootPhase: enum {
     Prepared
     Committed
     Tombstoned
 
-    fn wire(self) -> String Never! {
+    wire: fn(self) -> String Never! {
         if self == {
             .Prepared -> "prepared"
             .Committed -> "committed"
@@ -203,7 +203,7 @@ enum RootPhase {
         }
     }
 
-    fn parse(value: String) -> RootPhase StoreError! {
+    parse: fn(value: String) -> RootPhase StoreError! {
         if value == {
             "prepared" -> Ok(RootPhase.Prepared)
             "committed" -> Ok(RootPhase.Committed)
@@ -216,7 +216,7 @@ enum RootPhase {
 // One durable root. `targets` are the exact targets of this incarnation;
 // `protected_targets` are protected during replay (old union new while
 // prepared).
-struct LifecycleRoot {
+LifecycleRoot: struct {
     priv identity: RootIdentity
     priv targets: [String]
     priv protected_targets: [String]
@@ -229,12 +229,12 @@ struct LifecycleRoot {
     priv legacy: Bool
 
     // State validation guarantees this pair is nonzero.
-    fn etag(self) -> RootEtag Never! {
+    etag: fn(self) -> RootEtag Never! {
         RootEtag{incarnation: self.identity.incarnation.get(), revision: self.revision}
     }
 
     // The token before this root's replacement, when there was one.
-    fn previous_etag(self) -> RootEtag? Never! {
+    previous_etag: fn(self) -> RootEtag? Never! {
         if self.identity.incarnation.get() > 1 && self.revision > 1 {
             return Val(RootEtag{incarnation: self.identity.incarnation.get() - 1, revision: self.revision - 1})
         }
@@ -242,66 +242,66 @@ struct LifecycleRoot {
     }
 
     // Whether this root still protects its targets at `now`.
-    fn is_protecting(self, now: LifecycleTimestamp) -> Bool Never! {
+    is_protecting: fn(self, now: LifecycleTimestamp) -> Bool Never! {
         self.phase != RootPhase.Tombstoned && !self.metadata.is_expired(now)
     }
 
     // The newest transition time (tombstone, else commit, else prepare).
-    fn last_transition(self) -> LifecycleTimestamp Never! {
+    last_transition: fn(self) -> LifecycleTimestamp Never! {
         self.tombstoned_at ?? self.committed_at ?? self.prepared_at
     }
 }
 
-struct LifecycleRevision {
+LifecycleRevision: struct {
     priv value: String
 
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         self.value
     }
 }
 
 // The composite revision of the closure journal head and the lifecycle state.
-struct StoreRevision {
+StoreRevision: struct {
     priv lifecycle: LifecycleRevision
     priv closure_head: String
     priv digest: String
 
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         self.digest
     }
 }
 
-struct LifecycleSnapshot {
+LifecycleSnapshot: struct {
     priv roots: [String: LifecycleRoot]
     priv protected_targets: [String]
     priv revision: LifecycleRevision
     priv store_revision: StoreRevision
 
     // Roots in root-id order.
-    fn root_list(self) -> [LifecycleRoot] Never! {
+    root_list: fn(self) -> [LifecycleRoot] Never! {
         out := [LifecycleRoot]{}
-        ids :: store_lifecycle_sorted_ids(self.roots)
+        ids: store_lifecycle_sorted_ids(self.roots)
         loop id in ids -> &out.push(self.roots[id])
         out
     }
 }
 
 // A root observed in a pre-journal record, imported as committed.
-struct LegacyRoot {
+LegacyRoot: struct {
     priv identity: RootIdentity
     priv targets: [String]
     priv observed_at: LifecycleTimestamp
 }
 
 // One lifecycle journal transaction.
-enum LifecycleJournalEntry {
+LifecycleJournalEntry: enum {
     Prepare(identity: RootIdentity, proposed: [String], protected: [String], metadata: RootMetadata, revision: Int, at: LifecycleTimestamp)
     Commit(id: RootID, incarnation: Incarnation, witness: RootWitness, at: LifecycleTimestamp)
     Tombstone(id: RootID, incarnation: Incarnation, witness: RootWitness, at: LifecycleTimestamp)
     Legacy(identity: RootIdentity, targets: [String], at: LifecycleTimestamp)
 
     // Recovery work charged for this entry.
-    fn work(self) -> Int Never! {
+    work: fn(self) -> Int Never! {
         if self == {
             .Prepare(_, proposed, protected, _, _, _) -> proposed.len() + protected.len() + 1
             .Legacy(_, targets, _) -> targets.len() + 1
@@ -313,7 +313,7 @@ enum LifecycleJournalEntry {
 // One complete replacement request. The caller supplies the stable typed
 // identity and expected token; the journal owns incarnation allocation,
 // old-union-new protection, and the prepare/commit sequence.
-struct RootUpdate {
+RootUpdate: struct {
     priv identity: RootIdentity
     priv targets: [String]
     priv metadata: RootMetadata
@@ -322,17 +322,17 @@ struct RootUpdate {
 }
 
 // Rust `validate_identity`: 1..=512 bytes and no ASCII control byte.
-fn store_lifecycle_validate_identity(label: String, value: String) StoreError! {
-    raw :: value.bytes()
+store_lifecycle_validate_identity: fn(label: String, value: String) StoreError! {
+    raw: value.bytes()
     if raw.len() == 0 || raw.len() > STORE_LIFECYCLE_MAX_IDENTITY_BYTES -> return Err(StoreError.InvalidData("invalid lifecycle {label}"))
     loop byte in raw {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if code < 32 || code == 127 -> return Err(StoreError.InvalidData("invalid lifecycle {label}"))
     }
 }
 
 // Rust `validate_target`: `sha256-` then 64 lowercase hexadecimal digits.
-fn store_lifecycle_validate_target(target: String) StoreError! {
+store_lifecycle_validate_target: fn(target: String) StoreError! {
     if !target.starts_with("sha256-") -> return Err(StoreError.InvalidData("lifecycle target must be a sha256 digest"))
     if !store_lifecycle_is_lower_hex(target.removeprefix("sha256-"), 64) {
         return Err(StoreError.InvalidData("lifecycle target must use 64 lowercase hexadecimal digits"))
@@ -340,11 +340,11 @@ fn store_lifecycle_validate_target(target: String) StoreError! {
 }
 
 // Exactly `length` lowercase hexadecimal digits.
-fn store_lifecycle_is_lower_hex(value: String, length: Int) -> Bool Never! {
-    raw :: value.bytes()
+store_lifecycle_is_lower_hex: fn(value: String, length: Int) -> Bool Never! {
+    raw: value.bytes()
     if raw.len() != length -> return false
     loop byte in raw {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return false
     }
     true
@@ -352,13 +352,13 @@ fn store_lifecycle_is_lower_hex(value: String, length: Int) -> Bool Never! {
 
 // Rust `str::parse::<u64>`: an optional `+`, then one or more ASCII digits,
 // within the Int range.
-fn store_lifecycle_parse_u64(text: String) -> Int? Never! {
-    raw :: text.bytes()
-    start :: if raw.len() > 0 && Int.from_u8(raw[0]) == 43 -> 1 else -> 0
+store_lifecycle_parse_u64: fn(text: String) -> Int? Never! {
+    raw: text.bytes()
+    start: if raw.len() > 0 && Int.from_u8(raw[0]) == 43 -> 1 else -> 0
     if start >= raw.len() -> return None
     value := 0
     loop index in start..<raw.len() {
-        digit :: Int.from_u8(raw[index]) - 48
+        digit: Int.from_u8(raw[index]) - 48
         if digit < 0 || digit > 9 -> return None
         if value > (9223372036854775807 - digit) /% 10 -> return None
         value = value * 10 + digit
@@ -367,21 +367,21 @@ fn store_lifecycle_parse_u64(text: String) -> Int? Never! {
 }
 
 // `{value:020}`: zero-padded to twenty digits.
-fn store_lifecycle_pad20(value: Int) -> String Never! {
+store_lifecycle_pad20: fn(value: Int) -> String Never! {
     text := "{value}"
     loop text.bytes().len() < 20 -> text = "0{text}"
     text
 }
 
 // Sorted, duplicate-free union of two target sets.
-fn store_lifecycle_union(left: [String], right: [String]) -> [String] Never! {
+store_lifecycle_union: fn(left: [String], right: [String]) -> [String] Never! {
     merged := left.copy()
     loop value in right -> &merged.push(value)
     store_lifecycle_sorted_set(merged)
 }
 
 // Sort and drop duplicates.
-fn store_lifecycle_sorted_set(values: [String]) -> [String] Never! {
+store_lifecycle_sorted_set: fn(values: [String]) -> [String] Never! {
     sorted := values.copy()
     &sorted.sort()
     out := [String]{}
@@ -391,7 +391,7 @@ fn store_lifecycle_sorted_set(values: [String]) -> [String] Never! {
     out
 }
 
-fn store_lifecycle_is_subset(inner: [String], outer: [String]) -> Bool Never! {
+store_lifecycle_is_subset: fn(inner: [String], outer: [String]) -> Bool Never! {
     loop value in inner {
         if !outer.contains(value) -> return false
     }
@@ -399,13 +399,13 @@ fn store_lifecycle_is_subset(inner: [String], outer: [String]) -> Bool Never! {
 }
 
 // Root ids of a state map in sorted order.
-fn store_lifecycle_sorted_ids(state: [String: LifecycleRoot]) -> [String] Never! {
+store_lifecycle_sorted_ids: fn(state: [String: LifecycleRoot]) -> [String] Never! {
     ids := state.keys().to_list()
     &ids.sort()
     ids
 }
 
 // Unix seconds now (Rust `unix_now`).
-fn store_lifecycle_unix_now() -[Time]> LifecycleTimestamp Never! {
+store_lifecycle_unix_now: fn() -[Time]> LifecycleTimestamp Never! {
     LifecycleTimestamp.from_unix_seconds(time.unix_ns() /% 1000000000)
 }

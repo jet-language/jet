@@ -1,23 +1,23 @@
 
 use core.mem
 
-struct Node {
+Node: struct {
     payload: Int
     hops: Int
 }
 
-struct PinQueue {
+PinQueue: struct {
     label: String
     head: Pin<Node>
 }
 
-fn attach(label: String, node: &Node) -> PinQueue from node {
+attach: fn(label: String, node: &Node) -> PinQueue from node {
     return PinQueue{label: label.copy(), head: mem.pin(&node)}
 }
 
-fn run() {
+run: fn() {
     node := Node{payload: 41, hops: 0}
-    queue :: attach("ready", &node)
+    queue: attach("ready", &node)
     queue.head.hops += 1
     queue.head.payload += 1
     print("{(queue.label)} {(queue.head.payload)} {(queue.head.hops)}")

@@ -1,18 +1,18 @@
 // Real filesystem transport, assembled with the full canonical compiler unit.
 use {
     jet_cli.[JetCLIBuildInputs, jet_cli_build_read_rooted]
-    cli_sys :: core.sys
-    cli_files :: core.files
-    cli_process :: core.process
+    cli_sys: core.sys
+    cli_files: core.files
+    cli_process: core.process
 }
 
 #Test("build_input_transport") {
-    root :: "{cli_sys.temp_dir()}/jet-build-input-{cli_process.current_pid()}"
+    root: "{cli_sys.temp_dir()}/jet-build-input-{cli_process.current_pid()}"
     cli_files.create_dir_all("{root}/nested") ?? panic("test root")
     cli_files.write("{root}/nested/data.txt", "héllo") ?? panic("test bytes")
-    content :: jet_cli_build_read_rooted(root, "nested/data.txt", 6) ?? panic("bounded rooted read")
+    content: jet_cli_build_read_rooted(root, "nested/data.txt", 6) ?? panic("bounded rooted read")
     assert(content == "héllo".bytes())
-    normalized :: jet_cli_build_read_rooted("{root}/.", "./nested//data.txt", 6) ?? panic("normal OS components")
+    normalized: jet_cli_build_read_rooted("{root}/.", "./nested//data.txt", 6) ?? panic("normal OS components")
     assert(normalized == content)
     if jet_cli_build_read_rooted(root, "nested/data.txt", 5) == {
         .Err(detail) -> assert(detail.message == "file exceeds its read bound")
@@ -44,8 +44,8 @@ use {
     }
     // Unrooted file-URL reads share a held no-follow reader but intentionally
     // retain their reference policy permitting regular multi-link files.
-    inputs :: JetCLIBuildInputs{}
-    file_url :: inputs.read("{root}/nested/data.txt", 6) ?? panic("file URL read")
+    inputs: JetCLIBuildInputs{}
+    file_url: inputs.read("{root}/nested/data.txt", 6) ?? panic("file URL read")
     assert(file_url == content)
     if inputs.read("{root}/linked.txt", 6) == {
         .Err(detail) -> assert(detail.message == "file is not a regular file")

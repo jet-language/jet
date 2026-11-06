@@ -1,16 +1,16 @@
 // Value copies form finite snapshots. memory/entity_tree.jet uses Pool for shared back-links.
-struct Node {
+Node: struct {
     value: Int
     prev: Node?
     next: Node?
 }
 
-fn run() {
+run: fn() {
     first := Node{value: 1, prev: None, next: None}
-    second :: Node{value: 2, prev: Val(first.copy()), next: None}
+    second: Node{value: 2, prev: Val(first.copy()), next: None}
     first.next = Val(second.copy())
-    forward :: first.next ?? panic("missing forward link")
-    backward :: forward.prev ?? panic("missing backward link")
+    forward: first.next ?? panic("missing forward link")
+    backward: forward.prev ?? panic("missing backward link")
     print(backward.value)
     print(forward.value)
 }

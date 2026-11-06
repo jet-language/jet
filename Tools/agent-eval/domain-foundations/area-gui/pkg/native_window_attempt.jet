@@ -1,17 +1,17 @@
-package {
+package: {
     name: "native_window_attempt"
     authority: { allow: [Browser, IO, Mem.Alloc] }
 }
 
 use {
-    ui :: core.ui
-    gtk4 :: c.gtk4
+    ui: core.ui
+    gtk4: c.gtk4
 }
 
-fn run() {
+run: fn() {
     comptime if $build.os == {
         .Linux -> {
-            backend :: ui.gtk_backend()
+            backend: ui.gtk_backend()
             ui.mount(backend, ui.box([ui.text("Jet Notes native window")]))
             print("native backend: gtk4")
             backend.present("Jet Notes")

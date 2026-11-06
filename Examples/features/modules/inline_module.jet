@@ -1,21 +1,21 @@
 // D-MOD2: inline code modules — group functions AND types under a named
 // namespace. A member type is visible to its own module by its bare name and
 // to the rest of the file by its qualified `module.Type` spelling.
-module arith {
-    struct Tally {
+arith: module {
+    Tally: struct {
         priv total: Int
     }
 
-    fn double(n: Int) -> Int { n * 2 }
+    double: fn(n: Int) -> Int { n * 2 }
 
-    fn add(a: Int, b: Int) -> Int { a + b }
+    add: fn(a: Int, b: Int) -> Int { a + b }
 
-    fn tally(a: Int, b: Int) -> Tally { return Tally{total: add(a, b)} }
+    tally: fn(a: Int, b: Int) -> Tally { return Tally{total: add(a, b)} }
 }
 
-fn describe(t: arith.Tally) -> String { "total {t.total}" }
+describe: fn(t: arith.Tally) -> String { "total {t.total}" }
 
-fn run() {
+run: fn() {
     print(arith.double(5))
     print(arith.add(3, 4))
     print(arith.tally(3, 4).total)

@@ -1,8 +1,8 @@
 // Native ProcessReceipt144 field regression: Int, Option<Int>, List<Text>,
 // and Option<ProcessResourceLimit> use borrowed typed glue, like Text/Bool.
-use process :: core.process
+use process: core.process
 
-fn receipt_fields(receipt: ProcessReceipt) -> Int Never! {
+receipt_fields: fn(receipt: ProcessReceipt) -> Int Never! {
     total := receipt.code + receipt.pid + receipt.argv.len() + receipt.authority.len() + receipt.limits.len() + receipt.outputs.len()
     if receipt.signal == .Val(signal) -> total += signal
     if receipt.limit_hit == .Val(_) -> total += 1
@@ -11,12 +11,12 @@ fn receipt_fields(receipt: ProcessReceipt) -> Int Never! {
     total
 }
 
-fn plan_fields(plan: ProcessPlan) -> Int Never! {
+plan_fields: fn(plan: ProcessPlan) -> Int Never! {
     plan.argv.len() + plan.authority.len() + plan.limits.len() + plan.outputs.len() + plan.backend.len() + plan.executable_identity.len() + plan.input_digest.len() + plan.policy_digest.len() + plan.descendants.len()
 }
 
-fn main() {
-    receipt :: process.cmd([String]{"/bin/sh", "-c", "printf 'fields'"}).run() ?? panic("plain process run failed")
+main: fn() {
+    receipt: process.cmd([String]{"/bin/sh", "-c", "printf 'fields'"}).run() ?? panic("plain process run failed")
     assert(receipt_fields(receipt) >= 6)
     assert(receipt.code == 0 && receipt.signal == None && receipt.argv.len() == 3)
     print("native process receipt fields: ok")

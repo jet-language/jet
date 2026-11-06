@@ -1,15 +1,15 @@
 // A parameter or local read only as the subject of an `if x == { … }` table, or only on a path that leaves, is used; only `unused` is reported.
 // The arm-tail returns are the regression shape for the old L0102 false positive on return-arm tables, so jet.RedundantFinalReturn is allowed there.
-enum Format { JSON CSV MsgPack }
+Format: enum { JSON CSV MsgPack }
 
-#Allow(jet.RedundantFinalReturn, "the arm returns are the L0102 regression shape") fn extension(format: Format) -> String {
+#Allow(jet.RedundantFinalReturn, "the arm returns are the L0102 regression shape") extension: fn(format: Format) -> String {
     if format == {
         .MsgPack -> return "msgpack"
         else -> return "other"
     }
 }
 
-#Allow(jet.RedundantFinalReturn, "the arm returns are the L0102 regression shape") fn pair(outer: Format, inner: Format) -> String {
+#Allow(jet.RedundantFinalReturn, "the arm returns are the L0102 regression shape") pair: fn(outer: Format, inner: Format) -> String {
     if outer == {
         .JSON -> {
             if inner == {
@@ -21,22 +21,22 @@ enum Format { JSON CSV MsgPack }
     }
 }
 
-fn early(ready: Bool, value: Int, unused: Int) -> Int {
+early: fn(ready: Bool, value: Int, unused: Int) -> Int {
     if ready {
         return value
     }
     0
 }
 
-#Allow(jet.RedundantFinalReturn, "the arm returns are the L0102 regression shape") fn local_subject(ready: Bool) -> String {
-    format :: if ready -> Format.MsgPack else -> Format.CSV
+#Allow(jet.RedundantFinalReturn, "the arm returns are the L0102 regression shape") local_subject: fn(ready: Bool) -> String {
+    format: if ready -> Format.MsgPack else -> Format.CSV
     if format == {
         .MsgPack -> return "msgpack"
         else -> return "other"
     }
 }
 
-fn run() {
+run: fn() {
     print(extension(Format.MsgPack))
     print(pair(Format.JSON, Format.CSV))
     print(early(true, 1, 2))

@@ -1,13 +1,13 @@
 
 use {
-    encoding :: core.encoding
-    json :: core.encoding.json
-    files :: core.files
+    encoding: core.encoding
+    json: core.encoding.json
+    files: core.files
 }
 
-fn run() {
-    limits :: encoding.EncodingLimits.safe()
-    output :: files.create("{work}/events.json") ?? panic("create")
+run: fn() {
+    limits: encoding.EncodingLimits.safe()
+    output: files.create("{work}/events.json") ?? panic("create")
     writer := json.writer(^output, limits, false) ?? panic("writer")
     &writer.write(encoding.DataEvent.ObjectStart) ?? panic("write")
     &writer.write(encoding.DataEvent.Key("message")) ?? panic("write")
@@ -22,7 +22,7 @@ fn run() {
     &writer.finish() ?? panic("finish")
     &writer.finish() ?? panic("finish")
 
-    input :: files.open("{work}/events.json") ?? panic("open")
+    input: files.open("{work}/events.json") ?? panic("open")
     reader := json.reader(^input, encoding.EncodingLimits.safe()) ?? panic("reader")
     count := 0
     loop count < 11 {

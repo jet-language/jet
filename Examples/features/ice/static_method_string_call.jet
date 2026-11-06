@@ -1,16 +1,16 @@
 // A static method in a type body that calls String methods lowers to its
 // checked IR target on every tier (Tower #3674).
-struct Spec {
-    fn measure(input: String) -> Int {
+Spec: struct {
+    measure: fn(input: String) -> Int {
         input.trim().len()
     }
 
-    fn is_comment(input: String) -> Bool {
+    is_comment: fn(input: String) -> Bool {
         input.trim().starts_with("#")
     }
 }
 
-fn run() {
+run: fn() {
     print(Spec.measure(" x "))
     print(Spec.is_comment("  # note"))
     print(Spec.is_comment("value"))

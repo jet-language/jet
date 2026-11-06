@@ -1,88 +1,88 @@
-package { name: "async-event-scope-cancel" authority: { allow: [Time] } }
+package: { name: "async-event-scope-cancel" authority: { allow: [Time] } }
 use {
-    event :: core.event
-    tasks :: core.tasks
-    time :: core.time
+    event: core.event
+    tasks: core.tasks
+    time: core.time
 }
 
-fn owner_teardown_task() -> Task<DispatchReport<String>> {
-    owner_scope :: event.scope()
-    ev :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
-    { sender: started_tx, receiver: started_rx } :: channel<Int>()
-    { sender: release_tx, receiver: release_rx } :: channel<Int>()
+owner_teardown_task: fn() -> Task<DispatchReport<String>> {
+    owner_scope: event.scope()
+    ev: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    { sender: started_tx, receiver: started_rx }: channel<Int>()
+    { sender: release_tx, receiver: release_rx }: channel<Int>()
     ev.on(owner_scope, (n: Int) -> {
         started_tx.send(n.copy())
-        held_sender :: release_tx.copy()
-        released :: release_rx.receive() ?? panic("release")
+        held_sender: release_tx.copy()
+        released: release_rx.receive() ?? panic("release")
     })
     ev.emit_async(98).detach()
-    started :: started_rx.receive() ?? panic("started")
-    queued :: ev.emit_async(99)
+    started: started_rx.receive() ?? panic("started")
+    queued: ev.emit_async(99)
     return queued
 }
 
-fn run() {
-    cancel_scope :: event.scope()
-    cancelled :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
-    { sender: cancel_started_tx, receiver: cancel_started_rx } :: channel<Int>()
-    { sender: cancel_release_tx, receiver: cancel_release_rx } :: channel<Int>()
+run: fn() {
+    cancel_scope: event.scope()
+    cancelled: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    { sender: cancel_started_tx, receiver: cancel_started_rx }: channel<Int>()
+    { sender: cancel_release_tx, receiver: cancel_release_rx }: channel<Int>()
     cancelled.on(cancel_scope, (n: Int) -> {
         cancel_started_tx.send(n.copy())
-        released :: cancel_release_rx.receive() ?? panic("release")
+        released: cancel_release_rx.receive() ?? panic("release")
     })
-    cancel_running :: cancelled.emit_async(1)
-    started :: cancel_started_rx.receive() ?? panic("started")
-    cancel_queued :: cancelled.emit_async(2)
-    cancel_pending :: cancelled.emit_async(3)
+    cancel_running: cancelled.emit_async(1)
+    started: cancel_started_rx.receive() ?? panic("started")
+    cancel_queued: cancelled.emit_async(2)
+    cancel_pending: cancelled.emit_async(3)
     print("before-cancel q={cancelled.queued_count()} r={cancelled.running_count()} p={cancelled.blocked_count()}")
     cancel_scope.cancel()
-    pending_report :: cancel_pending.join() ?? panic("cancel pending join")
-    queued_report :: cancel_queued.join() ?? panic("cancel queued join")
-    running_report :: cancel_running.join() ?? panic("cancel running join")
+    pending_report: cancel_pending.join() ?? panic("cancel pending join")
+    queued_report: cancel_queued.join() ?? panic("cancel queued join")
+    running_report: cancel_running.join() ?? panic("cancel running join")
     print("cancel pending={!pending_report.accepted() && pending_report.state() == .Cancelled} trace={pending_report.trace().summary()}")
     print("cancel queued={queued_report.accepted() && queued_report.state() == .Cancelled} trace={queued_report.trace().summary()}")
     print("cancel running={running_report.accepted() && running_report.state() == .Cancelled} trace={running_report.trace().summary()}")
     print("after-cancel q={cancelled.queued_count()} r={cancelled.running_count()} p={cancelled.blocked_count()}")
 
-    queued_scope :: event.scope()
-    queued_deadline :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
-    { sender: queued_started_tx, receiver: queued_started_rx } :: channel<Int>()
-    { sender: queued_release_tx, receiver: queued_release_rx } :: channel<Int>()
+    queued_scope: event.scope()
+    queued_deadline: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    { sender: queued_started_tx, receiver: queued_started_rx }: channel<Int>()
+    { sender: queued_release_tx, receiver: queued_release_rx }: channel<Int>()
     queued_deadline.on(queued_scope, (n: Int) -> {
         queued_started_tx.send(n.copy())
-        released :: queued_release_rx.receive() ?? panic("release")
+        released: queued_release_rx.receive() ?? panic("release")
     })
-    queued_running :: queued_deadline.emit_async(10)
-    queued_started :: queued_started_rx.receive() ?? panic("started")
+    queued_running: queued_deadline.emit_async(10)
+    queued_started: queued_started_rx.receive() ?? panic("started")
     #Context(deadline: time.unix_ns() /% 1_000_000 + 20) {
-        expires_queued :: queued_deadline.emit_async(11)
-        queued_expired :: expires_queued.join() ?? panic("deadline queued join")
+        expires_queued: queued_deadline.emit_async(11)
+        queued_expired: expires_queued.join() ?? panic("deadline queued join")
         print("deadline queued={queued_expired.accepted() && queued_expired.state() == .DeadlineExceeded} trace={queued_expired.trace().summary()}")
     }
     queued_scope.cancel()
-    _ :: queued_running.join() ?? panic("queued running join")
+    _: queued_running.join() ?? panic("queued running join")
 
-    pending_scope :: event.scope()
-    pending_deadline :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
-    { sender: pending_started_tx, receiver: pending_started_rx } :: channel<Int>()
-    { sender: pending_release_tx, receiver: pending_release_rx } :: channel<Int>()
+    pending_scope: event.scope()
+    pending_deadline: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    { sender: pending_started_tx, receiver: pending_started_rx }: channel<Int>()
+    { sender: pending_release_tx, receiver: pending_release_rx }: channel<Int>()
     pending_deadline.on(pending_scope, (n: Int) -> {
         pending_started_tx.send(n.copy())
-        released :: pending_release_rx.receive() ?? panic("release")
+        released: pending_release_rx.receive() ?? panic("release")
     })
-    pending_running :: pending_deadline.emit_async(20)
-    pending_started :: pending_started_rx.receive() ?? panic("started")
-    pending_queued :: pending_deadline.emit_async(21)
+    pending_running: pending_deadline.emit_async(20)
+    pending_started: pending_started_rx.receive() ?? panic("started")
+    pending_queued: pending_deadline.emit_async(21)
     #Context(deadline: time.unix_ns() /% 1_000_000 + 20) {
-        expires_pending :: pending_deadline.emit_async(22)
-        pending_expired :: expires_pending.join() ?? panic("deadline pending join")
+        expires_pending: pending_deadline.emit_async(22)
+        pending_expired: expires_pending.join() ?? panic("deadline pending join")
         print("deadline pending={!pending_expired.accepted() && pending_expired.state() == .DeadlineExceeded} trace={pending_expired.trace().summary()}")
     }
     pending_scope.cancel()
-    _ :: pending_queued.join() ?? panic("pending queued join")
-    _ :: pending_running.join() ?? panic("pending running join")
+    _: pending_queued.join() ?? panic("pending queued join")
+    _: pending_running.join() ?? panic("pending running join")
 
-    owner_task :: owner_teardown_task()
-    owner_report :: owner_task.join() ?? panic("owner join")
+    owner_task: owner_teardown_task()
+    owner_report: owner_task.join() ?? panic("owner join")
     print("owner teardown={owner_report.accepted() && owner_report.state() == .Cancelled} trace={owner_report.trace().summary()}")
 }

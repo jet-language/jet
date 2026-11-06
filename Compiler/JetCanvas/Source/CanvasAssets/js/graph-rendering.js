@@ -846,7 +846,7 @@
       if (variablesList) variablesList.innerHTML = '<div class="tag">no variables</div>';
       if (variableCount) variableCount.textContent = "0";
       if (graphOverview) {
-        graphOverview.innerHTML = '<div class="details-empty"><b>No graph yet</b><span>Add a function such as <code>fn run()</code> in Code or Split view.</span></div>';
+        graphOverview.innerHTML = '<div class="details-empty"><b>No graph yet</b><span>Add a function such as <code>run: fn()</code> in Code or Split view.</span></div>';
       }
       syncWireStatus(null);
       window.__jetCanvasTest = Object.assign({}, window.__jetCanvasTest || {}, {

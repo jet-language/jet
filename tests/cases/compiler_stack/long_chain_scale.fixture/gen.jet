@@ -7,10 +7,10 @@ use {
     core.process.[args]
 }
 
-fn run() {
-    given :: args()
+run: fn() {
+    given: args()
     if given.len() != 1 -> panic("gen.jet takes one size: 1000, 10000 or 100000")
-    count :: if given[0] == {
+    count: if given[0] == {
         "1000" -> 1000
         "10000" -> 10000
         "100000" -> 100000
@@ -22,8 +22,8 @@ fn run() {
         &terms.push("a")
         &elements.push("{index % 10}")
     }
-    sum :: terms.join(" + ")
-    list :: elements.join(", ")
-    files.write("sum.jet", "fn run() {{\n    a :: 1\n    print({sum})\n}}\n") ?? panic("gen.jet: write sum.jet: {err}")
-    files.write("list.jet", "fn run() {{\n    xs :: [Int]{{{list}}}\n    print(xs.len())\n}}\n") ?? panic("gen.jet: write list.jet: {err}")
+    sum: terms.join(" + ")
+    list: elements.join(", ")
+    files.write("sum.jet", "run: fn() {{\n    a: 1\n    print({sum})\n}}\n") ?? panic("gen.jet: write sum.jet: {err}")
+    files.write("list.jet", "run: fn() {{\n    xs: [Int]{{{list}}}\n    print(xs.len())\n}}\n") ?? panic("gen.jet: write list.jet: {err}")
 }

@@ -1,16 +1,16 @@
 // Native E4 route fixtures, derived directly. No Rust oracle execution. The
 // driver calls this export once; return zero means all fixtures passed.
-fn compiler_url_fixture_success(input: I64, scheme: I64, host: I64, path: I64, query: I64, raw: I64, port: I64, explicit: Bool) -> Bool {
-    slots :: jet_rt_alloc(I64{16}, I64{8})
+compiler_url_fixture_success: fn(input: I64, scheme: I64, host: I64, path: I64, query: I64, raw: I64, port: I64, explicit: Bool) -> Bool {
+    slots: jet_rt_alloc(I64{16}, I64{8})
     rt_text_store(slots, I64{771})
     rt_text_store(slots + I64{8}, I64{772})
-    status :: jet_url_parse(input, slots, slots + I64{8})
+    status: jet_url_parse(input, slots, slots + I64{8})
     if (status != I64{1} || rt_text_word(slots + I64{8}) != I64{772}) {
         jet_rt_free(slots, I64{16}, I64{8})
         return false
     }
-    value :: rt_text_word(slots)
-    cloned_url :: jet_rt_handle_clone_jet_url(value)
+    value: rt_text_word(slots)
+    cloned_url: jet_rt_handle_clone_jet_url(value)
     good := cloned_url != value && jet_rt_handle_eq_jet_url(value, cloned_url)
     good = good && jet_rt_string_eq(rt_text_word(value), scheme)
     good = good && jet_rt_string_eq(rt_text_word(value + I64{24}), host)
@@ -18,41 +18,41 @@ fn compiler_url_fixture_success(input: I64, scheme: I64, host: I64, path: I64, q
     good = good && jet_rt_string_eq(rt_text_word(value + I64{56}), query)
     good = good && jet_rt_string_eq(rt_text_word(value + I64{72}), raw)
     good = good && rt_text_word(value + I64{32}) == port && jet_rt_record_get_jet_url_port_explicit(value) == explicit
-    getter :: jet_rt_record_get_jet_url_host(value)
+    getter: jet_rt_record_get_jet_url_host(value)
     good = good && getter != rt_text_word(value + I64{24}) && jet_rt_string_eq(getter, host)
     jet_rt_string_drop(getter)
-    exact_port :: jet_rt_record_get_jet_url_port(value)
+    exact_port: jet_rt_record_get_jet_url_port(value)
     good = good && jet_int_owned_to_i64(exact_port) == port
     jet_rt_int_drop(exact_port)
-    shown :: jet_rt_handle_show_jet_url(value)
+    shown: jet_rt_handle_show_jet_url(value)
     good = good && jet_rt_string_eq(shown, raw)
     jet_rt_string_drop(shown)
     jet_rt_handle_drop_jet_url(value)
     // The clone must retain independent text ownership after its origin dies.
-    cloned_host :: jet_rt_record_get_jet_url_host(cloned_url)
+    cloned_host: jet_rt_record_get_jet_url_host(cloned_url)
     good = good && jet_rt_string_eq(cloned_host, host)
     jet_rt_string_drop(cloned_host)
     jet_rt_handle_drop_jet_url(cloned_url)
     jet_rt_free(slots, I64{16}, I64{8})
     good
 }
-fn compiler_url_fixture_error(input: I64, expected: I64) -> Bool {
-    slots :: jet_rt_alloc(I64{16}, I64{8})
+compiler_url_fixture_error: fn(input: I64, expected: I64) -> Bool {
+    slots: jet_rt_alloc(I64{16}, I64{8})
     rt_text_store(slots, I64{771})
     rt_text_store(slots + I64{8}, I64{772})
-    status :: jet_url_parse(input, slots, slots + I64{8})
+    status: jet_url_parse(input, slots, slots + I64{8})
     if (status != I64{0} || rt_text_word(slots) != I64{771}) {
         if (status == I64{1}) -> jet_rt_handle_drop_jet_url(rt_text_word(slots))
         jet_rt_free(slots, I64{16}, I64{8})
         return false
     }
-    text :: rt_text_word(slots + I64{8})
-    good :: jet_rt_string_eq(text, expected)
+    text: rt_text_word(slots + I64{8})
+    good: jet_rt_string_eq(text, expected)
     jet_rt_string_drop(text)
     jet_rt_free(slots, I64{16}, I64{8})
     good
 }
-#Export(c) fn jet_rt_compiler_needed_url_fixture() -> I64 {
+#Export(c) jet_rt_compiler_needed_url_fixture: fn() -> I64 {
     if !compiler_url_fixture_success(rt_static_text("　HTTPS://BÜCHER.example:00443/a/%2e%2e/b/./c/?x=a+b&&x=%2f#"), rt_static_text("https"), rt_static_text("xn--bcher-2pa.example"), rt_static_text("/b/c/"), rt_static_text("x=a%2Bb&=&x=%2F"), rt_static_text("https://xn--bcher-2pa.example:443/b/c/?x=a%2Bb&=&x=%2F#"), I64{443}, true) -> return I64{1}
     if !compiler_url_fixture_success(rt_static_text("https://bücher.example"), rt_static_text("https"), rt_static_text("xn--bcher-kva.example"), rt_static_text("/"), rt_static_text(""), rt_static_text("https://xn--bcher-kva.example/"), I64{443}, false) -> return I64{2}
     if !compiler_url_fixture_success(rt_static_text("HtTp://u%40:p%3A@EXAMPLE.COM...:80/a//b?x&"), rt_static_text("http"), rt_static_text("example.com"), rt_static_text("/a//b"), rt_static_text("x=&="), rt_static_text("http://u%40:p%3A@example.com:80/a//b?x=&="), I64{80}, true) -> return I64{3}

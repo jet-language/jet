@@ -1,15 +1,15 @@
-fn build(b: Build) -[IO]> {
+build: fn(b: Build) -[IO]> {
     #Impure("build action writes declared output") {
-        action :: b.action(
+        action: b.action(
         "stamp",
         ["graph.jet"],
         ["stamp.txt"],
         ["/bin/sh", "-c", "printf graph2 > stamp.txt"],
         ["IO"],
         )
-        app :: b.add_executable("graph_probe", ["graph.jet"], [action])
+        app: b.add_executable("graph_probe", ["graph.jet"], [action])
         b.default(app)
     }
 }
 
-fn run() { print("graph probe") }
+run: fn() { print("graph probe") }

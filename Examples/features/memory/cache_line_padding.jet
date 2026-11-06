@@ -4,20 +4,20 @@
 // one line, so threads that write neighbouring counters stop slowing each
 // other down (false sharing).
 #Layout(c, align($build.cpu.cache_line))
-struct PaddedCounter {
+PaddedCounter: struct {
     hits: Int
 }
 
-struct Counter {
+Counter: struct {
     hits: Int
 }
 
-PADDED_ALIGN :: comptime { PaddedCounter.$layout.alignment ?? -1 }
-PADDED_SIZE :: comptime { PaddedCounter.$layout.size ?? -1 }
-PLAIN_ALIGN :: comptime { Counter.$layout.alignment ?? -1 }
-PLAIN_SIZE :: comptime { Counter.$layout.size ?? -1 }
+PADDED_ALIGN: comptime { PaddedCounter.$layout.alignment ?? -1 }
+PADDED_SIZE: comptime { PaddedCounter.$layout.size ?? -1 }
+PLAIN_ALIGN: comptime { Counter.$layout.alignment ?? -1 }
+PLAIN_SIZE: comptime { Counter.$layout.size ?? -1 }
 
-fn run() {
+run: fn() {
     print($build.cpu.cache_line)
     print("padded: align {PADDED_ALIGN} size {PADDED_SIZE}")
     print("plain: align {PLAIN_ALIGN} size {PLAIN_SIZE}")

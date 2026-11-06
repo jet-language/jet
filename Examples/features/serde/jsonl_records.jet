@@ -4,21 +4,21 @@
 // records, and an unfinished final record is truncated. Errors carry the
 // record index in `path` plus the stream line and byte offset.
 use {
-    encoding :: core.encoding
-    json :: core.encoding.json
-    jsonl :: core.encoding.jsonl
+    encoding: core.encoding
+    json: core.encoding.json
+    jsonl: core.encoding.jsonl
 }
 
-fn kind_name(kind: encoding.EncodingErrorKind) -> String {
+kind_name: fn(kind: encoding.EncodingErrorKind) -> String {
     if kind == encoding.EncodingErrorKind.Syntax -> return "Syntax"
     if kind == encoding.EncodingErrorKind.Truncated -> return "Truncated"
     "other"
 }
 
-fn whole(label: String, text: String) {
-    rows :: jsonl.parse(text) ?? {
-        line :: err.line ?? 0
-        column :: err.column ?? 0
+whole: fn(label: String, text: String) {
+    rows: jsonl.parse(text) ?? {
+        line: err.line ?? 0
+        column: err.column ?? 0
         print("{label}: {kind_name(err.kind)} at `{err.path}` line {line} column {column} byte {err.byte_offset}: {err.reason}")
         return
     }
@@ -26,14 +26,14 @@ fn whole(label: String, text: String) {
 }
 
 // Stopping after the first record parses nothing past it.
-fn first_only(text: String) {
-    row :: jsonl.first(text) ?? panic("first record")
+first_only: fn(text: String) {
+    row: jsonl.first(text) ?? panic("first record")
     print("early exit after {json.canonical(row) ?? panic("canonical")}")
 }
 
-fn run() {
-    cr :: String.from_bytes([U8]{13}) ?? ""
-    stream :: "{{\"a\":1}}{cr}\n\n  \n{{\"b\":[1,2]}}\n{{}} {{}}\n{{\"c\":\n"
+run: fn() {
+    cr: String.from_bytes([U8]{13}) ?? ""
+    stream: "{{\"a\":1}}{cr}\n\n  \n{{\"b\":[1,2]}}\n{{}} {{}}\n{{\"c\":\n"
     whole("parse", stream)
     whole("partial final record", "{{\"a\":1}}\n{{\"c\":")
     whole("clean", "{{\"a\":1}}{cr}\n\n{{\"b\":2}}")

@@ -9,43 +9,43 @@ use jet_foundation.[
     type_name,
 ]
 
-fn sema_function_reactive_handle_type(ty: Type) -> Bool Never! {
+sema_function_reactive_handle_type: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Apply(name, _) -> name == "Signal" || name == "Derived" || name == "Computed"
         else -> false
     }
 }
 
-fn sema_function_reactive_contains(values: [String], value: String) -> Bool Never! {
+sema_function_reactive_contains: fn(values: [String], value: String) -> Bool Never! {
     loop existing in values { if existing == value -> return true }
     false
 }
 
-fn sema_function_reactive_append_unique(values: &[String], value: String) Never! {
+sema_function_reactive_append_unique: fn(values: &[String], value: String) Never! {
     if !sema_function_reactive_contains(values, value) -> &values.push(value)
 }
 
-fn sema_function_reactive_is_local(context: SemaCheckContext, symbol_key: String) -> Bool Never! {
+sema_function_reactive_is_local: fn(context: SemaCheckContext, symbol_key: String) -> Bool Never! {
     sema_function_reactive_contains(context.reactive_local_keys, symbol_key)
 }
 
-fn sema_function_reactive_is_shared(context: SemaCheckContext, symbol_key: String) -> Bool Never! {
+sema_function_reactive_is_shared: fn(context: SemaCheckContext, symbol_key: String) -> Bool Never! {
     sema_function_reactive_contains(context.reactive_shared_keys, symbol_key)
 }
 
-fn sema_function_reactive_note_upgrade(context: &SemaCheckContext, name: String, ty: Type, crossing: String) Never! {
+sema_function_reactive_note_upgrade: fn(context: &SemaCheckContext, name: String, ty: Type, crossing: String) Never! {
     sema_function_reactive_append_unique(&context.reactive_upgrade_names, name)
     line := "{name}: {type_name(ty)} synchronized for {crossing} crossing"
     if !sema_function_reactive_contains(context.reactive_upgrades, line) -> &context.reactive_upgrades.push(line)
 }
 
-fn sema_function_reactive_note_channel(context: &SemaCheckContext, value: Expr, ty: Type) Never! {
+sema_function_reactive_note_channel: fn(context: &SemaCheckContext, value: Expr, ty: Type) Never! {
     if !sema_function_reactive_handle_type(ty) -> return
     name := if value == {.Ident(name, _, _) -> name else -> "this value"}
     sema_function_reactive_note_upgrade(&context, name, ty, "channel")
 }
 
-fn sema_function_reactive_record_binding(context: &SemaCheckContext, binding: Binding, symbol: Symbol, ty: Type) Never! {
+sema_function_reactive_record_binding: fn(context: &SemaCheckContext, binding: Binding, symbol: Symbol, ty: Type) Never! {
     is_local := false
     is_shared := false
     loop marker in binding.markers {
@@ -57,20 +57,20 @@ fn sema_function_reactive_record_binding(context: &SemaCheckContext, binding: Bi
     if is_shared && sema_function_reactive_handle_type(ty) -> sema_function_reactive_note_upgrade(&context, binding.name, ty, "#Shared pin")
 }
 
-fn sema_function_reactive_note_parallel_lambda(context: &SemaCheckContext, lambda: TLambda) Never! {
+sema_function_reactive_note_parallel_lambda: fn(context: &SemaCheckContext, lambda: TLambda) Never! {
     loop capture in lambda.captures {
         if sema_function_reactive_contains(lambda.capture_facts.mutable, capture.source) -> next
         if !sema_function_reactive_handle_type(capture.ty) -> next
-        symbol :: capture.local.symbol_id ?? next
+        symbol: capture.local.symbol_id ?? next
         if sema_function_reactive_is_local(context, symbol.key) -> next
         sema_function_reactive_note_upgrade(&context, capture.source, capture.ty, "parallel")
     }
 }
 
-fn sema_function_reactive_note_task_lambda(context: &SemaCheckContext, lambda: TLambda) Never! {
+sema_function_reactive_note_task_lambda: fn(context: &SemaCheckContext, lambda: TLambda) Never! {
     loop capture in lambda.captures {
         if !sema_function_reactive_handle_type(capture.ty) -> next
-        symbol :: capture.local.symbol_id ?? next
+        symbol: capture.local.symbol_id ?? next
         if sema_function_reactive_is_local(context, symbol.key) -> next
         crossing := "task"
         if sema_function_reactive_is_shared(context, symbol.key) -> crossing = "#Shared pin + task"

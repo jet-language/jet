@@ -1,14 +1,14 @@
 // Assemble with Compiler and use this run entry.
-fn repl_steps_require(ok: Bool, name: String) Never! {
+repl_steps_require: fn(ok: Bool, name: String) Never! {
     if !ok -> panic("REPL step contract: {name}")
 }
 
 // Rust sigil_binding_is_classified_as_statement and
 // bare_binding_is_preserved_as_an_exact_statement. Jet's canonical parser
 // uses a line boundary here instead of Rust's generated trailing semicolon.
-fn repl_steps_classifier_contract() {
-    loop text in ([String]{"t :: s", "s :: \"\""}) {
-        classified :: repl_classify(text, 1)
+repl_steps_classifier_contract: fn() {
+    loop text in ([String]{"t: s", "s: \"\""}) {
+        classified: repl_classify(text, 1)
         if classified == .Accepted(.Stmts(body, suppress, echo, check_source)) {
             repl_steps_require(!suppress && !echo && check_source == text && body.len() == 1, "binding source preserved")
             if body[0] == .Val(_) {
@@ -18,6 +18,6 @@ fn repl_steps_classifier_contract() {
     }
 }
 
-fn run() {
+run: fn() {
     repl_steps_classifier_contract()
 }

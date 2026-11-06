@@ -1,11 +1,11 @@
 
-use service :: core.service
+use service: core.service
 
-fn worker() {}
+worker: fn() {}
 
-fn run() {
+run: fn() {
     tree := service.tree("drain-handoff")
-    endpoint :: &tree.worker("api", worker, capacity: 2) ?? panic("worker")
+    endpoint: &tree.worker("api", worker, capacity: 2) ?? panic("worker")
     &tree.start() ?? panic("start")
     &tree.send(endpoint, "queued") ?? panic("queued")
     // copy: the drain, the late send and the restart registration still use the endpoint.
@@ -21,8 +21,8 @@ fn run() {
     &tree.stop() ?? panic("restart stop")
     &tree.start() ?? panic("restart start")
     &tree.directory_register("api", ^endpoint) ?? panic("restart directory")
-    generation :: &tree.handoff_generation() ?? panic("handoff")
-    current :: tree.directory_resolve("api") ?? panic("resolve")
+    generation: &tree.handoff_generation() ?? panic("handoff")
+    current: tree.directory_resolve("api") ?? panic("resolve")
     current.send("after") ?? panic("after send")
     print("handoff:{generation}:{current.show()}")
     print("after:{&tree.receive(current) ?? panic("after receive")}")

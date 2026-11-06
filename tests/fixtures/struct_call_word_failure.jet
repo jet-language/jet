@@ -1,7 +1,7 @@
-struct Word { value: U64 }
+Word: struct { value: U64 }
 
-fn hash2(namespace: String, identity: String) -> U64 Never! {
-    prime :: U64{0x100000001b3}
+hash2: fn(namespace: String, identity: String) -> U64 Never! {
+    prime: U64{0x100000001b3}
     hash := U64{0xcbf29ce484222325}
     loop byte in namespace.bytes() -> hash = ((hash).bit_xor(U64.from_u8(byte))).wrapping_mul(prime)
     hash = hash.wrapping_mul(prime)
@@ -9,8 +9,8 @@ fn hash2(namespace: String, identity: String) -> U64 Never! {
     hash
 }
 
-fn wrap(identity: String) -> Word Never! { Word{value: hash2("mir-type", identity)} }
+wrap: fn(identity: String) -> Word Never! { Word{value: hash2("mir-type", identity)} }
 
-fn run() {
+run: fn() {
     assert_eq(wrap("Unit").value, U64{0})
 }

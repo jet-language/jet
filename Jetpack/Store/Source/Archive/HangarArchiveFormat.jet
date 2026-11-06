@@ -8,40 +8,40 @@
 // bytes. This file owns the records, the encoder, the bounded decoder, the
 // per-field validators, and the CLI status report.
 
-STORE_ARCHIVE_MAGIC :: "jet-hangar-archive-v1"
-STORE_ARCHIVE_NIX_MANIFEST_TRAILER :: 2
-STORE_MAX_ARCHIVE_BYTES :: 1073741824
-STORE_ARCHIVE_MAX_OBJECTS :: 16384
-STORE_ARCHIVE_MAX_NODES_PER_OBJECT :: 1000000
-STORE_ARCHIVE_MAX_FIELD_BYTES :: 16777216
-STORE_ARCHIVE_MAX_NODE_BYTES :: 536870912
-STORE_ARCHIVE_STAGE :: ".archive-stage"
-STORE_ARCHIVE_KEY :: "hangar.key"
+STORE_ARCHIVE_MAGIC: "jet-hangar-archive-v1"
+STORE_ARCHIVE_NIX_MANIFEST_TRAILER: 2
+STORE_MAX_ARCHIVE_BYTES: 1073741824
+STORE_ARCHIVE_MAX_OBJECTS: 16384
+STORE_ARCHIVE_MAX_NODES_PER_OBJECT: 1000000
+STORE_ARCHIVE_MAX_FIELD_BYTES: 16777216
+STORE_ARCHIVE_MAX_NODE_BYTES: 536870912
+STORE_ARCHIVE_STAGE: ".archive-stage"
+STORE_ARCHIVE_KEY: "hangar.key"
 
 // Unix permission masks (octal 7777, 0222, 0200, 0600, 0644).
-STORE_MODE_PERMISSION_BITS :: 0xFFF
-STORE_MODE_WRITE_BITS :: 0x92
-STORE_MODE_OWNER_WRITE :: 0x80
-STORE_MODE_PRIVATE_FILE :: 0x180
-STORE_MODE_DEFAULT_FILE :: 0x1A4
+STORE_MODE_PERMISSION_BITS: 0xFFF
+STORE_MODE_WRITE_BITS: 0x92
+STORE_MODE_OWNER_WRITE: 0x80
+STORE_MODE_PRIVATE_FILE: 0x180
+STORE_MODE_DEFAULT_FILE: 0x1A4
 
 // The archive magic: the format name and one NUL byte.
-fn store_archive_magic() -> [U8] Never! {
+store_archive_magic: fn() -> [U8] Never! {
     magic := STORE_ARCHIVE_MAGIC.bytes()
     &magic.push(U8{0})
     magic
 }
 
 // Summary of one archive operation, printed by the Hangar CLI.
-struct HangarArchiveReport {
+HangarArchiveReport: struct {
     objects: Int
     bytes: Int
     signed: Bool
     root: String
 
     // Stable `jet.status/v1` output for the Hangar CLI (Rust `report_json`).
-    fn json(self, action: String) -> String ReportError! {
-        fields :: StatusFields.new()
+    json: fn(self, action: String) -> String ReportError! {
+        fields: StatusFields.new()
             .with("bytes", Dyn.Int(self.bytes))
             .with("objects", Dyn.Int(self.objects))
             .with("root", Dyn.Text(self.root.copy()))
@@ -51,13 +51,13 @@ struct HangarArchiveReport {
 }
 
 // The kind of one archived output node, with its one-byte wire tag.
-enum HangarArchiveNodeKind {
+HangarArchiveNodeKind: enum {
     Directory
     File
     Symlink
     Hardlink
 
-    fn wire_tag(self) -> Int Never! {
+    wire_tag: fn(self) -> Int Never! {
         if self == {
             .Directory -> 0
             .File -> 1
@@ -66,7 +66,7 @@ enum HangarArchiveNodeKind {
         }
     }
 
-    fn from_wire_tag(code: Int) -> HangarArchiveNodeKind? Never! {
+    from_wire_tag: fn(code: Int) -> HangarArchiveNodeKind? Never! {
         if code == {
             0 -> Val(HangarArchiveNodeKind.Directory)
             1 -> Val(HangarArchiveNodeKind.File)
@@ -79,7 +79,7 @@ enum HangarArchiveNodeKind {
 
 // One node of an archived output tree. `bytes` holds file contents or the
 // link target of a symlink or hardlink.
-struct HangarArchiveNode {
+HangarArchiveNode: struct {
     path: String
     kind: HangarArchiveNodeKind
     mode: Int
@@ -87,7 +87,7 @@ struct HangarArchiveNode {
 
     // The node's wire bytes, shared by the archive body and the canonical
     // Nix object bytes.
-    fn encode_into(self, out: &[U8]) StoreError! {
+    encode_into: fn(self, out: &[U8]) StoreError! {
         &out.push(U8{self.kind.wire_tag()})
         store_archive_put_string(&out, self.path)
         store_archive_put_raw_u32(&out, self.mode)
@@ -98,7 +98,7 @@ struct HangarArchiveNode {
 
 // One archived record: an output tree (empty `meta`, `id == digest`) or a
 // package record whose `meta` is the entry's meta.json.
-struct HangarArchiveObject {
+HangarArchiveObject: struct {
     id: String
     digest: String
     meta: String
@@ -107,14 +107,14 @@ struct HangarArchiveObject {
 }
 
 // The typed closure manifest a Nix CAS bundle carries after its objects.
-struct NixClosureManifest {
+NixClosureManifest: struct {
     output: String
     platform: String
     revision: String
     cache_key: String
     members: [NixClosureMember]
 
-    fn encode_into(self, out: &[U8]) StoreError! {
+    encode_into: fn(self, out: &[U8]) StoreError! {
         store_archive_put_string(&out, self.output)
         store_archive_put_string(&out, self.platform)
         store_archive_put_string(&out, self.revision)
@@ -129,19 +129,19 @@ struct NixClosureManifest {
         }
     }
 
-    fn decode_from(reader: &HangarArchiveReader) -> NixClosureManifest StoreError! {
-        output :: &reader.string()
-        platform :: &reader.string()
-        revision :: &reader.string()
-        cache_key :: &reader.string()
-        count :: &reader.u32()
+    decode_from: fn(reader: &HangarArchiveReader) -> NixClosureManifest StoreError! {
+        output: &reader.string()
+        platform: &reader.string()
+        revision: &reader.string()
+        cache_key: &reader.string()
+        count: &reader.u32()
         if count > STORE_ARCHIVE_MAX_OBJECTS -> return Err(StoreError.InvalidData("Nix closure manifest contains too many members"))
         members := [NixClosureMember]{}
         loop _ in 0..<count {
-            key :: &reader.string()
-            hash :: &reader.string()
-            size :: &reader.u64()
-            reference_count :: &reader.u32()
+            key: &reader.string()
+            hash: &reader.string()
+            size: &reader.u64()
+            reference_count: &reader.u32()
             if reference_count > STORE_ARCHIVE_MAX_OBJECTS {
                 return Err(StoreError.InvalidData("Nix closure manifest member contains too many references"))
             }
@@ -155,7 +155,7 @@ struct NixClosureManifest {
 
 // One member of a Nix closure manifest: its CAS key, the digest and size of
 // its canonical object bytes, and its sorted direct references.
-struct NixClosureMember {
+NixClosureMember: struct {
     key: String
     hash: String
     size: Int
@@ -163,24 +163,24 @@ struct NixClosureMember {
 }
 
 // The detached signature trailer.
-struct HangarArchiveSignature {
+HangarArchiveSignature: struct {
     key_id: String
     algorithm: String
     sig_hex: String
 
-    fn from_trust(signature: TrustSignature) -> HangarArchiveSignature Never! {
+    from_trust: fn(signature: TrustSignature) -> HangarArchiveSignature Never! {
         HangarArchiveSignature{key_id: signature.key_id, algorithm: signature.algorithm, sig_hex: signature.sig_hex}
     }
 }
 
 // A decoded or assembled canonical archive.
-struct HangarArchive {
+HangarArchive: struct {
     root_id: String
     objects: [HangarArchiveObject]
     nix_manifest: NixClosureManifest?
     signature: HangarArchiveSignature?
 
-    fn report(self) -> HangarArchiveReport Never! {
+    report: fn(self) -> HangarArchiveReport Never! {
         bytes := 0
         objects := 0
         loop object in self.objects {
@@ -191,7 +191,7 @@ struct HangarArchive {
     }
 
     // The signature payload: every byte before the signature trailer.
-    fn encode_unsigned(self) -> [U8] StoreError! {
+    encode_unsigned: fn(self) -> [U8] StoreError! {
         out := store_archive_magic()
         store_archive_put_string(&out, self.root_id)
         store_archive_put_u32(&out, self.objects.len())
@@ -215,7 +215,7 @@ struct HangarArchive {
 
     // The complete archive, with an explicit signature trailer (tag 0 when
     // unsigned) so the bytes always decode.
-    fn encode(self) -> [U8] StoreError! {
+    encode: fn(self) -> [U8] StoreError! {
         out := self.encode_unsigned()
         if self.signature == {
             .Val(signature) -> {
@@ -230,28 +230,28 @@ struct HangarArchive {
     }
 
     // The same archive without its signature trailer.
-    fn unsigned(self) -> HangarArchive Never! {
+    unsigned: fn(self) -> HangarArchive Never! {
         HangarArchive{root_id: self.root_id, objects: self.objects, nix_manifest: self.nix_manifest, signature: None}
     }
 
     // Bounded decode: every length, count, identity, path, and node kind is
     // checked before the value is built.
-    fn decode(bytes: [U8]) -> HangarArchive StoreError! {
+    decode: fn(bytes: [U8]) -> HangarArchive StoreError! {
         if bytes.len() > STORE_MAX_ARCHIVE_BYTES -> return Err(StoreError.InvalidData("archive exceeds the 1 GiB limit"))
         reader := HangarArchiveReader{bytes, at: 0}
-        magic :: store_archive_magic()
+        magic: store_archive_magic()
         if &reader.take_bytes(magic.len()) != magic -> return Err(StoreError.InvalidData("archive has an unknown format"))
-        root_id :: &reader.string()
+        root_id: &reader.string()
         store_archive_validate_id(root_id)
-        count :: &reader.u32()
+        count: &reader.u32()
         if count > STORE_ARCHIVE_MAX_OBJECTS -> return Err(StoreError.InvalidData("archive contains too many records"))
         objects := [HangarArchiveObject]{}
         output_digests := [String]{}
         package_ids := [String]{}
         loop _ in 0..<count {
-            id :: &reader.string()
-            digest :: &reader.string()
-            meta :: &reader.string()
+            id: &reader.string()
+            digest: &reader.string()
+            meta: &reader.string()
             store_archive_validate_id(id)
             store_archive_validate_digest(digest)
             if meta != "" {
@@ -264,19 +264,19 @@ struct HangarArchive {
                 }
                 &output_digests.push(digest)
             }
-            root_mode :: &reader.u32()
-            node_count :: &reader.u32()
+            root_mode: &reader.u32()
+            node_count: &reader.u32()
             if node_count > STORE_ARCHIVE_MAX_NODES_PER_OBJECT -> return Err(StoreError.InvalidData("archive output has too many nodes"))
             nodes := [HangarArchiveNode]{}
             loop _ in 0..<node_count {
-                kind_code :: Int.from_u8(&reader.byte())
-                path :: &reader.string()
+                kind_code: Int.from_u8(&reader.byte())
+                path: &reader.string()
                 store_archive_validate_relative(path)
-                mode :: &reader.u32()
-                size :: &reader.u64()
+                mode: &reader.u32()
+                size: &reader.u64()
                 if size < 0 || size > STORE_ARCHIVE_MAX_NODE_BYTES -> return Err(StoreError.InvalidData("archive node exceeds the 512 MiB limit"))
-                kind :: HangarArchiveNodeKind.from_wire_tag(kind_code) ?? return Err(StoreError.InvalidData("archive contains an unknown node kind"))
-                payload :: if kind == {
+                kind: HangarArchiveNodeKind.from_wire_tag(kind_code) ?? return Err(StoreError.InvalidData("archive contains an unknown node kind"))
+                payload: if kind == {
                     .Directory -> {
                         if size != 0 -> return Err(StoreError.InvalidData("archive directory node has a payload"))
                         [U8]{}
@@ -288,7 +288,7 @@ struct HangarArchive {
             store_archive_validate_no_path_collisions(nodes)
             &objects.push(HangarArchiveObject{id, digest, meta, root_mode, nodes})
         }
-        trailer :: Int.from_u8(&reader.byte())
+        trailer: Int.from_u8(&reader.byte())
         nix_manifest := NixClosureManifest?{None}
         signature_tag := trailer
         if trailer == STORE_ARCHIVE_NIX_MANIFEST_TRAILER {
@@ -298,9 +298,9 @@ struct HangarArchive {
         if signature_tag != 0 && signature_tag != 1 -> return Err(StoreError.InvalidData("archive has an unknown signature trailer"))
         signature := HangarArchiveSignature?{None}
         if signature_tag == 1 {
-            key_id :: &reader.string()
-            algorithm :: &reader.string()
-            sig_hex :: &reader.string()
+            key_id: &reader.string()
+            algorithm: &reader.string()
+            sig_hex: &reader.string()
             signature = Val(HangarArchiveSignature{key_id, algorithm, sig_hex})
         }
         if reader.remaining() != 0 -> return Err(StoreError.InvalidData("archive has trailing bytes"))
@@ -315,19 +315,19 @@ struct HangarArchive {
     // Accept the archive only when its signer is the configured key and the
     // detached HMAC covers the unsigned payload; unsigned archives only when
     // the caller allows them.
-    fn verify_signature(self, roots: HangarRoots, requested: String?, allow_unsigned: Bool) StoreError! {
-        signature :: self.signature ?? {
+    verify_signature: fn(self, roots: HangarRoots, requested: String?, allow_unsigned: Bool) StoreError! {
+        signature: self.signature ?? {
             if allow_unsigned -> return
             return Err(StoreError.InvalidData("unsigned Hangar archives are refused by default"))
         }
-        key :: store_archive_signing_key(roots, requested, false)
+        key: store_archive_signing_key(roots, requested, false)
         if key.key_id != signature.key_id {
             return Err(StoreError.InvalidData("archive signer `{signature.key_id}` is not the configured key `{key.key_id}`"))
         }
         if key.algorithm != signature.algorithm {
             return Err(StoreError.InvalidData("archive uses unsupported signature algorithm `{signature.algorithm}`"))
         }
-        expected :: key.sign(self.unsigned().encode_unsigned()).sig_hex
+        expected: key.sign(self.unsigned().encode_unsigned()).sig_hex
         if !crypto.constant_time_equal_bytes(expected.bytes(), signature.sig_hex.bytes()) {
             return Err(StoreError.InvalidData("Hangar archive signature verification failed"))
         }
@@ -335,26 +335,26 @@ struct HangarArchive {
 }
 
 // Bounded little-endian cursor over archive bytes.
-struct HangarArchiveReader {
+HangarArchiveReader: struct {
     bytes: [U8]
     at: Int
 
-    fn take_bytes(&self, len: Int) -> [U8] StoreError! {
+    take_bytes: fn(&self, len: Int) -> [U8] StoreError! {
         if len < 0 -> return Err(StoreError.InvalidData("archive length overflows"))
-        end :: self.at + len
+        end: self.at + len
         if end > self.bytes.len() -> return Err(StoreError.InvalidData("archive is truncated"))
-        taken :: self.bytes[self.at..<end]
+        taken: self.bytes[self.at..<end]
         self.at = end
         Ok(taken)
     }
 
-    fn byte(&self) -> U8 StoreError! {
-        taken :: &self.take_bytes(1)
+    byte: fn(&self) -> U8 StoreError! {
+        taken: &self.take_bytes(1)
         Ok(taken[0])
     }
 
-    fn u32(&self) -> Int StoreError! {
-        taken :: &self.take_bytes(4)
+    u32: fn(&self) -> Int StoreError! {
+        taken: &self.take_bytes(4)
         value := 0
         loop index in 0..<4 -> value = (value).bit_or((Int.from_u8(taken[index]) << (8 * index)))
         Ok(value)
@@ -362,71 +362,71 @@ struct HangarArchiveReader {
 
     // A u64 field; values past Int's range come back negative, which every
     // caller rejects as over its bound.
-    fn u64(&self) -> Int StoreError! {
-        taken :: &self.take_bytes(8)
+    u64: fn(&self) -> Int StoreError! {
+        taken: &self.take_bytes(8)
         value := 0
         loop index in 0..<8 -> value = (value).bit_or((Int.from_u8(taken[index]) << (8 * index)))
         Ok(value)
     }
 
-    fn string(&self) -> String StoreError! {
-        len :: &self.u32()
+    string: fn(&self) -> String StoreError! {
+        len: &self.u32()
         if len > STORE_ARCHIVE_MAX_FIELD_BYTES -> return Err(StoreError.InvalidData("archive field is too large"))
-        raw :: &self.take_bytes(len)
-        text :: String.from_bytes(raw) ?? return Err(StoreError.InvalidData("archive field is not UTF-8"))
+        raw: &self.take_bytes(len)
+        text: String.from_bytes(raw) ?? return Err(StoreError.InvalidData("archive field is not UTF-8"))
         Ok(text)
     }
 
-    fn remaining(self) -> Int Never! {
+    remaining: fn(self) -> Int Never! {
         if self.at >= self.bytes.len() -> return 0
         self.bytes.len() - self.at
     }
 }
 
-fn store_archive_put_u32(out: &[U8], value: Int) StoreError! {
+store_archive_put_u32: fn(out: &[U8], value: Int) StoreError! {
     if value < 0 || value > 0xFFFFFFFF -> return Err(StoreError.InvalidData("archive field is too large"))
     store_archive_put_raw_u32(&out, value)
 }
 
-fn store_archive_put_raw_u32(out: &[U8], value: Int) Never! {
+store_archive_put_raw_u32: fn(out: &[U8], value: Int) Never! {
     loop index in 0..<4 -> &out.push(U8{((value >> (8 * index))).bit_and(255)})
 }
 
-fn store_archive_put_u64(out: &[U8], value: Int) Never! {
+store_archive_put_u64: fn(out: &[U8], value: Int) Never! {
     loop index in 0..<8 -> &out.push(U8{((value >> (8 * index))).bit_and(255)})
 }
 
-fn store_archive_put_string(out: &[U8], value: String) StoreError! {
-    raw :: value.bytes()
+store_archive_put_string: fn(out: &[U8], value: String) StoreError! {
+    raw: value.bytes()
     if raw.len() > STORE_ARCHIVE_MAX_FIELD_BYTES -> return Err(StoreError.InvalidData("archive field is too large"))
     store_archive_put_u32(&out, raw.len())
     loop byte in raw -> &out.push(byte)
 }
 
 // Whether `raw` holds an ASCII control byte (C0 or DEL).
-fn store_archive_has_ascii_control(raw: [U8]) -> Bool Never! {
+store_archive_has_ascii_control: fn(raw: [U8]) -> Bool Never! {
     loop byte in raw {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if code < 32 || code == 127 -> return true
     }
     false
 }
 
-fn store_archive_is_hex_digit(code: Int) -> Bool Never! {
+store_archive_is_hex_digit: fn(code: Int) -> Bool Never! {
     (code >= 48 && code <= 57) || (code >= 97 && code <= 102) || (code >= 65 && code <= 70)
 }
 
 // An archive identity must be one safe path component.
-fn store_archive_validate_id(value: String) StoreError! {
-    raw :: value.bytes()
+store_archive_validate_id: fn(value: String) StoreError! {
+    raw: value.bytes()
     if raw.len() == 0 || raw.len() > 4096 || value == "." || value == ".." || value.contains("/") || value.contains("\\") || store_archive_has_ascii_control(raw) {
         return Err(StoreError.InvalidData("archive identity is not one safe path component"))
     }
 }
 
 // `sha256-` and 64 hex digits (either case).
-fn store_archive_validate_digest(value: String) StoreError! {
-    raw :: value.bytes()
+store_archive_validate_digest: fn(value: String) StoreError! {
+    raw: value.bytes()
     valid := value.starts_with("sha256-") && raw.len() == 71
     if valid {
         loop index in 7..<71 {
@@ -438,11 +438,11 @@ fn store_archive_validate_digest(value: String) StoreError! {
 
 // The normal components of `path` as Rust `Path::components` yields them:
 // repeated separators and interior `.` vanish; a leading `.` stays.
-fn store_archive_path_components(path: String) -> [String] Never! {
+store_archive_path_components: fn(path: String) -> [String] Never! {
     components := [String]{}
-    segments :: path.split("/").to_list()
+    segments: path.split("/").to_list()
     loop index in 0..<segments.len() {
-        segment :: segments[index]
+        segment: segments[index]
         if segment == "" -> next
         if segment == "." && (index > 0 || path.starts_with("/")) -> next
         &components.push(segment)
@@ -452,7 +452,7 @@ fn store_archive_path_components(path: String) -> [String] Never! {
 
 // A portable relative archive path: no foreign separator, empty or trailing
 // component, NUL, root, leading `.`, or `..`.
-fn store_archive_validate_relative(value: String) StoreError! {
+store_archive_validate_relative: fn(value: String) StoreError! {
     if value == "" || value.contains("\\") || value.contains("//") || value.ends_with("/") || value.bytes().contains(U8{0}) {
         return Err(StoreError.InvalidData("archive path is empty or uses a foreign separator"))
     }
@@ -464,7 +464,7 @@ fn store_archive_validate_relative(value: String) StoreError! {
 }
 
 // Paths must be unique, and no path may sit below a non-directory node.
-fn store_archive_validate_no_path_collisions(nodes: [HangarArchiveNode]) StoreError! {
+store_archive_validate_no_path_collisions: fn(nodes: [HangarArchiveNode]) StoreError! {
     kinds := [String: HangarArchiveNodeKind]{}
     loop node in nodes {
         store_archive_validate_relative(node.path)
@@ -472,9 +472,9 @@ fn store_archive_validate_no_path_collisions(nodes: [HangarArchiveNode]) StoreEr
         kinds[node.path] = node.kind
     }
     loop entry in kinds {
-        components :: entry.key.split("/").to_list()
+        components: entry.key.split("/").to_list()
         loop index in 1..<components.len() {
-            ancestor :: components[0..<index].join("/")
+            ancestor: components[0..<index].join("/")
             if kinds.get(ancestor) == {
                 .Val(kind) -> {
                     if kind != HangarArchiveNodeKind.Directory -> return Err(StoreError.InvalidData("archive contains a file/link path collision"))
@@ -486,10 +486,10 @@ fn store_archive_validate_no_path_collisions(nodes: [HangarArchiveNode]) StoreEr
 }
 
 // `path` equals `root` or lies below it, compared component-wise.
-fn store_archive_is_under(path: String, root: String) -> Bool Never! {
+store_archive_is_under: fn(path: String, root: String) -> Bool Never! {
     if path.starts_with("/") != root.starts_with("/") -> return false
-    inner :: store_archive_path_components(path)
-    outer :: store_archive_path_components(root)
+    inner: store_archive_path_components(path)
+    outer: store_archive_path_components(root)
     if outer.len() > inner.len() -> return false
     loop index in 0..<outer.len() {
         if inner[index] != outer[index] -> return false
@@ -499,9 +499,9 @@ fn store_archive_is_under(path: String, root: String) -> Bool Never! {
 
 // The components of `path` after the `root` prefix, or None when `path`
 // does not start with `root` (Rust `Path::strip_prefix`).
-fn store_archive_strip_prefix(path: String, root: String) -> [String]? Never! {
+store_archive_strip_prefix: fn(path: String, root: String) -> [String]? Never! {
     if !store_archive_is_under(path, root) -> return None
-    inner :: store_archive_path_components(path)
-    outer :: store_archive_path_components(root)
+    inner: store_archive_path_components(path)
+    outer: store_archive_path_components(root)
     Val(inner[outer.len()..<inner.len()])
 }

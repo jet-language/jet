@@ -1,17 +1,17 @@
-package {
+package: {
     name: "imports"
     authority: { allow: [FS.Write, IO, Mem.Alloc] }
 }
 
 use {
-    log :: "log"
-    kv :: "kv"
+    log: "log"
+    kv: "kv"
 }
 
-fn run() {
-    root :: "$HOME/.cache/jet-luna/dx3/prim-storage"
-    p :: Path.from("{root}/imports.txt")
-    a :: log.append_record(p.copy(), "a") ?? false
-    b :: log.append_record(Path.from("{root}/imports.txt"), "b") ?? false
+run: fn() {
+    root: "$HOME/.cache/jet-luna/dx3/prim-storage"
+    p: Path.from("{root}/imports.txt")
+    a: log.append_record(p.copy(), "a") ?? false
+    b: log.append_record(Path.from("{root}/imports.txt"), "b") ?? false
     print("{a} {b}")
 }

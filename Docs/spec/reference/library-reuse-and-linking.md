@@ -125,9 +125,9 @@ is mapped.
 The canonical Jet-side loader is:
 
 ```jet
-use library :: core.mod
+use library: core.mod
 
-loaded :: library.load(
+loaded: library.load(
     ".jet/build/loadable.jetlib",
     grant: { read: [".jet/build"] },
 )

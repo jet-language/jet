@@ -7,40 +7,40 @@ use {
     jet_devserver.NativeOverlayAdapter.[NativeOverlayAdapter, NativeOverlayUpdate]
     jet_devserver.Session.[ResidentDevSession]
     jet_devserver.TerminalHost.[JetDevtoolsHostKind, JetDevtoolsPanelAvailability, JetDevtoolsPanelCapability, JetDevtoolsPanelDescriptor]
-    project_panel_availability :: jet_devserver.TerminalHost.panel_availability
+    project_panel_availability: jet_devserver.TerminalHost.panel_availability
     jet_devserver.Devtools.catalog.[descriptors]
     core.devtools.runtime.kernel_devtools_panel_catalog.[JetDevtoolsPanelAvailability, JetDevtoolsPanelCapability, JetDevtoolsPanelDescriptor]
 }
 
-JET_DEVTOOLS_PROTOCOL :: "jet.devtools.v1"
-MAX_OVERLAY_PANELS :: Usize{64}
-MAX_OVERLAY_NODES :: Usize{512}
-MAX_OVERLAY_DEPTH :: Usize{32}
-MAX_OVERLAY_FRAMES :: Usize{64}
-MAX_OVERLAY_TEXT_BYTES :: Usize{16 * 1024}
-enum NativeOverlayNodeKind { Text; Status; Table; Tree; Chart; Action }
+JET_DEVTOOLS_PROTOCOL: "jet.devtools.v1"
+MAX_OVERLAY_PANELS: Usize{64}
+MAX_OVERLAY_NODES: Usize{512}
+MAX_OVERLAY_DEPTH: Usize{32}
+MAX_OVERLAY_FRAMES: Usize{64}
+MAX_OVERLAY_TEXT_BYTES: Usize{16 * 1024}
+NativeOverlayNodeKind: enum { Text; Status; Table; Tree; Chart; Action }
 // Projects grant requirements; never grants or executes an action.
-enum NativeOverlayGrant { Observe; Interact; Control }
-struct NativeOverlayAction { action_id: String; required_grant: NativeOverlayGrant }
+NativeOverlayGrant: enum { Observe; Interact; Control }
+NativeOverlayAction: struct { action_id: String; required_grant: NativeOverlayGrant }
 impl NativeOverlayAction {
-    fn new(action_id: String, required_grant: NativeOverlayGrant) -> Self { return Self { action_id, required_grant } }
+    new: fn(action_id: String, required_grant: NativeOverlayGrant) -> Self { return Self { action_id, required_grant } }
 }
 // Values are optional; no recovery of unpublished observation payloads.
-struct NativeOverlayNode {
+NativeOverlayNode: struct {
     id: String; kind: NativeOverlayNodeKind; label: String
     value: String?; status: String?; children: [NativeOverlayNode]
     action: NativeOverlayAction?
 }
 impl NativeOverlayNode {
-    fn new(id: String, kind: NativeOverlayNodeKind, label: String) -> Self {
+    new: fn(id: String, kind: NativeOverlayNodeKind, label: String) -> Self {
         return Self { id, kind, label, value: .None, status: .None, children: [], action: .None }
     }
-    fn text(id: String, label: String) -> Self { return Self.new(id, .Text, label) }
-    fn with_value(self: Self, value: String) -> Self { self.value = .Val(value); return self }
-    fn with_status(self: Self, status: String) -> Self { self.status = .Val(status); return self }
-    fn with_children(self: Self, children: [NativeOverlayNode]) -> Self { self.children = children; return self }
-    fn with_action(self: Self, action: NativeOverlayAction) -> Self { self.action = .Val(action); return self }
-    fn validate(self: &Self, depth: Usize, count: &Usize, ids: &[String: Bool]) Err! {
+    text: fn(id: String, label: String) -> Self { return Self.new(id, .Text, label) }
+    with_value: fn(self: Self, value: String) -> Self { self.value = .Val(value); return self }
+    with_status: fn(self: Self, status: String) -> Self { self.status = .Val(status); return self }
+    with_children: fn(self: Self, children: [NativeOverlayNode]) -> Self { self.children = children; return self }
+    with_action: fn(self: Self, action: NativeOverlayAction) -> Self { self.action = .Val(action); return self }
+    validate: fn(self: &Self, depth: Usize, count: &Usize, ids: &[String: Bool]) Err! {
         if depth > MAX_OVERLAY_DEPTH -> return .Err("native overlay node tree exceeds its depth budget")
         validate_text(self.id, "native overlay node id", false)
         validate_text(self.label, "native overlay node label", false)
@@ -60,15 +60,15 @@ impl NativeOverlayNode {
     }
 }
 // Already-typed panel facts; host never infers meaning from panel names.
-struct NativeOverlayPanelFact {
+NativeOverlayPanelFact: struct {
     panel_id: String; title: String; freshness: U64
     status: String; nodes: [NativeOverlayNode]
 }
 impl NativeOverlayPanelFact {
-    fn new(panel_id: String, title: String, freshness: U64, status: String, nodes: [NativeOverlayNode]) -> Self {
+    new: fn(panel_id: String, title: String, freshness: U64, status: String, nodes: [NativeOverlayNode]) -> Self {
         return Self { panel_id, title, freshness, status, nodes }
     }
-    fn validate(self: &Self, count: &Usize) Err! {
+    validate: fn(self: &Self, count: &Usize) Err! {
         validate_text(self.panel_id, "native overlay panel id", false)
         validate_text(self.title, "native overlay panel title", false)
         validate_text(self.status, "native overlay panel status", true)
@@ -77,18 +77,18 @@ impl NativeOverlayPanelFact {
         return ()
     }
 }
-struct NativeOverlayEvent {
+NativeOverlayEvent: struct {
     protocol: String; session_id: String; revision: String
     sequence: U64; observed_at_ms: U64; panels: [NativeOverlayPanelFact]
 }
 impl NativeOverlayEvent {
-    fn new(protocol: String, session_id: String, revision: String, sequence: U64, observed_at_ms: U64, panels: [NativeOverlayPanelFact]) -> Self {
+    new: fn(protocol: String, session_id: String, revision: String, sequence: U64, observed_at_ms: U64, panels: [NativeOverlayPanelFact]) -> Self {
         return Self { protocol, session_id, revision, sequence, observed_at_ms, panels }
     }
-    fn current(session_id: String, revision: String, sequence: U64, observed_at_ms: U64, panels: [NativeOverlayPanelFact]) -> Self {
+    current: fn(session_id: String, revision: String, sequence: U64, observed_at_ms: U64, panels: [NativeOverlayPanelFact]) -> Self {
         return Self.new(JET_DEVTOOLS_PROTOCOL, session_id, revision, sequence, observed_at_ms, ^panels)
     }
-    fn validate(self: &Self) Err! {
+    validate: fn(self: &Self) Err! {
         if self.protocol != JET_DEVTOOLS_PROTOCOL -> return .Err("native overlay protocol must be `{JET_DEVTOOLS_PROTOCOL}`")
         validate_text(self.revision, "native overlay revision", false)
         if self.sequence == 0 -> return .Err("native overlay event sequence must be greater than zero")
@@ -103,23 +103,23 @@ impl NativeOverlayEvent {
     }
 }
 // Physical viewport with integer DPI scale for reproducible headless geometry.
-struct NativeOverlayViewport { width: U32; height: U32; scale_milli: U32 }
+NativeOverlayViewport: struct { width: U32; height: U32; scale_milli: U32 }
 impl NativeOverlayViewport {
-    fn new(width: U32, height: U32, scale_milli: U32) -> Self Err! {
-        viewport :: Self { width, height, scale_milli }
+    new: fn(width: U32, height: U32, scale_milli: U32) -> Self Err! {
+        viewport: Self { width, height, scale_milli }
         viewport.validate()
         return viewport
     }
-    fn validate(self: &Self) Err! {
+    validate: fn(self: &Self) Err! {
         if self.width == 0 || self.height == 0 -> return .Err("native overlay viewport dimensions must be non-zero")
         if self.width > (U32{I32.MAX}) || self.height > (U32{I32.MAX}) -> return .Err("native overlay viewport exceeds coordinate range")
         if self.scale_milli == 0 || self.scale_milli > 10_000 -> return .Err("native overlay scale must be between 1 and 10000 milli-units")
         return ()
     }
-    fn scale(self: Self) -> F64 { return F64.from(self.scale_milli) / 1000.0 }
-    fn overlay_rect(self: Self, dock: NativeOverlayDock) -> NativeOverlayRect {
-        width :: self.scaled_extent(480, self.width)
-        height :: self.scaled_extent(360, self.height)
+    scale: fn(self: Self) -> F64 { return F64.from(self.scale_milli) / 1000.0 }
+    overlay_rect: fn(self: Self, dock: NativeOverlayDock) -> NativeOverlayRect {
+        width: self.scaled_extent(480, self.width)
+        height: self.scaled_extent(360, self.height)
         return if dock == {
             .Floating -> NativeOverlayRect { x: I32{((self.width - width) / 2)}, y: I32{((self.height - height) / 2)}, width, height }
             .Left -> NativeOverlayRect { x: 0, y: 0, width, height: self.height }
@@ -128,48 +128,48 @@ impl NativeOverlayViewport {
             .Bottom -> NativeOverlayRect { x: 0, y: I32{(self.height - height)}, width: self.width, height }
         }
     }
-    fn scaled_extent(self: Self, logical: U32, available: U32) -> U32 {
+    scaled_extent: fn(self: Self, logical: U32, available: U32) -> U32 {
         U32{return (U64.from(logical).saturating_mul(U64.from(self.scale_milli)).saturating_add(999) / 1000).max(1).min(U64.from(available))}
     }
 }
 impl NativeOverlayViewport.Default {
-    fn default() -> Self { return Self { width: 1280, height: 720, scale_milli: 1000 } }
+    default: fn() -> Self { return Self { width: 1280, height: 720, scale_milli: 1000 } }
 }
-struct NativeOverlayRect { x: I32; y: I32; width: U32; height: U32 }
+NativeOverlayRect: struct { x: I32; y: I32; width: U32; height: U32 }
 impl NativeOverlayRect {
-    fn contains(self: Self, x: I32, y: I32) -> Bool {
+    contains: fn(self: Self, x: I32, y: I32) -> Bool {
         return x >= self.x && y >= self.y && (I64{x}) < I64.from(self.x) + I64.from(self.width) && (I64{y}) < I64.from(self.y) + I64.from(self.height)
     }
 }
-enum NativeOverlayDock { Floating; Left; Right; Top; Bottom }
+NativeOverlayDock: enum { Floating; Left; Right; Top; Bottom }
 impl NativeOverlayDock.Default {
-    fn default() -> Self { return .Floating }
+    default: fn() -> Self { return .Floating }
 }
-struct NativeOverlayState { open: Bool; dock: NativeOverlayDock; focused: Bool }
+NativeOverlayState: struct { open: Bool; dock: NativeOverlayDock; focused: Bool }
 impl NativeOverlayState.Default {
-    fn default() -> Self { return Self { open: false, dock: .Floating, focused: false } }
+    default: fn() -> Self { return Self { open: false, dock: .Floating, focused: false } }
 }
-enum NativeOverlayInput {
+NativeOverlayInput: enum {
     Toggle; Close; Dock(NativeOverlayDock); Focus(Bool)
     Key { code: String, pressed: Bool }
     Gamepad { gamepad: I64, control: String, pressed: Bool }
     Pointer { x: I32, y: I32, pressed: Bool }
     Text(String); Activate { action_id: String }
 }
-enum NativeOverlayInputRoute { Overlay; Game }
-struct NativeOverlayFrame {
+NativeOverlayInputRoute: enum { Overlay; Game }
+NativeOverlayFrame: struct {
     frame_id: U64; protocol: String; session_id: String; revision: String
     sequence: U64; observed_at_ms: U64; open: Bool; dock: NativeOverlayDock
     focused: Bool; viewport: NativeOverlayViewport; bounds: NativeOverlayRect
     cursor: U64?; selection: JetDevtoolsSelection?; panels: [NativeOverlayPanelFact]
 }
 impl NativeOverlayFrame {
-    fn panel_count(self: Self) -> Usize { return self.panels.len() }
-    fn node_count(self: Self) -> Usize { return self.panels.iter().map((panel) -> panel.nodes.iter().map(node_count).sum()).sum() }
+    panel_count: fn(self: Self) -> Usize { return self.panels.len() }
+    node_count: fn(self: Self) -> Usize { return self.panels.iter().map((panel) -> panel.nodes.iter().map(node_count).sum()).sum() }
 }
-fn node_count(node: NativeOverlayNode) -> Usize { return 1 + node.children.iter().map(node_count).sum() }
-fn panel_node_count(panel: NativeOverlayPanelFact) -> Usize { return panel.nodes.iter().map(node_count).sum() }
-struct NativeOverlayHost {
+node_count: fn(node: NativeOverlayNode) -> Usize { return 1 + node.children.iter().map(node_count).sum() }
+panel_node_count: fn(panel: NativeOverlayPanelFact) -> Usize { return panel.nodes.iter().map(node_count).sum() }
+NativeOverlayHost: struct {
     state: NativeOverlayState; viewport: NativeOverlayViewport; toggle_key: String; release_build: Bool
     session_id: String?; revision: String?; sequence: U64?; view: JetDevtoolsViewState; observed_at_ms: U64
     panels: [String: NativeOverlayPanelFact]; next_frame_id: U64; max_frames: Usize
@@ -178,17 +178,17 @@ struct NativeOverlayHost {
     last_native_draw: JetDevtoolsNativeDrawCommand?
 }
 impl NativeOverlayHost {
-    fn new() -> Self { return Self.with_viewport(NativeOverlayViewport.default()) }
-    fn with_viewport(viewport: NativeOverlayViewport) -> Self {
+    new: fn() -> Self { return Self.with_viewport(NativeOverlayViewport.default()) }
+    with_viewport: fn(viewport: NativeOverlayViewport) -> Self {
         assert(viewport.validate().is_ok(), "invalid native overlay viewport")
         return Self { state: NativeOverlayState.default(), viewport, toggle_key: "F12", release_build: false,
             session_id: .None, revision: .None, sequence: .None, view: JetDevtoolsViewState.default(), observed_at_ms: 0,
             last_native_draw: .None, panels: {}, next_frame_id: 1, max_frames: MAX_OVERLAY_FRAMES, frames: VecDeque.new() }
     }
-    fn with_frame_capacity(self: Self, capacity: Usize) -> Self { self.max_frames = capacity.clamp(1, MAX_OVERLAY_FRAMES); return self }
-    fn with_release_build(self: Self, release_build: Bool) -> Self { self.set_release_build(release_build); return self }
-    fn release_build(self: Self) -> Bool { return self.release_build }
-    fn set_release_build(self: Self, release_build: Bool) -> Unit {
+    with_frame_capacity: fn(self: Self, capacity: Usize) -> Self { self.max_frames = capacity.clamp(1, MAX_OVERLAY_FRAMES); return self }
+    with_release_build: fn(self: Self, release_build: Bool) -> Self { self.set_release_build(release_build); return self }
+    release_build: fn(self: Self) -> Bool { return self.release_build }
+    set_release_build: fn(self: Self, release_build: Bool) -> Unit {
         self.release_build = release_build
         if release_build {
             self.state.open = false
@@ -203,42 +203,42 @@ impl NativeOverlayHost {
             self.last_native_draw = .None
         }
     }
-    fn panel_catalog(self: Self) -> [JetDevtoolsPanelDescriptor] { return descriptors() }
-    fn panel_availability(self: Self) -> [JetDevtoolsPanelAvailability] {
-        grants :: if self.release_build -> &[] else -> &JetDevtoolsPanelCapability.ALL
+    panel_catalog: fn(self: Self) -> [JetDevtoolsPanelDescriptor] { return descriptors() }
+    panel_availability: fn(self: Self) -> [JetDevtoolsPanelAvailability] {
+        grants: if self.release_build -> &[] else -> &JetDevtoolsPanelCapability.ALL
         return self.panel_availability_for(grants)
     }
-    fn panel_availability_for(self: Self, grants: [JetDevtoolsPanelCapability]) -> [JetDevtoolsPanelAvailability] {
-        grants :: if self.release_build -> &[] else -> grants
+    panel_availability_for: fn(self: Self, grants: [JetDevtoolsPanelCapability]) -> [JetDevtoolsPanelAvailability] {
+        grants: if self.release_build -> &[] else -> grants
         return project_panel_availability(.NativeOverlay, grants)
     }
-    fn state(self: Self) -> NativeOverlayState { return self.state }
-    fn viewport(self: Self) -> NativeOverlayViewport { return self.viewport }
-    fn toggle_key(self: Self) -> String { return self.toggle_key }
-    fn set_viewport(self: &Self, viewport: NativeOverlayViewport) Err! {
+    state: fn(self: Self) -> NativeOverlayState { return self.state }
+    viewport: fn(self: Self) -> NativeOverlayViewport { return self.viewport }
+    toggle_key: fn(self: Self) -> String { return self.toggle_key }
+    set_viewport: fn(self: &Self, viewport: NativeOverlayViewport) Err! {
         viewport.validate()
         self.viewport = viewport
         self.push_frame()
         return ()
     }
-    fn open(self: Self) -> Unit {
+    open: fn(self: Self) -> Unit {
         if self.release_build -> return
         self.state.open = true
         self.state.focused = true
         self.push_frame()
     }
-    fn close(self: Self) -> Unit { self.state.open = false; self.state.focused = false }
-    fn toggle(self: Self) -> Unit {
+    close: fn(self: Self) -> Unit { self.state.open = false; self.state.focused = false }
+    toggle: fn(self: Self) -> Unit {
         if self.release_build -> return
         if self.state.open -> self.close() else -> self.open()
     }
-    fn set_dock(self: Self, dock: NativeOverlayDock) -> Unit { self.state.dock = dock; self.push_frame() }
-    fn set_focus(self: Self, focused: Bool) -> Unit { self.state.focused = self.state.open && focused; self.push_frame() }
-    fn is_open(self: Self) -> Bool { return self.state.open }
-    fn is_focused(self: Self) -> Bool { return self.state.open && self.state.focused }
-    fn captures_input(self: Self) -> Bool { return self.is_focused() }
+    set_dock: fn(self: Self, dock: NativeOverlayDock) -> Unit { self.state.dock = dock; self.push_frame() }
+    set_focus: fn(self: Self, focused: Bool) -> Unit { self.state.focused = self.state.open && focused; self.push_frame() }
+    is_open: fn(self: Self) -> Bool { return self.state.open }
+    is_focused: fn(self: Self) -> Bool { return self.state.open && self.state.focused }
+    captures_input: fn(self: Self) -> Bool { return self.is_focused() }
     // Strictly increasing sequence; revision identity and freshness gates before mutation.
-    fn ingest(self: &Self, event: NativeOverlayEvent) Err! {
+    ingest: fn(self: &Self, event: NativeOverlayEvent) Err! {
         if self.release_build -> return .Err("native overlay is excluded from release builds")
         event.validate()
         if self.session_id.as_deref() == .Val(session_id) {
@@ -250,7 +250,7 @@ impl NativeOverlayHost {
                 return .Err("native overlay event sequence is not increasing")
             }
         }
-        revision_changed :: self.revision.as_deref().is_some_and((revision) -> revision != event.revision)
+        revision_changed: self.revision.as_deref().is_some_and((revision) -> revision != event.revision)
         projected_panel_count := if revision_changed -> 0 else -> self.panels.len()
         projected_node_count := Usize{if revision_changed -> 0 else -> self.panels.values().map(panel_node_count).sum()}
         loop panel in &event.panels {
@@ -276,30 +276,30 @@ impl NativeOverlayHost {
         self.push_frame()
         return ()
     }
-    fn ingest_update(self: &Self, update: &NativeOverlayUpdate) Err! {
+    ingest_update: fn(self: &Self, update: &NativeOverlayUpdate) Err! {
         if self.release_build -> return .Err("native overlay is excluded from release builds")
         self.view.cursor = update.identity.cursor.map((cursor) -> cursor.sequence)
         self.view.selection = update.selection.as_ref().map((selection) -> {
-            item :: if !selection.item_key.is_empty() -> .Val(selection.item_key.copy()) else -> .None
+            item: if !selection.item_key.is_empty() -> .Val(selection.item_key.copy()) else -> .None
             return JetDevtoolsSelection.new(selection.panel_id, item)
         })
         if update.event.clone() == .Val(event) -> self.ingest(^event)
         else if self.sequence.is_some() -> self.push_frame()
         return ()
     }
-    fn frame(self: Self) -> NativeOverlayFrame? { return self.frames.back() }
-    fn frames(self: Self) -> Iterator<NativeOverlayFrame> { return self.frames.iter() }
-    fn frame_count(self: Self) -> Usize { return self.frames.len() }
-    fn last_native_draw(self: Self) -> JetDevtoolsNativeDrawCommand? { return self.last_native_draw.as_ref() }
-    fn record_native_draw(self: Self, command: JetDevtoolsNativeDrawCommand) -> Unit {
+    frame: fn(self: Self) -> NativeOverlayFrame? { return self.frames.back() }
+    frames: fn(self: Self) -> Iterator<NativeOverlayFrame> { return self.frames.iter() }
+    frame_count: fn(self: Self) -> Usize { return self.frames.len() }
+    last_native_draw: fn(self: Self) -> JetDevtoolsNativeDrawCommand? { return self.last_native_draw.as_ref() }
+    record_native_draw: fn(self: Self, command: JetDevtoolsNativeDrawCommand) -> Unit {
         if !self.release_build -> self.last_native_draw = .Val(command)
     }
     // Canonical commands executed in the real backend's BeginDrawing/EndDrawing context.
-    fn native_draw_commands(self: Self) -> [JetDevtoolsNativeDrawCommand] {
-        frame :: self.frame() ?? return []
+    native_draw_commands: fn(self: Self) -> [JetDevtoolsNativeDrawCommand] {
+        frame: self.frame() ?? return []
         if self.release_build || !frame.open -> return []
-        bounds :: frame.bounds
-        bottom :: I64.from(bounds.y) + I64.from(bounds.height)
+        bounds: frame.bounds
+        bottom: I64.from(bounds.y) + I64.from(bounds.height)
         commands := [JetDevtoolsNativeDrawCommand]{[].with_capacity(MAX_OVERLAY_NODES.min(64))}
         commands.push(.Rectangle { x: bounds.x, y: bounds.y, width: I32{bounds.width}, height: I32{bounds.height}, color: JetDevtoolsNativeColor.new(16, 20, 28, 232) })
         commands.push(.Text { text: "Jet Devtools [{frame.session_id}]", x: bounds.x.saturating_add(12), y: bounds.y.saturating_add(22), size: 18, color: JetDevtoolsNativeColor.WHITE })
@@ -320,7 +320,7 @@ impl NativeOverlayHost {
         return commands
     }
     // Focused/open overlays capture all input, including pointers outside bounds.
-    fn route_input(self: Self, input: NativeOverlayInput) -> NativeOverlayInputRoute {
+    route_input: fn(self: Self, input: NativeOverlayInput) -> NativeOverlayInputRoute {
         return if input == {
             .Toggle -> {
                 if self.release_build -> .Game
@@ -349,35 +349,35 @@ impl NativeOverlayHost {
             .Text(_) | .Activate { action_id: _ } -> if self.captures_input() -> .Overlay else -> .Game
         }
     }
-    fn headless_projection(event: NativeOverlayEvent) -> NativeOverlayFrame Err! {
+    headless_projection: fn(event: NativeOverlayEvent) -> NativeOverlayFrame Err! {
         host := Self.new()
         host.open()
         host.ingest(event.copy())
         return host.frame().cloned() ?? return .Err("native overlay did not produce a headless frame")
     }
-    fn push_frame(self: Self) -> Unit {
+    push_frame: fn(self: Self) -> Unit {
         if self.release_build -> return
-        session_id :: self.session_id.as_deref() ?? return
-        revision :: self.revision.as_deref() ?? return
-        sequence :: self.sequence ?? return
-        frame_id :: self.next_frame_id
+        session_id: self.session_id.as_deref() ?? return
+        revision: self.revision.as_deref() ?? return
+        sequence: self.sequence ?? return
+        frame_id: self.next_frame_id
         self.next_frame_id = self.next_frame_id.saturating_add(1).max(1)
         keys := self.panels.keys().cloned().collect()
         keys.sort()
-        panels :: keys.iter().map((key) -> self.panels[key].clone()).collect()
-        frame :: NativeOverlayFrame { frame_id, protocol: JET_DEVTOOLS_PROTOCOL.to_string(), session_id: session_id.to_string(), revision: revision.to_string(), sequence,
+        panels: keys.iter().map((key) -> self.panels[key].clone()).collect()
+        frame: NativeOverlayFrame { frame_id, protocol: JET_DEVTOOLS_PROTOCOL.to_string(), session_id: session_id.to_string(), revision: revision.to_string(), sequence,
             observed_at_ms: self.observed_at_ms, open: self.state.open, dock: self.state.dock, focused: self.is_focused(), viewport: self.viewport,
             bounds: self.viewport.overlay_rect(self.state.dock), cursor: self.view.cursor, selection: self.view.selection.copy(), panels }
-        if self.frames.len() == self.max_frames -> _ :: self.frames.pop_front()
+        if self.frames.len() == self.max_frames -> _: self.frames.pop_front()
         self.frames.push_back(^frame)
     }
 }
 impl NativeOverlayHost.Default {
-    fn default() -> Self { return Self.new() }
+    default: fn() -> Self { return Self.new() }
 }
-fn append_native_node_commands(commands: [JetDevtoolsNativeDrawCommand], node: NativeOverlayNode, x: I32, y: I64, bottom: I64, depth: Usize) -> Unit {
+append_native_node_commands: fn(commands: [JetDevtoolsNativeDrawCommand], node: NativeOverlayNode, x: I32, y: I64, bottom: I64, depth: Usize) -> Unit {
     if y >= bottom || commands.len() >= MAX_OVERLAY_NODES -> return
-    indent :: I32{depth.saturating_mul(12).min(Usize{I32.MAX})}
+    indent: I32{depth.saturating_mul(12).min(Usize{I32.MAX})}
     text := node.label.copy()
     if node.value.as_deref() == .Val(value) { text.push_str(": "); text.push_str(value) }
     if node.status.as_deref() == .Val(status) { text.push_str(" ["); text.push_str(status); text.push(']') }
@@ -390,43 +390,43 @@ fn append_native_node_commands(commands: [JetDevtoolsNativeDrawCommand], node: N
 }
 // Foundation callbacks installed by jet dev, joining resident session to actual
 // window hooks without importing devserver into the generated Prelude.
-struct NativeOverlayHostBridge {
+NativeOverlayHostBridge: struct {
     session: Arc<ResidentDevSession>; adapter: Mutex<NativeOverlayAdapter>
     host: Mutex<NativeOverlayHost>; toggle_key_state: Mutex<[String: Bool]>
 }
 impl NativeOverlayHostBridge {
-    fn new(session: Arc<ResidentDevSession>, release_build: Bool) -> Self {
+    new: fn(session: Arc<ResidentDevSession>, release_build: Bool) -> Self {
         // GATE #4494: native Arc ownership and mutex guards at callback boundaries.
-        adapter :: NativeOverlayAdapter.for_session(&session).with_release_build(release_build)
-        host :: NativeOverlayHost.new().with_release_build(release_build)
+        adapter: NativeOverlayAdapter.for_session(&session).with_release_build(release_build)
+        host: NativeOverlayHost.new().with_release_build(release_build)
         return Self { session, adapter: Mutex.new(^adapter), host: Mutex.new(^host), toggle_key_state: Mutex.new({}) }
     }
-    fn frame(self: Self) -> NativeOverlayFrame? { return self.host.lock().ok()?.frame().cloned() }
+    frame: fn(self: Self) -> NativeOverlayFrame? { return self.host.lock().ok()?.frame().cloned() }
 }
 impl NativeOverlayHostBridge.JetDevtoolsNativeHost {
-    fn on_event(self: Self, session_id: String, _event: JetDevtoolsEvent) -> Unit {
+    on_event: fn(self: Self, session_id: String, _event: JetDevtoolsEvent) -> Unit {
         if session_id != self.session.id() -> return
         adapter := self.adapter.lock() ?? return
-        update :: adapter.sync_session(&self.session) ?? return
-        if self.host.lock() == .Ok(host) -> _ :: host.ingest_update(&update)
+        update: adapter.sync_session(&self.session) ?? return
+        if self.host.lock() == .Ok(host) -> _: host.ingest_update(&update)
     }
-    fn on_window_open(self: Self, window: JetDevtoolsNativeWindow) -> Unit {
+    on_window_open: fn(self: Self, window: JetDevtoolsNativeWindow) -> Unit {
         if window.session_id != self.session.id() -> return
-        viewport :: NativeOverlayViewport.new(window.width, window.height, 1000) ?? return
-        if self.host.lock() == .Ok(host) -> _ :: host.set_viewport(viewport)
+        viewport: NativeOverlayViewport.new(window.width, window.height, 1000) ?? return
+        if self.host.lock() == .Ok(host) -> _: host.set_viewport(viewport)
     }
-    fn on_window_close(self: Self, session_id: String) -> Unit {
+    on_window_close: fn(self: Self, session_id: String) -> Unit {
         if session_id != self.session.id() -> return
         if self.host.lock() == .Ok(host) -> host.close()
     }
-    fn on_input(self: Self, session_id: String, input: JetDevtoolsNativeInput) -> Bool {
+    on_input: fn(self: Self, session_id: String, input: JetDevtoolsNativeInput) -> Bool {
         if session_id != self.session.id() -> return false
         host := self.host.lock() ?? return false
-        input :: if input == {
+        input: if input == {
             .Key { code, pressed } -> {
-                edge_pressed :: if code == host.toggle_key() {
+                edge_pressed: if code == host.toggle_key() {
                     states := self.toggle_key_state.lock() ?? return false
-                    was_pressed :: states.insert(code.copy(), pressed).unwrap_or(false)
+                    was_pressed: states.insert(code.copy(), pressed).unwrap_or(false)
                     pressed && !was_pressed
                 } else -> pressed
                 NativeOverlayInput.Key { code, pressed: edge_pressed }
@@ -435,23 +435,23 @@ impl NativeOverlayHostBridge.JetDevtoolsNativeHost {
         }
         return host.route_input(^input) == .Overlay
     }
-    fn on_frame_begin(self: Self, frame: JetDevtoolsNativeFrame) -> [JetDevtoolsNativeDrawCommand] {
+    on_frame_begin: fn(self: Self, frame: JetDevtoolsNativeFrame) -> [JetDevtoolsNativeDrawCommand] {
         if frame.session_id != self.session.id() -> return []
-        viewport :: NativeOverlayViewport.new(frame.width, frame.height, 1000) ?? return []
+        viewport: NativeOverlayViewport.new(frame.width, frame.height, 1000) ?? return []
         host := self.host.lock() ?? return []
-        if host.viewport() != viewport -> _ :: host.set_viewport(viewport)
+        if host.viewport() != viewport -> _: host.set_viewport(viewport)
         return host.native_draw_commands()
     }
-    fn on_draw(self: Self, session_id: String, command: JetDevtoolsNativeDrawCommand) -> Unit {
+    on_draw: fn(self: Self, session_id: String, command: JetDevtoolsNativeDrawCommand) -> Unit {
         if session_id != self.session.id() -> return
         if self.host.lock() == .Ok(host) -> host.record_native_draw(^command)
     }
-    fn on_frame_end(self: Self, session_id: String) -> Unit {
+    on_frame_end: fn(self: Self, session_id: String) -> Unit {
         if session_id != self.session.id() -> return
-        _ :: self.frame()
+        _: self.frame()
     }
 }
-fn validate_text(value: String, label: String, allow_empty: Bool) Err! {
+validate_text: fn(value: String, label: String, allow_empty: Bool) Err! {
     if (!allow_empty && value.is_empty()) || value.len() > MAX_OVERLAY_TEXT_BYTES || value.chars().any((c) -> c.is_control()) -> return .Err("{label} is empty, too long, or contains control text")
     return ()
 }

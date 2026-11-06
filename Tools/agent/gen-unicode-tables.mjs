@@ -459,14 +459,14 @@ function jetLookupTree(rows, missing, mapped, indent = "    ") {
 }
 function jetMapping(name, map) {
   const rows = jetMappingRows(map);
-  return `fn unicode_${name}_mapping(cp: I64) -> I64 Never! {\n`
+  return `unicode_${name}_mapping: fn(cp: I64) -> I64 Never! {\n`
     + jetLookupTree(rows, "cp", (row) => row[2] === null
       ? `I64{${row[3]}}`
       : row[2] === 0 ? "cp" : `wrapping(cp + I64{${row[2]}})`)
     + "}\n";
 }
 function jetProperty(name, ranges) {
-  return `fn unicode_is_${name}(cp: I64) -> Bool Never! {\n`
+  return `unicode_is_${name}: fn(cp: I64) -> Bool Never! {\n`
     + jetLookupTree(mergePairRanges(ranges), "false", () => "true")
     + "}\n";
 }
@@ -494,13 +494,13 @@ function jetNormalizeLookup(name, rows, missing, mapped) {
     const chunk = rows.slice(start, start + 128);
     const index = dispatch.length;
     const fn = `unicode_${name}_${index}`;
-    const text = jetNormalizeHeader + `fn ${fn}(cp: I64) -> I64 Never! {\n`
+    const text = jetNormalizeHeader + `${fn}: fn(cp: I64) -> I64 Never! {\n`
       + jetLookupTree(chunk, missing, mapped) + "}\n";
     if (text.length > jetTablesOut.length) throw new Error(`${fn} exceeds existing UnicodeTables.jet size`);
     jetNormalizeChunks.push([`Compiler/JetRuntime/Source/UnicodeNormalize${name.split("_").map(p => p[0].toUpperCase() + p.slice(1)).join("")}${index}.jet`, text]);
     dispatch.push([chunk[0][0], chunk.at(-1)[1], fn]);
   }
-  return `fn unicode_${name}(cp: I64) -> I64 Never! {\n`
+  return `unicode_${name}: fn(cp: I64) -> I64 Never! {\n`
     + jetLookupTree(dispatch, missing, (row) => `${row[2]}(cp)`) + "}\n";
 }
 const jetNormalizeTablesOut = jetNormalizeHeader
@@ -511,7 +511,7 @@ const jetNormalizeTablesOut = jetNormalizeHeader
     const key = (BigInt(a) << 21n) | BigInt(b);
     return [key, key, c];
   }), "I64{-1}", (row) => `I64{${row[2]}}`) + "\n"
-  + "fn unicode_normal_compose(a: I64, b: I64) -> I64 Never! {\n"
+  + "unicode_normal_compose: fn(a: I64, b: I64) -> I64 Never! {\n"
   + "    unicode_normal_compose_key((a << I64{21}).bit_or(b))\n}\n";
 
 // Native text-method lookups (title/capitalize/casefold, istitle, padding
@@ -520,7 +520,7 @@ const jetNormalizeTablesOut = jetNormalizeHeader
 // Lookups are packed in order into UnicodeText_<n>.jet units, each within the
 // existing UnicodeTables.jet size (one lookup alone must also fit).
 function jetTagged(name, ranges, missing) {
-  return `fn unicode_${name}(cp: I64) -> I64 Never! {\n`
+  return `unicode_${name}: fn(cp: I64) -> I64 Never! {\n`
     + jetLookupTree(ranges.filter((row) => row[2] !== missing), `I64{${missing}}`, (row) => `I64{${row[2]}}`)
     + "}\n";
 }
@@ -588,7 +588,7 @@ function segmentationAsset(symbol, rows, tagged) {
     }
   }
   const literal = Array.from(bytes, b => `\\x${b.toString(16).padStart(2, "0").toUpperCase()}`).join("");
-  return `// ${rows.length} JUCD records, ${stride} bytes each.\n${symbol} :: [U8]{"${literal}"}\n`;
+  return `// ${rows.length} JUCD records, ${stride} bytes each.\n${symbol}: [U8]{"${literal}"}\n`;
 }
 const segmentationTables = [
   ["UNICODE_WORD_BREAK", wordRanges, true],
@@ -648,7 +648,7 @@ function asset(symbol, kind, rows, widths, namePool = []) {
     }
   }
   const module = symbol.toLowerCase();
-  const source = `${HEADER_COMMENT}// JUCD schema 1; little-endian; ${rows.length} records of ${stride} bytes.\n${symbol} :: ${bytesLiteral(bytes)}\n`;
+  const source = `${HEADER_COMMENT}// JUCD schema 1; little-endian; ${rows.length} records of ${stride} bytes.\n${symbol}: ${bytesLiteral(bytes)}\n`;
   assets.push({symbol, module, kind, count: rows.length, stride, bytes: size,
     sha256: createHash("sha256").update(bytes).digest("hex"), source});
 }
@@ -692,14 +692,14 @@ if (!checkOnly) mkdirSync(assetRoot, {recursive: true});
 const pascalFile = (module) => module.split("_").map((part) => part[0].toUpperCase() + part.slice(1)).join("");
 const coreOutputs = assets.map(a => [`${assetRoot}/${pascalFile(a.module)}.jet`, a.source]);
 coreOutputs.push([`${assetRoot}/Assets.jet`,
-  `${HEADER_COMMENT}${assets.map(a => `module ${a.module}`).join("\n")}\n`]);
+  `${HEADER_COMMENT}${assets.map(a => `${a.module}: module`).join("\n")}\n`]);
 coreOutputs.push([`${assetRoot}/manifest.json`, JSON.stringify({
   schema: 1, unicode: "17.0.0", byteOrder: "little", inputs: PINNED_SHA256,
   assets: assets.map(({source, ...facts}) => facts),
 }, null, 2) + "\n"]);
 const stringModules = assets.filter(a => /^UNICODE_(LOWER|UPPER|WHITE_SPACE|CASED|CASE_IGNORABLE)/.test(a.symbol));
 function declarations(list) {
-  return list.map(a => `    text_${a.module} :: core.text.runtime.assets.${a.module}`).join("\n");
+  return list.map(a => `    text_${a.module}: core.text.runtime.assets.${a.module}`).join("\n");
 }
 // String asset modules are attached to their canonical kernel, not normalization.
 const stringPath = "Core/Text/Runtime/KernelUnicodeString.jet";

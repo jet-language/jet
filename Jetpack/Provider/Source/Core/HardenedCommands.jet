@@ -3,10 +3,10 @@
 // directories, and the network gate (Rust Provider.rs `exclusive_temp_dir`,
 // `network_denied`).
 
-PROVIDER_DENY_NETWORK_ENV :: "JETPACK_DENY_NETWORK"
+PROVIDER_DENY_NETWORK_ENV: "JETPACK_DENY_NETWORK"
 
 // Whether a hardened Git binary can run at all.
-fn provider_git_available() -[Env, Exec, Time.Wait]> Bool Never! {
+provider_git_available: fn() -[Env, Exec, Time.Wait]> Bool Never! {
     if foundation_hardened_git_command().arg("--version").run() == {
         .Ok(_) -> true
         .Err(_) -> false
@@ -15,15 +15,15 @@ fn provider_git_available() -[Env, Exec, Time.Wait]> Bool Never! {
 
 // Create a CSPRNG-named directory under `parent` without deleting or reusing a
 // collision. The caller owns cleanup (`provider_remove_tree_quiet(dir)`).
-fn provider_exclusive_temp_dir(parent: String, prefix: String) -[FS, Rand]> String IOError! {
+provider_exclusive_temp_dir: fn(parent: String, prefix: String) -[FS, Rand]> String IOError! {
     if prefix == "" || prefix == "." || prefix == ".." || pkg_text_has_control(prefix) || prefix.contains("/") || prefix.contains("\\") {
         return Err(provider_io_error_invalid(prefix, "temporary-directory prefix must be one safe path component"))
     }
     files.create_dir_all(parent)
-    directory :: files.open_directory(parent)
+    directory: files.open_directory(parent)
     loop _ in 0..<16 {
-        bytes :: random.bytes(16) ?? return Err(provider_io_error_other(parent, "operating-system randomness is unavailable"))
-        name :: "{prefix}-{pkg_hex_bytes(bytes)}"
+        bytes: random.bytes(16) ?? return Err(provider_io_error_other(parent, "operating-system randomness is unavailable"))
+        name: "{prefix}-{pkg_hex_bytes(bytes)}"
         if provider_create_temp_candidate(directory, name) == {
             .Ok(_) -> return Ok(files.join(parent, name))
             .Err(error) -> {
@@ -36,32 +36,32 @@ fn provider_exclusive_temp_dir(parent: String, prefix: String) -[FS, Rand]> Stri
 
 // Exclusive mkdirat on the held parent, not the idempotent whole-path helper.
 // AlreadyExists belongs to the naming loop; a collision is never reused.
-fn provider_create_temp_candidate(parent: Directory, name: String) IOError! -[FS]> {
-    _ :: parent.create_directory(name)
+provider_create_temp_candidate: fn(parent: Directory, name: String) IOError! -[FS]> {
+    _: parent.create_directory(name)
 }
 
 // Best-effort removal of a temporary tree (Rust `TempDirGuard` drop).
-fn provider_remove_tree_quiet(path: String) Never! -[FS]> {
+provider_remove_tree_quiet: fn(path: String) Never! -[FS]> {
     files.remove_all(path).drop("an abandoned temporary tree is swept by later cleanup")
 }
 
-fn provider_io_error_invalid(path: String, message: String) -> IOError Never! {
+provider_io_error_invalid: fn(path: String, message: String) -> IOError Never! {
     IOError.InvalidInput(IOContext{operation: .Write, resource: Val(path), os_code: None, cause: Val(message)})
 }
 
-fn provider_io_error_exists(path: String, message: String) -> IOError Never! {
+provider_io_error_exists: fn(path: String, message: String) -> IOError Never! {
     IOError.AlreadyExists(IOContext{operation: .Write, resource: Val(path), os_code: None, cause: Val(message)})
 }
 
-fn provider_io_error_other(path: String, message: String) -> IOError Never! {
+provider_io_error_other: fn(path: String, message: String) -> IOError Never! {
     IOError.Other(IOContext{operation: .Write, resource: Val(path), os_code: None, cause: Val(message)})
 }
 
 // `JETPACK_DENY_NETWORK` set to any non-empty value forbids every fetch.
-fn provider_network_denied() -[Env]> Bool Never! {
+provider_network_denied: fn() -[Env]> Bool Never! {
     (sys.get(PROVIDER_DENY_NETWORK_ENV) ?? "") != ""
 }
 
-fn provider_ensure_network_allowed(need: String) ProviderError! -[Env]> {
+provider_ensure_network_allowed: fn(need: String) ProviderError! -[Env]> {
     if provider_network_denied() -> return Err(ProviderError.Offline("network disabled by {PROVIDER_DENY_NETWORK_ENV} while trying to {need}"))
 }

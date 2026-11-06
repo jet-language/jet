@@ -72,8 +72,8 @@ const rows = [
   "",
   `// The messages as one static text, a line per errno 0..${highest}, each ended`,
   "// by LF. An errno whose line is empty, or past the last, has line 0's.",
-  "fn host_errno_append(text: I64, errno: I64) {",
-  `    table :: rt_text_data(rt_static_text("${lines.map((line) => `${line}\\n`).join("")}"))`,
+  "host_errno_append: fn(text: I64, errno: I64) {",
+  `    table: rt_text_data(rt_static_text("${lines.map((line) => `${line}\\n`).join("")}"))`,
   `    index := if (errno > I64{0} && errno <= I64{${highest}}) -> errno else -> I64{0}`,
   "    loop {",
   "        start := I64{0}",
@@ -92,7 +92,7 @@ const rows = [
   "    }",
   "}",
 ];
-rows.push("", "fn host_errno_cause_append(text: I64, errno: I64) {", "    host_errno_append(text, errno)", ...words(" (os error ", "    "), "    rt_text_push_number(text, errno)", ...words(")", "    "), "}", "", "fn host_errno_text(errno: I64) -> I64 {", "    text :: jet_rt_string_builder_new()", "    host_errno_append(text, errno)", "    jet_rt_string_builder_finish(text)", "}", "", "fn host_errno_cause(errno: I64) -> I64 {", "    text :: jet_rt_string_builder_new()", "    host_errno_cause_append(text, errno)", "    jet_rt_string_builder_finish(text)", "}");
+rows.push("", "host_errno_cause_append: fn(text: I64, errno: I64) {", "    host_errno_append(text, errno)", ...words(" (os error ", "    "), "    rt_text_push_number(text, errno)", ...words(")", "    "), "}", "", "host_errno_text: fn(errno: I64) -> I64 {", "    text: jet_rt_string_builder_new()", "    host_errno_append(text, errno)", "    jet_rt_string_builder_finish(text)", "}", "", "host_errno_cause: fn(errno: I64) -> I64 {", "    text: jet_rt_string_builder_new()", "    host_errno_cause_append(text, errno)", "    jet_rt_string_builder_finish(text)", "}");
 const text = rows.join("\n") + "\n";
 const output = join(root, "Compiler/JetRuntime/Source/HostErrors.jet");
 if (args[0] === "--check") {

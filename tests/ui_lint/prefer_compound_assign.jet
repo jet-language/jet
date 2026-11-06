@@ -1,12 +1,12 @@
-struct Player {
+Player: struct {
     hp: Int
 }
 
-fn damage(p: &Player, amount: Int) { p.hp = p.hp - amount }
+damage: fn(p: &Player, amount: Int) { p.hp = p.hp - amount }
 
-fn heal(p: &Player, amount: Int) { p.hp = p.hp + amount }
+heal: fn(p: &Player, amount: Int) { p.hp = p.hp + amount }
 
-fn tally() {
+tally: fn() {
     n := 0
     n = n + 1
     // Already compound — must not warn (including after any hooked rewrite).
@@ -15,13 +15,13 @@ fn tally() {
     n = (n + 1)
 }
 
-fn index_stay_expanded() {
+index_stay_expanded: fn() {
     xs := [1, 2, 3]
     // Indexed compound is E0164; expanded form must not get L0503.
     xs[0] = xs[0] + 1
 }
 
-fn run() {
+run: fn() {
     p := Player{hp: 100}
     damage(&p, 30)
     heal(&p, 10)

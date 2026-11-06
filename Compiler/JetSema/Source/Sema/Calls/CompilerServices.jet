@@ -18,7 +18,7 @@ use jet_foundation.[
     expr_span,
 ]
 
-struct SemaCompilerServicesCallContract {
+SemaCompilerServicesCallContract: struct {
     module_name: String
     member: String
     parameters: [Type]
@@ -26,7 +26,7 @@ struct SemaCompilerServicesCallContract {
     failure_carrier: TFailureCarrier
 }
 
-struct SemaCompilerServicesCallCheck {
+SemaCompilerServicesCallCheck: struct {
     recognized: Bool
     arguments_complete: Bool
     module_name: String
@@ -36,17 +36,17 @@ struct SemaCompilerServicesCallCheck {
     failure_carrier: TFailureCarrier
 }
 
-fn sema_compiler_services_result(value_name: String, error_name: String) -> Type Never! {
+sema_compiler_services_result: fn(value_name: String, error_name: String) -> Type Never! {
     Type.Result{ok: Type.Named{name: value_name}, err: Type.Named{name: error_name}}
 }
 
 // Routing needs only membership, not an allocated typed argument contract.
 // This same predicate guards construction of the compiler query contract.
-fn sema_compiler_services_is_compiler_query(module_name: String, member: String) -> Bool Never! {
+sema_compiler_services_is_compiler_query: fn(module_name: String, member: String) -> Bool Never! {
     module_name == "core.compiler" && (member == "lex" || member == "parse" || member == "check" || member == "source_map" || member == "manifest" || member == "package" || member == "lock" || member == "profiles")
 }
 
-fn sema_compiler_services_call_contract(module_name: String, member: String) -> SemaCompilerServicesCallContract? {
+sema_compiler_services_call_contract: fn(module_name: String, member: String) -> SemaCompilerServicesCallContract? {
     if sema_compiler_services_is_compiler_query(module_name, member) {
         value_name := if {
             member == "lex" -> "CompilerLexed"
@@ -92,25 +92,25 @@ fn sema_compiler_services_call_contract(module_name: String, member: String) -> 
     None
 }
 
-fn sema_compiler_services_check_untyped(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
+sema_compiler_services_check_untyped: fn(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
     loop argument in args {
         _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
 }
-fn sema_compiler_services_arity_diagnostic(module_name: String, member: String, expected: Int, actual: Int, span: Span) -> Diagnostic {
+sema_compiler_services_arity_diagnostic: fn(module_name: String, member: String, expected: Int, actual: Int, span: Span) -> Diagnostic {
     // The reference checks a compiler query as a function of the imported
     // Core source module.
     if module_name == "core.compiler" -> return sema_error("E0104", span, "`{member}` expects {expected} argument{if expected == 1 -> "" else -> "s"}, got {actual}", "every argument must match a parameter", "check the definition of `{member}` in the imported file")
     sema_error("E0104", span, "`{member}` expects {expected} argument{if expected == 1 -> "" else -> "s"}, got {actual}", "every argument must match a standard library function parameter", "check the call to `{member}`")
 }
 
-fn sema_compiler_services_compile_time_gate(module_name: String, member: String, span: Span, compiler_api_allowed: Bool, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
+sema_compiler_services_compile_time_gate: fn(module_name: String, member: String, span: Span, compiler_api_allowed: Bool, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
     if scopes.comptime_execution_depth > 0 || compiler_api_allowed -> return
     if module_name == "core.compiler" {
-        &diagnostics.push(sema_error("E0956", span, "`{module_name}.{member}` is compile-time only", "the compiler API exposes read-only front-end facts to build and comptime code; it is not a runtime service", "move this call into `fn build` or a `comptime` binding"))
+        &diagnostics.push(sema_error("E0956", span, "`{module_name}.{member}` is compile-time only", "the compiler API exposes read-only front-end facts to build and comptime code; it is not a runtime service", "move this call into `build: fn` or a `comptime` binding"))
         return
     }
-    &diagnostics.push(sema_error("E0956", span, "`{module_name}.{member}` is compile-time only", "build graph values are checked facts, not a runtime service", "move this call into `fn build` or a `comptime` binding"))
+    &diagnostics.push(sema_error("E0956", span, "`{module_name}.{member}` is compile-time only", "build graph values are checked facts, not a runtime service", "move this call into `build: fn` or a `comptime` binding"))
 }
 
 // A `core.compiler` query result or one of its records. The compiler answers
@@ -118,7 +118,7 @@ fn sema_compiler_services_compile_time_gate(module_name: String, member: String,
 // ir_host_method); no runtime layout holds one, so a running program can't
 // read it. A declared type resolves to its canonical `module::Name`, so a
 // bare name here is the compiler's own.
-fn sema_compiler_host_value_name(name: String) -> Bool Never! {
+sema_compiler_host_value_name: fn(name: String) -> Bool Never! {
     if name == {
         "CompilerError" | "CompilerDiagnostic" | "CompilerLexed" | "CompilerToken" | "CompilerSyntaxTree" | "CompilerNode" | "CompilerChecked" | "CompilerSemanticIndex" | "CompilerSourceMap" | "CompilerGeneratedLine" -> true
         "CompilerManifest" | "CompilerPackage" | "CompilerPackageError" | "CompilerDependency" | "CompilerPackageTarget" | "CompilerPackageOutput" | "CompilerBuildProfile" -> true
@@ -129,7 +129,7 @@ fn sema_compiler_host_value_name(name: String) -> Bool Never! {
 
 // The compiler value (sema_compiler_host_value_name) `ty` holds anywhere:
 // itself, or an element, payload or member of it.
-fn sema_compiler_host_value_held(ty: Type) -> String? Never! {
+sema_compiler_host_value_held: fn(ty: Type) -> String? Never! {
     if ty == {
         .Tagged(_, inner) -> return sema_compiler_host_value_held(inner)
         .Named(name) -> {
@@ -153,17 +153,17 @@ fn sema_compiler_host_value_held(ty: Type) -> String? Never! {
 
 // Runtime code reading `name`, a compile-time value that holds compiler value
 // `held`: no compiler answers its fields and methods once the program runs,
-// so only comptime code and `fn build` read it.
-fn sema_compiler_host_value_runtime_read(name: String, held: String, span: Span, scopes: SemaScopeTable, function_name: String, diagnostics: &[Diagnostic]) {
+// so only comptime code and `build: fn` read it.
+sema_compiler_host_value_runtime_read: fn(name: String, held: String, span: Span, scopes: SemaScopeTable, function_name: String, diagnostics: &[Diagnostic]) {
     if scopes.comptime_execution_depth > 0 || (scopes.location_function ?? function_name) == "build" -> return
-    &diagnostics.push(sema_error("E0956", span, "`{name}` holds a compiler value (`{held}`), which exists only while compiling", "comptime code and `fn build` read compiler values; the running program has no compiler to answer them", "compute the plain value you need (a Bool, number or String) inside a `comptime` block and read that at runtime"))
+    &diagnostics.push(sema_error("E0956", span, "`{name}` holds a compiler value (`{held}`), which exists only while compiling", "comptime code and `build: fn` read compiler values; the running program has no compiler to answer them", "compute the plain value you need (a Bool, number or String) inside a `comptime` block and read that at runtime"))
 }
 
-// `compiler_api_allowed` is an explicit caller fact for `fn build` and other
+// `compiler_api_allowed` is an explicit caller fact for `build: fn` and other
 // compiler-approved regions; SemaScopeTable separately records comptime depth.
 // The result/failure carrier remains available for recovery after diagnostics;
 // `arguments_complete` describes only whether every supplied argument checked.
-fn sema_compiler_services_check_call(module_name: String, member: String, args: [CallArg], span: Span, compiler_api_allowed: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCompilerServicesCallCheck {
+sema_compiler_services_check_call: fn(module_name: String, member: String, args: [CallArg], span: Span, compiler_api_allowed: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCompilerServicesCallCheck {
     contract := sema_compiler_services_call_contract(module_name, member)
     if contract == None {
         &diagnostics.push(sema_call_core_unknown_item(module_name, member, span))
@@ -171,7 +171,7 @@ fn sema_compiler_services_check_call(module_name: String, member: String, args: 
         result := sema_compiler_services_result("CompilerError", "CompilerError")
         return SemaCompilerServicesCallCheck{recognized: false, arguments_complete: false, module_name: module_name, member: member, arguments: [TExpr]{}, result_type: result, failure_carrier: TFailureCarrier.Result{success: Type.Named{name: "CompilerError"}, error: Type.Named{name: "CompilerError"}}}
     }
-    selected :: contract ?? return SemaCompilerServicesCallCheck{recognized: false, arguments_complete: false, module_name: module_name, member: member, arguments: [TExpr]{}, result_type: sema_compiler_services_result("CompilerError", "CompilerError"), failure_carrier: TFailureCarrier.Result{success: Type.Named{name: "CompilerError"}, error: Type.Named{name: "CompilerError"}}}
+    selected: contract ?? return SemaCompilerServicesCallCheck{recognized: false, arguments_complete: false, module_name: module_name, member: member, arguments: [TExpr]{}, result_type: sema_compiler_services_result("CompilerError", "CompilerError"), failure_carrier: TFailureCarrier.Result{success: Type.Named{name: "CompilerError"}, error: Type.Named{name: "CompilerError"}}}
     sema_compiler_services_compile_time_gate(module_name, member, span, compiler_api_allowed, scopes, &diagnostics)
     if args.len() != selected.parameters.len() {
         &diagnostics.push(sema_compiler_services_arity_diagnostic(module_name, member, selected.parameters.len(), args.len(), span))
@@ -183,15 +183,15 @@ fn sema_compiler_services_check_call(module_name: String, member: String, args: 
                 if {
                     module_name == "core.compiler" -> {
                         if args.len() > 0 {
-                            expected :: selected.parameters[0]
-                            diagnostic_start :: diagnostics.len()
+                            expected: selected.parameters[0]
+                            diagnostic_start: diagnostics.len()
                             if sema_check_expression(args[0].expr, Val(expected), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) == None && compiler_api_allowed -> sema_compiler_services_replace_mismatch(member, expected, args[0].expr, diagnostic_start, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                         }
                     }
                     else -> {
                         index := 0
                         loop index < args.len() {
-                            argument_expected :: if index < selected.parameters.len() -> Val(selected.parameters[index]) else -> None
+                            argument_expected: if index < selected.parameters.len() -> Val(selected.parameters[index]) else -> None
                             _ := sema_check_expression(args[index].expr, argument_expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                             index += 1
                         }
@@ -205,7 +205,7 @@ fn sema_compiler_services_check_call(module_name: String, member: String, args: 
     arguments_complete := true
     index := 0
     loop index < args.len() {
-        diagnostic_start :: diagnostics.len()
+        diagnostic_start: diagnostics.len()
         value := sema_check_expression(args[index].expr, Val(selected.parameters[index]), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if value == None && module_name == "core.compiler" && compiler_api_allowed -> sema_compiler_services_replace_mismatch(member, selected.parameters[index], args[index].expr, diagnostic_start, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if value == .Val(item) -> &values.push(item) else -> arguments_complete = false
@@ -218,28 +218,28 @@ fn sema_compiler_services_check_call(module_name: String, member: String, args: 
 // compiler API runs (comptime or `build`) that does not fit its parameter is
 // the call's E0112 "wants T here"; a runtime call keeps the value's own E0108
 // beside its E0956.
-fn sema_compiler_services_replace_mismatch(member: String, required: Type, value: Expr, diagnostic_start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
-    value_span :: expr_span(value)
-    mismatch_index :: sema_value_mismatch_index(diagnostics, diagnostic_start, value_span) ?? return
+sema_compiler_services_replace_mismatch: fn(member: String, required: Type, value: Expr, diagnostic_start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+    value_span: expr_span(value)
+    mismatch_index: sema_value_mismatch_index(diagnostics, diagnostic_start, value_span) ?? return
     probe_diagnostics := [Diagnostic]{}
-    offered :: sema_probe_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return
-    offered_ty :: sema_call_resolved_type(offered.ty, environment, program)
+    offered: sema_probe_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return
+    offered_ty: sema_call_resolved_type(offered.ty, environment, program)
     diagnostics[mismatch_index] = sema_error("E0112", value_span, "`{member}` wants {sema_type_show(required)} here, but this is {sema_type_show(offered_ty)}", "every argument must match its parameter's type", sema_type_fix_hint(required, offered_ty))
 }
 
-fn sema_compiler_services_lower_core_call(check: SemaCompilerServicesCallCheck, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_compiler_services_lower_core_call: fn(check: SemaCompilerServicesCallCheck, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if !check.recognized || !check.arguments_complete -> return None
     if check.module_name == "core.build" && check.member == "graph" {
         if check.arguments.len() != 1 -> return None
-        call :: THostCall.Method{receiver: check.arguments[0], method: "graph", args: [TExpr]{}}
+        call: THostCall.Method{receiver: check.arguments[0], method: "graph", args: [TExpr]{}}
         return sema_expr_expected_owned(sema_tree_node(check.result_type, TExprKind.HostCall{call: call}, span), expected, environment, program, &diagnostics)
     }
     if check.module_name != "core.compiler" -> return None
-    record :: sema_call_core_record(check.module_name, check.member, check.arguments.len(), span, &diagnostics) ?? return None
+    record: sema_call_core_record(check.module_name, check.member, check.arguments.len(), span, &diagnostics) ?? return None
     if !sema_call_core_record_effects(record, span, [Type]{}, check.result_type, check.failure_carrier, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics) -> return None
     sema_call_core_tree(record, check.arguments, span, [Type]{}, [Bool]{}, check.result_type, check.failure_carrier, expected, environment, program, &diagnostics)
 }
-fn sema_call_compiler_value_owner(ty: Type) -> String? {
+sema_call_compiler_value_owner: fn(ty: Type) -> String? {
     if ty == {
         .Tagged(_, inner) -> return sema_call_compiler_value_owner(inner)
         .Named(name) | .Apply(name, _) -> {
@@ -253,7 +253,7 @@ fn sema_call_compiler_value_owner(ty: Type) -> String? {
     None
 }
 
-fn sema_call_compiler_value_expected_args(owner: String, method: String) -> Int? {
+sema_call_compiler_value_expected_args: fn(owner: String, method: String) -> Int? {
     if owner == "ProgramInfo" {
         if method == "types" || method == "functions" || method == "packages" || method == "definitions" || method == "references" || method == "call_edges" || method == "structural_nodes" -> return Val(0)
     }
@@ -307,11 +307,11 @@ fn sema_call_compiler_value_expected_args(owner: String, method: String) -> Int?
     None
 }
 
-fn sema_call_compiler_value_string_list() -> Type Never! {
+sema_call_compiler_value_string_list: fn() -> Type Never! {
     Type.List{element: Type.String}
 }
 
-fn sema_call_compiler_value_method_type(owner: String, method: String) -> Type? {
+sema_call_compiler_value_method_type: fn(owner: String, method: String) -> Type? {
     if owner == "ProgramInfo" {
         if method == "types" -> return Val(Type.List{element: Type.Named{name: "TypeInfo"}})
         if method == "functions" -> return Val(Type.List{element: Type.Named{name: "FunctionInfo"}})
@@ -399,7 +399,7 @@ fn sema_call_compiler_value_method_type(owner: String, method: String) -> Type? 
     None
 }
 
-fn sema_call_try_compiler_value_method(
+sema_call_try_compiler_value_method: fn(
     receiver: Expr,
     receiver_value: TExpr,
     method: String,
@@ -413,8 +413,8 @@ fn sema_call_try_compiler_value_method(
     context: &SemaCheckContext,
     diagnostics: &[Diagnostic],
 ) -> SemaMethodSpecialCheck {
-    owner :: sema_call_compiler_value_owner(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    expected_args :: sema_call_compiler_value_expected_args(owner, method) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    owner: sema_call_compiler_value_owner(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    expected_args: sema_call_compiler_value_expected_args(owner, method) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if args.len() != expected_args {
         loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
@@ -428,17 +428,17 @@ fn sema_call_try_compiler_value_method(
     checked_args := args
     typed_values := [TExpr]{}
     if expected_args > 0 {
-        binding :: sema_call_bind_args("{owner}.{method}", params, &checked_args, span, &diagnostics) ?? {
+        binding: sema_call_bind_args("{owner}.{method}", params, &checked_args, span, &diagnostics) ?? {
             loop argument in checked_args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
-        typed :: sema_call_typecheck_bound_arguments("{owner}.{method}", params, None, false, binding, &checked_args, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics, true) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        typed: sema_call_typecheck_bound_arguments("{owner}.{method}", params, None, false, binding, &checked_args, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics, true) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         typed_values = typed.values
     }
     ownership := sema_ownership_check_method_call(&state, "{owner}.{method}", receiver, AccessConvention.Read, params, &checked_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "{owner}.{method}", span, [EffectRowEntry]{}, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    result_type :: sema_call_compiler_value_method_type(owner, method) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    result_type: sema_call_compiler_value_method_type(owner, method) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     value := sema_tree_node(result_type, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: typed_values}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }

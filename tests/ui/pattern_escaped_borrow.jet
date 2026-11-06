@@ -1,6 +1,6 @@
 // Narrowing a read-only parameter to a grouped leaf cannot take its
 // non-copyable `ViewMut` payload apart: the binding would escape the borrow.
-enum Msg {
+Msg: enum {
     Net {
         Packet(ViewMut<Int>)
         Ping(Int)
@@ -8,7 +8,7 @@ enum Msg {
     Quit
 }
 
-fn first(m: Msg) -> Int {
+first: fn(m: Msg) -> Int {
     if m == {
         .Net.Packet(bytes) -> bytes[0]
         .Net.Ping(n) -> n
@@ -16,6 +16,6 @@ fn first(m: Msg) -> Int {
     }
 }
 
-fn run() {
+run: fn() {
     print(first(Msg.Quit))
 }

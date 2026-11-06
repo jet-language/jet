@@ -1,4 +1,4 @@
-package {
+package: {
     name: "ui_node_slots"
     version: "0.1.0"
     authority: {
@@ -11,15 +11,15 @@ package {
 // `ui.text_input` attached, with one meaning on every tier. A plain node has
 // none of them; a text input's width counts Unicode scalars.
 use {
-    ui :: core.ui
-    host :: core.ui.host
+    ui: core.ui
+    host: core.ui.host
 }
 
-fn run() {
-    plain :: ui.button("Plain")
+run: fn() {
+    plain: ui.button("Plain")
     if plain.accessibility == None && plain.shortcut == None && plain.ime == None -> print("plain: no slots")
-    meta :: UIAccessibility{name: Val("Save"), description: None, states: [UIAccessibilityState]{.Disabled, .Expanded(true), .Value("draft")}}
-    labelled :: ui.node_accessibility(ui.button("Save"), meta)
+    meta: UIAccessibility{name: Val("Save"), description: None, states: [UIAccessibilityState]{.Disabled, .Expanded(true), .Value("draft")}}
+    labelled: ui.node_accessibility(ui.button("Save"), meta)
     if labelled.accessibility == .Val(read) {
         print("name {read.name ?? "?"} states {read.states.len()}")
         loop state in read.states {
@@ -29,11 +29,11 @@ fn run() {
         }
         print("same {read == meta}")
     }
-    keyed :: ui.node_shortcut(ui.button("Go"), UIShortcut.cmd(" S "))
+    keyed: ui.node_shortcut(ui.button("Go"), UIShortcut.cmd(" S "))
     if keyed.shortcut == .Val(cut) -> print("shortcut {cut.key} {cut.modifiers.bits}")
-    input :: ui.text_input("héllo", .Disabled)
+    input: ui.text_input("héllo", .Disabled)
     print("input {input.width} {input.height} {input.label}")
     if input.ime == .Val(mode) -> print("ime disabled {mode == .Disabled}")
-    native :: ui.text_input("", .Native)
+    native: ui.text_input("", .Native)
     if native.ime == .Val(mode) -> print("ime native {mode == .Native}")
 }

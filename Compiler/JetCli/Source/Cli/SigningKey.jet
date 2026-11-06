@@ -4,22 +4,22 @@
 // key that `jet registry publish` signs with. The key files and their
 // owner-only writes belong to Jetpack/Publication (Sign.jet).
 use {
-    key_files :: core.files
+    key_files: core.files
     jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[Diagnostic, diagnostic_render_all]
     jetpack_publication.[PUBLICATION_DEFAULT_REGISTRY, publication_key_paths, publication_keygen]
 }
 
 // Where `jet registry key backup` writes when no destination is named.
-JET_CLI_KEY_BACKUP_DEFAULT :: "./jet-signing-key.backup"
+JET_CLI_KEY_BACKUP_DEFAULT: "./jet-signing-key.backup"
 
 // The registry `--registry <name>` or `--registry=<name>` names, else Jet's default registry.
-fn jet_cli_signing_registry(jet_argv: [String]) -> String Never! {
+jet_cli_signing_registry: fn(jet_argv: [String]) -> String Never! {
     jet_cli_option_value(jet_argv, "--registry") ?? PUBLICATION_DEFAULT_REGISTRY
 }
 
 // The words after the command that are not flags, and not the value of `--registry`.
-fn jet_cli_signing_words(jet_argv: [String]) -> [String] Never! {
+jet_cli_signing_words: fn(jet_argv: [String]) -> [String] Never! {
     words := [String]{}
     skip_next := false
     loop argument in jet_argv {
@@ -36,25 +36,25 @@ fn jet_cli_signing_words(jet_argv: [String]) -> [String] Never! {
     words
 }
 
-fn jet_cli_keygen_plan(jet_argv: [String], color: Bool) -> JetCLIPlan Never! {
+jet_cli_keygen_plan: fn(jet_argv: [String], color: Bool) -> JetCLIPlan Never! {
     JetCLIPlan.Keygen{registry: jet_cli_signing_registry(jet_argv), force: jet_argv.contains("--force"), color: color}
 }
 
 // `jet registry key <subcommand>`: `backup` is the only one.
-fn jet_cli_key_plan(jet_argv: [String], color: Bool, json: Bool) -> JetCLIPlan Never! {
+jet_cli_key_plan: fn(jet_argv: [String], color: Bool, json: Bool) -> JetCLIPlan Never! {
     // words[0] is the command word `key`.
-    words :: jet_cli_signing_words(jet_argv)
+    words: jet_cli_signing_words(jet_argv)
     if words.len() < 2 -> return jet_cli_inspect_b_error("E2104", "`jet registry key` needs a subcommand — try `jet registry key backup`.", color, json, JET_DRIVER_EXIT_USER_ERROR)
     if words[1] != "backup" -> return jet_cli_inspect_b_error("E2101", "unknown `jet registry key` subcommand `{words[1]}` — did you mean `jet registry key backup`?", color, json, JET_DRIVER_EXIT_USER_ERROR)
-    dest :: if words.len() > 2 -> words[2] else -> JET_CLI_KEY_BACKUP_DEFAULT
+    dest: if words.len() > 2 -> words[2] else -> JET_CLI_KEY_BACKUP_DEFAULT
     JetCLIPlan.KeyBackup{registry: jet_cli_signing_registry(jet_argv), dest: dest, color: color}
 }
 
 // Creates the registry's signing key; an existing key is E1248 unless `force`.
-fn jet_cli_keygen(registry: String, force: Bool, color: Bool) -[FS, Env, Time, Rand]> JetDriverVerbOutput Never! {
+jet_cli_keygen: fn(registry: String, force: Bool, color: Bool) -[FS, Env, Time, Rand]> JetDriverVerbOutput Never! {
     if publication_keygen(registry, force) == {
         .Ok(key) -> {
-            stdout :: "created a signing key for registry `{registry}`.\n  public key:  {key.public_key_hex}\n  secret key:  {key.seed_path}\n  public file: {key.public_key_path}\n`jet registry key backup` writes this to {key.seed_path} — losing it means losing your ability to publish signed updates.\n"
+            stdout: "created a signing key for registry `{registry}`.\n  public key:  {key.public_key_hex}\n  secret key:  {key.seed_path}\n  public file: {key.public_key_path}\n`jet registry key backup` writes this to {key.seed_path} — losing it means losing your ability to publish signed updates.\n"
             JetDriverVerbOutput{stdout: stdout, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
         }
         .Err(error) -> JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all("package.jet", "", [Diagnostic]{error.diagnostic}, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
@@ -63,15 +63,15 @@ fn jet_cli_keygen(registry: String, force: Bool, color: Bool) -[FS, Env, Time, R
 
 // Copies the registry's secret signing key to `dest`. The copy is not
 // encrypted: it is the publisher's own copy to keep safe.
-fn jet_cli_key_backup(registry: String, dest: String, color: Bool) -[FS, Env]> JetDriverVerbOutput Never! {
-    seed_path :: publication_key_paths(registry).seed_path
+jet_cli_key_backup: fn(registry: String, dest: String, color: Bool) -[FS, Env]> JetDriverVerbOutput Never! {
+    seed_path: publication_key_paths(registry).seed_path
     if !key_files.is_file(seed_path) -> return jet_cli_signing_failure("no signing key for registry `{registry}` — run `jet registry keygen` first", color)
     if key_files.copy(seed_path, dest) == .Err(error) -> return jet_cli_signing_failure("couldn't copy the signing key to {dest}: {error}", color)
     JetDriverVerbOutput{stdout: "backed up the `{registry}` signing key to {dest}\nwarning: store this file somewhere safe (e.g. a password manager). Anyone who has it can publish signed updates as you.\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
 // `cli_error!("E2105", ...)`: the code's shared Why and Fix, exit 1.
-fn jet_cli_signing_failure(what: String, color: Bool) -> JetDriverVerbOutput Never! {
-    shared :: jet_cli_diagnostic_copy("E2105")
+jet_cli_signing_failure: fn(what: String, color: Bool) -> JetDriverVerbOutput Never! {
+    shared: jet_cli_diagnostic_copy("E2105")
     jet_cli_report_output("", "E2105", what, shared.why, shared.fix, color, JET_DRIVER_EXIT_USER_ERROR)
 }

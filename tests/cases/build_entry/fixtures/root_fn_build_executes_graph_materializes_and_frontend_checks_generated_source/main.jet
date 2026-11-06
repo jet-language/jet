@@ -1,19 +1,19 @@
 
-fn build(b: Build) -[Exec, FS]> {
+build: fn(b: Build) -[Exec, FS]> {
     b.generate("generated_message") {
-        fn generated_message() -> String { return "built" }
+        generated_message: fn() -> String { return "built" }
     }
     #Impure("write declared build output") {
-        stamp :: b.action(
+        stamp: b.action(
             "stamp",
             [],
             [".jet/generated/app/stamp.txt"],
             ["sh", "-c", "printf stamped > .jet/generated/app/stamp.txt"],
             ["Exec", "FS"]
         )
-        app :: b.add_executable("app", ["main.jet", ".jet/generated/main/generated_message.jet"], [stamp])
+        app: b.add_executable("app", ["main.jet", ".jet/generated/main/generated_message.jet"], [stamp])
         b.default(app)
     }
 }
 
-fn run() { print("ok") }
+run: fn() { print("ok") }

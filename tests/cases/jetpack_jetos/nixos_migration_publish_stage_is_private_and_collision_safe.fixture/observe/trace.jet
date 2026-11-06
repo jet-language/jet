@@ -1,12 +1,12 @@
 // Observation-only port of trace selectors tests/jetpack_jetos.rs:3347-3388/3614-3635/3704-3712.
 use {
-    files :: core.files
-    parse :: core.text.parse
+    files: core.files
+    parse: core.text.parse
 }
-fn run() {
-    trace :: files.read("trace.log") ?? panic("read original syscall trace")
-    lines :: trace.lines()
-    marker :: "/.nixos-comparison-publish-devhost-gnome-"
+run: fn() {
+    trace: files.read("trace.log") ?? panic("read original syscall trace")
+    lines: trace.lines()
+    marker: "/.nixos-comparison-publish-devhost-gnome-"
     mkdir := -1
     first_input := -1
     first_output := -1
@@ -14,7 +14,7 @@ fn run() {
     insecure := false
     collision := false
     loop i in 0..<lines.len() {
-        line :: lines[i]
+        line: lines[i]
         if !line.contains(marker) -> next
         if mkdir < 0 && line.contains("mkdir(") && line.contains("0700") -> mkdir = i
         if first_input < 0 && (line.contains("/flake.nix") || line.contains("/configuration.nix") || line.contains("/input-facts.json")) -> first_input = i
@@ -23,7 +23,7 @@ fn run() {
         if line.contains("mkdir(") && line.contains("0700") && line.contains("EEXIST") -> collision = true
     }
     loop i in 0..<lines.len() {
-        line :: lines[i]
+        line: lines[i]
         if line.contains(marker) && line.contains("AT_SYMLINK_NOFOLLOW") && (line.contains("S_IFDIR|0700") || line.contains("stx_mode=S_IFDIR|0700")) -> &protected.push(i)
     }
     numbers := [String]{}

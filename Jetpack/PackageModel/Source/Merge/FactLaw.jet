@@ -10,7 +10,7 @@ use jet_foundation.[Diagnostic, Item, PolicyValue, Span, diagnostic_from_registr
 // The six lexical source rungs used by every build fact. Package is the
 // outermost source and Item is the nearest source.
 #Comparable
-enum SourceScope {
+SourceScope: enum {
     Package
     File
     Module
@@ -18,7 +18,7 @@ enum SourceScope {
     Block
     Item
 
-    fn name(self) -> String Never! {
+    name: fn(self) -> String Never! {
         if self == {
             .Package -> "package"
             .File -> "file"
@@ -29,7 +29,7 @@ enum SourceScope {
         }
     }
 
-    fn rank(self) -> Int Never! {
+    rank: fn(self) -> Int Never! {
         if self == {
             .Package -> 0
             .File -> 1
@@ -45,7 +45,7 @@ enum SourceScope {
 // may replace an earlier layer; two different values at one deciding layer
 // are a hard conflict.
 #Comparable
-enum ContributionLayer {
+ContributionLayer: enum {
     Declaration
     OptimizationBundle
     Workspace
@@ -54,7 +54,7 @@ enum ContributionLayer {
     Fleet
     CommandLine
 
-    fn name(self) -> String Never! {
+    name: fn(self) -> String Never! {
         if self == {
             .Declaration -> "declaration"
             .OptimizationBundle -> "optimization bundle"
@@ -66,7 +66,7 @@ enum ContributionLayer {
         }
     }
 
-    fn rank(self) -> Int Never! {
+    rank: fn(self) -> Int Never! {
         if self == {
             .Declaration -> 0
             .OptimizationBundle -> 1
@@ -78,7 +78,7 @@ enum ContributionLayer {
         }
     }
 
-    fn can_force(self) -> Bool Never! {
+    can_force: fn(self) -> Bool Never! {
         if self == {
             .System | .Fleet -> true
             else -> false
@@ -87,13 +87,13 @@ enum ContributionLayer {
 }
 
 // How a fact combines across the contribution ladder.
-enum FactMerge {
+FactMerge: enum {
     Override
     TightenOnly
 }
 
 // A resolver-owned declaration default and its source label.
-struct FactDefault {
+FactDefault: struct {
     value: FactValue
     source: String
 }
@@ -101,34 +101,34 @@ struct FactDefault {
 // A fact key carries its resolver merge direction and an optional
 // resolver-owned default writer; contributors supply only a value and
 // provenance.
-struct FactKey {
+FactKey: struct {
     name: String
     merge: FactMerge{FactMerge.Override}
     default: FactDefault?{None}
 
-    fn new(name: String) -> FactKey Never! {
+    new: fn(name: String) -> FactKey Never! {
         FactKey{name: name}
     }
 
-    fn tighten_only(name: String) -> FactKey Never! {
+    tighten_only: fn(name: String) -> FactKey Never! {
         FactKey{name: name, merge: FactMerge.TightenOnly}
     }
 
     // Set the resolver-owned declaration default for this fact.
-    fn with_default(name: String, value: FactValue) -> FactKey Never! {
+    with_default: fn(name: String, value: FactValue) -> FactKey Never! {
         FactKey.with_default_source(name, value, "<default>")
     }
 
     // Set the resolver-owned declaration default and preserve its source
     // label for the explanation chain.
-    fn with_default_source(name: String, value: FactValue, source: String) -> FactKey Never! {
+    with_default_source: fn(name: String, value: FactValue, source: String) -> FactKey Never! {
         FactKey{name: name, default: Val(FactDefault{value: value, source: source})}
     }
 }
 
 // Tier-0 values that can travel through the contribution law. Facts erase
 // before runtime; this carrier exists only for folding and explanation.
-enum FactValue {
+FactValue: enum {
     Bool(value: Bool)
     Int(value: Int)
     Char(value: Char)
@@ -137,7 +137,7 @@ enum FactValue {
     OptionalText(value: String?)
     Policy(value: PolicyValue)
 
-    fn display(self) -> String Never! {
+    display: fn(self) -> String Never! {
         if self == {
             .Bool(value) -> "{value}"
             .Int(value) -> "{value}"
@@ -156,7 +156,7 @@ enum FactValue {
 
     // Rust's tuple-variant Debug spelling is part of the lock projection,
     // distinct from the human-facing value display above.
-    fn debug_text(self) -> String Never! {
+    debug_text: fn(self) -> String Never! {
         if self == {
             .Bool(value) -> "Bool({value:Debug})"
             .Int(value) -> "Int({value:Debug})"
@@ -178,7 +178,7 @@ enum FactValue {
         }
     }
 
-    fn safety_relation(self, next: FactValue) -> SafetyRelation Never! {
+    safety_relation: fn(self, next: FactValue) -> SafetyRelation Never! {
         if self == next -> return SafetyRelation.Same
         if self == {
             .Bool(outer) -> {
@@ -205,7 +205,7 @@ enum FactValue {
     }
 }
 
-enum SafetyRelation {
+SafetyRelation: enum {
     Same
     Tighten
     Widen
@@ -213,7 +213,7 @@ enum SafetyRelation {
 }
 
 // Rust `PolicyValue::display`.
-fn pkg_policy_value_display(value: PolicyValue) -> String Never! {
+pkg_policy_value_display: fn(value: PolicyValue) -> String Never! {
     if value == {
         .Enabled -> "true"
         .Limit(limit) -> "{limit}"
@@ -233,7 +233,7 @@ fn pkg_policy_value_display(value: PolicyValue) -> String Never! {
 }
 
 // True when moving from `outer` to `inner` loosens a policy gate.
-fn pkg_policy_gate_widens(outer: PolicyValue, inner: PolicyValue) -> Bool Never! {
+pkg_policy_gate_widens: fn(outer: PolicyValue, inner: PolicyValue) -> Bool Never! {
     if inner == PolicyValue.Allow -> return outer == PolicyValue.Forbid
     if outer == {
         .Forbid -> inner != PolicyValue.Forbid
@@ -255,7 +255,7 @@ fn pkg_policy_gate_widens(outer: PolicyValue, inner: PolicyValue) -> Bool Never!
 
 // One written contributor to one fact. `target` lets a source-scoped value
 // identify the item it governs without changing the global ordering law.
-struct FactContribution {
+FactContribution: struct {
     key: String
     value: FactValue
     scope: SourceScope
@@ -271,67 +271,67 @@ struct FactContribution {
     force_reason: String?{None}
     default: Bool{false}
 
-    fn new(key: String, value: FactValue, scope: SourceScope, layer: ContributionLayer, source: String) -> FactContribution Never! {
+    new: fn(key: String, value: FactValue, scope: SourceScope, layer: ContributionLayer, source: String) -> FactContribution Never! {
         FactContribution{key: key, value: value, scope: scope, layer: layer, source: source}
     }
 
-    fn at(^self, span: Span) -> FactContribution Never! {
+    at: fn(^self, span: Span) -> FactContribution Never! {
         updated := self
         updated.span = span
         updated
     }
 
-    fn for_target(^self, target: Span) -> FactContribution Never! {
+    for_target: fn(^self, target: Span) -> FactContribution Never! {
         updated := self
         updated.target = Val(target)
         updated
     }
 
-    fn force_with_reason(^self, reason: String) -> FactContribution Never! {
+    force_with_reason: fn(^self, reason: String) -> FactContribution Never! {
         updated := self
         updated.force = true
         updated.force_reason = Val(reason)
         updated
     }
 
-    fn forced(^self) -> FactContribution Never! {
+    forced: fn(^self) -> FactContribution Never! {
         ^self.force_with_reason(".Force")
     }
 
-    fn with_reason(^self, reason: String) -> FactContribution Never! {
+    with_reason: fn(^self, reason: String) -> FactContribution Never! {
         updated := self
         updated.reason = Val(reason)
         updated
     }
 
-    fn default_for(key: FactKey, value: FactValue, source: String) -> FactContribution Never! {
+    default_for: fn(key: FactKey, value: FactValue, source: String) -> FactContribution Never! {
         FactContribution{key: key.name, value: value, scope: SourceScope.Package, layer: ContributionLayer.Declaration, source: source, default: true}
     }
 }
 
 // The resolved value plus the complete writer chain. `effective` indexes
 // `provenance`, so explain output can mark exactly one writer.
-struct EffectiveFact {
+EffectiveFact: struct {
     key: FactKey
     value: FactValue
     provenance: [FactContribution]
     effective: Int
     forced: Bool
 
-    fn explain(self) -> String Never! {
+    explain: fn(self) -> String Never! {
         out := "{self.key.name} = {self.value.display()}"
         loop index in 0..<self.provenance.len() {
-            contribution :: self.provenance[index]
-            status :: if {
+            contribution: self.provenance[index]
+            status: if {
                 index == self.effective -> "effective"
                 contribution.force -> "pinned"
                 else -> "shadowed"
             }
-            pin :: if contribution.force_reason == {
+            pin: if contribution.force_reason == {
                 .Val(text) -> " pin={text}"
                 .None -> ""
             }
-            reason :: if contribution.reason == {
+            reason: if contribution.reason == {
                 .Val(text) -> " reason={text}"
                 .None -> ""
             }
@@ -342,13 +342,13 @@ struct EffectiveFact {
 }
 
 #Error
-enum FactError {
+FactError: enum {
     InvalidForce(key: String, layer: ContributionLayer, source: String)
     Conflict(key: String, layer: ContributionLayer, first: FactContribution, second: FactContribution)
     SafetyWidening(key: String, previous: FactContribution, next: FactContribution)
     SafetyIncomparable(key: String, previous: FactContribution, next: FactContribution)
 
-    fn message(self) -> String Never! {
+    message: fn(self) -> String Never! {
         if self == {
             .InvalidForce(key, layer, source) -> "fact `{key}` uses `.Force` at the unsupported {layer.name()} layer ({source})"
             .Conflict(key, layer, first, second) -> "fact `{key}` has conflicting values at the {layer.name()} layer: {first.source}:{first.span.start} and {second.source}:{second.span.start}"
@@ -359,7 +359,7 @@ enum FactError {
 
     // The same typed conflict reaches the product diagnostic and names both
     // written locations. Other resolver failures remain typed resolver errors.
-    fn diagnostic(self) -> Diagnostic? Never! {
+    diagnostic: fn(self) -> Diagnostic? Never! {
         if self == {
             .Conflict(key, layer, first, second) -> Val(diagnostic_from_registry("E3521", Val(second.span), "fact `{key}` has conflicting values at the {layer.name()} layer", "`{first.source}` writes {first.value.display()} at {first.span.start}:{first.span.end}; `{second.source}` writes {second.value.display()} at {second.span.start}:{second.span.end}.", "make same-layer writers agree, or move one value to a more explicit contribution layer"))
             else -> None
@@ -368,7 +368,7 @@ enum FactError {
 }
 
 // Writer order: layer, then scope, then source label, then span.
-fn pkg_fact_precedes(left: FactContribution, right: FactContribution) -> Bool Never! {
+pkg_fact_precedes: fn(left: FactContribution, right: FactContribution) -> Bool Never! {
     if left.layer.rank() != right.layer.rank() -> return left.layer.rank() < right.layer.rank()
     if left.scope.rank() != right.scope.rank() -> return left.scope.rank() < right.scope.rank()
     if left.source != right.source -> return left.source < right.source
@@ -380,7 +380,7 @@ fn pkg_fact_precedes(left: FactContribution, right: FactContribution) -> Bool Ne
 // eligible layer and nearest scope decide, `.Force` caps eligibility at its
 // layer, and a tighten-only key may never widen along the chain. None when
 // nobody writes the fact and the key has no default.
-fn pkg_fact_resolve(key: FactKey, declarations: [FactContribution]) -> EffectiveFact? FactError! {
+pkg_fact_resolve: fn(key: FactKey, declarations: [FactContribution]) -> EffectiveFact? FactError! {
     chain := [FactContribution]{}
     loop declaration in declarations {
         if declaration.key == key.name { &chain.push(declaration) }
@@ -413,8 +413,8 @@ fn pkg_fact_resolve(key: FactKey, declarations: [FactContribution]) -> Effective
     }
     group_start := 0
     loop index in 1..<chain.len() {
-        declaration :: chain[index]
-        first :: chain[group_start]
+        declaration: chain[index]
+        first: chain[group_start]
         if declaration.layer != first.layer || declaration.scope != first.scope {
             group_start = index
         } else if declaration.value != first.value {
@@ -441,17 +441,17 @@ fn pkg_fact_resolve(key: FactKey, declarations: [FactContribution]) -> Effective
     loop index in eligible {
         if chain[index].layer.rank() == effective_layer && chain[index].scope.rank() == effective_scope { &candidates.push(index) }
     }
-    first :: chain[candidates[0]]
+    first: chain[candidates[0]]
     loop position in 1..<candidates.len() {
-        second :: chain[candidates[position]]
+        second: chain[candidates[position]]
         if second.value != first.value {
             return Err(FactError.Conflict{key: key.name, layer: first.layer, first: first, second: second})
         }
     }
     if key.merge == FactMerge.TightenOnly {
         loop position in 1..<eligible.len() {
-            previous :: chain[eligible[position - 1]]
-            next_writer :: chain[eligible[position]]
+            previous: chain[eligible[position - 1]]
+            next_writer: chain[eligible[position]]
             if previous.value.safety_relation(next_writer.value) == {
                 .Same | .Tighten -> {}
                 .Widen -> { return Err(FactError.SafetyWidening{key: key.name, previous: previous, next: next_writer}) }
@@ -462,7 +462,7 @@ fn pkg_fact_resolve(key: FactKey, declarations: [FactContribution]) -> Effective
     // copy: the first candidate row (owner: `chain`, which moves into the provenance field below)
     // and the effective value (owner: the EffectiveFact) are both kept; a view of chain cannot
     // outlive that move.
-    value :: first.value.copy()
-    forced :: first.force || force_layer >= 0
+    value: first.value.copy()
+    forced: first.force || force_layer >= 0
     Ok(Val(EffectiveFact{key: key, value: value, provenance: chain, effective: candidates[0], forced: forced}))
 }

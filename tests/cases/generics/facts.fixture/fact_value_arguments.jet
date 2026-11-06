@@ -1,5 +1,5 @@
 // D-CONF-MODULE1=A: a typed build setting is a legal generic-module value.
-package {
+package: {
     name: "fact_value_arguments"
     settings: {
         cache_slots: Int = 3,
@@ -10,14 +10,14 @@ package {
     }
 }
 
-module cache<K>(capacity: Int) {
-    struct Buffer {
+cache: module<K>(capacity: Int) {
+    Buffer: struct {
         items: [K#capacity]
     }
 
-    fn slots() -> Int { capacity }
+    slots: fn() -> Int { capacity }
 }
 
-module tuned :: cache<Int>($build.settings.cache_slots)
+tuned: cache<Int>($build.settings.cache_slots)
 
-fn run() { print(tuned.slots()) }
+run: fn() { print(tuned.slots()) }

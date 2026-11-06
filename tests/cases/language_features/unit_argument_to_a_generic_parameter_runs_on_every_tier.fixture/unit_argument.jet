@@ -1,19 +1,19 @@
 #Error
-enum StepError {
+StepError: enum {
     Negative
 }
 
-fn step(n: Int) StepError! {
+step: fn(n: Int) StepError! {
     if n < 0 -> return Err(StepError.Negative)
     Ok(())
 }
 
-fn finish<T>(value: ^T) -> T StepError! {
+finish: fn<T>(value: ^T) -> T StepError! {
     Ok(^value)
 }
 
-fn run() {
-    done :: step(1) ?? panic("step")
+run: fn() {
+    done: step(1) ?? panic("step")
     finish(^done) ?? panic("finish")
     print("unit through a generic: ok")
     if step(-1) == {

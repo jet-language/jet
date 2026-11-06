@@ -1,4 +1,4 @@
-package {
+package: {
     name: "ui_default_provider"
     version: "0.1.0"
     authority: {
@@ -10,13 +10,13 @@ package {
 // the harness's DOM stub fires composition, drag/drop and paste events before
 // the run, and Core decodes and judges each one.
 use {
-    host :: core.ui.host
-    clipboard :: core.ui.host.clipboard
-    drag_drop :: core.ui.host.drag_drop
-    ime :: core.ui.host.ime
+    host: core.ui.host
+    clipboard: core.ui.host.clipboard
+    drag_drop: core.ui.host.drag_drop
+    ime: core.ui.host.ime
 }
 
-fn show_ime() {
+show_ime: fn() {
     if ime.poll() == {
         .Ok(event) -> print("ime: {event}")
         .Err(error) -> print("ime: {error}")
@@ -24,12 +24,12 @@ fn show_ime() {
 }
 
 // Prints every drag/drop event but the dragover flood, which it counts.
-fn show_drops() {
+show_drops: fn() {
     over := 0
     loop {
         if drag_drop.poll() == {
             .Ok(found) -> {
-                event :: found ?? break
+                event: found ?? break
                 if event.phase == .Over { over += 1 } else { print("drop: {event}") }
             }
             .Err(error) -> print("drop: {error}")
@@ -38,11 +38,11 @@ fn show_drops() {
     print("drop: {over} dragover events")
 }
 
-fn run() {
-    facts :: host.capabilities()
+run: fn() {
+    facts: host.capabilities()
     loop fact in facts.facts -> print("capability {fact.capability}: {fact.available}")
 
-    grant :: host.fs_grant(".", host.fs_rights_read()) ?? panic("the working directory grant is valid")
+    grant: host.fs_grant(".", host.fs_rights_read()) ?? panic("the working directory grant is valid")
     if host.open_file(host.open_request(grant)) == {
         .Ok(selection) -> print("open: {selection.files.len()} files")
         .Err(error) -> print("open: {error}")

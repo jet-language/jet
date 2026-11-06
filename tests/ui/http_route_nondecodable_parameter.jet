@@ -1,16 +1,16 @@
-use server :: core.http.server
+use server: core.http.server
 
 #!Codable
-struct JokeID { value: Int }
+JokeID: struct { value: Int }
 
-struct Jokes {
+Jokes: struct {
     #Server.Get("/jokes/:id")
-    fn joke(self, id: JokeID) -> HTTPResponse HTTPError! {
+    joke: fn(self, id: JokeID) -> HTTPResponse HTTPError! {
         Ok(server.response(200, "joke={id.value}"))
     }
 }
 
-fn run() {
-    mux :: server.mux()
+run: fn() {
+    mux: server.mux()
     mux.mount(Jokes{})
 }

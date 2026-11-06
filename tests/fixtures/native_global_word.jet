@@ -2,15 +2,15 @@
 // from the same checked unit. The storage stays local to the object.
 native_global_word := I64{0}
 
-#Export(c) fn native_global_store(value: I64) {
+#Export(c) native_global_store: fn(value: I64) {
     #Unsafe("the fixture's one-threaded caller (run, or global-word.c) is the only writer") {
         native_global_word = value
     }
 }
 
-#Export(c) fn native_global_load() -> I64 { native_global_word }
+#Export(c) native_global_load: fn() -> I64 { native_global_word }
 
-fn run() {
+run: fn() {
     print(native_global_load())
     native_global_store(I64{-7})
     print(native_global_load())

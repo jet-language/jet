@@ -1,21 +1,21 @@
 
 use {
     core.mem
-    scope :: core.mem.scope
+    scope: core.mem.scope
 }
 
-fn run() {
-    arena :: mem.Arena.new(capacity: 32)
-    first :: arena.alloc(7)
+run: fn() {
+    arena: mem.Arena.new(capacity: 32)
+    first: arena.alloc(7)
     print(first)
 
     // Reset is reusable, but the first view is no longer live past this edge.
     &arena.reset()
-    second :: arena.alloc(11)
+    second: arena.alloc(11)
     print(second)
 
     // Fallible allocation keeps the typed provider report identical on every tier.
-    fixed :: mem.Fixed.new(size: 40)
+    fixed: mem.Fixed.new(size: 40)
     fixed.try_alloc(7) ? value -> {
         print("success {value}")
     }
@@ -31,8 +31,8 @@ fn run() {
     close(^fixed)
 
     // Scope guards run in reverse declaration order, before the function exits.
-    _outer :: scope.guard(() -> print("outer cleanup"))
-    _inner :: scope.guard(() -> print("inner cleanup"))
+    _outer: scope.guard(() -> print("outer cleanup"))
+    _inner: scope.guard(() -> print("inner cleanup"))
     print("live")
 
     // close is terminal ownership transfer; no view remains live here.

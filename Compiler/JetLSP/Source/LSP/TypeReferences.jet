@@ -7,20 +7,20 @@ use {
     jet_semindex.[SymbolDB, SymKind, SymRef, DefinitionAnchor, SourceSpan]
 }
 
-fn lsp_build_navigation_symbol_db(result: JetDriverCompilerCheckResult) -> SymbolDB {
+lsp_build_navigation_symbol_db: fn(result: JetDriverCompilerCheckResult) -> SymbolDB {
     db := lsp_build_symbol_db(result)
-    owner :: result.bundle ?? return db
-    permit :: owner.guard_read()
-    checked :: result.graph ?? return db
+    owner: result.bundle ?? return db
+    permit: owner.guard_read()
+    checked: result.graph ?? return db
     lsp_rebind_checked_reference_identities(&db)
     lsp_add_checked_type_references(permit.value, checked.effect_facts.name_ledger, &db)
     lsp_rebind_checked_reference_identities(&db)
     db
 }
 
-fn lsp_rebind_checked_reference_identities(db: &SymbolDB) Never! {
+lsp_rebind_checked_reference_identities: fn(db: &SymbolDB) Never! {
     loop index in 0..<db.refs.len() {
-        anchor :: db.refs[index].target ?? next
+        anchor: db.refs[index].target ?? next
         identity := String?{None}
         loop definition in db.defs {
             if definition.module_path != anchor.module_path || definition.def_span.start != anchor.def_span.start || definition.def_span.end != anchor.def_span.end || !lsp_navigation_target_kind_matches(definition.kind, anchor.kind) -> next
@@ -45,7 +45,7 @@ fn lsp_rebind_checked_reference_identities(db: &SymbolDB) Never! {
     }
 }
 
-fn lsp_navigation_target_kind_matches(kind: SymKind, target: String) -> Bool Never! {
+lsp_navigation_target_kind_matches: fn(kind: SymKind, target: String) -> Bool Never! {
     if target == {
         "module" | "import_alias" -> kind == .Module
         "function" | "method" | "extern" -> kind == .Function{..}
@@ -69,13 +69,13 @@ fn lsp_navigation_target_kind_matches(kind: SymKind, target: String) -> Bool Nev
     }
 }
 
-fn lsp_add_checked_type_references(bundle: ProgramBundle, ledger: NameLedger, db: &SymbolDB) Never! {
+lsp_add_checked_type_references: fn(bundle: ProgramBundle, ledger: NameLedger, db: &SymbolDB) Never! {
     loop (module_idx, module_ref) in bundle.modules {
         loop item in module_ref.items -> lsp_add_item_type_references(item, module_idx, module_ref.display, module_ref.source, ledger, &db)
     }
 }
 
-fn lsp_add_item_type_references(item: Item, module_idx: Int, module_path: String, source: String, ledger: NameLedger, db: &SymbolDB) Never! {
+lsp_add_item_type_references: fn(item: Item, module_idx: Int, module_path: String, source: String, ledger: NameLedger, db: &SymbolDB) Never! {
     if item == {
         .Func(function) -> lsp_add_func_type_references(function, module_idx, module_path, source, ledger, &db)
         .Struct(definition) -> {
@@ -119,30 +119,30 @@ fn lsp_add_item_type_references(item: Item, module_idx: Int, module_path: String
     }
 }
 
-fn lsp_add_func_type_references(function: Func, module_idx: Int, module_path: String, source: String, ledger: NameLedger, db: &SymbolDB) Never! {
+lsp_add_func_type_references: fn(function: Func, module_idx: Int, module_path: String, source: String, ledger: NameLedger, db: &SymbolDB) Never! {
     loop parameter in function.params -> lsp_add_checked_type_reference(parameter.ty, parameter.ty_span, module_idx, module_path, source, ledger, &db)
     if function.return_type == .Val(ty) {
         if function.return_type_span == .Val(span) -> lsp_add_checked_type_reference(ty, span, module_idx, module_path, source, ledger, &db)
     }
 }
 
-fn lsp_add_checked_type_reference(ty: Type, span: Span, module_idx: Int, module_path: String, source: String, ledger: NameLedger, db: &SymbolDB) Never! {
-    name :: if ty == {
+lsp_add_checked_type_reference: fn(ty: Type, span: Span, module_idx: Int, module_path: String, source: String, ledger: NameLedger, db: &SymbolDB) Never! {
+    name: if ty == {
         .Named(name) | .Apply(name, _) -> name
         .TraitObject(names) -> { if names.len() != 1 -> return; names[0] } else -> { return }
     }
     lsp_add_named_type_reference(name, span, module_idx, module_path, source, ledger, &db)
 }
 
-fn lsp_add_named_type_reference(name: String, span: Span, module_idx: Int, module_path: String, source: String, ledger: NameLedger, db: &SymbolDB) Never! {
-    bytes :: source.bytes()
+lsp_add_named_type_reference: fn(name: String, span: Span, module_idx: Int, module_path: String, source: String, ledger: NameLedger, db: &SymbolDB) Never! {
+    bytes: source.bytes()
     if span.start < 0 || span.start >= span.end || span.end > bytes.len() -> return
     if (Int.from_u8(bytes[span.start]).bit_and(192)) == 128 -> return
     if span.end < bytes.len() && (Int.from_u8(bytes[span.end]).bit_and(192)) == 128 -> return
-    resolved :: lsp_checked_type_declaration(ledger, module_idx, name) ?? return
-    declaration :: resolved.declaration
-    identity :: name_ledger_semantic_identity(ledger, resolved.module_idx, declaration.name) ?? return
-    target_path :: name_ledger_module_path(ledger, resolved.module_idx) ?? module_path
+    resolved: lsp_checked_type_declaration(ledger, module_idx, name) ?? return
+    declaration: resolved.declaration
+    identity: name_ledger_semantic_identity(ledger, resolved.module_idx, declaration.name) ?? return
+    target_path: name_ledger_module_path(ledger, resolved.module_idx) ?? module_path
     loop reference in db.refs {
         if reference.module_path != module_path || reference.span != span -> next
         if reference.target == .Val(target) {
@@ -153,29 +153,29 @@ fn lsp_add_named_type_reference(name: String, span: Span, module_idx: Int, modul
 }
 
 // Foundation's ledger methods determine exact alias/nominal precedence.
-fn lsp_checked_type_declaration(ledger: NameLedger, module_idx: Int, name: String) -> (module_idx: Int, declaration: NameDeclaration)? Never! {
+lsp_checked_type_declaration: fn(ledger: NameLedger, module_idx: Int, name: String) -> (module_idx: Int, declaration: NameDeclaration)? Never! {
     if name_ledger_declaration(ledger, module_idx, name) == .Val(declaration) -> return Val((module_idx: module_idx, declaration: declaration))
     if name_ledger_nominal_module(ledger, name) == .Val(target_module) {
-        parts :: name.split("::")
+        parts: name.split("::")
         canonical_name := parts[parts.len() - 1] // #4303
         if name_ledger_declaration(ledger, target_module, canonical_name) == .Val(declaration) -> return Val((module_idx: target_module, declaration: declaration))
-        leaves :: canonical_name.split(".")
+        leaves: canonical_name.split(".")
         leaf := leaves[leaves.len() - 1] // #4303
         if name_ledger_declaration(ledger, target_module, leaf) == .Val(declaration) -> return Val((module_idx: target_module, declaration: declaration))
     }
     if name_ledger_effective_alias(ledger, module_idx, name) == .Val(alias) {
         if alias.target_module == .Val(target_module) {
-            parts :: alias.target.split(".")
+            parts: alias.target.split(".")
             target_name := parts[parts.len() - 1] // #4303
             if name_ledger_declaration(ledger, target_module, target_name) == .Val(declaration) -> return Val((module_idx: target_module, declaration: declaration))
         }
     }
-    parts :: name.split(".")
+    parts: name.split(".")
     if parts.len() < 2 -> return None
     leaf := parts[parts.len() - 1] // #4303
     qualifier := parts[0..<parts.len() - 1].join(".") // #4303
-    alias :: name_ledger_effective_alias(ledger, module_idx, qualifier) ?? return None
-    target_module :: alias.target_module ?? return None
-    declaration :: name_ledger_declaration(ledger, target_module, leaf) ?? return None
+    alias: name_ledger_effective_alias(ledger, module_idx, qualifier) ?? return None
+    target_module: alias.target_module ?? return None
+    declaration: name_ledger_declaration(ledger, target_module, leaf) ?? return None
     Val((module_idx: target_module, declaration: declaration))
 }

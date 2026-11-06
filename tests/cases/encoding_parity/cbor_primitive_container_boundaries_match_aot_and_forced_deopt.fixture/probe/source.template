@@ -1,45 +1,45 @@
 
 use {
-    cbor :: core.encoding.cbor
-    text :: core.text
+    cbor: core.encoding.cbor
+    text: core.text
 }
 
 #CodableAsBase
-Severity :: distinct Int(0..10)
+Severity: distinct Int(0..10)
 
-fn invalid_i8_rejected() -[]> Bool {
+invalid_i8_rejected: fn() -[]> Bool {
     cbor.decode<I8>([U8]{ 0x18, 0x80 }) ? _value -> return false ! _error -> return true
 }
 
-fn invalid_u32_rejected() -[]> Bool {
+invalid_u32_rejected: fn() -[]> Bool {
     cbor.decode<U32>([U8]{ 0x20 }) ? _value -> return false ! _error -> return true
 }
 
-fn invalid_f32_rejected() -[]> Bool {
+invalid_f32_rejected: fn() -[]> Bool {
     cbor.decode<F32>([U8]{ 0xfb, 0x7f, 0xef, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff }) ? _value -> return false ! _error -> return true
 }
 
-fn invalid_fixed_rejected() -[]> Bool {
+invalid_fixed_rejected: fn() -[]> Bool {
     cbor.decode<[Int#2]>([U8]{ 0x81, 0x01 }) ? _value -> return false ! _error -> return true
 }
 
-fn invalid_range_rejected() -[]> Bool {
+invalid_range_rejected: fn() -[]> Bool {
     cbor.decode<Severity>([U8]{ 0x0b }) ? _value -> return false ! _error -> return true
 }
 
-fn invalid_i8_error() -[]> String {
+invalid_i8_error: fn() -[]> String {
     cbor.decode<I8>([U8]{ 0x18, 0x80 }) ? _value -> return "accepted" ! error -> return error[0].reason
 }
 
-fn invalid_u8_error() -[]> String {
+invalid_u8_error: fn() -[]> String {
     cbor.decode<U8>([U8]{ 0x19, 0x01, 0x00 }) ? _value -> return "accepted" ! error -> return error[0].reason
 }
 
-fn invalid_fixed_bytes_error() -[]> String {
+invalid_fixed_bytes_error: fn() -[]> String {
     cbor.decode<[U8#2]>([U8]{ 0x41, 0xde }) ? _value -> return "accepted" ! error -> return error[0].reason
 }
 
-fn forced_deopt() -[]> String {
+forced_deopt: fn() -[]> String {
     if text.casefold("Straße") != "strasse" { panic("casefold") }
     signed := cbor.decode<I8>((cbor.to_bytes_canonical(I8{ -8 }) ?? panic("i8 encode")).copy()) ?? panic("i8 decode")
     unsigned := cbor.decode<U32>((cbor.to_bytes_canonical(U32{ 4000000000 }) ?? panic("u32 encode")).copy()) ?? panic("u32 decode")
@@ -52,6 +52,6 @@ fn forced_deopt() -[]> String {
     return "{signed}|{unsigned}|{narrow}|{pair[0]},{pair[1]}|{bytes[0]},{bytes[1]}|{tree_n}|{severity.raw()}|{invalid_i8_rejected()}|{invalid_u32_rejected()}|{invalid_f32_rejected()}|{invalid_fixed_rejected()}|{invalid_range_rejected()}|{invalid_i8_error()}|{invalid_u8_error()}|{invalid_fixed_bytes_error()}"
 }
 
-fn run() {
+run: fn() {
     print(forced_deopt())
 }

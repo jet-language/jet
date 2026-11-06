@@ -1,22 +1,22 @@
-use fs :: core.files
+use fs: core.files
 
 #CLI
-struct WorkloadArgs {
+WorkloadArgs: struct {
     root: String
 }
 
-fn run(args: WorkloadArgs) {
-    root :: args.root
-    entries :: fs.walk(root) ?? panic("cannot walk documents")
+run: fn(args: WorkloadArgs) {
+    root: args.root
+    entries: fs.walk(root) ?? panic("cannot walk documents")
     rows := [String]{}
     loop entry in entries {
         if !entry.is_dir {
-            text :: fs.read(entry.path) ?? panic("cannot read document")
+            text: fs.read(entry.path) ?? panic("cannot read document")
             headings := 0
             bullets := 0
             malformed := false
             loop line in text.split("\n") {
-                trimmed :: line.trim()
+                trimmed: line.trim()
                 if line.starts_with("#") {
                     if trimmed.copy() == "#" {
                         malformed = true

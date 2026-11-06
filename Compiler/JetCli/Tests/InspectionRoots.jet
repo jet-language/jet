@@ -3,12 +3,12 @@
 use {
     jet_cli.[JetCLIPlan, jet_cli_inspect_require_root, jet_cli_require_inspect_root]
     jet_driver.[JET_DRIVER_EXIT_USER_ERROR, JetDriverVerbOutput]
-    cli_sys :: core.sys
-    cli_files :: core.files
-    cli_process :: core.process
+    cli_sys: core.sys
+    cli_files: core.files
+    cli_process: core.process
 }
 
-fn inspection_root_fixture_require_root(start: String, expected: String) {
+inspection_root_fixture_require_root: fn(start: String, expected: String) {
     if jet_cli_require_inspect_root(start, "missing package", true) == {
         .Root(root) -> assert(root == expected)
         .Refused(_) -> panic("checked inspection Package root")
@@ -22,7 +22,7 @@ fn inspection_root_fixture_require_root(start: String, expected: String) {
     }
 }
 
-fn inspection_root_fixture_missing(start: String) {
+inspection_root_fixture_missing: fn(start: String) {
     action := JetCLIPlan.Done{output: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: 0}}
     if jet_cli_require_inspect_root(start, "missing package", true) == {
         .Root(_) -> panic("missing root was invented")
@@ -47,17 +47,17 @@ fn inspection_root_fixture_missing(start: String) {
 }
 
 #Test("inspection_roots") {
-    root :: "{cli_sys.temp_dir()}/jet-inspection-roots-{cli_process.current_pid()}"
+    root: "{cli_sys.temp_dir()}/jet-inspection-roots-{cli_process.current_pid()}"
     cli_files.create_dir_all("{root}/manifest/sub") ?? panic("manifest fixture")
     cli_files.create_dir_all("{root}/inline/sub") ?? panic("inline fixture")
     cli_files.create_dir_all("{root}/missing/sub") ?? panic("missing fixture")
-    // package.jet holds bare manifest fields; `package {…}` is the inline form in a .jet file.
+    // package.jet holds bare manifest fields; `package: {…}` is the inline form in a .jet file.
     cli_files.write("{root}/manifest/package.jet", "name: \"manifest\"\nversion: \"0.0.0\"\nedition: \"2026\"\n") ?? panic("manifest")
     inspection_root_fixture_require_root("{root}/manifest/sub", "{root}/manifest")
-    cli_files.write("{root}/inline/run.jet", "package {{ name: \"inline\" version: \"0.0.0\" edition: \"2026\" outputs: {{ app: .Executable{{entry: run}} }} }}\nfn run() {{}}\n") ?? panic("inline Package")
+    cli_files.write("{root}/inline/run.jet", "package: {{ name: \"inline\" version: \"0.0.0\" edition: \"2026\" outputs: {{ app: .Executable{{entry: run}} }} }}\nrun: fn() {{}}\n") ?? panic("inline Package")
     inspection_root_fixture_require_root("{root}/inline/sub", "{root}/inline")
     // A loose main.jet is not an inline Package or an excuse to refuse a mode.
-    cli_files.write("{root}/missing/main.jet", "fn run() {{}}\n") ?? panic("loose source")
+    cli_files.write("{root}/missing/main.jet", "run: fn() {{}}\n") ?? panic("loose source")
     inspection_root_fixture_missing("{root}/missing/sub")
     cli_files.remove_all(root) ?? panic("inspection roots cleanup")
 }

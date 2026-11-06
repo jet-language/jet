@@ -5,52 +5,52 @@
 // protocol record. Every failure removes the half-built lease container.
 
 // The protected wrapper directory, held by handle.
-struct ExecWrappers {
+ExecWrappers: struct {
     directory: LeasedDirectory
 }
 
 // One output a lease covers and the verified source its bytes come from.
-struct LeaseOutputSource {
+LeaseOutputSource: struct {
     output_root: String
     source: String
 }
 
 // Rust `components()` yielding exactly one normal component.
-fn store_reuse_single_component(value: String) -> Bool Never! {
+store_reuse_single_component: fn(value: String) -> Bool Never! {
     if value == "" || value == "." || value.starts_with("/") || value.starts_with("./") -> return false
-    components :: store_path_components(value)
+    components: store_path_components(value)
     components.len() == 1 && components[0] != ".."
 }
 
 // On Linux, canonical Hangar outputs from Nix and the native `jetpackage`
 // provider are immutable CAS objects: hold a directory handle instead of
 // copying a private snapshot for every child command.
-fn store_reuse_direct_cas_candidate(roots: HangarRoots, entry: StoreEntry) -> Bool Never! {
+store_reuse_direct_cas_candidate: fn(roots: HangarRoots, entry: StoreEntry) -> Bool Never! {
     if sys.name() != "linux" -> return false
-    producer :: ProducerRecord.decode(entry.producer_record) ?? return false
-    digest :: entry.envelope.output_hash
+    producer: ProducerRecord.decode(entry.producer_record) ?? return false
+    digest: entry.envelope.output_hash
     (producer.provider == "nix" || producer.provider == "jetpackage") && digest != "" && !digest.contains("/") && !digest.contains("\\") && store_reuse_same_path(entry.out, store_reuse_object_path(roots, digest))
 }
 
-fn store_reuse_direct_cas_entry(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) -> Bool Never! {
+store_reuse_direct_cas_entry: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) -> Bool Never! {
     if !store_reuse_direct_cas_candidate(roots, entry) -> return false
-    digest :: entry.envelope.output_hash
-    expected :: store_reuse_object_path(roots, digest)
-    object_info :: files.stat(expected) ?? return false
-    seal_info :: files.stat(store_reuse_seal_path(roots, digest)) ?? return false
+    digest: entry.envelope.output_hash
+    expected: store_reuse_object_path(roots, digest)
+    object_info: files.stat(expected) ?? return false
+    seal_info: files.stat(store_reuse_seal_path(roots, digest)) ?? return false
     if !object_info.is_dir || object_info.is_symlink || !seal_info.is_file -> return false
     if (object_info.mode).bit_and(0o222) != 0 -> return false
-    sealed :: store_check_seal(&verification, expected, roots.hangar_dir()) ?? return false
+    sealed: store_check_seal(&verification, expected, roots.hangar_dir()) ?? return false
     sealed == digest
 }
 
 // Rust `snapshot_lease_unlocked`: the caller holds the Hangar lock.
-fn store_snapshot_lease_unlocked(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, projection_index: NixProjectionIndex?, validate_provider_facts: Bool) -> CacheLease StoreError! {
-    leases :: files.join(roots.root, "leases")
+store_snapshot_lease_unlocked: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, projection_index: NixProjectionIndex?, validate_provider_facts: Bool) -> CacheLease StoreError! {
+    leases: files.join(roots.root, "leases")
     store_ensure_real_directory(leases, "Hangar lease directory")
     if !store_reuse_single_component(entry.id) -> return Err(StoreError.Other("cache lease entry identity is not one path component"))
-    sequence :: process_sequence_take(STORE_LEASE_SEQUENCE)
-    lease_name :: "{sys.pid()}-{sequence}-{entry.id}"
+    sequence: process_sequence_take(STORE_LEASE_SEQUENCE)
+    lease_name: "{sys.pid()}-{sequence}-{entry.id}"
     if lease_name.bytes().len() > STORE_LEASE_NAME_MAX -> return Err(StoreError.InvalidInput("cache lease identity exceeds the recovery bound"))
     if validate_provider_facts {
         if ProducerRecord.decode(entry.producer_record) == {
@@ -58,22 +58,22 @@ fn store_snapshot_lease_unlocked(verification: &StoreVerification, roots: Hangar
             else -> {}
         }
     }
-    direct_cas :: store_reuse_direct_cas_entry(&verification, roots, entry)
+    direct_cas: store_reuse_direct_cas_entry(&verification, roots, entry)
     if !validate_provider_facts {
-        producer :: ProducerRecord.decode(entry.producer_record) ?? return Err(StoreError.Other("warm cache entry `{entry.id}` has an invalid producer record: {err.message()}"))
+        producer: ProducerRecord.decode(entry.producer_record) ?? return Err(StoreError.Other("warm cache entry `{entry.id}` has an invalid producer record: {err.message()}"))
         if sys.name() == "linux" && producer.provider == "nix" && !direct_cas {
             return Err(StoreError.Other("warm Nix entry `{entry.id}` has no valid direct-CAS seal witness"))
         }
     }
-    lease_root :: files.join(leases, lease_name)
+    lease_root: files.join(leases, lease_name)
     files.create_dir(lease_root)
-    lease_lock_path :: env_lock_path_for_scope(lease_root, "live")
-    live_lock :: env_acquire_lease_lock(lease_root, "live") ?? {
+    lease_lock_path: env_lock_path_for_scope(lease_root, "live")
+    live_lock: env_acquire_lease_lock(lease_root, "live") ?? {
         store_reuse_discard_tree(lease_root)
         return Err(StoreError.IO(err))
     }
-    lease_snapshot_root :: files.join(lease_root, "snapshot")
-    snapshot_root :: if direct_cas -> entry.out else -> lease_snapshot_root
+    lease_snapshot_root: files.join(lease_root, "snapshot")
+    snapshot_root: if direct_cas -> entry.out else -> lease_snapshot_root
     if store_reuse_build_lease(&verification, roots, entry, projection_index, direct_cas, lease_root, lease_lock_path, ^live_lock, snapshot_root, lease_snapshot_root) == {
         .Ok(lease) -> Ok(lease)
         .Err(error) -> {
@@ -86,7 +86,7 @@ fn store_snapshot_lease_unlocked(verification: &StoreVerification, roots: Hangar
             // A raw OS error names nothing: every lease failure is about this
             // entry's snapshot or its recorded Hangar objects, so say so once.
             // Already-specific messages pass through unchanged.
-            message :: error.message()
+            message: error.message()
             if message.contains("Hangar") -> return Err(error)
             Err(StoreError.Other("cache lease for `{entry.id}`: a Hangar object or snapshot resource is unavailable: {message}"))
         }
@@ -94,7 +94,7 @@ fn store_snapshot_lease_unlocked(verification: &StoreVerification, roots: Hangar
 }
 
 // Best-effort removal of a container this lease created.
-fn store_reuse_discard_tree(path: String) Never! {
+store_reuse_discard_tree: fn(path: String) Never! {
     if files.remove_all(path) == {
         .Err(_) -> {}
         else -> {}
@@ -103,13 +103,13 @@ fn store_reuse_discard_tree(path: String) Never! {
 
 // Open and pin a directory and reserve the child descriptor it is passed
 // at; its identity is the lease's swap witness.
-fn store_reuse_hold_directory(path: String) -> LeasedDirectory StoreError! {
-    directory :: files.open_directory(path)
-    info :: directory.stat()
+store_reuse_hold_directory: fn(path: String) -> LeasedDirectory StoreError! {
+    directory: files.open_directory(path)
+    info: directory.stat()
     Ok(LeasedDirectory{path: path, directory: Val(directory), id: info.id, child_fd: store_lease_reserve_child_fd()})
 }
 
-fn store_reuse_build_lease(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, projection_index: NixProjectionIndex?, direct_cas: Bool, lease_root: String, lease_lock_path: String, live_lock: ^RuntimeLock, snapshot_root: String, lease_snapshot_root: String) -> CacheLease StoreError! {
+store_reuse_build_lease: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, projection_index: NixProjectionIndex?, direct_cas: Bool, lease_root: String, lease_lock_path: String, live_lock: ^RuntimeLock, snapshot_root: String, lease_snapshot_root: String) -> CacheLease StoreError! {
     if !files.exists(entry.out) {
         store_ensure_real_directory(snapshot_root, "cache lease snapshot")
         return Ok(CacheLease{
@@ -148,7 +148,7 @@ fn store_reuse_build_lease(verification: &StoreVerification, roots: HangarRoots,
     if !direct_cas {
         hardlinks := [String: String]{}
         store_copy_snapshot_node(entry.out, snapshot_root, &hardlinks)
-        digest :: pkg_try_output_hash_of(snapshot_root) ?? return Err(StoreError.Other(err.message()))
+        digest: pkg_try_output_hash_of(snapshot_root) ?? return Err(StoreError.Other(err.message()))
         if digest != entry.envelope.output_hash {
             store_remove_snapshot_node(snapshot_root)
             return Err(StoreError.Other("private lease snapshot mismatch: expected {entry.envelope.output_hash}, got {digest}"))
@@ -157,17 +157,17 @@ fn store_reuse_build_lease(verification: &StoreVerification, roots: HangarRoots,
         store_fsync_tree(lease_root)
         sealed_digest = pkg_try_output_hash_of(snapshot_root) ?? return Err(StoreError.Other(err.message()))
     }
-    snapshot_dir :: store_reuse_hold_directory(snapshot_root)
-    projections :: if projection_index == {
+    snapshot_dir: store_reuse_hold_directory(snapshot_root)
+    projections: if projection_index == {
         .Val(index) -> store_nix_store_projection_for_entry_index(roots, entry, snapshot_root, index)
         .None -> store_nix_store_projection_for_entry(&verification, roots, entry, snapshot_root)
     }
     if direct_cas -> store_reuse_validate_direct_projection_seals(&verification, roots, projections)
     output_sources := [LeaseOutputSource]{LeaseOutputSource{output_root: entry.out, source: snapshot_root}}
     seen_digests := [String]{entry.envelope.output_hash}
-    output_names :: store_sorted_keys(entry.named_outputs)
+    output_names: store_sorted_keys(entry.named_outputs)
     loop name in output_names {
-        digest :: entry.named_outputs[name]
+        digest: entry.named_outputs[name]
         if seen_digests.contains(digest) -> next
         &seen_digests.push(digest)
         source := ""
@@ -179,7 +179,7 @@ fn store_reuse_build_lease(verification: &StoreVerification, roots: HangarRoots,
         }
         &output_sources.push(LeaseOutputSource{output_root: store_reuse_object_path(roots, digest), source: source})
     }
-    opened :: store_reuse_open_nix_projection_sources(projections)
+    opened: store_reuse_open_nix_projection_sources(projections)
     leased_output_roots := [LeasedOutputRoot]{}
     loop output in output_sources {
         if store_reuse_same_path(output.source, snapshot_root) {
@@ -194,7 +194,7 @@ fn store_reuse_build_lease(verification: &StoreVerification, roots: HangarRoots,
             &leased_output_roots.push(LeasedOutputRoot{output_root: output.output_root, child_root: LeaseText.plain(output.source), child_fd: None})
             next
         }
-        at :: store_reuse_binding_index(opened.bindings, output.source) ?? return Err(StoreError.Other("named output `{output.output_root}` has no stable lease handle"))
+        at: store_reuse_binding_index(opened.bindings, output.source) ?? return Err(StoreError.Other("named output `{output.output_root}` has no stable lease handle"))
         // A held directory reaches the child at its descriptor; a symlink
         // root or single-file object is named by its canonical source, whose
         // target or identity validation re-checks.
@@ -222,23 +222,23 @@ fn store_reuse_build_lease(verification: &StoreVerification, roots: HangarRoots,
         }
     }
     executables := store_reuse_open_snapshot_executables(projected_bin_root ?? snapshot_root, bin_relative)
-    bin_root_fd :: if bin_output_index == {
+    bin_root_fd: if bin_output_index == {
         .Val(index) -> leased_output_roots[index].child_fd
         .None -> None
     }
-    wrappers :: if direct_cas -> ExecWrappers?{None} else -> store_reuse_create_exec_wrappers(lease_snapshot_root, executables, bin_root_fd, bin_relative ?? "")
+    wrappers: if direct_cas -> ExecWrappers?{None} else -> store_reuse_create_exec_wrappers(lease_snapshot_root, executables, bin_root_fd, bin_relative ?? "")
     protocol_lease_id := ""
     protocol_generation := 0
     protocol_owner_scope := ""
     protocol_owner_lock := RuntimeLock?{None}
     if !direct_cas {
-        protocol :: ExecutableLeaseProtocol.open(roots.root)
+        protocol: ExecutableLeaseProtocol.open(roots.root)
         protocol_lease_id = protocol.new_lease_id()
         protocol_owner_scope = ExecutableLeaseProtocol.owner_scope(protocol_lease_id)
-        members :: store_reuse_executable_lease_members(&executables)
-        prepared :: protocol.prepare_snapshot(protocol_lease_id, protocol_owner_scope, snapshot_root, entry.name, entry.version, entry.reference, sealed_digest, members)
-        frame :: protocol.encode_request(prepared.request)
-        receipt :: protocol.accept_snapshot(frame, sealed_digest, snapshot_root)
+        members: store_reuse_executable_lease_members(&executables)
+        prepared: protocol.prepare_snapshot(protocol_lease_id, protocol_owner_scope, snapshot_root, entry.name, entry.version, entry.reference, sealed_digest, members)
+        frame: protocol.encode_request(prepared.request)
+        receipt: protocol.accept_snapshot(frame, sealed_digest, snapshot_root)
         protocol_generation = receipt.generation
         protocol_owner_lock = Val(^prepared.owner_lock)
     }
@@ -280,7 +280,7 @@ fn store_reuse_build_lease(verification: &StoreVerification, roots: HangarRoots,
     })
 }
 
-fn store_reuse_binding_index(bindings: [NixProjectionBinding], source: String) -> Int? Never! {
+store_reuse_binding_index: fn(bindings: [NixProjectionBinding], source: String) -> Int? Never! {
     loop index in 0..<bindings.len() {
         if store_reuse_same_path(bindings[index].source, source) -> return Val(index)
     }
@@ -289,15 +289,15 @@ fn store_reuse_binding_index(bindings: [NixProjectionBinding], source: String) -
 
 // Open the regular-file executables of `<snapshot_root>/<bin>` in name
 // order. A link to a regular file is followed, as a launcher would.
-fn store_reuse_open_snapshot_executables(snapshot_root: String, bin: String?) -> [SnapshotFile] StoreError! {
-    relative :: bin ?? return Ok([SnapshotFile]{})
-    path :: files.join(snapshot_root, relative)
+store_reuse_open_snapshot_executables: fn(snapshot_root: String, bin: String?) -> [SnapshotFile] StoreError! {
+    relative: bin ?? return Ok([SnapshotFile]{})
+    path: files.join(snapshot_root, relative)
     out := [SnapshotFile]{}
     if !files.is_dir(path) -> return Ok(out)
-    entries :: files.list_dir(path)
+    entries: files.list_dir(path)
     loop entry in entries {
-        file :: files.open(entry.path)
-        info :: file.stat()
+        file: files.open(entry.path)
+        info: file.stat()
         if !info.is_file -> next
         &out.push(SnapshotFile{relative: entry.name, file: Val(file), id: info.id})
     }
@@ -306,16 +306,16 @@ fn store_reuse_open_snapshot_executables(snapshot_root: String, bin: String?) ->
 
 // The digest of every executable, read through its opened handle in place:
 // the lease keeps these handles open.
-fn store_reuse_executable_lease_members(executables: &[SnapshotFile]) -> [LeaseMember] StoreError! {
+store_reuse_executable_lease_members: fn(executables: &[SnapshotFile]) -> [LeaseMember] StoreError! {
     members := [LeaseMember]{}
     loop index in 0..<executables.len() {
-        relative :: executables[index].relative
+        relative: executables[index].relative
         if executables[index].file == None -> return Err(StoreError.Other("lease executable `{relative}` lost its handle"))
         if &executables[index].file == .Val(input) {
             &input.seek(0)
             hasher := StreamingSHA256.new()
             loop {
-                chunk :: input.read(65536)
+                chunk: input.read(65536)
                 if chunk.len() == 0 -> break
                 &hasher.update(chunk)
             }
@@ -327,56 +327,56 @@ fn store_reuse_executable_lease_members(executables: &[SnapshotFile]) -> [LeaseM
 
 // The system tools the rootless wrapper keeper needs, from fixed system
 // directories only.
-fn store_reuse_find_system_tool(name: String) -> String StoreError! {
-    directories :: [String]{"/run/current-system/sw/bin", "/usr/bin", "/bin"}
+store_reuse_find_system_tool: fn(name: String) -> String StoreError! {
+    directories: [String]{"/run/current-system/sw/bin", "/usr/bin", "/bin"}
     loop directory in directories {
-        path :: files.join(directory, name)
+        path: files.join(directory, name)
         if files.is_file(path) -> return Ok(path)
     }
     Err(StoreError.NotFound("required system tool `{name}` not found"))
 }
 
-STORE_LEASE_KEEPER_SCRIPT :: "set -eu\n\"$1\" -t tmpfs -o size=1m,mode=0755 jetpack-exec \"$2\"\nprintf 'ready\\n'\nIFS= read -r _\n\"$1\" -o remount,bind,ro \"$2\"\nprintf 'sealed\\n'\nIFS= read -r _ || true\n"
+STORE_LEASE_KEEPER_SCRIPT: "set -eu\n\"$1\" -t tmpfs -o size=1m,mode=0755 jetpack-exec \"$2\"\nprintf 'ready\\n'\nIFS= read -r _\n\"$1\" -o remount,bind,ro \"$2\"\nprintf 'sealed\\n'\nIFS= read -r _ || true\n"
 
 // Rust `create_exec_wrappers`: a read-only tmpfs in a private rootless
 // mount namespace holds one link per executable naming that member through
 // the descriptor its bin root is passed at. The keeper exits once the
 // directory is held open. Other hosts refuse: a private snapshot is not a
 // caller-unwritable handoff there.
-fn store_reuse_create_exec_wrappers(snapshot_root: String, executables: [SnapshotFile], bin_root_fd: Int?, bin: String) -> ExecWrappers? StoreError! {
+store_reuse_create_exec_wrappers: fn(snapshot_root: String, executables: [SnapshotFile], bin_root_fd: Int?, bin: String) -> ExecWrappers? StoreError! {
     if executables.len() == 0 -> return Ok(None)
     if sys.name() != "linux" -> return Err(StoreError.Unsupported("protected executable lease service is unavailable"))
-    root_fd :: bin_root_fd ?? return Err(StoreError.Unsupported("the leased bin directory is not held by a directory handle"))
-    mountpoint :: "{snapshot_root}.exec-mount"
+    root_fd: bin_root_fd ?? return Err(StoreError.Unsupported("the leased bin directory is not held by a directory handle"))
+    mountpoint: "{snapshot_root}.exec-mount"
     files.create_dir_all(mountpoint)
-    unshare :: store_reuse_find_system_tool("unshare")
-    mount :: store_reuse_find_system_tool("mount")
-    shell :: store_reuse_find_system_tool("sh")
-    argv :: [String]{unshare, "--user", "--map-root-user", "--mount", "--propagation", "private", shell, "-c", STORE_LEASE_KEEPER_SCRIPT, "jetpack-lease-keeper", mount, mountpoint}
+    unshare: store_reuse_find_system_tool("unshare")
+    mount: store_reuse_find_system_tool("mount")
+    shell: store_reuse_find_system_tool("sh")
+    argv: [String]{unshare, "--user", "--map-root-user", "--mount", "--propagation", "private", shell, "-c", STORE_LEASE_KEEPER_SCRIPT, "jetpack-lease-keeper", mount, mountpoint}
     child := process.cmd(argv).stdin(.Stream).stdout(.Stream).stderr(.Stream).spawn()
-    ready :: store_reuse_keeper_line(&child)
+    ready: store_reuse_keeper_line(&child)
     if ready.trim() != "ready" -> return Err(store_reuse_wrapper_keeper_error(^child, "creating private executable mount"))
-    root :: "/proc/{child.id()}/root{mountpoint}"
+    root: "/proc/{child.id()}/root{mountpoint}"
     loop executable in executables -> files.symlink(store_lease_wrapper_target(root_fd, bin, executable.relative), files.join(root, executable.relative))
     child.stdin.write_all("seal\n".bytes())
-    sealed :: store_reuse_keeper_line(&child)
+    sealed: store_reuse_keeper_line(&child)
     if sealed.trim() != "sealed" -> return Err(store_reuse_wrapper_keeper_error(^child, "sealing private executable mount"))
-    directory :: store_reuse_hold_directory(root)
+    directory: store_reuse_hold_directory(root)
     child.stdin.close()
-    receipt :: child.wait()
+    receipt: child.wait()
     if !receipt.success -> return Err(StoreError.Other("private executable mount keeper failed"))
     files.remove_dir(mountpoint)
     Ok(Val(ExecWrappers{directory: directory}))
 }
 
 // The keeper's next status line, or "" at end of output.
-fn store_reuse_keeper_line(child: &ProcessChild) -> String Never! {
+store_reuse_keeper_line: fn(child: &ProcessChild) -> String Never! {
     loop line in child.stdout.lines() -> return line
     ""
 }
 
 // Rust `wrapper_keeper_error`: the keeper's stderr names the failure.
-fn store_reuse_wrapper_keeper_error(child: ^ProcessChild, action: String) -> StoreError Never! {
+store_reuse_wrapper_keeper_error: fn(child: ^ProcessChild, action: String) -> StoreError Never! {
     lines := [String]{}
     loop line in child.stderr.lines() -> &lines.push(line)
     if child.wait() == {
@@ -388,11 +388,11 @@ fn store_reuse_wrapper_keeper_error(child: ^ProcessChild, action: String) -> Sto
 
 // Copy an output into the private snapshot, preserving modes, symlinks and
 // hardlink groups (keyed by file identity). Special files are refused.
-fn store_copy_snapshot_node(source: String, destination: String, hardlinks: &[String: String]) StoreError! {
-    info :: files.stat(source)
+store_copy_snapshot_node: fn(source: String, destination: String, hardlinks: &[String: String]) StoreError! {
+    info: files.stat(source)
     if info.is_dir {
         files.create_dir_all(destination)
-        entries :: files.list_dir(source)
+        entries: files.list_dir(source)
         loop entry in entries -> store_copy_snapshot_node(entry.path, files.join(destination, entry.name), &hardlinks)
         files.set_mode(destination, (info.mode).bit_and(0o7777))
         return
@@ -414,7 +414,7 @@ fn store_copy_snapshot_node(source: String, destination: String, hardlinks: &[St
         return
     }
     if info.is_symlink {
-        target :: files.read_link(source)
+        target: files.read_link(source)
         if sys.family() == "windows" -> return Err(StoreError.Other("cache symlink snapshots need platform support"))
         files.symlink(target, destination)
         return
@@ -423,13 +423,13 @@ fn store_copy_snapshot_node(source: String, destination: String, hardlinks: &[St
 }
 
 // Unix hardlink groups: only multiply-linked files share one identity key.
-fn store_reuse_snapshot_file_identity(info: Stat) -> String? Never! {
+store_reuse_snapshot_file_identity: fn(info: Stat) -> String? Never! {
     if sys.family() == "windows" || info.links <= 1 -> return None
     Val("{info.id.device}:{info.id.inode}")
 }
 
-fn store_remove_snapshot_node(path: String) StoreError! {
-    info :: files.stat(path)
+store_remove_snapshot_node: fn(path: String) StoreError! {
+    info: files.stat(path)
     store_make_tree_writable_for_removal(path)
     if info.is_dir {
         files.remove_all(path)

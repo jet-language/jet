@@ -1,29 +1,29 @@
 // core.regex has one meaning on every tier: one engine (Core/Regex) gives
 // the same Unicode case folding, scalar classes, \p{...}/\P{...}, syntax
 // errors, and `$` replacement expansion at o0, o1 and o2.
-use rx :: core.regex
+use rx: core.regex
 
-fn show(label: String, re: rx.Regex, text: String) {
-    found :: rx.find(re, text) ?? "none"
+show: fn(label: String, re: rx.Regex, text: String) {
+    found: rx.find(re, text) ?? "none"
     print("{label}: is={rx.is_match(re, text)} full={rx.full_match(re, text)} find='{found}' all={rx.find_all(re, text).len()}")
 }
 
-fn pat(p: String) -> rx.Regex {
+pat: fn(p: String) -> rx.Regex {
     rx.compile(p) ?? panic("compile {p}")
 }
 
-fn ci(p: String) -> rx.Regex {
+ci: fn(p: String) -> rx.Regex {
     rx.compile_with(p, rx.flags(true, false, false)) ?? panic("compile {p}")
 }
 
-fn verdict(p: String) {
+verdict: fn(p: String) {
     if rx.compile(p) == {
         .Ok(_) -> print("{p}: compiles")
         .Err(_) -> print("{p}: syntax error")
     }
 }
 
-fn run() {
+run: fn() {
     show("ci sharp s", ci("straße"), "STRASSE")
     show("ci sharp s exact", ci("straße"), "STRAßE")
     show("ci accent", ci("école"), "ÉCOLE")

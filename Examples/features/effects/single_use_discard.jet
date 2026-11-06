@@ -16,22 +16,22 @@
 // `drop` erases to a plain move-to-nowhere: the value's cleanup runs, no
 // `unsafe` machine code is emitted. The `#Unsafe` gate is a compile-time audit,
 // not a runtime cost.
-#SingleUse struct Ticket {
+#SingleUse Ticket: struct {
     id: String
 }
 
-fn issue(id: String) -> Ticket { return Ticket{id: id.copy()} }
+issue: fn(id: String) -> Ticket { return Ticket{id: id.copy()} }
 
-fn redeem(ticket: ^Ticket) { print("redeemed {ticket.id}") }
+redeem: fn(ticket: ^Ticket) { print("redeemed {ticket.id}") }
 
-fn run() {
+run: fn() {
     // The ordinary path: the ticket is consumed by being redeemed.
-    a :: issue("A")
+    a: issue("A")
     redeem(^a)
     // The audited discard: this ticket is being voided on purpose — the event
     // it admitted to was cancelled, so there is nothing left to redeem. We say
     // so in the `#Unsafe` reason, and `drop` discharges the consume duty.
-    b :: issue("B")
+    b: issue("B")
     #Unsafe("event cancelled; the ticket admits to nothing, so voiding it is correct") {
         consume(b)
     }

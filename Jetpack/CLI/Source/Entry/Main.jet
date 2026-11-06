@@ -9,8 +9,8 @@
 // jetpack-nix-index and jetpack-trust-root) when invoked under their names.
 
 // `argv` is the full process argument vector, program name first.
-fn cli_jetpack_main(argv: [String]) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
-    program :: files.basename(argv.get(0) ?? "")
+cli_jetpack_main: fn(argv: [String]) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    program: files.basename(argv.get(0) ?? "")
     if program == "jetpack-nix-index" -> return cli_nix_index_main(cli_tail(argv, 1))
     if program == "jetpack-trust-root" -> return cli_trust_root_main(cli_tail(argv, 1))
     // The root `jet` process probes this hidden flag before every engine
@@ -19,7 +19,7 @@ fn cli_jetpack_main(argv: [String]) -[IO, FS, Env, Exec, Net, Time, Time.Wait, R
         print(COMPILER_VERSION)
         return EXIT_OK
     }
-    args :: cli_tail(argv, 1)
+    args: cli_tail(argv, 1)
     if args.get(0) == .Val(verb) && verb == EXTENSION_HOST_SUBCOMMAND -> return cli_run_compiler_extension_host(cli_tail(args, 1))
     if args.get(0) == .Val(verb) && verb == BUILD_PLUGIN_HOST_SUBCOMMAND -> return cli_run_build_plugin_host(cli_tail(args, 1))
     if args.get(0) == .Val(verb) && verb == PACKAGE_DEPENDENCY_HOST_SUBCOMMAND -> return cli_run_package_dependency_host(cli_tail(args, 1))

@@ -4,12 +4,12 @@
 // into one copy never shows in another copy. Each case edits a copy and
 // prints the original, then the copy.
 
-struct Node {
+Node: struct {
     name: String
     meta: Meta
 }
 
-struct Meta {
+Meta: struct {
     note: String
     count: Int
     tags: [String]
@@ -17,42 +17,42 @@ struct Meta {
     detail: Detail
 }
 
-struct Detail {
+Detail: struct {
     label: String
     seen: [Node]
 }
 
-enum Slot {
+Slot: enum {
     Empty
     Held(node: Node)
 }
 
-fn leaf(name: String) -> Node {
+leaf: fn(name: String) -> Node {
     Node{name: name, meta: Meta{note: name, count: 0, tags: [String]{}, children: [Node]{}, detail: Detail{label: name, seen: [Node]{}}}}
 }
 
-fn renamed(node: Node, note: String) -> Node {
+renamed: fn(node: Node, note: String) -> Node {
     value := node
     value.meta.note = note
     value
 }
 
-fn add_tag(node: &Node, text: String) {
+add_tag: fn(node: &Node, text: String) {
     &node.meta.tags.push(text)
 }
 
-fn set_note(node: &Node, note: String) {
+set_note: fn(node: &Node, note: String) {
     node.meta.note = note
 }
 
-fn held_note(slot: Slot) -> String {
+held_note: fn(slot: Slot) -> String {
     if slot == {
         .Held(node) -> node.meta.note
         .Empty -> "empty"
     }
 }
 
-fn run() {
+run: fn() {
     original := Node{name: "root", meta: Meta{note: "first", count: 1, tags: [String]{"a"}, children: [Node]{}, detail: Detail{label: "plain", seen: [Node]{}}}}
 
     second := original
@@ -86,13 +86,13 @@ fn run() {
     print("param field: {original.meta.note} / {noted.meta.note}")
 
     // A Map value's field.
-    book :: [String:Node]{"k": original}
+    book: [String:Node]{"k": original}
     entry := book
     entry["k"].meta.note = "mapped"
     print("map value: {book["k"].meta.note} / {entry["k"].meta.note}")
 
     // An enum payload's field, through a write window.
-    slot :: Slot.Held{node: original}
+    slot: Slot.Held{node: original}
     edited := slot
     if &edited == {
         .Held(node) -> node.meta.note = "held"
@@ -101,7 +101,7 @@ fn run() {
     print("payload: {held_note(slot)} / {held_note(edited)}")
 
     // A tuple element's field.
-    pair :: (node: original, rank: 1)
+    pair: (node: original, rank: 1)
     moved := pair
     moved.node.meta.note = "tupled"
     print("tuple: {pair.node.meta.note} / {moved.node.meta.note}")

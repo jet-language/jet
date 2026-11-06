@@ -4,15 +4,15 @@
 // by the real C4/S8/S23/S24 producer. The six existing fixture golden files
 // remain authoritative and unchanged.
 
-fn doc_render_test_source() -> DocSource Never! {
+doc_render_test_source: fn() -> DocSource Never! {
     DocSource{path: "é.jet", start: 2, end: 17, line: 3, column: 5, link: "é.jet#L3"}
 }
-fn doc_render_test_item() -> DocItem Never! {
+doc_render_test_item: fn() -> DocItem Never! {
     DocItem{kind: "function", name: "answer", qualified_name: "API::answer", module_path: "é.jet", public: true, package_public: false,
-        signature: "fn answer()\nfailure: Int (implicit default !Err)", failure_contract: Val("Int"), failure_source: Val("implicit default !Err"),
+        signature: "answer: fn()\nfailure: Int (implicit default !Err)", failure_contract: Val("Int"), failure_source: Val("implicit default !Err"),
         summary: "Answer <&>.", examples: [String]{"`answer()`", "first", "first"}, markers: [String]{"Z", "A", "Z"}, source: doc_render_test_source()}
 }
-fn doc_render_expected_source_json() -> String Never! {
+doc_render_expected_source_json: fn() -> String Never! {
     "{{\"path\":\"é.jet\",\"start\":2,\"end\":17,\"line\":3,\"column\":5,\"link\":\"é.jet#L3\"}}"
 }
 
@@ -30,21 +30,21 @@ fn doc_render_expected_source_json() -> String Never! {
     assert_eq(docs_link(""), "../")
 }
 #Test("docs_source_and_module_raw_json_preserve_exact_field_order") {
-    source :: doc_render_test_source()
-    expected_source :: doc_render_expected_source_json()
+    source: doc_render_test_source()
+    expected_source: doc_render_expected_source_json()
     assert_eq(doc_source_json(source), expected_source)
-    row :: DocModule{name: "a\"\\\n", path: "é.jet", public: false, summary: "<&>", source: source}
-    expected :: "{{\"name\":\"a\\\"\\\\\\n\",\"path\":\"é.jet\",\"public\":false,\"summary\":\"<&>\",\"source\":{expected_source}}}"
+    row: DocModule{name: "a\"\\\n", path: "é.jet", public: false, summary: "<&>", source: source}
+    expected: "{{\"name\":\"a\\\"\\\\\\n\",\"path\":\"é.jet\",\"public\":false,\"summary\":\"<&>\",\"source\":{expected_source}}}"
     assert_eq(doc_module_json(row), expected)
 }
 #Test("docs_item_json_keeps_contracts_null_empty_and_authored_array_order") {
     item := doc_render_test_item()
-    source :: doc_render_expected_source_json()
-    expected :: "{{\"kind\":\"function\",\"name\":\"answer\",\"qualified_name\":\"API::answer\",\"module\":\"é.jet\",\"public\":true,\"package_public\":false,\"signature\":\"fn answer()\\nfailure: Int (implicit default !Err)\",\"failure_contract\":\"Int\",\"failure_source\":\"implicit default !Err\",\"summary\":\"Answer <&>.\",\"examples\":[\"`answer()`\",\"first\",\"first\"],\"markers\":[\"Z\",\"A\",\"Z\"],\"source\":{source}}}"
+    source: doc_render_expected_source_json()
+    expected: "{{\"kind\":\"function\",\"name\":\"answer\",\"qualified_name\":\"API::answer\",\"module\":\"é.jet\",\"public\":true,\"package_public\":false,\"signature\":\"answer: fn()\\nfailure: Int (implicit default !Err)\",\"failure_contract\":\"Int\",\"failure_source\":\"implicit default !Err\",\"summary\":\"Answer <&>.\",\"examples\":[\"`answer()`\",\"first\",\"first\"],\"markers\":[\"Z\",\"A\",\"Z\"],\"source\":{source}}}"
     assert_eq(doc_item_json(item), expected)
     item.failure_contract = None
     item.failure_source = Val("")
-    absent :: doc_item_json(item)
+    absent: doc_item_json(item)
     assert(absent.contains("\"failure_contract\":null,\"failure_source\":\"\""))
     assert(!absent.contains("\"failure_contract\":\"\""))
     item.examples = [String]{}
@@ -53,8 +53,8 @@ fn doc_render_expected_source_json() -> String Never! {
 }
 #Test("docs_impl_json_distinguishes_inherent_none_from_empty_trait") {
     row := DocImpl{kind: "trait_impl", type_name: "T<&>", trait_name: Val("Show"), module_path: "é.jet", public: true, methods: [String]{"z", "a", "z"}, source: doc_render_test_source()}
-    source :: doc_render_expected_source_json()
-    expected :: "{{\"kind\":\"trait_impl\",\"type_name\":\"T<&>\",\"trait_name\":\"Show\",\"module\":\"é.jet\",\"public\":true,\"methods\":[\"z\",\"a\",\"z\"],\"source\":{source}}}"
+    source: doc_render_expected_source_json()
+    expected: "{{\"kind\":\"trait_impl\",\"type_name\":\"T<&>\",\"trait_name\":\"Show\",\"module\":\"é.jet\",\"public\":true,\"methods\":[\"z\",\"a\",\"z\"],\"source\":{source}}}"
     assert_eq(doc_impl_json(row), expected)
     row.trait_name = None
     assert(doc_impl_json(row).contains("\"trait_name\":null"))
@@ -62,28 +62,28 @@ fn doc_render_expected_source_json() -> String Never! {
     assert(doc_impl_json(row).contains("\"trait_name\":\"\""))
 }
 #Test("docs_doctest_json_preserves_setup_expectation_order_and_escaping") {
-    row :: DocTest{module_path: "é.jet", line: 35, setup: [String]{"x :: \"<&>\"", "x"}, expectations: [DocExpectation]{DocExpectation{expression: "x", expected: "\"<&>\""}, DocExpectation{expression: "1 + 1", expected: "2"}}, source: doc_render_test_source()}
-    source :: doc_render_expected_source_json()
-    expected :: "{{\"module\":\"é.jet\",\"line\":35,\"setup\":[\"x :: \\\"<&>\\\"\",\"x\"],\"expectations\":[{{\"expression\":\"x\",\"expected\":\"\\\"<&>\\\"\"}},{{\"expression\":\"1 + 1\",\"expected\":\"2\"}}],\"source\":{source}}}"
+    row: DocTest{module_path: "é.jet", line: 35, setup: [String]{"x: \"<&>\"", "x"}, expectations: [DocExpectation]{DocExpectation{expression: "x", expected: "\"<&>\""}, DocExpectation{expression: "1 + 1", expected: "2"}}, source: doc_render_test_source()}
+    source: doc_render_expected_source_json()
+    expected: "{{\"module\":\"é.jet\",\"line\":35,\"setup\":[\"x: \\\"<&>\\\"\",\"x\"],\"expectations\":[{{\"expression\":\"x\",\"expected\":\"\\\"<&>\\\"\"}},{{\"expression\":\"1 + 1\",\"expected\":\"2\"}}],\"source\":{source}}}"
     assert_eq(doc_test_json(row), expected)
 }
 #Test("docs_raw_rows_reject_public_content_and_order_drift") {
     row := doc_render_test_item()
-    original :: doc_item_json(row)
+    original: doc_item_json(row)
     row.summary = "Altered public API."
-    changed :: doc_item_json(row)
+    changed: doc_item_json(row)
     assert(original != changed)
     assert(changed.contains("\"summary\":\"Altered public API.\""))
     assert(!changed.contains("\"summary\":\"Answer <&>.\""))
     &row.examples.reverse()
-    reordered :: doc_item_json(row)
+    reordered: doc_item_json(row)
     assert(changed != reordered)
     assert(reordered.contains("\"examples\":[\"first\",\"first\",\"`answer()`\"]"))
     row.public = false
     assert(doc_item_json(row).contains("\"public\":false,\"package_public\":false"))
 }
 
-fn doc_render_assert_field_names(value: StatusValue, names: [String]) Never! {
+doc_render_assert_field_names: fn(value: StatusValue, names: [String]) Never! {
     if value == {
         .Object(fields) -> {
             assert_eq(fields.entries.len(), names.len())
@@ -92,13 +92,13 @@ fn doc_render_assert_field_names(value: StatusValue, names: [String]) Never! {
         else -> { panic("documentation row must be a typed Report object") }
     }
 }
-fn doc_render_assert_status_text(value: StatusValue, expected: String) Never! {
+doc_render_assert_status_text: fn(value: StatusValue, expected: String) Never! {
     if value == {
         .String(text) -> assert_eq(text, expected)
         else -> { panic("documentation text must be a typed Report string") }
     }
 }
-fn doc_render_assert_status_strings(value: StatusValue, expected: [String]) Never! {
+doc_render_assert_status_strings: fn(value: StatusValue, expected: [String]) Never! {
     if value == {
         .Array(values) -> {
             assert_eq(values.len(), expected.len())
@@ -108,11 +108,11 @@ fn doc_render_assert_status_strings(value: StatusValue, expected: [String]) Neve
     }
 }
 #Test("docs_status_projection_preserves_typed_nulls_and_nested_order") {
-    source :: doc_render_test_source()
+    source: doc_render_test_source()
     doc_render_assert_field_names(doc_source_value(source), [String]{"path", "start", "end", "line", "column", "link"})
     doc_render_assert_field_names(doc_module_value(DocModule{name: "M", path: "é.jet", public: false, summary: "", source: source}), [String]{"name", "path", "public", "summary", "source"})
-    item :: doc_render_test_item()
-    value :: doc_item_value(item)
+    item: doc_render_test_item()
+    value: doc_item_value(item)
     doc_render_assert_field_names(value, [String]{"kind", "name", "qualified_name", "module", "public", "package_public", "signature", "failure_contract", "failure_source", "summary", "examples", "markers", "source"})
     if value == {
         .Object(fields) -> {
@@ -138,8 +138,8 @@ fn doc_render_assert_status_strings(value: StatusValue, expected: [String]) Neve
         else -> { panic("absent doc text must be null") }
     }
     doc_render_assert_status_text(optional_doc_text(Val("")), "")
-    implementation :: DocImpl{kind: "inherent_impl", type_name: "M", trait_name: None, module_path: "é.jet", public: false, methods: [String]{"b", "a"}, source: source}
-    impl_value :: doc_impl_value(implementation)
+    implementation: DocImpl{kind: "inherent_impl", type_name: "M", trait_name: None, module_path: "é.jet", public: false, methods: [String]{"b", "a"}, source: source}
+    impl_value: doc_impl_value(implementation)
     doc_render_assert_field_names(impl_value, [String]{"kind", "type_name", "trait_name", "module", "public", "methods", "source"})
     if impl_value == {
         .Object(fields) -> {
@@ -151,8 +151,8 @@ fn doc_render_assert_status_strings(value: StatusValue, expected: [String]) Neve
         }
         else -> { panic("implementation must be object") }
     }
-    test :: DocTest{module_path: "é.jet", line: 35, setup: [String]{"x :: 2"}, expectations: [DocExpectation]{DocExpectation{expression: "x", expected: "2"}}, source: source}
-    test_value :: doc_test_value(test)
+    test: DocTest{module_path: "é.jet", line: 35, setup: [String]{"x: 2"}, expectations: [DocExpectation]{DocExpectation{expression: "x", expected: "2"}}, source: source}
+    test_value: doc_test_value(test)
     doc_render_assert_field_names(test_value, [String]{"module", "line", "setup", "expectations", "source"})
     if test_value == {
         .Object(fields) -> {
@@ -160,7 +160,7 @@ fn doc_render_assert_status_strings(value: StatusValue, expected: [String]) Neve
                 .Integer(line) -> assert_eq(line, 35)
                 else -> { panic("line must be integer") }
             }
-            doc_render_assert_status_strings(fields.entries[2].value, [String]{"x :: 2"})
+            doc_render_assert_status_strings(fields.entries[2].value, [String]{"x: 2"})
             if fields.entries[3].value == {
                 .Array(expectations) -> {
                     assert_eq(expectations.len(), 1)
@@ -184,9 +184,9 @@ fn doc_render_assert_status_strings(value: StatusValue, expected: [String]) Neve
 // actual ordered.jet checked graph, not a default projection/filled fixture.
 // Includes a negative public-content/order transition rather than a size or
 // source-inclusion assertion. No alternate checked producer is introduced.
-fn doc_render_ordered_fixture_rejects_public_content_and_order_drift(^graph: DocGraph) Never! {
-    before_md :: graph.to_markdown()
-    before_html :: graph.to_html()
+doc_render_ordered_fixture_rejects_public_content_and_order_drift: fn(^graph: DocGraph) Never! {
+    before_md: graph.to_markdown()
+    before_html: graph.to_html()
     assert(before_md.contains("### `alpha`\n\nAlpha API."))
     assert(before_md.contains("### `zulu`\n\nZulu API."))
     assert(before_html.contains("<code>alpha</code></h3><p>Alpha API.</p>"))
@@ -196,8 +196,8 @@ fn doc_render_ordered_fixture_rejects_public_content_and_order_drift(^graph: Doc
     assert(before_md.split("### `alpha`")[0].len() < before_md.split("### `zulu`")[0].len())
     assert(before_html.split("<h3 id=\"alpha\">")[0].len() < before_html.split("<h3 id=\"zulu\">")[0].len())
     &graph.items.reverse()
-    reversed_md :: graph.to_markdown()
-    reversed_html :: graph.to_html()
+    reversed_md: graph.to_markdown()
+    reversed_html: graph.to_html()
     assert(before_md != reversed_md)
     assert(before_html != reversed_html)
     assert(reversed_md.split("### `zulu`")[0].len() < reversed_md.split("### `alpha`")[0].len())
@@ -213,12 +213,12 @@ fn doc_render_ordered_fixture_rejects_public_content_and_order_drift(^graph: Doc
 // Inputs are actual files read by the CLI/C4 fixture runner: never copied
 // constants. Compare the raw graph and local outputs to the original six
 // goldens using the same exact-byte assertions as S21's CLI output consumers.
-fn doc_render_fixture_outputs_match_stable_goldens(graph: DocGraph, golden_json: String, golden_markdown: String, golden_html: String) Never! {
+doc_render_fixture_outputs_match_stable_goldens: fn(graph: DocGraph, golden_json: String, golden_markdown: String, golden_html: String) Never! {
     assert_eq(graph.to_json(), golden_json)
     assert_eq(graph.to_markdown(), golden_markdown)
     assert_eq(graph.to_html(), golden_html)
 }
-fn doc_render_package_outputs_match_stable_goldens(graph: DocGraph, golden_json: String, golden_markdown: String, golden_html: String) Never! {
+doc_render_package_outputs_match_stable_goldens: fn(graph: DocGraph, golden_json: String, golden_markdown: String, golden_html: String) Never! {
     assert_eq(graph.to_json(), golden_json)
     assert_eq(graph.to_markdown(), golden_markdown)
     assert_eq(graph.to_html(), golden_html)

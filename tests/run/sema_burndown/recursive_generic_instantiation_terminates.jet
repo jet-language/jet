@@ -2,71 +2,71 @@
 // through a map of a generic value (the QueryEngine<T> unit, the GC port's
 // GCState<O>) or through its own field (Tree<T>). Each instance is keyed by
 // its type identity, so a cycle reuses the instance already in flight.
-struct Subject {
+Subject: struct {
     name: String
 }
 
-struct Key {
+Key: struct {
     subject: Subject
     rev: Int
 }
 
-struct Memo<T> {
+Memo: struct<T> {
     value: T
     deps: [Key]
     rev: Int
 }
 
-struct QueryEngine<T> {
+QueryEngine: struct<T> {
     memos: [Key: Memo<T>]
     revision: Int
 
-    fn new() -> QueryEngine<T> { QueryEngine<T>{memos: [Key: Memo<T>]{}, revision: 0} }
+    new: fn() -> QueryEngine<T> { QueryEngine<T>{memos: [Key: Memo<T>]{}, revision: 0} }
 
-    fn put(&self, key: Key, value: T, deps: [Key]) {
+    put: fn(&self, key: Key, value: T, deps: [Key]) {
         self.memos[key] = Memo<T>{value: value, deps: deps, rev: self.revision}
     }
 
-    fn memo_key_valid(self, key: Key, depth: Int) -> Bool {
+    memo_key_valid: fn(self, key: Key, depth: Int) -> Bool {
         if depth > 8 -> return false
-        entry :: self.memos.get(key) ?? return false
+        entry: self.memos.get(key) ?? return false
         self.memo_entry_valid(entry, depth + 1)
     }
 
-    fn memo_entry_valid(self, entry: Memo<T>, depth: Int) -> Bool {
+    memo_entry_valid: fn(self, entry: Memo<T>, depth: Int) -> Bool {
         loop dep in entry.deps {
             if !self.memo_key_valid(dep, depth) -> return false
         }
         entry.rev <= self.revision
     }
 
-    fn size(self) -> Int { self.memos.len() }
+    size: fn(self) -> Int { self.memos.len() }
 }
 
-struct GCEntry<O> {
+GCEntry: struct<O> {
     object: O
     marked: Bool
 }
 
-struct GCState<O> {
+GCState: struct<O> {
     entries: [U64: GCEntry<O>]
 
-    fn new() -> GCState<O> { GCState<O>{entries: [U64: GCEntry<O>]{}} }
+    new: fn() -> GCState<O> { GCState<O>{entries: [U64: GCEntry<O>]{}} }
 
-    fn insert(&self, id: U64, object: O) { self.entries[id] = GCEntry<O>{object: object, marked: false} }
+    insert: fn(&self, id: U64, object: O) { self.entries[id] = GCEntry<O>{object: object, marked: false} }
 
-    fn count(self) -> Int { self.entries.len() }
+    count: fn(self) -> Int { self.entries.len() }
 }
 
-struct GCTestObject {
+GCTestObject: struct {
     n: Int
 }
 
-struct Tree<T> {
+Tree: struct<T> {
     value: T
     children: [Tree<T>]
 
-    fn count(self) -> Int {
+    count: fn(self) -> Int {
         total := 1
         loop child in self.children {
             total += child.count()
@@ -75,19 +75,19 @@ struct Tree<T> {
     }
 }
 
-fn depth<T>(tree: Tree<T>) -> Int {
+depth: fn<T>(tree: Tree<T>) -> Int {
     best := 0
     loop child in tree.children {
-        d :: depth<T>(child)
+        d: depth<T>(child)
         if d > best -> best = d
     }
     best + 1
 }
 
-fn key(name: String, rev: Int) -> Key { Key{subject: Subject{name: name}, rev: rev} }
+key: fn(name: String, rev: Int) -> Key { Key{subject: Subject{name: name}, rev: rev} }
 
-fn run() {
-    empty :: QueryEngine<Int>.new()
+run: fn() {
+    empty: QueryEngine<Int>.new()
     print(empty.size())
     engine := QueryEngine<String>.new()
     &engine.put(key("a", 1), "A", [Key]{})
@@ -99,9 +99,9 @@ fn run() {
     &state.insert(U64{1}, GCTestObject{n: 3})
     &state.insert(U64{2}, GCTestObject{n: 4})
     print(state.count())
-    leaf :: Tree<String>{value: "b", children: [Tree<String>]{}}
-    middle :: Tree<String>{value: "m", children: [Tree<String>]{leaf}}
-    root :: Tree<String>{value: "a", children: [Tree<String>]{middle, leaf.copy()}}
+    leaf: Tree<String>{value: "b", children: [Tree<String>]{}}
+    middle: Tree<String>{value: "m", children: [Tree<String>]{leaf}}
+    root: Tree<String>{value: "a", children: [Tree<String>]{middle, leaf.copy()}}
     print(root.count())
     print(depth(root))
 }

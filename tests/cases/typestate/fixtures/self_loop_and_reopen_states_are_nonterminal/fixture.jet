@@ -1,16 +1,16 @@
 
-struct Gate {
+Gate: struct {
     state { Closed, Reopened }
     w: Int
 }
 
 impl Gate {
-    #Transition(_, Closed) fn new(w: Int) -[]> Gate { return Gate{ w: w } }
-    #Transition(Closed, Closed) fn hold(self: ^Gate) -[]> Gate { return self }
-    #Transition(Closed, Reopened) fn reopen(self: ^Gate) -[]> Gate { return self }
+    #Transition(_, Closed) new: fn(w: Int) -[]> Gate { return Gate{ w: w } }
+    #Transition(Closed, Closed) hold: fn(self: ^Gate) -[]> Gate { return self }
+    #Transition(Closed, Reopened) reopen: fn(self: ^Gate) -[]> Gate { return self }
 }
 
-fn run() {
+run: fn() {
     g := Gate.new(1)
     g = ^g.hold()
     g = ^g.reopen()

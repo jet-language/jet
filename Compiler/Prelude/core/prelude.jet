@@ -3,23 +3,23 @@
 // These declarations name the ambient surface. Their meaning stays in the
 // embedded Prelude/CoreLib implementations; sema opens this module once per
 // file and resolves each alias through the ordinary Core call path.
-fn print(value: Any)
-fn input(prompt: String{""}) -> String IOError!
-fn panic(message: String)
-fn assert(cond: Bool)
-fn assert_eq(a: Any, b: Any)
+print: fn(value: Any)
+input: fn(prompt: String{""}) -> String IOError!
+panic: fn(message: String)
+assert: fn(cond: Bool)
+assert_eq: fn(a: Any, b: Any)
 // D-DBG1=A: `debug(value)` returns `value` unchanged and, in development
 // builds, writes `[debug] file.jet:LINE expr = <Debug form>` to stderr. It adds
 // no effect; a shipped artifact or release-profile build rejects it (E3405).
-fn debug<T>(value: T) -> T
+debug: fn<T>(value: T) -> T
 
 // D-TEXTHEAD-TYPE1=A: checked text is an ordinary nominal String-backed type
 // with one ordinary CheckedText implementation. The trait has one associated
 // check error, one pure complete-text checker, and one pure generic hole encoder.
-trait CheckedText {
-    type Error
-    fn check(text: String) Error! -[]>
-    fn encode_hole<T: Printable>(value: T) String -[]>
+CheckedText: trait {
+    Error: type
+    check: fn(text: String) Error! -[]>
+    encode_hole: fn<T: Printable>(value: T) String -[]>
 }
 
 // D-BENCH-KEEP1=A: measurement claims use the one always-available identity
@@ -31,11 +31,11 @@ pub use {
     core.prelude.[min, max, clamp]
     core.term.[eprint]
     core.time.[Clock, Instant, Duration]
-    Date :: core.time.LocalDate
+    Date: core.time.LocalDate
     core.files.[Path]
-    read_file :: core.files.read
-    write_file :: core.files.write
-    file_exists :: core.files.exists
+    read_file: core.files.read
+    write_file: core.files.write
+    file_exists: core.files.exists
 }
-fn channel<T>(capacity: Int{0})
+channel: fn<T>(capacity: Int{0})
 pub use core.comptime.[embed_file, embed_bytes, find, fetch]

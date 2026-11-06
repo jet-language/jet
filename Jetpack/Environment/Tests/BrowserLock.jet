@@ -2,23 +2,23 @@
 
 use {
     jetpack_foundation.[BROWSER_DEFAULT_PROTOCOL, SOURCE_ROOT_DIR]
-    files :: core.files
+    files: core.files
 }
 
-fn env_browser_test_root(label: String) -[FS]> String {
-    root :: files.tmpdir("jet-browser-lock-{label}-") ?? panic("browser lock scratch")
+env_browser_test_root: fn(label: String) -[FS]> String {
+    root: files.tmpdir("jet-browser-lock-{label}-") ?? panic("browser lock scratch")
     files.create_dir_all(files.join(root, SOURCE_ROOT_DIR)) ?? panic("managed dir")
     root
 }
 
-fn env_browser_test_fake(root: String, body: String) -[FS]> String {
-    bin :: files.join(root, "fake-chromium")
+env_browser_test_fake: fn(root: String, body: String) -[FS]> String {
+    bin: files.join(root, "fake-chromium")
     files.write(bin, body) ?? panic("fake browser")
     files.set_mode(bin, 0o755) ?? panic("fake browser mode")
     bin
 }
 
-fn env_browser_test_drifted(result: LockedBrowser BrowserLockError!) -> Bool {
+env_browser_test_drifted: fn(result: LockedBrowser BrowserLockError!) -> Bool {
     if result == {
         .Ok(_) -> false
         .Err(error) -> {
@@ -32,11 +32,11 @@ fn env_browser_test_drifted(result: LockedBrowser BrowserLockError!) -> Bool {
 }
 
 #Test("browser lock resolve and hash drift") {
-    root :: env_browser_test_root("ok")
-    bin :: env_browser_test_fake(root, "#!/bin/sh\necho Chromium 131.0\n")
-    locked :: env_browser_lock_binary(root, "chromium", bin, "131.0", BROWSER_DEFAULT_PROTOCOL, "test fixture") ?? panic("lock the fake browser")
+    root: env_browser_test_root("ok")
+    bin: env_browser_test_fake(root, "#!/bin/sh\necho Chromium 131.0\n")
+    locked: env_browser_lock_binary(root, "chromium", bin, "131.0", BROWSER_DEFAULT_PROTOCOL, "test fixture") ?? panic("lock the fake browser")
     assert_eq(locked.engine, "chromium")
-    resolved :: env_browser_resolve(root, "chromium") ?? panic("resolve the locked browser")
+    resolved: env_browser_resolve(root, "chromium") ?? panic("resolve the locked browser")
     assert_eq(resolved.binary, locked.binary)
     assert_eq(resolved.envelope.output_hash, locked.envelope.output_hash)
     files.write(bin, "#!/bin/sh\necho Chromium 999\n") ?? panic("drift the binary")
@@ -54,7 +54,7 @@ fn env_browser_test_drifted(result: LockedBrowser BrowserLockError!) -> Bool {
         }
         .Ok(_) -> panic("edge is not a supported engine")
     }
-    root :: env_browser_test_root("missing")
+    root: env_browser_test_root("missing")
     if env_browser_resolve(root, "firefox") == {
         .Err(error) -> {
             if error == {
@@ -68,12 +68,12 @@ fn env_browser_test_drifted(result: LockedBrowser BrowserLockError!) -> Bool {
 }
 
 #Test("browser lock find engine binary prefers bin dir") {
-    root :: env_browser_test_root("find")
-    bin_dir :: files.join(files.join(root, "out"), "bin")
+    root: env_browser_test_root("find")
+    bin_dir: files.join(files.join(root, "out"), "bin")
     files.create_dir_all(bin_dir) ?? panic("bin dir")
-    chromium :: files.join(bin_dir, "chromium")
+    chromium: files.join(bin_dir, "chromium")
     files.write(chromium, "x") ?? panic("chromium")
-    found :: env_browser_find_engine_binary(files.join(root, "out"), "chromium") ?? panic("find chromium")
+    found: env_browser_find_engine_binary(files.join(root, "out"), "chromium") ?? panic("find chromium")
     assert_eq(found, chromium)
     files.remove_all(root).drop("test cleanup")
 }

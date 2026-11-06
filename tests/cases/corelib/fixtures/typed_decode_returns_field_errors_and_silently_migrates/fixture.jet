@@ -1,23 +1,23 @@
 
 use {
-    json :: core.encoding.json
-    toml :: core.encoding.toml
-    csv :: core.encoding.csv
+    json: core.encoding.json
+    toml: core.encoding.toml
+    csv: core.encoding.csv
 }
 
 #[PublishedSchema, Codable]
-struct Config { port: Int  host: String }
+Config: struct { port: Int  host: String }
 
 migration Config {
     add host: String = "localhost"
 }
 
-fn run() ![FieldError] {
-    old :: json.decode<Config>("{{\"port\":2}}")
+run: fn() ![FieldError] {
+    old: json.decode<Config>("{{\"port\":2}}")
     print("json {old.port} {old.host}")
-    toml_old :: toml.decode<Config>("port = 3\n")
+    toml_old: toml.decode<Config>("port = 3\n")
     print("toml {toml_old.port} {toml_old.host}")
-    rows :: csv.decode<Config>("port\n4\n5\n")
+    rows: csv.decode<Config>("port\n4\n5\n")
     print("csv {rows.len()} {rows[1].port} {rows[1].host}")
     if json.decode<Config>("{{\"port\":\"nope\",\"host\":\"h\"}}") == {
         .Ok(value) -> print("unexpected {value.port}")

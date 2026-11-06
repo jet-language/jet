@@ -5,9 +5,9 @@ use {
     jet_parser.[parse_source]
 }
 
-fn pkg_test_selective_import(language: ForeignLanguage) {
-    root :: language.root()
-    list :: parse_source("use {root}.[lib1, lib2]\nfn run() {{ }}\n".bytes())
+pkg_test_selective_import: fn(language: ForeignLanguage) {
+    root: language.root()
+    list: parse_source("use {root}.[lib1, lib2]\nrun: fn() {{ }}\n".bytes())
     assert(list.diagnostics.is_empty(), "{root}: {list.diagnostics:Debug}")
     list.program.imports[0].kind == .Unqualified(module_alias, _, items, _, _) ?? panic("{root} list took a foreign-only parser branch")
     assert_eq(module_alias, root)
@@ -18,9 +18,9 @@ fn pkg_test_selective_import(language: ForeignLanguage) {
     assert_eq(items[1].original, "lib2")
     assert(items[1].alias == None, root)
 
-    single :: parse_source("use alias :: {root}.single\nfn run() {{ }}\n".bytes())
+    single: parse_source("use alias: {root}.single\nrun: fn() {{ }}\n".bytes())
     assert(single.diagnostics.is_empty(), "{root}: {single.diagnostics:Debug}")
-    import :: single.program.imports[0]
+    import: single.program.imports[0]
     import.kind == .Module(path, _) ?? panic("{root} single import changed parser shape")
     assert_eq(path, "{root}.single")
     assert_eq(import.alias, "alias")

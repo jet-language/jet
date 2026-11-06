@@ -1,19 +1,19 @@
 
-fn acquire(handle: Shared<Int>) -> SharedGuard<Int> {
+acquire: fn(handle: Shared<Int>) -> SharedGuard<Int> {
     return handle.guard_edit()
 }
 
-fn read_returned(handle: Shared<Int>) -> Int {
-    guard :: acquire(handle)
+read_returned: fn(handle: Shared<Int>) -> Int {
+    guard: acquire(handle)
     return guard.value
 }
 
-fn bump(handle: Shared<Int>) {
-    guard :: handle.guard_edit()
+bump: fn(handle: Shared<Int>) {
+    guard: handle.guard_edit()
     guard.value += 1
 }
 
-fn run() {
+run: fn() {
     cell := shared 6
     print(read_returned(cell))
     bump(cell)

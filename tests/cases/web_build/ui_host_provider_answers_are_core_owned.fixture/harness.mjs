@@ -1,5 +1,5 @@
 // A stub browser provider: it answers primitives only (capability flags,
-// clipboard text, raw queue events, dialog tokens and results). Every rule,
+// clipboard text, raw queue events, dialog tokens and results, key claims). Every rule,
 // decoded value and error the program prints is Core's. Multi-field answers
 // are provider records: each field is `<UTF-8 byte length>:<bytes>`.
 const encoder = new TextEncoder();
@@ -24,6 +24,7 @@ globalThis.jetUiProvider = {
   eventPop: (queue) => queues[queue].shift() ?? null,
   dialogRequest: (kind, request) => dialogs.push({ kind, request }) - 1,
   dialogResult: (token) => record(dialogs[token].kind === 0 ? ["selected", "notes/today.txt"] : ["cancelled"]),
+  keyClaim: () => true,
 };
 const { jet_main } = await import("./app.js");
 await jet_main();

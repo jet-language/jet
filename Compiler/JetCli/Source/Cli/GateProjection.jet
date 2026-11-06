@@ -8,18 +8,18 @@ use {
     jetpack_foundation.[UNIFIED_LOCK_FILE]
 }
 
-fn jet_cli_gate_ledger(compiled: JetDriverCompileResult) -> Shared<GateLedger>? Never! {
+jet_cli_gate_ledger: fn(compiled: JetDriverCompileResult) -> Shared<GateLedger>? Never! {
     loop doc in compiled.doc_modules {
         if doc.gate_ledger == .Val(ledger) -> return Val(ledger)
     }
     None
 }
 
-fn jet_cli_gate_entries_at(ledger: GateLedger, source: String, span: Span) -> [GateEntry] Never! {
+jet_cli_gate_entries_at: fn(ledger: GateLedger, source: String, span: Span) -> [GateEntry] Never! {
     rows := [GateEntry]{}
     loop entry in ledger.rows {
         if entry.source != source -> next
-        site :: entry.span ?? next
+        site: entry.span ?? next
         // copy: `entry` stays in the iterated collection (`entry` is a view of its element; no move
         // out of an element, E0225) and the pushed row owns its own.
         if span.start <= site.start && site.end <= span.end -> &rows.push(entry.copy())
@@ -29,7 +29,7 @@ fn jet_cli_gate_entries_at(ledger: GateLedger, source: String, span: Span) -> [G
 
 // Project the provenance that the canonical fact resolver already settled.
 // A forced writer is one build gate, not a new build-fact policy mechanism.
-fn jet_cli_gate_append_build_facts(ledger: &GateLedger, facts: [EffectiveFact]) Never! {
+jet_cli_gate_append_build_facts: fn(ledger: &GateLedger, facts: [EffectiveFact]) Never! {
     loop fact in facts {
         loop contribution in fact.provenance {
             if !contribution.force -> next
@@ -43,12 +43,12 @@ fn jet_cli_gate_append_build_facts(ledger: &GateLedger, facts: [EffectiveFact]) 
 // `build.allow`, then its lock's authority (else each locked package's effect
 // grants), workspace build grants and forced overrides, as external rows. Rows
 // are pushed in the Rust BTreeMap order (sorted keys).
-fn jet_cli_gate_append_package_writers(ledger: &GateLedger, snapshot: JetDriverAuthorizedSourceSnapshot) {
+jet_cli_gate_append_package_writers: fn(ledger: &GateLedger, snapshot: JetDriverAuthorizedSourceSnapshot) {
     loop root in snapshot.roots {
         if root.identity != snapshot.entry_root_identity -> next
-        facts :: jet_cli_root_package_facts(root) ?? break
+        facts: jet_cli_root_package_facts(root) ?? break
         jet_cli_gate_append_authority(&ledger, facts.authority, facts.origin)
-        recorded :: facts.provenance.get("build_allow") ?? [String]{}
+        recorded: facts.provenance.get("build_allow") ?? [String]{}
         loop allowed in facts.build_allow {
             provenance := recorded.copy()
             if provenance.len() == 0 -> &provenance.push("{facts.origin}:build.allow")
@@ -56,21 +56,21 @@ fn jet_cli_gate_append_package_writers(ledger: &GateLedger, snapshot: JetDriverA
         }
         break
     }
-    lock :: jet_cli_entry_lock(snapshot) ?? return
+    lock: jet_cli_entry_lock(snapshot) ?? return
     if lock.authority == .Val(authority) {
         jet_cli_gate_append_authority(&ledger, authority, UNIFIED_LOCK_FILE)
     } else {
         loop package in lock.packages {
             if package.effect_grants.len() == 0 && package.granted_effects.len() == 0 -> next
-            authority :: package.effect_authority ?? ".jet/lock effect provenance"
-            detail :: "required effects: {jet_cli_gate_effect_names(package.required_effects, package.effects)}; granted effects: {jet_cli_gate_effect_names(package.granted_effects, package.effect_grants)}; denied effects: {jet_cli_gate_effect_names(package.denied_effects, [String]{})}; authority: {authority}"
+            authority: package.effect_authority ?? ".jet/lock effect provenance"
+            detail: "required effects: {jet_cli_gate_effect_names(package.required_effects, package.effects)}; granted effects: {jet_cli_gate_effect_names(package.granted_effects, package.effect_grants)}; denied effects: {jet_cli_gate_effect_names(package.denied_effects, [String]{})}; authority: {authority}"
             gate_ledger_push(&ledger, jet_cli_gate_external(GateKind.DependencyGrant, "package", UNIFIED_LOCK_FILE, package.name, detail, [String]{"{UNIFIED_LOCK_FILE}:dependency.effect-grants"}))
         }
     }
     grants := lock.workspace_overlay_policy.build_grants.copy()
     &grants.sort_by((left: BuildGrant, right: BuildGrant) -> left.subject <=> right.subject)
     loop grant in grants {
-        detail :: "required effects: not evaluated; granted effects: {grant.effects.join(",")}; denied effects: none; authority: .jet/lock workspace authority"
+        detail: "required effects: not evaluated; granted effects: {grant.effects.join(",")}; denied effects: none; authority: .jet/lock workspace authority"
         gate_ledger_push(&ledger, jet_cli_gate_external(GateKind.DependencyGrant, "package", UNIFIED_LOCK_FILE, "build:{grant.subject}", detail, [String]{"{UNIFIED_LOCK_FILE}:workspace.build-grants"}))
     }
     loop overlay in lock.workspace_overlay_policy.overlays {
@@ -82,7 +82,7 @@ fn jet_cli_gate_append_package_writers(ledger: &GateLedger, snapshot: JetDriverA
                 if (package.field_priorities.get(name) ?? 0) >= 100 -> &fields.push(name)
             }
             if package.priority < 100 && fields.len() == 0 -> next
-            detail :: if fields.len() == 0 -> "workspace override" else -> "workspace override fields: {fields.join(",")}"
+            detail: if fields.len() == 0 -> "workspace override" else -> "workspace override fields: {fields.join(",")}"
             gate_ledger_push(&ledger, jet_cli_gate_external(GateKind.ForcePin, "package", UNIFIED_LOCK_FILE, package.package, detail, [String]{"{UNIFIED_LOCK_FILE}:overlay {overlay.name} priority=Force"}))
         }
     }
@@ -91,21 +91,21 @@ fn jet_cli_gate_append_package_writers(ledger: &GateLedger, snapshot: JetDriverA
 // `append_authority_entries` over one `authority:` block written at `source`.
 // Its own bound is `authority.allow`/`authority.deny` (#5070), the rest keep
 // their Rust subjects.
-fn jet_cli_gate_append_authority(ledger: &GateLedger, authority: PackageAuthority, source: String) {
-    held :: "{source} authority"
-    granted :: "{source} authority.grants"
+jet_cli_gate_append_authority: fn(ledger: &GateLedger, authority: PackageAuthority, source: String) {
+    held: "{source} authority"
+    granted: "{source} authority.grants"
     if authority.allow == .Val(allow) {
-        detail :: "required effects: not evaluated; granted effects: {allow.join(",")}; denied effects: none; authority: {held}"
+        detail: "required effects: not evaluated; granted effects: {allow.join(",")}; denied effects: none; authority: {held}"
         gate_ledger_push(&ledger, jet_cli_gate_external(GateKind.BuildFlag, "package", source, "authority.allow", detail, [String]{"{source}:authority.allow"}))
     }
     if authority.deny == .Val(deny) {
-        detail :: "required effects: not evaluated; granted effects: none; denied effects: {deny.join(",")}; authority: {held}"
+        detail: "required effects: not evaluated; granted effects: none; denied effects: {deny.join(",")}; authority: {held}"
         gate_ledger_push(&ledger, jet_cli_gate_external(GateKind.BuildFlag, "package", source, "authority.deny", detail, [String]{"{source}:authority.deny"}))
     }
     grants := authority.grants.copy()
     &grants.sort_by((left: PackageGrant, right: PackageGrant) -> left.package <=> right.package)
     loop grant in grants {
-        detail :: "required effects: not evaluated; granted effects: {grant.rights.join(",")}; denied effects: none; authority: {granted}"
+        detail: "required effects: not evaluated; granted effects: {grant.rights.join(",")}; denied effects: none; authority: {granted}"
         gate_ledger_push(&ledger, jet_cli_gate_external(GateKind.DependencyGrant, "package", source, grant.package, detail, [String]{"{source}:authority.grants"}))
     }
     if authority.trust == .Val(trust) {
@@ -132,7 +132,7 @@ fn jet_cli_gate_append_authority(ledger: &GateLedger, authority: PackageAuthorit
     }
 }
 
-fn jet_cli_gate_trust_label(decision: TrustDecision) -> String Never! {
+jet_cli_gate_trust_label: fn(decision: TrustDecision) -> String Never! {
     if decision == {
         .Allow -> "allow"
         .Prompt -> "prompt"
@@ -141,8 +141,8 @@ fn jet_cli_gate_trust_label(decision: TrustDecision) -> String Never! {
 }
 
 // `effect_names`: `primary`, else `fallback`, else `none`.
-fn jet_cli_gate_effect_names(primary: [String], fallback: [String]) -> String Never! {
-    effects :: if primary.len() > 0 -> primary else -> fallback
+jet_cli_gate_effect_names: fn(primary: [String], fallback: [String]) -> String Never! {
+    effects: if primary.len() > 0 -> primary else -> fallback
     if effects.len() == 0 -> return "none"
     effects.join(",")
 }

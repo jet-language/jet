@@ -1,17 +1,17 @@
 
-use db :: core.db
+use db: core.db
 
-fn run() {
-    conn :: db.open_memory()
-    policy :: db.policy("person", "true") ?? panic("policy")
+run: fn() {
+    conn: db.open_memory()
+    policy: db.policy("person", "true") ?? panic("policy")
     scoped := conn.with_policy(policy, "owner")
-    _ :: db.migrate(scoped, "person-v1", [
+    _: db.migrate(scoped, "person-v1", [
         SQL{"CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT)"}
     ]) ?? panic("create")
-    _ :: scoped.execute(
+    _: scoped.execute(
         SQL{"INSERT INTO person (id, name) VALUES (7, 'Ada')"}
     ) ?? panic("insert")
-    present :: scoped.query_one(
+    present: scoped.query_one(
         SQL{"SELECT id, name FROM person WHERE id = 7"}
     )
     if present == {
@@ -20,9 +20,9 @@ fn run() {
         }
         .None -> { panic("present row absent") }
     }
-    absent :: scoped.query_one(
+    absent: scoped.query_one(
         SQL{"SELECT id, name FROM person WHERE id = 99"}
     )
     if absent == .None { print("absent") } else { panic("absent row present") }
-    _closed :: scoped.close()
+    _closed: scoped.close()
 }

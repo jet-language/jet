@@ -61,7 +61,7 @@ export function consumerTree(files, entries, prefix) {
     const groups = [];
     for (let start = 0; start < level.length; start += GROUP) {
       const name = `${prefix}_l${depth}_g${start / GROUP}`;
-      const body = [`fn ${name}(seed: Int) -> Int {`, `    acc := seed % ${M}`];
+      const body = [`${name}: fn(seed: Int) -> Int {`, `    acc := seed % ${M}`];
       level.slice(start, start + GROUP).forEach((entry, index) => {
         body.push(`    acc = (acc * 31 + ${entry}(acc + ${index + 1})) % ${M}`);
       });
@@ -81,7 +81,7 @@ export function consumerTree(files, entries, prefix) {
 // The entry file: `run` folds every root into one checksum line, after any
 // declarations the shape already placed in main.jet.
 export function finish(name, files, roots) {
-  const lines = ['fn run() {', `    checksum := 0`];
+  const lines = ['run: fn() {', `    checksum := 0`];
   roots.forEach((root, index) => lines.push(`    checksum = (checksum * 31 + ${root}(${index + 1})) % ${M}`));
   lines.push(`    print("${name} checksum {checksum}")`, '}', '');
   files['main.jet'] = `${files['main.jet'] ? `${files['main.jet']}\n` : ''}${lines.join('\n')}`;

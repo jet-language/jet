@@ -1,31 +1,31 @@
 // A returned view that borrows a temporary argument or receiver is
 // refused at the call itself, also when the call sits inside another
 // expression: the temporary owner is dropped when the call returns.
-enum Packet {
+Packet: enum {
     Data([Int])
     Empty
 }
 
-struct Bag {
+Bag: struct {
     items: [Int]
 }
 
 impl Bag {
-    fn window(self) -> View<Int> from self {
+    window: fn(self) -> View<Int> from self {
         self.items[0..1]
     }
 }
 
-fn head(packet: Packet, spare: [Int]) -> View<Int> from packet | spare {
+head: fn(packet: Packet, spare: [Int]) -> View<Int> from packet | spare {
     if packet == .Data(items) -> return items[0..1]
     spare[0..0]
 }
 
-fn make() -> Bag {
+make: fn() -> Bag {
     Bag{items: [Int]{7, 8, 9}}
 }
 
-fn run() {
+run: fn() {
     print(head(Packet.Data([Int]{7, 8}), [Int]{0}))
     print(make().window())
 }

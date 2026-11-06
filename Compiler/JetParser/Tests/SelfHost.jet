@@ -7,12 +7,12 @@
 // separately runs this same suite through native U2 r3/M3.
 use jet_foundation.[diagnostic_render_all]
 
-struct ParserSelfHostCase {
+ParserSelfHostCase: struct {
     name: String
     source: String
     expected: [Int]
 }
-struct ParserSelfHostSnapshot {
+ParserSelfHostSnapshot: struct {
     file: String
     source: String
     expected: String
@@ -20,12 +20,12 @@ struct ParserSelfHostSnapshot {
 
 #Test("generated_jet_call_arguments_match_native_parser_contract") {
     loop testcase in parser_selfhost_cases() {
-        parsed :: parser_test_result(testcase.source)
+        parsed: parser_test_result(testcase.source)
         if !testcase.source.contains(";") {
-            rendered :: diagnostic_render_all(testcase.name, testcase.source, parsed.diagnostics, false)
+            rendered: diagnostic_render_all(testcase.name, testcase.source, parsed.diagnostics, false)
             assert(!rendered.contains("`;`"), "{testcase.name}: diagnostic names a synthetic terminator: {rendered}")
         }
-        actual :: selfhost_parser_result_facts(parsed)
+        actual: selfhost_parser_result_facts(parsed)
         if testcase.name.starts_with("unclosed-") {
             assert(actual[0] == 1, "{testcase.name}: exactly one teaching diagnostic")
         }
@@ -34,17 +34,17 @@ struct ParserSelfHostSnapshot {
 
     // Render actual Jet parser diagnostics, not frozen CLI reports.
     loop snapshot in parser_selfhost_snapshots() {
-        parsed :: parser_test_result(snapshot.source)
+        parsed: parser_test_result(snapshot.source)
         if snapshot.file.contains("unclosed_") {
             assert(parsed.diagnostics.len() == 1, "{snapshot.file}: exactly one report")
         }
-        rendered :: diagnostic_render_all(snapshot.file, snapshot.source, parsed.diagnostics, false)
+        rendered: diagnostic_render_all(snapshot.file, snapshot.source, parsed.diagnostics, false)
         assert(!rendered.contains("found `;`"), "{snapshot.file}: synthetic terminator wording: {rendered}")
         assert(rendered.trim_end() == snapshot.expected.trim_end(), "{snapshot.file}: Jet-produced UI snapshot; actual={rendered:Debug}, expected={snapshot.expected:Debug}")
     }
 }
 
-fn parser_selfhost_cases() -> [ParserSelfHostCase] {
+parser_selfhost_cases: fn() -> [ParserSelfHostCase] {
     [ParserSelfHostCase]{
         {name: "unmarked-read", source: "f(x)", expected: [Int]{
             0, 1, 1, 0, 2, 3, 0, 0, 1, 1, 120, 2, 3,
@@ -103,10 +103,10 @@ fn parser_selfhost_cases() -> [ParserSelfHostCase] {
             108, 108, 35, 101, 46, 103, 46, 32, 96, 120, 96, 44, 32, 96, 52, 50, 96, 44, 32, 96, 51, 46, 53, 96,
             44, 32, 111, 114, 32, 96, 34, 104, 101, 108, 108, 111, 34, 96, 1, 2, 5, 0, 0, 0, 0, 0, 0,
         }},
-        {name: "declaration-marker-use-label", source: "#M(use: x) fn run() {{}}", expected: [Int]{
+        {name: "declaration-marker-use-label", source: "#M(use: x) run: fn() {{}}", expected: [Int]{
             0, 2, 1, 1, 3, 117, 115, 101, 3, 6, 1, 1, 120, 8, 9,
         }},
-        {name: "marker-group-use-label", source: "#[M(use: x)] fn run() {{}}", expected: [Int]{
+        {name: "marker-group-use-label", source: "#[M(use: x)] run: fn() {{}}", expected: [Int]{
             1, 5, 69, 48, 57, 57, 57, 1, 38, 79, 110, 101, 32, 109, 97, 114, 107, 101, 114, 32, 105, 115, 32, 119,
             114, 105, 116, 116, 101, 110, 32, 119, 105, 116, 104, 111, 117, 116, 32, 98, 114, 97, 99, 107, 101, 116, 115, 57,
             66, 114, 97, 99, 107, 101, 116, 115, 32, 103, 114, 111, 117, 112, 32, 116, 119, 111, 32, 111, 114, 32, 109, 111,
@@ -133,7 +133,7 @@ fn parser_selfhost_cases() -> [ParserSelfHostCase] {
             0, 1, 1, 0, 2, 3, 0, 0, 6, 1, 109, 8, 9, 2, 11, 0, 5, 1, 98, 5, 6, 2, 6, 1,
             1, 97, 2, 3,
         }},
-        {name: "arm-table-braced", source: "fn show(score: Int) {{\n    if score >= 90 {{\n        print(\"a\")\n    }} else if score >= 80 {{\n        print(\"b\")\n    }} else {{\n        print(\"c\")\n    }}\n    print(\"done\")\n}}\n", expected: [Int]{
+        {name: "arm-table-braced", source: "show: fn(score: Int) {{\n    if score >= 90 {{\n        print(\"a\")\n    }} else if score >= 80 {{\n        print(\"b\")\n    }} else {{\n        print(\"c\")\n    }}\n    print(\"done\")\n}}\n", expected: [Int]{
             1, 5, 76, 48, 53, 48, 55, 2, 43, 80, 114, 101, 102, 101, 114, 32, 97, 110, 32, 111, 114, 100, 101, 114,
             101, 100, 32, 97, 114, 109, 32, 116, 97, 98, 108, 101, 32, 102, 111, 114, 32, 116, 104, 105, 115, 32, 98, 114,
             97, 110, 99, 104, 77, 79, 110, 101, 32, 111, 114, 100, 101, 114, 101, 100, 32, 97, 114, 109, 32, 116, 97, 98,
@@ -151,7 +151,7 @@ fn parser_selfhost_cases() -> [ParserSelfHostCase] {
             105, 110, 116, 40, 34, 99, 34, 41, 10, 32, 32, 32, 32, 32, 32, 32, 32, 125, 10, 32, 32, 32, 32, 125,
             1, 1, 0, 0, 0,
         }},
-        {name: "arm-table-arrow", source: "fn run() {{\n    if false -> print(\"a\") else if true -> print(\"b\") else -> print(\"c\")\n}}\n", expected: [Int]{
+        {name: "arm-table-arrow", source: "run: fn() {{\n    if false -> print(\"a\") else if true -> print(\"b\") else -> print(\"c\")\n}}\n", expected: [Int]{
             1, 5, 76, 48, 53, 48, 55, 2, 43, 80, 114, 101, 102, 101, 114, 32, 97, 110, 32, 111, 114, 100, 101, 114,
             101, 100, 32, 97, 114, 109, 32, 116, 97, 98, 108, 101, 32, 102, 111, 114, 32, 116, 104, 105, 115, 32, 98, 114,
             97, 110, 99, 104, 77, 79, 110, 101, 32, 111, 114, 100, 101, 114, 101, 100, 32, 97, 114, 109, 32, 116, 97, 98,
@@ -165,7 +165,7 @@ fn parser_selfhost_cases() -> [ParserSelfHostCase] {
             34, 41, 10, 32, 32, 32, 32, 32, 32, 32, 32, 101, 108, 115, 101, 32, 45, 62, 32, 112, 114, 105, 110, 116,
             40, 34, 99, 34, 41, 10, 32, 32, 32, 32, 125, 1, 1, 0, 0, 0,
         }},
-        {name: "arm-table-value", source: "fn run() {{\n    answer :: if true -> {{\n        value :: 40 + 2\n        value\n    }} else -> 0\n    print(answer)\n}}\n", expected: [Int]{
+        {name: "arm-table-value", source: "run: fn() {{\n    answer: if true -> {{\n        value: 40 + 2\n        value\n    }} else -> 0\n    print(answer)\n}}\n", expected: [Int]{
             1, 5, 76, 48, 53, 48, 55, 2, 43, 80, 114, 101, 102, 101, 114, 32, 97, 110, 32, 111, 114, 100, 101, 114,
             101, 100, 32, 97, 114, 109, 32, 116, 97, 98, 108, 101, 32, 102, 111, 114, 32, 116, 104, 105, 115, 32, 98, 114,
             97, 110, 99, 104, 77, 79, 110, 101, 32, 111, 114, 100, 101, 114, 101, 100, 32, 97, 114, 109, 32, 116, 97, 98,
@@ -180,7 +180,7 @@ fn parser_selfhost_cases() -> [ParserSelfHostCase] {
             32, 32, 32, 32, 32, 32, 101, 108, 115, 101, 32, 45, 62, 32, 48, 10, 32, 32, 32, 32, 125, 1, 1, 0,
             0, 0,
         }},
-        {name: "arm-table-nested", source: "fn run(a: Bool, b: Bool) {{\n    if a {{\n        if b {{\n            print(\"1\")\n        }} else if a {{\n            print(\"2\")\n        }}\n    }} else if b {{\n        print(\"3\")\n    }}\n}}\n", expected: [Int]{
+        {name: "arm-table-nested", source: "run: fn(a: Bool, b: Bool) {{\n    if a {{\n        if b {{\n            print(\"1\")\n        }} else if a {{\n            print(\"2\")\n        }}\n    }} else if b {{\n        print(\"3\")\n    }}\n}}\n", expected: [Int]{
             2, 5, 76, 48, 53, 48, 55, 2, 43, 80, 114, 101, 102, 101, 114, 32, 97, 110, 32, 111, 114, 100, 101, 114,
             101, 100, 32, 97, 114, 109, 32, 116, 97, 98, 108, 101, 32, 102, 111, 114, 32, 116, 104, 105, 115, 32, 98, 114,
             97, 110, 99, 104, 77, 79, 110, 101, 32, 111, 114, 100, 101, 114, 101, 100, 32, 97, 114, 109, 32, 116, 97, 98,
@@ -212,7 +212,7 @@ fn parser_selfhost_cases() -> [ParserSelfHostCase] {
             112, 114, 105, 110, 116, 40, 34, 51, 34, 41, 10, 32, 32, 32, 32, 32, 32, 32, 32, 125, 10, 32, 32, 32,
             32, 125, 1, 1, 0, 0, 0,
         }},
-        {name: "arm-table-comment-refusal", source: "fn run(a: Bool) {{\n    if a {{\n        print(\"x\")\n    }} /* keep */ else if !a {{\n        print(\"y\")\n    }}\n}}\n", expected: [Int]{
+        {name: "arm-table-comment-refusal", source: "run: fn(a: Bool) {{\n    if a {{\n        print(\"x\")\n    }} /* keep */ else if !a {{\n        print(\"y\")\n    }}\n}}\n", expected: [Int]{
             1, 5, 76, 48, 53, 48, 55, 2, 43, 80, 114, 101, 102, 101, 114, 32, 97, 110, 32, 111, 114, 100, 101, 114,
             101, 100, 32, 97, 114, 109, 32, 116, 97, 98, 108, 101, 32, 102, 111, 114, 32, 116, 104, 105, 115, 32, 98, 114,
             97, 110, 99, 104, 77, 79, 110, 101, 32, 111, 114, 100, 101, 114, 101, 100, 32, 97, 114, 109, 32, 116, 97, 98,
@@ -254,7 +254,7 @@ fn parser_selfhost_cases() -> [ParserSelfHostCase] {
             0, 1, 4, 0, 2, 3, 0, 0, 0, 0, 17, 18, 0, 0, 0, 0, 32, 33, 0, 0, 0, 0, 45, 46,
             0, 0, 0,
         }},
-        {name: "unclosed-paren-call-p16", source: "fn run() {{\n    print(\"hello\"\n}}\n", expected: [Int]{
+        {name: "unclosed-paren-call-p16", source: "run: fn() {{\n    print(\"hello\"\n}}\n", expected: [Int]{
             1, 5, 69, 48, 48, 56, 51, 1, 36, 96, 40, 96, 32, 111, 112, 101, 110, 101, 100, 32, 111, 110, 32, 108,
             105, 110, 101, 32, 50, 32, 105, 115, 32, 110, 101, 118, 101, 114, 32, 99, 108, 111, 115, 101, 100, 66, 69, 118,
             101, 114, 121, 32, 96, 40, 96, 32, 110, 101, 101, 100, 115, 32, 97, 32, 109, 97, 116, 99, 104, 105, 110, 103,
@@ -265,7 +265,7 @@ fn parser_selfhost_cases() -> [ParserSelfHostCase] {
             32, 108, 105, 110, 101, 32, 99, 111, 109, 101, 115, 32, 98, 101, 102, 111, 114, 101, 32, 116, 104, 101, 32, 99,
             108, 111, 115, 105, 110, 103, 32, 96, 41, 96, 0, 0,
         }},
-        {name: "unclosed-bracket-list", source: "fn run() {{\n    values :: [1, 2, 3\n    print(values.len())\n}}\n", expected: [Int]{
+        {name: "unclosed-bracket-list", source: "run: fn() {{\n    values: [1, 2, 3\n    print(values.len())\n}}\n", expected: [Int]{
             1, 5, 69, 48, 48, 56, 51, 1, 36, 96, 91, 96, 32, 111, 112, 101, 110, 101, 100, 32, 111, 110, 32, 108,
             105, 110, 101, 32, 50, 32, 105, 115, 32, 110, 101, 118, 101, 114, 32, 99, 108, 111, 115, 101, 100, 66, 69, 118,
             101, 114, 121, 32, 96, 91, 96, 32, 110, 101, 101, 100, 115, 32, 97, 32, 109, 97, 116, 99, 104, 105, 110, 103,
@@ -276,7 +276,7 @@ fn parser_selfhost_cases() -> [ParserSelfHostCase] {
             32, 108, 105, 110, 101, 32, 99, 111, 109, 101, 115, 32, 98, 101, 102, 111, 114, 101, 32, 116, 104, 101, 32, 99,
             108, 111, 115, 105, 110, 103, 32, 96, 93, 96, 0, 0,
         }},
-        {name: "unclosed-brace-block", source: "fn run() {{\n    print(\"hello\")\n", expected: [Int]{
+        {name: "unclosed-brace-block", source: "run: fn() {{\n    print(\"hello\")\n", expected: [Int]{
             1, 5, 69, 48, 48, 56, 51, 1, 36, 96, 123, 96, 32, 111, 112, 101, 110, 101, 100, 32, 111, 110, 32, 108,
             105, 110, 101, 32, 49, 32, 105, 115, 32, 110, 101, 118, 101, 114, 32, 99, 108, 111, 115, 101, 100, 66, 69, 118,
             101, 114, 121, 32, 96, 123, 96, 32, 110, 101, 101, 100, 115, 32, 97, 32, 109, 97, 116, 99, 104, 105, 110, 103,
@@ -287,7 +287,7 @@ fn parser_selfhost_cases() -> [ParserSelfHostCase] {
             101, 32, 102, 105, 108, 101, 32, 99, 111, 109, 101, 115, 32, 98, 101, 102, 111, 114, 101, 32, 116, 104, 101, 32,
             99, 108, 111, 115, 105, 110, 103, 32, 96, 125, 96, 0, 0,
         }},
-        {name: "unclosed-brace-interpolation", source: "fn run() {{\n    count :: 1\n    print(\"count {{count\")\n}}\n", expected: [Int]{
+        {name: "unclosed-brace-interpolation", source: "run: fn() {{\n    count: 1\n    print(\"count {{count\")\n}}\n", expected: [Int]{
             1, 5, 69, 48, 48, 48, 50, 1, 34, 84, 104, 105, 115, 32, 96, 123, 96, 32, 110, 101, 118, 101, 114, 32,
             103, 101, 116, 115, 32, 97, 32, 109, 97, 116, 99, 104, 105, 110, 103, 32, 96, 125, 96, 174, 96, 123, 96, 32,
             105, 110, 115, 105, 100, 101, 32, 113, 117, 111, 116, 101, 100, 32, 116, 101, 120, 116, 32, 115, 116, 97, 114, 116,
@@ -303,7 +303,7 @@ fn parser_selfhost_cases() -> [ParserSelfHostCase] {
             116, 104, 101, 32, 116, 101, 120, 116, 32, 97, 115, 32, 96, 96, 226, 128, 166, 96, 96, 32, 102, 111, 114, 32,
             114, 97, 119, 32, 116, 101, 120, 116, 1, 43, 54, 0, 0, 0, 0, 0, 0,
         }},
-        {name: "type-prefix-list-element", source: "struct Entry {{ tags: [?String] }}", expected: [Int]{
+        {name: "type-prefix-list-element", source: "Entry: struct {{ tags: [?String] }}", expected: [Int]{
             1, 13, 69, 45, 84, 89, 80, 69, 45, 80, 82, 69, 70, 73, 88, 1, 44, 96, 63, 84, 96, 32, 97, 110,
             100, 32, 96, 33, 69, 96, 32, 97, 114, 101, 32, 114, 101, 116, 105, 114, 101, 100, 32, 112, 114, 101, 102, 105,
             120, 32, 116, 121, 112, 101, 32, 109, 97, 114, 107, 115, 46, 128, 65, 32, 116, 121, 112, 101, 32, 109, 97, 114,
@@ -318,7 +318,7 @@ fn parser_selfhost_cases() -> [ParserSelfHostCase] {
             96, 32, 102, 111, 114, 32, 96, 33, 40, 65, 32, 124, 32, 66, 41, 96, 46, 1, 22, 29, 1, 22, 29, 7,
             83, 116, 114, 105, 110, 103, 63, 1, 1, 0, 0, 0,
         }},
-        {name: "type-prefix-optional-result", source: "fn find(id: Int) -> ?Entry {{ return None }}", expected: [Int]{
+        {name: "type-prefix-optional-result", source: "find: fn(id: Int) -> ?Entry {{ return None }}", expected: [Int]{
             1, 13, 69, 45, 84, 89, 80, 69, 45, 80, 82, 69, 70, 73, 88, 1, 44, 96, 63, 84, 96, 32, 97, 110,
             100, 32, 96, 33, 69, 96, 32, 97, 114, 101, 32, 114, 101, 116, 105, 114, 101, 100, 32, 112, 114, 101, 102, 105,
             120, 32, 116, 121, 112, 101, 32, 109, 97, 114, 107, 115, 46, 128, 65, 32, 116, 121, 112, 101, 32, 109, 97, 114,
@@ -333,7 +333,7 @@ fn parser_selfhost_cases() -> [ParserSelfHostCase] {
             96, 32, 102, 111, 114, 32, 96, 33, 40, 65, 32, 124, 32, 66, 41, 96, 46, 1, 20, 26, 1, 20, 26, 6,
             69, 110, 116, 114, 121, 63, 1, 1, 0, 0, 0,
         }},
-        {name: "type-prefix-optional-literal", source: "limit :: ?Int{{None}}", expected: [Int]{
+        {name: "type-prefix-optional-literal", source: "limit: ?Int{{None}}", expected: [Int]{
             1, 13, 69, 45, 84, 89, 80, 69, 45, 80, 82, 69, 70, 73, 88, 1, 44, 96, 63, 84, 96, 32, 97, 110,
             100, 32, 96, 33, 69, 96, 32, 97, 114, 101, 32, 114, 101, 116, 105, 114, 101, 100, 32, 112, 114, 101, 102, 105,
             120, 32, 116, 121, 112, 101, 32, 109, 97, 114, 107, 115, 46, 128, 65, 32, 116, 121, 112, 101, 32, 109, 97, 114,
@@ -348,7 +348,7 @@ fn parser_selfhost_cases() -> [ParserSelfHostCase] {
             96, 32, 102, 111, 114, 32, 96, 33, 40, 65, 32, 124, 32, 66, 41, 96, 46, 1, 9, 13, 1, 9, 13, 4,
             73, 110, 116, 63, 1, 1, 0, 0, 0,
         }},
-        {name: "type-prefix-unit-contract", source: "fn save(id: Int) !SaveError {{}}", expected: [Int]{
+        {name: "type-prefix-unit-contract", source: "save: fn(id: Int) !SaveError {{}}", expected: [Int]{
             1, 13, 69, 45, 84, 89, 80, 69, 45, 80, 82, 69, 70, 73, 88, 1, 44, 96, 63, 84, 96, 32, 97, 110,
             100, 32, 96, 33, 69, 96, 32, 97, 114, 101, 32, 114, 101, 116, 105, 114, 101, 100, 32, 112, 114, 101, 102, 105,
             120, 32, 116, 121, 112, 101, 32, 109, 97, 114, 107, 115, 46, 128, 65, 32, 116, 121, 112, 101, 32, 109, 97, 114,
@@ -363,7 +363,7 @@ fn parser_selfhost_cases() -> [ParserSelfHostCase] {
             96, 32, 102, 111, 114, 32, 96, 33, 40, 65, 32, 124, 32, 66, 41, 96, 46, 1, 17, 27, 1, 17, 27, 10,
             83, 97, 118, 101, 69, 114, 114, 111, 114, 33, 1, 1, 0, 0, 0,
         }},
-        {name: "type-prefix-value-contract", source: "fn load() -> Int !SaveError {{ return Ok(1) }}", expected: [Int]{
+        {name: "type-prefix-value-contract", source: "load: fn() -> Int !SaveError {{ return Ok(1) }}", expected: [Int]{
             1, 13, 69, 45, 84, 89, 80, 69, 45, 80, 82, 69, 70, 73, 88, 1, 44, 96, 63, 84, 96, 32, 97, 110,
             100, 32, 96, 33, 69, 96, 32, 97, 114, 101, 32, 114, 101, 116, 105, 114, 101, 100, 32, 112, 114, 101, 102, 105,
             120, 32, 116, 121, 112, 101, 32, 109, 97, 114, 107, 115, 46, 128, 65, 32, 116, 121, 112, 101, 32, 109, 97, 114,
@@ -378,7 +378,7 @@ fn parser_selfhost_cases() -> [ParserSelfHostCase] {
             96, 32, 102, 111, 114, 32, 96, 33, 40, 65, 32, 124, 32, 66, 41, 96, 46, 1, 17, 27, 1, 17, 27, 10,
             83, 97, 118, 101, 69, 114, 114, 111, 114, 33, 1, 1, 0, 0, 0,
         }},
-        {name: "type-prefix-union-contract", source: "fn load() -> Int !(SaveError | LoadError) {{ return Ok(1) }}", expected: [Int]{
+        {name: "type-prefix-union-contract", source: "load: fn() -> Int !(SaveError | LoadError) {{ return Ok(1) }}", expected: [Int]{
             3, 5, 69, 48, 48, 48, 51, 1, 65, 84, 104, 105, 115, 32, 117, 110, 105, 116, 45, 102, 97, 108, 108, 105,
             98, 108, 101, 32, 115, 105, 103, 110, 97, 116, 117, 114, 101, 32, 117, 115, 101, 115, 32, 116, 104, 101, 32, 114,
             101, 116, 105, 114, 101, 100, 32, 97, 114, 114, 111, 119, 45, 97, 110, 100, 45, 117, 110, 105, 116, 32, 102, 111,
@@ -414,13 +414,13 @@ fn parser_selfhost_cases() -> [ParserSelfHostCase] {
     }
 }
 
-fn parser_selfhost_snapshots() -> [ParserSelfHostSnapshot] {
+parser_selfhost_snapshots: fn() -> [ParserSelfHostSnapshot] {
     [ParserSelfHostSnapshot]{
-        {file: "tests/ui/unclosed_paren_call.jet", source: "fn run() {{\n    print(\"hello\"\n}}\n", expected: "Error [jet.UnclosedDelimiter]: `(` opened on line 2 is never closed\n  --> tests/ui/unclosed_paren_call.jet:2:10\n    |\n  2 |     print(\"hello\"\n    |          ^\n  --> tests/ui/unclosed_paren_call.jet:2:18\n    |\n  2 |     print(\"hello\"\n    |                  ^ the end of the line comes before the closing `)`\n Why: Every `(` needs a matching `)`, but the end of the line came first\n Fix: Add `)` where the call ends\nMore: jet-lang.dev/e/E0083\n"},
-        {file: "tests/ui/unclosed_bracket_list.jet", source: "fn run() {{\n    values :: [1, 2, 3\n    print(values.len())\n}}\n", expected: "Error [jet.UnclosedDelimiter]: `[` opened on line 2 is never closed\n  --> tests/ui/unclosed_bracket_list.jet:2:15\n    |\n  2 |     values :: [1, 2, 3\n    |               ^\n  --> tests/ui/unclosed_bracket_list.jet:2:23\n    |\n  2 |     values :: [1, 2, 3\n    |                       ^ the end of the line comes before the closing `]`\n Why: Every `[` needs a matching `]`, but the end of the line came first\n Fix: Add `]` where the list ends\nMore: jet-lang.dev/e/E0083\n"},
-        {file: "tests/ui/unclosed_brace_block.jet", source: "fn run() {{\n    print(\"hello\")\n", expected: "Error [jet.UnclosedDelimiter]: `{{` opened on line 1 is never closed\n  --> tests/ui/unclosed_brace_block.jet:1:10\n    |\n  1 | fn run() {{\n    |          ^\n  --> tests/ui/unclosed_brace_block.jet:2:19\n    |\n  2 |     print(\"hello\")\n    |                   ^ the end of the file comes before the closing `}}`\n Why: Every `{{` needs a matching `}}`, but the end of the file came first\n Fix: Add `}}` where the block ends\nMore: jet-lang.dev/e/E0083\n"},
-        {file: "tests/ui/unclosed_brace_interpolation.jet", source: "fn run() {{\n    count :: 1\n    print(\"count {{count\")\n}}\n", expected: "Error [jet.UnterminatedText]: This `{{` never gets a matching `}}`\n  --> tests/ui/unclosed_brace_interpolation.jet:3:18\n    |\n  3 |     print(\"count {{count\")\n    |                  ^^^^^^^^\n Why: `{{` inside quoted text starts an interpolated value and needs a closing `}}` before the text ends; escaped braces use `{{{{`/`}}}}`, while raw backtick strings keep braces literal\n Fix: Add a `}}` after the value, write `{{{{` for an escaped brace, or write the text as ``…`` for raw text\nMore: jet-lang.dev/e/E0002\n"},
-        {file: "tests/ui/logic_mix_or_then_and.jet", source: "fn run() {{\n    a :: true\n    b :: false\n    c :: true\n    print(a || b && c)\n}}\n", expected: "Error [jet.MixedLogicWithoutParentheses]: `&&` and `||` are mixed here without parentheses\n  --> tests/ui/logic_mix_or_then_and.jet:5:16\n    |\n  5 |     print(a || b && c)\n    |                ^^^^^^\n Why: `&&` binds tighter than `||`, but readers often misjudge that, so Jet asks you to show the grouping\n Fix: Write `(b && c)` to keep today's meaning, or regroup the conditions the way you intended\nMore: jet-lang.dev/e/E0082\n"},
-        {file: "tests/ui/logic_mix_and_then_or.jet", source: "fn run() {{\n    a :: true\n    b :: false\n    c :: true\n    print(a && b || c)\n}}\n", expected: "Error [jet.MixedLogicWithoutParentheses]: `&&` and `||` are mixed here without parentheses\n  --> tests/ui/logic_mix_and_then_or.jet:5:11\n    |\n  5 |     print(a && b || c)\n    |           ^^^^^^\n Why: `&&` binds tighter than `||`, but readers often misjudge that, so Jet asks you to show the grouping\n Fix: Write `(a && b)` to keep today's meaning, or regroup the conditions the way you intended\nMore: jet-lang.dev/e/E0082\n"},
+        {file: "tests/ui/unclosed_paren_call.jet", source: "run: fn() {{\n    print(\"hello\"\n}}\n", expected: "Error [jet.UnclosedDelimiter]: `(` opened on line 2 is never closed\n  --> tests/ui/unclosed_paren_call.jet:2:10\n    |\n  2 |     print(\"hello\"\n    |          ^\n  --> tests/ui/unclosed_paren_call.jet:2:18\n    |\n  2 |     print(\"hello\"\n    |                  ^ the end of the line comes before the closing `)`\n Why: Every `(` needs a matching `)`, but the end of the line came first\n Fix: Add `)` where the call ends\nMore: jet-lang.dev/e/E0083\n"},
+        {file: "tests/ui/unclosed_bracket_list.jet", source: "run: fn() {{\n    values: [1, 2, 3\n    print(values.len())\n}}\n", expected: "Error [jet.UnclosedDelimiter]: `[` opened on line 2 is never closed\n  --> tests/ui/unclosed_bracket_list.jet:2:13\n    |\n  2 |     values: [1, 2, 3\n    |             ^\n  --> tests/ui/unclosed_bracket_list.jet:2:21\n    |\n  2 |     values: [1, 2, 3\n    |                     ^ the end of the line comes before the closing `]`\n Why: Every `[` needs a matching `]`, but the end of the line came first\n Fix: Add `]` where the list ends\nMore: jet-lang.dev/e/E0083\n"},
+        {file: "tests/ui/unclosed_brace_block.jet", source: "run: fn() {{\n    print(\"hello\")\n", expected: "Error [jet.UnclosedDelimiter]: `{{` opened on line 1 is never closed\n  --> tests/ui/unclosed_brace_block.jet:1:11\n    |\n  1 | run: fn() {{\n    |           ^\n  --> tests/ui/unclosed_brace_block.jet:2:19\n    |\n  2 |     print(\"hello\")\n    |                   ^ the end of the file comes before the closing `}}`\n Why: Every `{{` needs a matching `}}`, but the end of the file came first\n Fix: Add `}}` where the block ends\nMore: jet-lang.dev/e/E0083\n"},
+        {file: "tests/ui/unclosed_brace_interpolation.jet", source: "run: fn() {{\n    count: 1\n    print(\"count {{count\")\n}}\n", expected: "Error [jet.UnterminatedText]: This `{{` never gets a matching `}}`\n  --> tests/ui/unclosed_brace_interpolation.jet:3:18\n    |\n  3 |     print(\"count {{count\")\n    |                  ^^^^^^^^\n Why: `{{` inside quoted text starts an interpolated value and needs a closing `}}` before the text ends; escaped braces use `{{{{`/`}}}}`, while raw backtick strings keep braces literal\n Fix: Add a `}}` after the value, write `{{{{` for an escaped brace, or write the text as ``…`` for raw text\nMore: jet-lang.dev/e/E0002\n"},
+        {file: "tests/ui/logic_mix_or_then_and.jet", source: "run: fn() {{\n    a: true\n    b: false\n    c: true\n    print(a || b && c)\n}}\n", expected: "Error [jet.MixedLogicWithoutParentheses]: `&&` and `||` are mixed here without parentheses\n  --> tests/ui/logic_mix_or_then_and.jet:5:16\n    |\n  5 |     print(a || b && c)\n    |                ^^^^^^\n Why: `&&` binds tighter than `||`, but readers often misjudge that, so Jet asks you to show the grouping\n Fix: Write `(b && c)` to keep today's meaning, or regroup the conditions the way you intended\nMore: jet-lang.dev/e/E0082\n"},
+        {file: "tests/ui/logic_mix_and_then_or.jet", source: "run: fn() {{\n    a: true\n    b: false\n    c: true\n    print(a && b || c)\n}}\n", expected: "Error [jet.MixedLogicWithoutParentheses]: `&&` and `||` are mixed here without parentheses\n  --> tests/ui/logic_mix_and_then_or.jet:5:11\n    |\n  5 |     print(a && b || c)\n    |           ^^^^^^\n Why: `&&` binds tighter than `||`, but readers often misjudge that, so Jet asks you to show the grouping\n Fix: Write `(a && b)` to keep today's meaning, or regroup the conditions the way you intended\nMore: jet-lang.dev/e/E0082\n"},
     }
 }

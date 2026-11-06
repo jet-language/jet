@@ -1,27 +1,27 @@
 // UDP receive kernels and the UDPPacket carrier. Packet96: inline Socket56
 // addr@0, truncated@56, native List<U8> header @64 [length, capacity, data],
 // original_len@88.
-NET_UDP_PACKET_BYTES :: I64{96}
+NET_UDP_PACKET_BYTES: I64{96}
 
-#Export(c) fn jet_rt_handle_clone_jet_udp_packet(value: I64) -> I64 {
-    result :: jet_rt_alloc(NET_UDP_PACKET_BYTES, I64{8})
+#Export(c) jet_rt_handle_clone_jet_udp_packet: fn(value: I64) -> I64 {
+    result: jet_rt_alloc(NET_UDP_PACKET_BYTES, I64{8})
     coll_copy(value, result, I64{64})
     data_u8_list_copy_into(wrapping(value + I64{64}), wrapping(result + I64{64}))
     net_put(result, I64{88}, net_word(value, I64{88}))
     result
 }
-#Export(c) fn jet_rt_handle_drop_jet_udp_packet(value: I64) {
+#Export(c) jet_rt_handle_drop_jet_udp_packet: fn(value: I64) {
     if (value == I64{0}) -> return
     data_u8_list_drop_fields(wrapping(value + I64{64}))
     jet_rt_free(value, NET_UDP_PACKET_BYTES, I64{8})
 }
 // "UDPPacket({len} bytes from {addr})".
-#Export(c) fn jet_rt_handle_show_jet_udp_packet(value: I64) -> I64 {
-    result :: jet_rt_string_builder_new()
+#Export(c) jet_rt_handle_show_jet_udp_packet: fn(value: I64) -> I64 {
+    result: jet_rt_string_builder_new()
     jet_rt_string_builder_push(result, rt_static_text("UDPPacket("))
     rt_text_push_number(result, net_word(value, I64{64}))
     jet_rt_string_builder_push(result, rt_static_text(" bytes from "))
-    address :: net_route_socket_text(value)
+    address: net_route_socket_text(value)
     jet_rt_string_builder_push(result, address)
     jet_rt_string_drop(address)
     jet_rt_string_builder_push(result, rt_static_text(")"))
@@ -30,17 +30,17 @@ NET_UDP_PACKET_BYTES :: I64{96}
 // Field projections borrow the packet's inline storage. A header field
 // writes its lent copy into the caller's `out` slot: the 56-byte socket
 // address, or the data List's [length, capacity, data] header.
-#Export(c) fn jet_rt_handle_field_jet_udp_packet_addr(value: I64, out: I64) { coll_copy(value, out, I64{56}) }
-#Export(c) fn jet_rt_handle_field_jet_udp_packet_truncated(value: I64) -> I64 { value + I64{56} }
-#Export(c) fn jet_rt_handle_field_jet_udp_packet_data(value: I64, out: I64) { coll_copy(wrapping(value + I64{64}), out, I64{24}) }
+#Export(c) jet_rt_handle_field_jet_udp_packet_addr: fn(value: I64, out: I64) { coll_copy(value, out, I64{56}) }
+#Export(c) jet_rt_handle_field_jet_udp_packet_truncated: fn(value: I64) -> I64 { value + I64{56} }
+#Export(c) jet_rt_handle_field_jet_udp_packet_data: fn(value: I64, out: I64) { coll_copy(wrapping(value + I64{64}), out, I64{24}) }
 // original_len is at most 65535, so the word is its own inline Int; so is
 // the peer port (Socket56 port@24).
-#Export(c) fn jet_rt_handle_field_jet_udp_packet_original_len(value: I64) -> I64 { net_word(value, I64{88}) }
-#Export(c) fn jet_rt_handle_field_jet_udp_packet_port(value: I64) -> I64 { net_word(value, I64{24}) }
+#Export(c) jet_rt_handle_field_jet_udp_packet_original_len: fn(value: I64) -> I64 { net_word(value, I64{88}) }
+#Export(c) jet_rt_handle_field_jet_udp_packet_port: fn(value: I64) -> I64 { net_word(value, I64{24}) }
 // The peer host is derived, not stored: a fresh String of the IP (an IPv6
 // scope as `%N`, no brackets), the form net.socket_addr(host, port) parses.
-#Export(c) fn jet_rt_handle_field_jet_udp_packet_host(value: I64) -> I64 {
-    text :: jet_rt_string_builder_new()
+#Export(c) jet_rt_handle_field_jet_udp_packet_host: fn(value: I64) -> I64 {
+    text: jet_rt_string_builder_new()
     ip_show_into(text, value)
     if (net_word(value, I64{0}) == I64{6} && net_word(value, I64{40}) != I64{0}) {
         jet_rt_string_builder_push(text, rt_static_text("%"))
@@ -49,34 +49,34 @@ NET_UDP_PACKET_BYTES :: I64{96}
     jet_rt_string_builder_finish(text)
 }
 
-#Export(c) fn jet_net_raw_udp_packet_addr(packet: I64) -> I64 { net_copy(packet, I64{56}) }
+#Export(c) jet_net_raw_udp_packet_addr: fn(packet: I64) -> I64 { net_copy(packet, I64{56}) }
 
 // recv_from into a 65535-byte buffer, waiting on WouldBlock/Interrupted
 // under the explicit deadline when `explicit`, else the socket's; keep
 // min(n, cap) bytes, truncated when n > cap.
-fn net_udp_receive(value: I64, limit: I64, positive: Bool, ceiling: I64, explicit: Bool, deadline: I64, output: I64, error: I64) -> I64 {
-    operation :: rt_static_text("udp receive")
+net_udp_receive: fn(value: I64, limit: I64, positive: Bool, ceiling: I64, explicit: Bool, deadline: I64, output: I64, error: I64) -> I64 {
+    operation: rt_static_text("udp receive")
     if !net_udp_open(value, operation, error) -> return I64{0}
-    native :: jet_int_owned_to_i64(limit)
+    native: jet_int_owned_to_i64(limit)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     if (positive && native <= I64{0}) -> return net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, I64{0}, jet_rt_string_clone(rt_static_text("udp receive limit must be positive")), I64{0}, error)
     if (!positive && native < I64{0}) -> return net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, I64{0}, jet_rt_string_clone(rt_static_text("udp receive limit must be non-negative")), I64{0}, error)
-    cap :: if (native < ceiling) -> native else -> ceiling
-    scratch :: jet_rt_alloc(I64{48}, I64{8})
+    cap: if (native < ceiling) -> native else -> ceiling
+    scratch: jet_rt_alloc(I64{48}, I64{8})
     if !net_udp_deadline_enter(value, explicit, deadline, operation, wrapping(scratch + I64{32}), error) {
         jet_rt_free(scratch, I64{48}, I64{8})
         return I64{0}
     }
-    buffer :: jet_rt_alloc(I64{65535} * RT_HOST_U8_STRIDE, I64{8})
-    packet :: jet_rt_alloc(NET_UDP_PACKET_BYTES, I64{8})
+    buffer: jet_rt_alloc(I64{65535} * RT_HOST_U8_STRIDE, I64{8})
+    packet: jet_rt_alloc(NET_UDP_PACKET_BYTES, I64{8})
     thread_zero(packet, NET_UDP_PACKET_BYTES)
     result := I64{0}
     loop {
         received := jet_socket_receive_from_raw(jet_udp_socket_fd_raw(value), buffer, I64{65535}, packet, scratch)
         if (received >= I64{0}) {
             if (received > I64{65535}) -> received = I64{65535}
-            kept :: if (received < cap) -> received else -> cap
-            data :: if (kept == I64{0}) -> I64{0} else -> jet_rt_alloc(kept * RT_HOST_U8_STRIDE, I64{8})
+            kept: if (received < cap) -> received else -> cap
+            data: if (kept == I64{0}) -> I64{0} else -> jet_rt_alloc(kept * RT_HOST_U8_STRIDE, I64{8})
             if (kept != I64{0}) -> rt_text_bytes_copy(data, buffer, kept * RT_HOST_U8_STRIDE)
             net_put(packet, I64{56}, if (received > cap) -> I64{1} else -> I64{0})
             net_put(packet, I64{64}, kept)
@@ -87,7 +87,7 @@ fn net_udp_receive(value: I64, limit: I64, positive: Bool, ceiling: I64, explici
             result = I64{1}
             break
         }
-        code :: net_word(scratch, I64{8})
+        code: net_word(scratch, I64{8})
         if (code == I64{11} || code == I64{4}) {
             if !net_udp_wait(jet_udp_socket_fd_raw(value), true, operation, scratch, error) -> break
         } else {
@@ -103,17 +103,17 @@ fn net_udp_receive(value: I64, limit: I64, positive: Bool, ceiling: I64, explici
 }
 
 // A positive limit, kept bytes capped at 1 MiB.
-#Export(c) fn jet_net_udp_recv_from(value: I64, limit: I64, output: I64, error: I64) -> I64 {
+#Export(c) jet_net_udp_recv_from: fn(value: I64, limit: I64, output: I64, error: I64) -> I64 {
     net_udp_receive(value, limit, true, I64{1048576}, false, I64{0}, output, error)
 }
 
 // A non-negative limit, kept bytes capped at 65535.
-#Export(c) fn jet_net_udp_receive(value: I64, limit: I64, output: I64, error: I64) -> I64 {
+#Export(c) jet_net_udp_receive: fn(value: I64, limit: I64, output: I64, error: I64) -> I64 {
     net_udp_receive(value, limit, false, I64{65535}, false, I64{0}, output, error)
 }
 
 // UdpSocket::receive(max_bytes, deadline:): the same receive under the
 // explicit deadline instead of the socket's timeout.
-#Export(c) fn jet_net_udp_receive_deadline(value: I64, limit: I64, deadline: I64, output: I64, error: I64) -> I64 {
+#Export(c) jet_net_udp_receive_deadline: fn(value: I64, limit: I64, deadline: I64, output: I64, error: I64) -> I64 {
     net_udp_receive(value, limit, false, I64{65535}, true, deadline, output, error)
 }

@@ -1,6 +1,6 @@
 // Claims for `jetpack why` report rendering (Rust jetpack::CLI::why tests).
 
-fn cli_why_test_sample() -> PackageWhy {
+cli_why_test_sample: fn() -> PackageWhy {
     PackageWhy{
         query: "ripgrep",
         package: "ripgrep",
@@ -24,7 +24,7 @@ fn cli_why_test_sample() -> PackageWhy {
     }
 }
 
-fn cli_why_test_field(tree: Dyn, key: String) -> Dyn {
+cli_why_test_field: fn(tree: Dyn, key: String) -> Dyn {
     if tree == {
         .Object(object) -> {
             loop pair in object {
@@ -36,7 +36,7 @@ fn cli_why_test_field(tree: Dyn, key: String) -> Dyn {
     }
 }
 
-fn cli_why_test_text(tree: Dyn) -> String {
+cli_why_test_text: fn(tree: Dyn) -> String {
     if tree == {
         .Text(text) -> text
         else -> panic("expected a string")
@@ -44,28 +44,28 @@ fn cli_why_test_text(tree: Dyn) -> String {
 }
 
 #Test("cli why human and json reports contain the same facts") {
-    report :: cli_why_test_sample()
-    text :: report.text()
-    facts_1 :: [String]{"env file", "/work/env.jet:12", "packages: [ripgrep]", "lock line", "/work/.jet/lock:8", "name = \"ripgrep\"", "catalog", "endpoint", "signature chain", "signed", "disk", "dependents", "receipt"}
+    report: cli_why_test_sample()
+    text: report.text()
+    facts_1: [String]{"env file", "/work/env.jet:12", "packages: [ripgrep]", "lock line", "/work/.jet/lock:8", "name = \"ripgrep\"", "catalog", "endpoint", "signature chain", "signed", "disk", "dependents", "receipt"}
     loop fact in facts_1 {
         assert(text.contains(fact), "human report misses {fact}")
     }
-    rendered :: report.to_json() ?? panic("valid typed why report JSON")
-    tree :: json.parse(rendered) ?? panic("the why report is JSON")
-    facts_2 :: [String]{"\"env_file\"", "\"lock_file\"", "\"catalog\"", "\"endpoint\"", "\"signature_chain\"", "\"source_digest\"", "\"grade\"", "\"bytes\"", "\"dependents\"", "\"receipt\""}
+    rendered: report.to_json() ?? panic("valid typed why report JSON")
+    tree: json.parse(rendered) ?? panic("the why report is JSON")
+    facts_2: [String]{"\"env_file\"", "\"lock_file\"", "\"catalog\"", "\"endpoint\"", "\"signature_chain\"", "\"source_digest\"", "\"grade\"", "\"bytes\"", "\"dependents\"", "\"receipt\""}
     loop fact in facts_2 {
         assert(rendered.contains(fact), "JSON report misses {fact}")
     }
     assert_eq(cli_why_test_text(cli_why_test_field(tree, "action")), "why")
     // `PackageWhy.to_json` (Store Explain/PackageWhy.jet) nests the report under
     // the status envelope's `why` field, as the Rust `Store/Explain.rs` did.
-    why :: cli_why_test_field(tree, "why")
-    requesting :: cli_why_test_field(why, "requesting")
+    why: cli_why_test_field(tree, "why")
+    requesting: cli_why_test_field(why, "requesting")
     assert_eq(foundation_json_integer(cli_why_test_field(cli_why_test_field(requesting, "env_file"), "line")), Val(12))
     assert_eq(cli_why_test_text(cli_why_test_field(cli_why_test_field(why, "trust"), "grade")), "signed")
     assert_eq(cli_why_test_text(cli_why_test_field(cli_why_test_field(why, "origin"), "endpoint")), "https://index.example")
     assert_eq(cli_why_test_text(cli_why_test_field(cli_why_test_field(requesting, "lock_file"), "text")), "name = \"ripgrep\"")
-    dependents :: if cli_why_test_field(why, "dependents") == {
+    dependents: if cli_why_test_field(why, "dependents") == {
         .Array(items) -> items
         else -> panic("dependents is a list")
     }

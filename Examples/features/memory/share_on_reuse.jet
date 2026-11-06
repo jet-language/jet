@@ -2,12 +2,12 @@
 // name's last use. When the name is used again, that earlier use shares the
 // value instead: each holder has its own value, so a write through one never
 // shows in the other. `^name` stays an exact move and `name.copy()` an explicit copy.
-enum Shape {
+Shape: enum {
     Named(String)
     Blank
 }
 
-fn describe(shape: Shape) -> String {
+describe: fn(shape: Shape) -> String {
     if shape == {
         .Named(name) -> "named {name}"
         .Blank -> "blank"
@@ -16,7 +16,7 @@ fn describe(shape: Shape) -> String {
 
 // `return seen` leaves the loop, so it is the last use of `seen` on that
 // path, not a use on a later iteration.
-fn before_limit(items: [Int], limit: Int) -> [Int] {
+before_limit: fn(items: [Int], limit: Int) -> [Int] {
     seen := [Int]{}
     loop item in items {
         if item > limit -> return seen
@@ -25,7 +25,7 @@ fn before_limit(items: [Int], limit: Int) -> [Int] {
     seen
 }
 
-fn run() {
+run: fn() {
     xs := [1, 2, 3]
     ys := xs
     &ys.push(4)

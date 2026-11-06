@@ -1,26 +1,26 @@
 Error [jet.AmbiguousTraitConstant]: The `impl Marker` block gives `sites` twice
   --> tests/ui/marker_impl_rejected_members.jet:9:9
     |
-  9 |         sites :: [.Method]
+  9 |         sites: [.Method]
     |         ^^^^^
  Why: A marker has one value for each setting
- Fix: Remove one `sites :: …`
+ Fix: Remove one `sites: …`
 More: jet-lang.dev/e/E0937
 
 Error [jet.UnknownTraitConstant]: `colour` is not a setting of `Marker`
   --> tests/ui/marker_impl_rejected_members.jet:10:9
     |
- 10 |         colour :: .Red
+ 10 |         colour: .Red
     |         ^^^^^^
  Why: An `impl Marker` block gives only the settings a marker has: sites, repeatable, owns_menu, inherits, resolution, scopes, companion
  Fix: Remove `colour`, or write one of the marker settings
 More: jet-lang.dev/e/E0936
 
-Error [jet.DuplicateDefinition]: `fn expand` is defined twice in `impl Marker`
-  --> tests/ui/marker_impl_rejected_members.jet:15:12
+Error [jet.DuplicateDefinition]: `expand: fn` is defined twice in `impl Marker`
+  --> tests/ui/marker_impl_rejected_members.jet:15:9
     |
- 15 |         fn expand(self, target: Target) {}
-    |            ^^^^^^
+ 15 |         expand: fn(self, target: Target) {}
+    |         ^^^^^^
  Why: A marker has one template
  Fix: Remove one of the definitions
 More: jet-lang.dev/e/E0105
@@ -28,10 +28,10 @@ More: jet-lang.dev/e/E0105
 Error [jet.TraitMethodMismatch]: `render` is not a method of `Marker`
   --> tests/ui/marker_impl_rejected_members.jet:17:9
     |
- 17 |         fn render(self) {}
-    |         ^^^^^^^^^^^^^^^
+ 17 |         render: fn(self) {}
+    |         ^^^^^^^^^^^^^^^^
  Why: `impl Marker` has one method, the template the compiler expands with the marked item bound to `target`
- Fix: Write `fn expand(self, target: Target) { … }`
+ Fix: Write `expand: fn(self, target: Target) { … }`
 More: jet-lang.dev/e/E0907
 
 Error [jet.DuplicateTraitImpl]: `Traced` has a second `impl Marker` block
@@ -44,10 +44,10 @@ Error [jet.DuplicateTraitImpl]: `Traced` has a second `impl Marker` block
 More: jet-lang.dev/e/E0908
 
 Error [jet.StackedRuleLines]: The marker group `Traced` has fields, settings or a template
-  --> tests/ui/marker_impl_rejected_members.jet:4:8
+  --> tests/ui/marker_impl_rejected_members.jet:4:1
     |
-  4 | struct Traced {
-    |        ^^^^^^
+  4 | Traced: struct {
+    | ^^^^^^
  Why: A group names a fixed marker stack, so a use site passes nothing into it and it expands to its members
- Fix: Remove everything but `group :: #[…]`, or declare a marker without a group
+ Fix: Remove everything but `group: #[…]`, or declare a marker without a group
 More: jet-lang.dev/e/E0999

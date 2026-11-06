@@ -15,14 +15,14 @@ use {
     ]
 }
 
-enum JetEvalErrorKind { Source Compiler Unsupported Fuel Ownership Effect ComptimePanic }
+JetEvalErrorKind: enum { Source Compiler Unsupported Fuel Ownership Effect ComptimePanic }
 
-struct JetEvalInternalProblem {
+JetEvalInternalProblem: struct {
     span: Span?
     message: String
 }
 
-struct JetEvalError {
+JetEvalError: struct {
     kind: JetEvalErrorKind
     diagnostic: Diagnostic
 }
@@ -30,19 +30,19 @@ struct JetEvalError {
 // Installed only for a checked fn-build or fn-dev invocation, which the IR
 // machine runs (IR/Host.jet). The ordinary comptime evaluation deliberately
 // cannot acquire network or wait rights.
-trait JetEvalBuildHostAdapter {
-    fn clone_adapter(self) -[]> JetEvalBuildHostAdapter
+JetEvalBuildHostAdapter: trait {
+    clone_adapter: fn(self) -[]> JetEvalBuildHostAdapter
     // Build host method `member` (`Build.add_executable`, `BuildPlan.graph`,
     // `Dev.watch`) on `args`, the receiver first; `fallible` when the checked
     // call returns a Result, `impure` when it sits in an `#Impure` block.
     // None: no method of this host.
-    fn build_call(self, member: String, args: [TComptimeValue], fallible: Bool, impure: Bool, span: Span) -[FS.Read, Net, Time.Wait]> JetEvalBuildReply?
+    build_call: fn(self, member: String, args: [TComptimeValue], fallible: Bool, impure: Bool, span: Span) -[FS.Read, Net, Time.Wait]> JetEvalBuildReply?
 }
 
 // A host method's answer (a build host's, a compiler query host's): its
 // value (a fallible method's success as Present, its typed failure as a
 // told Failed), or the diagnostic that stops the evaluation.
-enum JetEvalBuildReply {
+JetEvalBuildReply: enum {
     Value(value: TComptimeValue)
     Failure(diagnostic: Diagnostic)
 }
@@ -53,13 +53,13 @@ enum JetEvalBuildReply {
 // it owns the rooted, no-follow read, its bounds and the input record. A
 // failure is the diagnostic the read reports (E0955).
 #Error
-struct JetEvalComptimeInputError {
+JetEvalComptimeInputError: struct {
     diagnostic: Diagnostic
 }
 
-trait JetEvalComptimeInputAdapter {
-    fn clone_input_adapter(self) -[]> JetEvalComptimeInputAdapter
-    fn comptime_input(self, builtin: String, path: String, span: Span) -[FS.Read]> TComptimeValue JetEvalComptimeInputError!
+JetEvalComptimeInputAdapter: trait {
+    clone_input_adapter: fn(self) -[]> JetEvalComptimeInputAdapter
+    comptime_input: fn(self, builtin: String, path: String, span: Span) -[FS.Read]> TComptimeValue JetEvalComptimeInputError!
 }
 
 // The compiler's answer to a `core.compiler` query (`compiler.lex(source)`,
@@ -70,14 +70,14 @@ trait JetEvalComptimeInputAdapter {
 // check is a whole compile of its source, with that compile's effects, and
 // the profile view evaluates `env.jet`, whose compile-time expressions run
 // through the compiler service (Exec, Time.Wait).
-trait JetEvalCompilerQueryHost {
-    fn clone_compiler_host(self) -[]> JetEvalCompilerQueryHost
+JetEvalCompilerQueryHost: trait {
+    clone_compiler_host: fn(self) -[]> JetEvalCompilerQueryHost
     // Query `query` on `args`: its typed Result (Present, or a told Failed
     // CompilerError). None: no query of this host.
-    fn compiler_query(self, query: String, args: [TComptimeValue], span: Span) -[Env, Exec, FFI.Asm, FS, Net, Time.Wait]> JetEvalBuildReply?
+    compiler_query: fn(self, query: String, args: [TComptimeValue], span: Span) -[Env, Exec, FFI.Asm, FS, Net, Time.Wait]> JetEvalBuildReply?
 }
 
-struct JetEvalConfig {
+JetEvalConfig: struct {
     // Budget for one compile-time call: a native call has fuel /% 2000
     // milliseconds (IR/Native.jet). Runtime execution (a program run) has
     // no limit, like a built binary.
@@ -109,14 +109,14 @@ struct JetEvalConfig {
     impure_gate: Bool{false}
 }
 
-fn jet_eval_default_config() -> JetEvalConfig Never! {
+jet_eval_default_config: fn() -> JetEvalConfig Never! {
     JetEvalConfig{fuel: 10000000, max_call_depth: 1024, max_collection_len: 1000000, globals: [String:TComptimeValue]{}, runtime_execution: false, host_hooks: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: Val(sema_numeric_unit_conversion_exact_service)}}
 }
 
 // Read-fork a fresh runtime configuration before an owning request is moved.
 // Every field is reconstructed; adapter cloning is the sole host-session copy.
-fn jet_eval_runtime_config(config: JetEvalConfig) -> JetEvalConfig {
-    build_host_adapter :: if config.build_host_adapter == {
+jet_eval_runtime_config: fn(config: JetEvalConfig) -> JetEvalConfig {
+    build_host_adapter: if config.build_host_adapter == {
         None -> None
         Val(adapter) -> Val(adapter.clone_adapter())
     }
@@ -132,7 +132,7 @@ fn jet_eval_runtime_config(config: JetEvalConfig) -> JetEvalConfig {
     }
 }
 
-fn jet_eval_diagnostic(kind: JetEvalErrorKind, span: Span, what: String, why: String, fix: String) -> JetEvalError {
+jet_eval_diagnostic: fn(kind: JetEvalErrorKind, span: Span, what: String, why: String, fix: String) -> JetEvalError {
     code := "E0956"
     if kind == JetEvalErrorKind.Fuel -> code = "E0952"
     if kind == JetEvalErrorKind.Effect -> code = "E3401"
@@ -144,7 +144,7 @@ fn jet_eval_diagnostic(kind: JetEvalErrorKind, span: Span, what: String, why: St
 // names the runtime result; computing a compile-time value, it is the same
 // stop the program would make at run time, reported once in the registry's
 // words, with no compile-time cascade.
-fn jet_eval_source_error(runtime_execution: Bool, span: Span, what: String) -> JetEvalError Never! {
+jet_eval_source_error: fn(runtime_execution: Bool, span: Span, what: String) -> JetEvalError Never! {
     if !runtime_execution {
         return JetEvalError{kind: JetEvalErrorKind.Source, diagnostic: diagnostic_from_registry("E3010", Val(span), "`{what}`", "the operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.", "check the operands or bounds before the operation, or use a checked operation that returns an outcome.")}
     }
@@ -153,7 +153,7 @@ fn jet_eval_source_error(runtime_execution: Bool, span: Span, what: String) -> J
 
 // Comptime Char data carries the Unicode scalar value, as sema's checked
 // constants do.
-fn jet_eval_char_value(character: Char) -> TComptimeValue Never! {
-    code :: sema_checked_const_char("{character}") ?? panic("a Char always encodes one UTF-8 scalar")
+jet_eval_char_value: fn(character: Char) -> TComptimeValue Never! {
+    code: sema_checked_const_char("{character}") ?? panic("a Char always encodes one UTF-8 scalar")
     TComptimeValue.Char{value: code}
 }

@@ -1,16 +1,16 @@
-#Import module c.jet_go_handles {
-    fn new_handle(value: Int) -> Int = "new_handle"
-    fn consume_handle(handle: Int) -> Int = "consume_handle"
+#Import c.jet_go_handles: module {
+    new_handle: fn(value: Int) -> Int = "new_handle"
+    consume_handle: fn(handle: Int) -> Int = "consume_handle"
 }
-use abi :: c.jet_go_handles
+use abi: c.jet_go_handles
 
-struct Handle { priv value: Int }
+Handle: struct { priv value: Int }
 
-fn new_handle(value: Int) -> Handle {
+new_handle: fn(value: Int) -> Handle {
     return Handle{ value: abi.new_handle(value) }
 }
 
-fn consume_handle(handle: Handle) -> Int {
+consume_handle: fn(handle: Handle) -> Int {
     return abi.consume_handle(handle.value)
 }
 

@@ -1,33 +1,33 @@
-struct Address {
+Address: struct {
     text: String
 }
 
-struct Email {
+Email: struct {
     addr: String
     nested: Address
     items: [Address]
 }
 
-fn shallow(e: Email) -> Dyn { Dyn.Text(e.addr) }
+shallow: fn(e: Email) -> Dyn { Dyn.Text(e.addr) }
 
-fn nested(e: Email) -> Dyn { Dyn.Text(e.nested.text) }
+nested: fn(e: Email) -> Dyn { Dyn.Text(e.nested.text) }
 
-fn indexed(e: Email) -> Dyn { Dyn.Text(e.items[0].text) }
+indexed: fn(e: Email) -> Dyn { Dyn.Text(e.items[0].text) }
 
-fn computed_index(e: Email, i: Int) -> Dyn { Dyn.Text(e.items[i + 1].text) }
+computed_index: fn(e: Email, i: Int) -> Dyn { Dyn.Text(e.items[i + 1].text) }
 
-fn pick() -> Int { 0 }
+pick: fn() -> Int { 0 }
 
-fn call_index(e: Email) -> Dyn { Dyn.Text(e.items[pick()].text) }
+call_index: fn(e: Email) -> Dyn { Dyn.Text(e.items[pick()].text) }
 
-fn unary_parenthesized_index(e: Email, i: Int) -> Dyn { Dyn.Text(e.items[-(-i)].text) }
+unary_parenthesized_index: fn(e: Email, i: Int) -> Dyn { Dyn.Text(e.items[-(-i)].text) }
 
-fn if_index(e: Email, choose_first: Bool) -> Dyn {
+if_index: fn(e: Email, choose_first: Bool) -> Dyn {
     return Dyn.Text(e.items[if choose_first -> 0 else -> 1].text)
 }
 
-fn owned_slice(xs: [Dyn]) -> Dyn { Dyn.Array(xs[0..1]) }
+owned_slice: fn(xs: [Dyn]) -> Dyn { Dyn.Array(xs[0..1]) }
 
-fn run() {
+run: fn() {
 
 }

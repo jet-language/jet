@@ -4,16 +4,16 @@
 use {
     jet_foundation.[Diagnostic, diagnostic_from_registry, diagnostic_render_all]
     jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, JetDriverAuthorizedSourceFile]
-    cli_files :: core.files
+    cli_files: core.files
 }
 
-struct JetCLIProjectPart {
+JetCLIProjectPart: struct {
     name: String
     path: String
     automatic: Bool
 }
 
-fn jet_cli_project_part_value(name: String, path: String, state: String) -> JetCLIStatusValue Never! {
+jet_cli_project_part_value: fn(name: String, path: String, state: String) -> JetCLIStatusValue Never! {
     jet_cli_status_object(
     [JetCLIStatusField]{
         jet_cli_status_field("name", jet_cli_status_text(name)),
@@ -23,9 +23,9 @@ fn jet_cli_project_part_value(name: String, path: String, state: String) -> JetC
     )
 }
 
-fn jet_cli_project_parts(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
-    skipped_only :: args.contains("--skipped")
-    root :: cli_files.cwd() ?? "."
+jet_cli_project_parts: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
+    skipped_only: args.contains("--skipped")
+    root: cli_files.cwd() ?? "."
     files := [JetDriverAuthorizedSourceFile]{}
     if jet_cli_discover_sources(root, &files) == .Val(problem) {
         return jet_cli_fail("E1334", "couldn't discover source files authority `{root}`", problem, "restore access to the authority metadata and try again", color, JET_DRIVER_EXIT_USER_ERROR)
@@ -35,11 +35,11 @@ fn jet_cli_project_parts(args: [String], color: Bool, json: Bool) -[FS, Env]> Je
     sources := [String]{}
     names := [String]{}
     loop file in files {
-        filename :: jet_cli_file_name(file.relative_path)
+        filename: jet_cli_file_name(file.relative_path)
         if filename == "package.jet" || filename == "pkg.jet" || (jet_cli_relative_parent(file.relative_path) == "" && JET_CLI_COMMAND_ROLE_FILES.contains(filename)) {
             next
         }
-        program :: jet_cli_parsed_program(file.source) ?? next
+        program: jet_cli_parsed_program(file.source) ?? next
         &sources.push(file.relative_path)
         // An exact `use project._name` opts a skipped part in (spec.md,
         // module discovery). Two segments parse as a member import of
@@ -48,7 +48,7 @@ fn jet_cli_project_parts(args: [String], color: Bool, json: Bool) -[FS, Env]> Je
             if imported.kind == {
                 .Module(name, _) -> {
                     if name.starts_with("project.") {
-                        leaf :: name.slice(8..<name.len())
+                        leaf: name.slice(8..<name.len())
                         if !explicit.contains(leaf) -> &explicit.push(leaf)
                     }
                 }
@@ -90,7 +90,7 @@ fn jet_cli_project_parts(args: [String], color: Bool, json: Bool) -[FS, Env]> Je
         loop declaration in declarations {
             if declaration.name != name -> next
             &paths.push(declaration.path)
-            state :: if {
+            state: if {
                 declaration.automatic -> "automatic"
                 explicit.contains(name) -> "explicit"
                 else -> "skipped"
@@ -108,21 +108,21 @@ fn jet_cli_project_parts(args: [String], color: Bool, json: Bool) -[FS, Env]> Je
             },
             ),
             )
-            &diagnostics.push(diagnostic_from_registry("E0606", None, "project module `project.{name}` is declared more than once", "a project module name must resolve to one declaration", "keep one `module {name}` declaration; found {paths.join(", ")}"))
+            &diagnostics.push(diagnostic_from_registry("E0606", None, "project module `project.{name}` is declared more than once", "a project module name must resolve to one declaration", "keep one `{name}: module` declaration; found {paths.join(", ")}"))
         }
     }
     if !skipped_only {
         loop path in sources {
             if declared_paths.contains(path) -> next
-            stem :: if path.ends_with(".jet") -> path.slice(0..<(path.len() - 4)) else -> path
-            name :: "project.{stem.replace("/", ".")}"
+            stem: if path.ends_with(".jet") -> path.slice(0..<(path.len() - 4)) else -> path
+            name: "project.{stem.replace("/", ".")}"
             &part_values.push(jet_cli_project_part_value(name, path, "automatic"))
             output = "{output}{jet_cli_pad("automatic", 9)} {jet_cli_pad(name, 24)} {path}\n"
         }
     }
-    status :: if diagnostics.len() == 0 -> JET_DRIVER_EXIT_OK else -> JET_DRIVER_EXIT_USER_ERROR
+    status: if diagnostics.len() == 0 -> JET_DRIVER_EXIT_OK else -> JET_DRIVER_EXIT_USER_ERROR
     if json {
-        fields :: [JetCLIStatusField]{
+        fields: [JetCLIStatusField]{
             jet_cli_status_field("parts", jet_cli_status_array(part_values)),
             jet_cli_status_field("conflicts", jet_cli_status_array(conflict_values)),
         }

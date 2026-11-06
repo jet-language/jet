@@ -3,7 +3,7 @@ use {
     jet_semindex.[SourceSpan]
 }
 #Test("event_aliases_are_deduplicated_and_constructor_receiver_is_required") {
-    src := "use events :: core.event\nuse events :: core.event // duplicate\nuse tasks :: core.tasks\nevents.new<Int>()\n"
+    src := "use events: core.event\nuse events: core.event // duplicate\nuse tasks: core.tasks\nevents.new<Int>()\n"
     aliases := event_module_aliases(src)
     assert_eq(aliases, ["events"])
     start := src.find("new<Int>").unwrap()

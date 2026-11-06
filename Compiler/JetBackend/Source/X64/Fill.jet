@@ -18,7 +18,7 @@
 // written (rax, rcx, rdx, rsi, rdi, r8, r11), rsp is untouched, and the code
 // falls through its last byte.
 
-fn x64_fill_code(width: Int, exact: Bool) -> [U8] Never! {
+x64_fill_code: fn(width: Int, exact: Bool) -> [U8] Never! {
     code := [U8]{}
     declines := [Int]{}
     x64_mov_ri(&code, X64_RAX, X64_INT_SUM_DECLINED)
@@ -46,7 +46,7 @@ fn x64_fill_code(width: Int, exact: Bool) -> [U8] Never! {
     if width == 8 -> x64_byte(&code, 0x48)
     x64_byte(&code, if width == 1 -> 0xaa else -> 0xab)
     x64_mov_ri(&code, X64_RAX, 0)
-    end :: code.len()
+    end: code.len()
     loop site in declines -> x64_patch_rel32(&code, site, end)
     code
 }

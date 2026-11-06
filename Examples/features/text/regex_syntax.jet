@@ -3,14 +3,14 @@
 // count and a lazy one (`*?`, `+?`, `??`, `{n,m}?`) its smallest. The
 // example also covers the assertions `\b \B \A \z`, the escapes, class
 // escapes inside `[]`, and the positioned RegexError a bad pattern reports.
-use rx :: core.regex
+use rx: core.regex
 
-fn show(label: String, re: rx.Regex, text: String) {
-    found :: re.find(text) ?? "none"
+show: fn(label: String, re: rx.Regex, text: String) {
+    found: re.find(text) ?? "none"
     print("{label}: find='{found}' full={re.full_match(text)} all={re.find_all(text)}")
 }
 
-fn verdict(pattern: String) {
+verdict: fn(pattern: String) {
     if rx.compile(pattern) == {
         .Ok(_) -> print("ok: {pattern}")
         .Err(err) -> print("{err} [offset {err.offset}]")
@@ -18,12 +18,12 @@ fn verdict(pattern: String) {
 }
 
 // `RegexError` converts to `Err`, so `compile` propagates like any call.
-fn count_words(pattern: String, text: String) -> Int Err! {
-    words :: rx.compile(pattern)
+count_words: fn(pattern: String, text: String) -> Int Err! {
+    words: rx.compile(pattern)
     words.find_all(text).len()
 }
 
-fn run() {
+run: fn() {
     show("first arm wins", Regex{"a|ab"}, "ab")
     show("arms keep order", Regex{"ab|a"}, "ab")
     show("greedy", Regex{"<.+>"}, "<a><b>")
@@ -38,7 +38,7 @@ fn run() {
     show("escapes", Regex{"\x41\u00e9\x{{1F600}}\x21"}, "Aé😀!")
     show("punctuation", Regex{"\.\-\#\ "}, "a.-# b")
     show("python name", Regex{"(?P<year>\d{{4}})"}, "in 2026")
-    m :: Regex{"(?P<key>\w+)=(?<value>\w*)"}.match("set mode=fast") ?? panic("no match")
+    m: Regex{"(?P<key>\w+)=(?<value>\w*)"}.match("set mode=fast") ?? panic("no match")
     print("key={m.name("key") ?? "none"} value={m.name("value") ?? "none"}")
     verdict("(a")
     verdict("a)")

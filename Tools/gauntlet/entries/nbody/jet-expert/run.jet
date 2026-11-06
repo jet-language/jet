@@ -1,22 +1,22 @@
 use {
-    math :: core.math
-    fmt :: core.text.fmt
+    math: core.math
+    fmt: core.text.fmt
 }
 
-#CLI struct Args { steps: Int }
+#CLI Args: struct { steps: Int }
 
 #Inline(Always)
-fn kinetic(v:F64x4,mass:Float) -> Float {
+kinetic: fn(v:F64x4,mass:Float) -> Float {
     Float{0.5}*mass*(v*v).sum()
 }
 
 #Inline(Always)
-fn potential(left:F64x4,left_mass:Float,right:F64x4,right_mass:Float) -> Float {
-    delta::left-right
-    distance_sq::(delta*delta).sum()
+potential: fn(left:F64x4,left_mass:Float,right:F64x4,right_mass:Float) -> Float {
+    delta: left-right
+    distance_sq: (delta*delta).sum()
     return left_mass*right_mass/math.sqrt(distance_sq)
 }
-fn energy(p0:F64x4,v0:F64x4,m0:Float,p1:F64x4,v1:F64x4,m1:Float,p2:F64x4,v2:F64x4,m2:Float,p3:F64x4,v3:F64x4,m3:Float,p4:F64x4,v4:F64x4,m4:Float) -> Float {
+energy: fn(p0:F64x4,v0:F64x4,m0:Float,p1:F64x4,v1:F64x4,m1:Float,p2:F64x4,v2:F64x4,m2:Float,p3:F64x4,v3:F64x4,m3:Float,p4:F64x4,v4:F64x4,m4:Float) -> Float {
     total:=kinetic(v0,m0)
     total-=potential(p0,m0,p1,m1)
     total-=potential(p0,m0,p2,m2)
@@ -35,52 +35,52 @@ fn energy(p0:F64x4,v0:F64x4,m0:Float,p1:F64x4,v1:F64x4,m1:Float,p2:F64x4,v2:F64x
     return total
 }
 
-fn run(args: Args) {
-    pi::Float{3.141592653589793}
-    solar_mass::Float{4.0}*pi*pi
-    year::Float{365.24}
+run: fn(args: Args) {
+    pi: Float{3.141592653589793}
+    solar_mass: Float{4.0}*pi*pi
+    year: Float{365.24}
 
     p0:=F64x4(0.0,0.0,0.0,0.0)
     v0:=F64x4(0.0,0.0,0.0,0.0)
-    m0::solar_mass
+    m0: solar_mass
 
     p1:=F64x4(4.84143144246472090,-1.16032004402742839,-0.103622044471123109,0.0)
     v1:=F64x4(0.00166007664274403694*year,0.00769901118419740425*year,-0.0000690460016972063023*year,0.0)
-    m1::Float{0.000954791938424326609}*solar_mass
+    m1: Float{0.000954791938424326609}*solar_mass
 
     p2:=F64x4(8.34336671824457987,4.12479856412430479,-0.403523417114321381,0.0)
     v2:=F64x4(-0.00276742510726862411*year,0.00499852801234917238*year,0.0000230417297573763929*year,0.0)
-    m2::Float{0.000285885980666130812}*solar_mass
+    m2: Float{0.000285885980666130812}*solar_mass
 
     p3:=F64x4(12.8943695621391310,-15.1111514016986312,-0.223307578892655734,0.0)
     v3:=F64x4(0.00296460137564761618*year,0.00237847173959480950*year,-0.0000296589568540237556*year,0.0)
-    m3::Float{0.0000436624404335156298}*solar_mass
+    m3: Float{0.0000436624404335156298}*solar_mass
 
     p4:=F64x4(15.3796971148509165,-25.9193146099879641,0.179258772950371181,0.0)
     v4:=F64x4(0.00268067772490389322*year,0.00162824170038242201*year,-0.0000951592254519715870*year,0.0)
-    m4::Float{0.0000515138902046611451}*solar_mass
+    m4: Float{0.0000515138902046611451}*solar_mass
 
-    momentum::v1*F64x4.splat(m1)+v2*F64x4.splat(m2)+v3*F64x4.splat(m3)+v4*F64x4.splat(m4)
+    momentum: v1*F64x4.splat(m1)+v2*F64x4.splat(m2)+v3*F64x4.splat(m3)+v4*F64x4.splat(m4)
     v0=F64x4.splat(Float{-1.0}/m0)*momentum
 
     print(fmt.decimal(energy(p0,v0,m0,p1,v1,m1,p2,v2,m2,p3,v3,m3,p4,v4,m4),9))
 
-    dt::Float{0.01}
-    dt_vec::F64x4.splat(dt)
-    unit_padding::F64x4(1.0,0.0,0.0,0.0)
+    dt: Float{0.01}
+    dt_vec: F64x4.splat(dt)
+    unit_padding: F64x4(1.0,0.0,0.0,0.0)
     steps_left:=I64{args.steps}
     loop steps_left > 0 {
-        d01::p0-p1
-        d02::p0-p2
-        d12::p1-p2
-        d03::p0-p3
+        d01: p0-p1
+        d02: p0-p2
+        d12: p1-p2
+        d03: p0-p3
 
-        dx0::F64x4(d01[0],d02[0],d12[0],d03[0])
-        dy0::F64x4(d01[1],d02[1],d12[1],d03[1])
-        dz0::F64x4(d01[2],d02[2],d12[2],d03[2])
-        squared0::dx0*dx0+dy0*dy0+dz0*dz0
-        roots0::F64x4(math.sqrt(squared0[0]),math.sqrt(squared0[1]),math.sqrt(squared0[2]),math.sqrt(squared0[3]))
-        magnitudes0::dt_vec/(squared0*roots0)
+        dx0: F64x4(d01[0],d02[0],d12[0],d03[0])
+        dy0: F64x4(d01[1],d02[1],d12[1],d03[1])
+        dz0: F64x4(d01[2],d02[2],d12[2],d03[2])
+        squared0: dx0*dx0+dy0*dy0+dz0*dz0
+        roots0: F64x4(math.sqrt(squared0[0]),math.sqrt(squared0[1]),math.sqrt(squared0[2]),math.sqrt(squared0[3]))
+        magnitudes0: dt_vec/(squared0*roots0)
 
         v0-=d01*F64x4.splat(m1*magnitudes0[0])
         v1+=d01*F64x4.splat(m0*magnitudes0[0])
@@ -91,17 +91,17 @@ fn run(args: Args) {
         v1-=d12*F64x4.splat(m2*magnitudes0[2])
         v2+=d12*F64x4.splat(m1*magnitudes0[2])
 
-        d13::p1-p3
-        d23::p2-p3
-        d04::p0-p4
-        d14::p1-p4
+        d13: p1-p3
+        d23: p2-p3
+        d04: p0-p4
+        d14: p1-p4
 
-        dx1::F64x4(d13[0],d23[0],d04[0],d14[0])
-        dy1::F64x4(d13[1],d23[1],d04[1],d14[1])
-        dz1::F64x4(d13[2],d23[2],d04[2],d14[2])
-        squared1::dx1*dx1+dy1*dy1+dz1*dz1
-        roots1::F64x4(math.sqrt(squared1[0]),math.sqrt(squared1[1]),math.sqrt(squared1[2]),math.sqrt(squared1[3]))
-        magnitudes1::dt_vec/(squared1*roots1)
+        dx1: F64x4(d13[0],d23[0],d04[0],d14[0])
+        dy1: F64x4(d13[1],d23[1],d04[1],d14[1])
+        dz1: F64x4(d13[2],d23[2],d04[2],d14[2])
+        squared1: dx1*dx1+dy1*dy1+dz1*dz1
+        roots1: F64x4(math.sqrt(squared1[0]),math.sqrt(squared1[1]),math.sqrt(squared1[2]),math.sqrt(squared1[3]))
+        magnitudes1: dt_vec/(squared1*roots1)
 
         v1-=d13*F64x4.splat(m3*magnitudes1[0])
         v3+=d13*F64x4.splat(m1*magnitudes1[0])
@@ -112,14 +112,14 @@ fn run(args: Args) {
         v1-=d14*F64x4.splat(m4*magnitudes1[3])
         v4+=d14*F64x4.splat(m1*magnitudes1[3])
 
-        d24::p2-p4
-        d34::p3-p4
-        dx2::F64x4(d24[0],d34[0],unit_padding[0],unit_padding[0])
-        dy2::F64x4(d24[1],d34[1],unit_padding[1],unit_padding[1])
-        dz2::F64x4(d24[2],d34[2],unit_padding[2],unit_padding[2])
-        squared2::dx2*dx2+dy2*dy2+dz2*dz2
-        roots2::F64x4(math.sqrt(squared2[0]),math.sqrt(squared2[1]),math.sqrt(squared2[2]),math.sqrt(squared2[3]))
-        magnitudes2::dt_vec/(squared2*roots2)
+        d24: p2-p4
+        d34: p3-p4
+        dx2: F64x4(d24[0],d34[0],unit_padding[0],unit_padding[0])
+        dy2: F64x4(d24[1],d34[1],unit_padding[1],unit_padding[1])
+        dz2: F64x4(d24[2],d34[2],unit_padding[2],unit_padding[2])
+        squared2: dx2*dx2+dy2*dy2+dz2*dz2
+        roots2: F64x4(math.sqrt(squared2[0]),math.sqrt(squared2[1]),math.sqrt(squared2[2]),math.sqrt(squared2[3]))
+        magnitudes2: dt_vec/(squared2*roots2)
 
         v2-=d24*F64x4.splat(m4*magnitudes2[0])
         v4+=d24*F64x4.splat(m2*magnitudes2[0])

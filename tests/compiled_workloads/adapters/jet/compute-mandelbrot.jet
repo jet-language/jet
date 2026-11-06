@@ -1,42 +1,42 @@
 // #1414 compute workload: direct binary64 Mandelbrot escape-time checksum.
 // The peer uses the same window, update order, stride, and iteration count.
-use fs :: core.files
+use fs: core.files
 
 #CLI
-struct WorkloadArgs {
+WorkloadArgs: struct {
     input: String
 }
 
-fn reject_case(label: String, named: Bool) {
+reject_case: fn(label: String, named: Bool) {
     if named -> print("case={label}")
     print("reject=invalid-number")
     print("samples=0")
     print("checksum=0")
 }
 
-fn escape_count(cx: Float, cy: Float, maximum: Int) -> Int {
+escape_count: fn(cx: Float, cy: Float, maximum: Int) -> Int {
     zx := Float{0.0}
     zy := Float{0.0}
     loop i in 0..<maximum {
-        zx_squared :: zx * zx
-        zy_squared :: zy * zy
-        difference :: zx_squared - zy_squared
-        next_x :: difference + cx
-        product :: zx * zy
-        doubled :: product * Float{2.0}
-        next_y :: doubled + cy
+        zx_squared: zx * zx
+        zy_squared: zy * zy
+        difference: zx_squared - zy_squared
+        next_x: difference + cx
+        product: zx * zy
+        doubled: product * Float{2.0}
+        next_y: doubled + cy
         zx = next_x
         zy = next_y
-        magnitude_x :: zx * zx
-        magnitude_y :: zy * zy
-        magnitude_squared :: magnitude_x + magnitude_y
-        threshold :: Float{4.0}
+        magnitude_x: zx * zx
+        magnitude_y: zy * zy
+        magnitude_squared: magnitude_x + magnitude_y
+        threshold: Float{4.0}
         if magnitude_squared > threshold -> return i + 1
     }
     return maximum
 }
 
-fn emit_case(label: String, named: Bool, width: Int, height: Int, stride: Int, iterations: Int, parse_failed: Bool, width_seen: Bool, height_seen: Bool, stride_seen: Bool, iterations_seen: Bool) {
+emit_case: fn(label: String, named: Bool, width: Int, height: Int, stride: Int, iterations: Int, parse_failed: Bool, width_seen: Bool, height_seen: Bool, stride_seen: Bool, iterations_seen: Bool) {
     if parse_failed || !width_seen || !height_seen || !stride_seen || !iterations_seen {
         reject_case(label, named)
         return
@@ -45,22 +45,22 @@ fn emit_case(label: String, named: Bool, width: Int, height: Int, stride: Int, i
         reject_case(label, named)
         return
     }
-    samples_x :: (width + stride - 1) /% stride
-    samples_y :: (height + stride - 1) /% stride
+    samples_x: (width + stride - 1) /% stride
+    samples_y: (height + stride - 1) /% stride
     if samples_x <= 0 || samples_y <= 0 || samples_x > 25_000_000 /% samples_y {
         reject_case(label, named)
         return
     }
-    expected_samples :: samples_x * samples_y
+    expected_samples: samples_x * samples_y
     samples := 0
     checksum := 0
     loop y in 0..<height, stride {
-        cy_ratio :: Float.from_int(y) / Float.from_int(height)
-        cy :: cy_ratio * Float{2.0} - Float{1.0}
+        cy_ratio: Float.from_int(y) / Float.from_int(height)
+        cy: cy_ratio * Float{2.0} - Float{1.0}
         loop x in 0..<width, stride {
-            cx_ratio :: Float.from_int(x) / Float.from_int(width)
-            cx :: cx_ratio * Float{3.5} - Float{2.5}
-            count :: escape_count(cx, cy, iterations)
+            cx_ratio: Float.from_int(x) / Float.from_int(width)
+            cx: cx_ratio * Float{3.5} - Float{2.5}
+            count: escape_count(cx, cy, iterations)
             checksum = (checksum + count) % 1_000_000_007
             samples += 1
         }
@@ -74,7 +74,7 @@ fn emit_case(label: String, named: Bool, width: Int, height: Int, stride: Int, i
     print("checksum={checksum}")
 }
 
-fn run_single(raw: String) {
+run_single: fn(raw: String) {
     width := 0
     height := 0
     stride := 0
@@ -85,15 +85,15 @@ fn run_single(raw: String) {
     iterations_seen := false
     parse_failed := false
     loop line in raw.lines() {
-        trimmed :: line.trim().copy()
+        trimmed: line.trim().copy()
         if trimmed == "" -> next
-        fields :: line.split("=").to_list()
+        fields: line.split("=").to_list()
         if fields.len() != 2 {
             parse_failed = true
             next
         }
-        key :: fields[0].trim()
-        value :: Int.parse(fields[1].trim()) ?? {
+        key: fields[0].trim()
+        value: Int.parse(fields[1].trim()) ?? {
             parse_failed = true
             next
         }
@@ -118,7 +118,7 @@ fn run_single(raw: String) {
     emit_case("", false, width, height, stride, iterations, parse_failed, width_seen, height_seen, stride_seen, iterations_seen)
 }
 
-fn run_batch(raw: String) {
+run_batch: fn(raw: String) {
     width := 0
     height := 0
     stride := 0
@@ -131,14 +131,14 @@ fn run_batch(raw: String) {
     active := false
     label := ""
     loop line in raw.lines() {
-        trimmed :: line.trim().copy()
+        trimmed: line.trim().copy()
         if trimmed == "" || trimmed.starts_with("#") -> next
-        fields :: trimmed.split("=").to_list()
+        fields: trimmed.split("=").to_list()
         if fields.len() != 2 {
             parse_failed = true
             next
         }
-        key :: fields[0].trim()
+        key: fields[0].trim()
         if key == "case" {
             if active {
                 emit_case(label, true, width, height, stride, iterations, parse_failed, width_seen, height_seen, stride_seen, iterations_seen)
@@ -160,7 +160,7 @@ fn run_batch(raw: String) {
             parse_failed = true
             next
         }
-        value :: Int.parse(fields[1].trim()) ?? {
+        value: Int.parse(fields[1].trim()) ?? {
             parse_failed = true
             next
         }
@@ -187,8 +187,8 @@ fn run_batch(raw: String) {
     } else { reject_case("batch", true) }
 }
 
-fn run(args: WorkloadArgs) {
-    input :: args.input
-    raw :: fs.read(input) ?? panic("read input")
+run: fn(args: WorkloadArgs) {
+    input: args.input
+    raw: fs.read(input) ?? panic("read input")
     if raw.contains("case=") -> run_batch(raw) else -> run_single(raw)
 }

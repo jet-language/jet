@@ -7,7 +7,7 @@
 // environment receipt: reference, store name, recorded version, output
 // digest, and the stable metadata fingerprint (the two usage timestamps are
 // excluded; they may change without invalidating an activation).
-struct EnvironmentSelection {
+EnvironmentSelection: struct {
     reference: String
     name: String
     version: String
@@ -15,16 +15,16 @@ struct EnvironmentSelection {
     metadata: String
 
     // The (reference, name, version, output) half used to pre-filter.
-    fn base_key(self) -> String Never! {
+    base_key: fn(self) -> String Never! {
         "{self.reference}\t{self.name}\t{self.version}\t{self.output_hash}"
     }
 
-    fn key(self) -> String Never! {
+    key: fn(self) -> String Never! {
         "{self.base_key()}\t{self.metadata}"
     }
 }
 
-fn store_environment_entry_selection(entry: StoreEntry) -> EnvironmentSelection Never! {
+store_environment_entry_selection: fn(entry: StoreEntry) -> EnvironmentSelection Never! {
     stable := entry.copy()
     stable.realized_at = 0
     stable.last_used_at = 0
@@ -39,10 +39,10 @@ fn store_environment_entry_selection(entry: StoreEntry) -> EnvironmentSelection 
 
 // Selected entries keyed by their full selection; among duplicates the most
 // recently used (then greatest id) wins.
-struct EnvironmentEntryIndex {
+EnvironmentEntryIndex: struct {
     priv by_selection: [String: StoreEntry]
 
-    fn from_entries(entries: [StoreEntry]) -> EnvironmentEntryIndex Never! {
+    from_entries: fn(entries: [StoreEntry]) -> EnvironmentEntryIndex Never! {
         index := EnvironmentEntryIndex{by_selection: [String: StoreEntry]{}}
         loop entry in entries -> &index.offer(store_environment_entry_selection(entry).key(), entry)
         index
@@ -50,7 +50,7 @@ struct EnvironmentEntryIndex {
 
     // Build only the receipt members that can be selected. Store metadata
     // hashes for unrelated entries cannot affect an environment stamp.
-    fn from_entries_for_selections(entries: [StoreEntry], selections: [EnvironmentSelection]) -> EnvironmentEntryIndex Never! {
+    from_entries_for_selections: fn(entries: [StoreEntry], selections: [EnvironmentSelection]) -> EnvironmentEntryIndex Never! {
         wanted := [String: Bool]{}
         base_keys := [String: Bool]{}
         loop selection in selections {
@@ -59,31 +59,31 @@ struct EnvironmentEntryIndex {
         }
         index := EnvironmentEntryIndex{by_selection: [String: StoreEntry]{}}
         loop entry in entries {
-            base :: "{entry.reference}\t{entry.name}\t{entry.version}\t{entry.envelope.output_hash}"
+            base: "{entry.reference}\t{entry.name}\t{entry.version}\t{entry.envelope.output_hash}"
             if !base_keys.has_key(base) -> next
-            key :: store_environment_entry_selection(entry).key()
+            key: store_environment_entry_selection(entry).key()
             if !wanted.has_key(key) -> next
             &index.offer(key, entry)
         }
         index
     }
 
-    fn offer(&self, key: String, entry: StoreEntry) Never! {
+    offer: fn(&self, key: String, entry: StoreEntry) Never! {
         if self.by_selection.get(key) == {
             .Val(current) -> {
-                newer :: entry.last_used_at > current.last_used_at || (entry.last_used_at == current.last_used_at && entry.id > current.id)
+                newer: entry.last_used_at > current.last_used_at || (entry.last_used_at == current.last_used_at && entry.id > current.id)
                 if newer -> self.by_selection[key] = entry
             }
             .None -> self.by_selection[key] = entry
         }
     }
 
-    fn get(self, selection: EnvironmentSelection) -> StoreEntry? Never! {
+    get: fn(self, selection: EnvironmentSelection) -> StoreEntry? Never! {
         self.by_selection.get(selection.key())
     }
 }
 
-fn store_append_environment_stamp_field(stamp: &[U8], field: [U8]) Never! {
+store_append_environment_stamp_field: fn(stamp: &[U8], field: [U8]) Never! {
     store_push_u64_le(&stamp, field.len())
     store_push_bytes(&stamp, field)
 }
@@ -91,16 +91,16 @@ fn store_append_environment_stamp_field(stamp: &[U8], field: [U8]) Never! {
 // External output paths of the selected entries that live outside this
 // Hangar: non-Hangar outputs and, for non-Nix providers, recorded output
 // paths and dependency files, which stay part of the activation witness.
-fn store_external_output_paths(roots: HangarRoots, entries: [StoreEntry]) -> [String] Never! {
-    hangar :: roots.hangar_dir()
+store_external_output_paths: fn(roots: HangarRoots, entries: [StoreEntry]) -> [String] Never! {
+    hangar: roots.hangar_dir()
     paths := [String]{}
     loop entry in entries {
         if entry.out != "" && !store_path_starts_with(entry.out, hangar) -> &paths.push(entry.out)
-        producer :: ProducerRecord.decode(entry.producer_record) ?? next
+        producer: ProducerRecord.decode(entry.producer_record) ?? next
         // Nix named outputs are projected from their verified Hangar objects.
         if producer.provider == "nix" -> next
         loop key in store_sorted_keys(producer.facts) {
-            value :: producer.facts[key]
+            value: producer.facts[key]
             path := ""
             if {
                 key.starts_with("nix.output.") || key.starts_with("output.path.") -> path = value
@@ -116,8 +116,8 @@ fn store_external_output_paths(roots: HangarRoots, entries: [StoreEntry]) -> [St
     store_sorted_unique(paths)
 }
 
-fn store_append_external_metadata_stamp(stamp: &[U8], metadata: Stat) Never! {
-    kind :: if {
+store_append_external_metadata_stamp: fn(stamp: &[U8], metadata: Stat) Never! {
+    kind: if {
         metadata.is_symlink -> "symlink"
         metadata.is_dir -> "directory"
         metadata.is_file -> "file"
@@ -125,14 +125,14 @@ fn store_append_external_metadata_stamp(stamp: &[U8], metadata: Stat) Never! {
     }
     store_append_environment_stamp_field(&stamp, kind.bytes())
     store_append_environment_stamp_field(&stamp, "{metadata.size}".bytes())
-    nanos :: metadata.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")
-    seconds :: nanos /% 1000000000
-    modified :: if nanos < 0 -> "" else -> "{seconds}:{nanos - seconds * 1000000000}"
+    nanos: metadata.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")
+    seconds: nanos /% 1000000000
+    modified: if nanos < 0 -> "" else -> "{seconds}:{nanos - seconds * 1000000000}"
     store_append_environment_stamp_field(&stamp, modified.bytes())
 }
 
 // Rust `format!("{:?}", error.kind())` for the stamp.
-fn store_io_kind_name(error: IOError) -> String Never! {
+store_io_kind_name: fn(error: IOError) -> String Never! {
     if error == {
         .NotFound(_) -> "NotFound"
         .PermissionDenied(_) -> "PermissionDenied"
@@ -144,7 +144,7 @@ fn store_io_kind_name(error: IOError) -> String Never! {
     }
 }
 
-fn store_append_external_output_stamp(stamp: &[U8], path: String) Never! {
+store_append_external_output_stamp: fn(stamp: &[U8], path: String) Never! {
     store_append_environment_stamp_field(&stamp, path.bytes())
     if files.stat(path) == {
         .Ok(metadata) -> {
@@ -176,7 +176,7 @@ fn store_append_external_output_stamp(stamp: &[U8], path: String) Never! {
 
 // A missing node records `missing`; any other failure records `failed` and
 // the Rust error-kind name.
-fn store_append_stat_failure(stamp: &[U8], error: IOError, missing: String, failed: String) Never! {
+store_append_stat_failure: fn(stamp: &[U8], error: IOError, missing: String, failed: String) Never! {
     if StoreError.IO(error).is_not_found() {
         store_append_environment_stamp_field(&stamp, missing.bytes())
         return
@@ -185,18 +185,18 @@ fn store_append_stat_failure(stamp: &[U8], error: IOError, missing: String, fail
     store_append_environment_stamp_field(&stamp, store_io_kind_name(error).bytes())
 }
 
-fn store_environment_entry_stamp_with_index(roots: HangarRoots, project: String, definition_fingerprint: String, inherited_loader_path: String?, selections: [EnvironmentSelection], index: EnvironmentEntryIndex) -> String StoreError! {
-    store_stamp :: store_wal_state_stamp(roots)
+store_environment_entry_stamp_with_index: fn(roots: HangarRoots, project: String, definition_fingerprint: String, inherited_loader_path: String?, selections: [EnvironmentSelection], index: EnvironmentEntryIndex) -> String StoreError! {
+    store_stamp: store_wal_state_stamp(roots)
     canonical := "jetpack-env-entry-v4".bytes()
     &canonical.push(U8{0})
-    header :: [String]{store_stamp, definition_fingerprint, project, inherited_loader_path ?? ""}
+    header: [String]{store_stamp, definition_fingerprint, project, inherited_loader_path ?? ""}
     loop field in header -> store_append_environment_stamp_field(&canonical, field.bytes())
     ordered := selections.copy()
     &ordered.sort_by(selection -> selection.key())
     selected := [StoreEntry]{}
-    seals :: files.join(roots.hangar_dir(), STORE_SEALS_DIR)
+    seals: files.join(roots.hangar_dir(), STORE_SEALS_DIR)
     loop selection in ordered {
-        fields :: [String]{selection.reference, selection.name, selection.version, selection.output_hash, selection.metadata}
+        fields: [String]{selection.reference, selection.name, selection.version, selection.output_hash, selection.metadata}
         loop field in fields -> store_append_environment_stamp_field(&canonical, field.bytes())
         if index.get(selection) == {
             .Val(entry) -> {
@@ -215,8 +215,8 @@ fn store_environment_entry_stamp_with_index(roots: HangarRoots, project: String,
     Ok(store_sha256_hex(canonical))
 }
 
-fn store_environment_entry_stamp(roots: HangarRoots, project: String, definition_fingerprint: String, inherited_loader_path: String?, selections: [EnvironmentSelection]) -> String StoreError! {
-    entries :: store_list_read_only(roots)
-    index :: EnvironmentEntryIndex.from_entries_for_selections(entries, selections)
+store_environment_entry_stamp: fn(roots: HangarRoots, project: String, definition_fingerprint: String, inherited_loader_path: String?, selections: [EnvironmentSelection]) -> String StoreError! {
+    entries: store_list_read_only(roots)
+    index: EnvironmentEntryIndex.from_entries_for_selections(entries, selections)
     store_environment_entry_stamp_with_index(roots, project, definition_fingerprint, inherited_loader_path, selections, index)
 }

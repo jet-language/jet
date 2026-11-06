@@ -5,26 +5,26 @@
 // `Dyn` in the exact Rust field order, and `json.to_string` writes it.
 // Status field values are Core `Dyn` values (Rust `StatusValue`).
 use {
-    json :: core.encoding.json
-    files :: core.files
-    sys :: core.sys
-    crypto :: core.crypto
+    json: core.encoding.json
+    files: core.files
+    sys: core.sys
+    crypto: core.crypto
 }
 
 
-REPORT_NAME :: "jet.report"
-REPORT_VERSION :: 3
-REPORT_SCHEMA :: "jet.report/v3"
-STATUS_NAME :: "jet.status"
-STATUS_VERSION :: 1
-STATUS_SCHEMA :: "jet.status/v1"
+REPORT_NAME: "jet.report"
+REPORT_VERSION: 3
+REPORT_SCHEMA: "jet.report/v3"
+STATUS_NAME: "jet.status"
+STATUS_VERSION: 1
+STATUS_SCHEMA: "jet.status/v1"
 
 // The report model's one failure carrier; the text is the Rust error string.
 #Error
-struct ReportError {
+ReportError: struct {
     message: String
 
-    fn new(message: String) -> ReportError Never! {
+    new: fn(message: String) -> ReportError Never! {
         ReportError{message: message}
     }
 }
@@ -32,13 +32,13 @@ struct ReportError {
 // Rust `char::is_control` over every scalar: C0, DEL, or C1 (U+0080..U+009F,
 // encoded 0xC2 0x80..0x9F). Foundation sits below every area, so the report
 // validators carry their own copy of this check.
-fn foundation_text_has_control(value: String) -> Bool Never! {
-    raw :: value.bytes()
+foundation_text_has_control: fn(value: String) -> Bool Never! {
+    raw: value.bytes()
     loop index in 0..<raw.len() {
-        code :: Int.from_u8(raw[index])
+        code: Int.from_u8(raw[index])
         if code < 32 || code == 127 -> return true
         if code == 0xC2 && index + 1 < raw.len() {
-            next_code :: Int.from_u8(raw[index + 1])
+            next_code: Int.from_u8(raw[index + 1])
             if next_code >= 0x80 && next_code <= 0x9F -> return true
         }
     }
@@ -46,26 +46,26 @@ fn foundation_text_has_control(value: String) -> Bool Never! {
 }
 
 // Compact JSON text uses Core's fallible wire projection.
-fn report_json(value: Dyn) -> String ReportError! {
-    text :: json.to_string(value) ?? return Err(ReportError.new(err.reason))
+report_json: fn(value: Dyn) -> String ReportError! {
+    text: json.to_string(value) ?? return Err(ReportError.new(err.reason))
     Ok(text)
 }
 
-fn report_optional_text(value: String?) -> Dyn Never! {
+report_optional_text: fn(value: String?) -> Dyn Never! {
     if value == {
         .Val(text) -> Dyn.Text(text)
         .None -> Dyn.Null
     }
 }
 
-fn report_optional_int(value: Int?) -> Dyn Never! {
+report_optional_int: fn(value: Int?) -> Dyn Never! {
     if value == {
         .Val(number) -> Dyn.Int(number)
         .None -> Dyn.Null
     }
 }
 
-fn report_texts(values: [String]) -> Dyn Never! {
+report_texts: fn(values: [String]) -> Dyn Never! {
     items := [Dyn]{}
     loop value in values -> &items.push(Dyn.Text(value))
     Dyn.Array(items)
@@ -73,12 +73,12 @@ fn report_texts(values: [String]) -> Dyn Never! {
 
 // Why a diagnostic has no machine-applicable edit. The next action is part
 // of the value, never inferred from the kind.
-enum NoFixReasonKind {
+NoFixReasonKind: enum {
     Behavior
     Design
     Ambiguous
 
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         if self == {
             .Behavior -> "behavior"
             .Design -> "design"
@@ -86,7 +86,7 @@ enum NoFixReasonKind {
         }
     }
 
-    fn parse(value: String) -> NoFixReasonKind ReportError! {
+    parse: fn(value: String) -> NoFixReasonKind ReportError! {
         if value == {
             "behavior" -> Ok(NoFixReasonKind.Behavior)
             "design" -> Ok(NoFixReasonKind.Design)
@@ -97,51 +97,51 @@ enum NoFixReasonKind {
 }
 
 // A reviewed action for a diagnostic that cannot carry an automatic edit.
-struct NoFixReason {
+NoFixReason: struct {
     kind: NoFixReasonKind
     next: String
 
-    fn new(kind: NoFixReasonKind, next: String) -> NoFixReason Never! {
+    new: fn(kind: NoFixReasonKind, next: String) -> NoFixReason Never! {
         NoFixReason.try_new(kind, next) ?? panic("NoFixReason::new requires a reviewed next action")
     }
 
-    fn try_new(kind: NoFixReasonKind, next: String) -> NoFixReason ReportError! {
-        reason :: NoFixReason{kind: kind, next: next}
+    try_new: fn(kind: NoFixReasonKind, next: String) -> NoFixReason ReportError! {
+        reason: NoFixReason{kind: kind, next: next}
         reason.validate()
         Ok(reason)
     }
 
-    fn validate(self) ReportError! {
+    validate: fn(self) ReportError! {
         if self.next.trim() == "" -> return Err(ReportError.new("no-fix reason next action must not be empty"))
         if foundation_text_has_control(self.next) -> return Err(ReportError.new("no-fix reason next action must not contain control characters"))
     }
 }
 
 // One named status field.
-struct StatusField {
+StatusField: struct {
     name: String
     value: Dyn
 }
 
 // Ordered, typed action-specific fields for a status object.
-struct StatusFields {
+StatusFields: struct {
     entries: [StatusField]
 
-    fn new() -> StatusFields Never! {
+    new: fn() -> StatusFields Never! {
         StatusFields{entries: [StatusField]{}}
     }
 
-    fn with(self, name: String, value: Dyn) -> StatusFields Never! {
+    with: fn(self, name: String, value: Dyn) -> StatusFields Never! {
         self.try_with(name, value) ?? panic("status fields must have unique, non-empty names")
     }
 
-    fn try_with(self, name: String, value: Dyn) -> StatusFields ReportError! {
+    try_with: fn(self, name: String, value: Dyn) -> StatusFields ReportError! {
         fields := self
         &fields.insert(name, value)
         Ok(fields)
     }
 
-    fn insert(&self, name: String, value: Dyn) ReportError! {
+    insert: fn(&self, name: String, value: Dyn) ReportError! {
         if name == "" || foundation_text_has_control(name) -> return Err(ReportError.new("status field names must be non-empty and printable"))
         loop entry in self.entries {
             if entry.name == name -> return Err(ReportError.new("duplicate status field `{name}`"))
@@ -149,17 +149,17 @@ struct StatusFields {
         &self.entries.push(StatusField{name: name, value: value})
     }
 
-    fn extend(&self, fields: StatusFields) ReportError! {
+    extend: fn(&self, fields: StatusFields) ReportError! {
         loop entry in fields.entries -> &self.insert(entry.name, entry.value)
     }
 
-    fn is_empty(self) -> Bool Never! {
+    is_empty: fn(self) -> Bool Never! {
         self.entries.len() == 0
     }
 
     // Rust `StatusValue::parse`: status fields refuse duplicate names, so an
     // object is re-inserted field by field in document order.
-    fn from_dyn_object(value: [String: Dyn]) -> StatusFields ReportError! {
+    from_dyn_object: fn(value: [String: Dyn]) -> StatusFields ReportError! {
         fields := StatusFields.new()
         loop entry in value -> &fields.insert(entry.key, entry.value)
         Ok(fields)
@@ -167,7 +167,7 @@ struct StatusFields {
 }
 
 // Rust `StatusValue::parse`: a JSON text as a status field value.
-fn report_status_value_parse(text: String) -> Dyn ReportError! {
+report_status_value_parse: fn(text: String) -> Dyn ReportError! {
     if json.parse(text) == {
         .Ok(tree) -> Ok(tree)
         .Err(error) -> Err(ReportError.new(error.reason))
@@ -175,52 +175,52 @@ fn report_status_value_parse(text: String) -> Dyn ReportError! {
 }
 
 // Rust `StatusValue::object`.
-fn report_status_object(fields: StatusFields) -> Dyn Never! {
+report_status_object: fn(fields: StatusFields) -> Dyn Never! {
     object := [String: Dyn]{}
     loop entry in fields.entries -> object[entry.name] = entry.value
     Dyn.Object(object)
 }
 
 // The one machine status object for every command `--json` result.
-struct StatusEnvelope {
+StatusEnvelope: struct {
     action: String
     ok: Bool
     reports: [ReportEnvelope]
     fields: StatusFields
 
-    fn new(action: String, ok: Bool) -> StatusEnvelope Never! {
+    new: fn(action: String, ok: Bool) -> StatusEnvelope Never! {
         StatusEnvelope{action: action, ok: ok, reports: [ReportEnvelope]{}, fields: StatusFields.new()}
     }
 
-    fn with_report(self, report: ReportEnvelope) -> StatusEnvelope Never! {
+    with_report: fn(self, report: ReportEnvelope) -> StatusEnvelope Never! {
         envelope := self
         &envelope.reports.push(report)
         envelope
     }
 
-    fn with_reports(self, reports: [ReportEnvelope]) -> StatusEnvelope Never! {
+    with_reports: fn(self, reports: [ReportEnvelope]) -> StatusEnvelope Never! {
         envelope := self
         loop report in reports -> &envelope.reports.push(report)
         envelope
     }
 
-    fn with_field(self, name: String, value: Dyn) -> StatusEnvelope Never! {
+    with_field: fn(self, name: String, value: Dyn) -> StatusEnvelope Never! {
         envelope := self
         envelope.fields = envelope.fields.with(name, value)
         envelope
     }
 
-    fn with_fields(self, fields: StatusFields) -> StatusEnvelope Never! {
+    with_fields: fn(self, fields: StatusFields) -> StatusEnvelope Never! {
         self.try_with_fields(fields) ?? panic("status fields must not duplicate envelope fields")
     }
 
-    fn try_with_fields(self, fields: StatusFields) -> StatusEnvelope ReportError! {
+    try_with_fields: fn(self, fields: StatusFields) -> StatusEnvelope ReportError! {
         envelope := self
         &envelope.fields.extend(fields)
         Ok(envelope)
     }
 
-    fn validate(self) ReportError! {
+    validate: fn(self) ReportError! {
         if self.action == "" -> return Err(ReportError.new("status action must not be empty"))
         if foundation_text_has_control(self.action) -> return Err(ReportError.new("status action must not contain control characters"))
         loop entry in self.fields.entries {
@@ -232,7 +232,7 @@ struct StatusEnvelope {
         loop report in self.reports -> report.validate()
     }
 
-    fn to_tree(self) -> Dyn Never! {
+    to_tree: fn(self) -> Dyn Never! {
         self.validate() ?? panic("invalid jet.status/v1 envelope")
         object := [String: Dyn]{}
         object["schema"] = Dyn.Text(STATUS_SCHEMA)
@@ -245,38 +245,38 @@ struct StatusEnvelope {
         Dyn.Object(object)
     }
 
-    fn json(self) -> String ReportError! {
+    json: fn(self) -> String ReportError! {
         report_json(self.to_tree())
     }
 
-    fn json_line(self) -> String ReportError! {
-        text :: self.json() ?? return Err(err)
+    json_line: fn(self) -> String ReportError! {
+        text: self.json() ?? return Err(err)
         Ok("{text}\n")
     }
 }
 
 // Render a typed status envelope; reserved keys fail through the one
 // validator every producer shares.
-fn report_render_status(action: String, ok: Bool, fields: StatusFields) -> String ReportError! {
-    envelope :: StatusEnvelope.new(action, ok).try_with_fields(fields) ?? panic("status fields must not duplicate envelope fields")
+report_render_status: fn(action: String, ok: Bool, fields: StatusFields) -> String ReportError! {
+    envelope: StatusEnvelope.new(action, ok).try_with_fields(fields) ?? panic("status fields must not duplicate envelope fields")
     envelope.json()
 }
 
 // Render one status object with typed report children.
-fn report_render_status_with_reports(action: String, ok: Bool, reports: [ReportEnvelope], fields: StatusFields) -> String ReportError! {
-    envelope :: StatusEnvelope.new(action, ok).with_reports(reports).try_with_fields(fields) ?? panic("status fields must not duplicate envelope fields")
+report_render_status_with_reports: fn(action: String, ok: Bool, reports: [ReportEnvelope], fields: StatusFields) -> String ReportError! {
+    envelope: StatusEnvelope.new(action, ok).with_reports(reports).try_with_fields(fields) ?? panic("status fields must not duplicate envelope fields")
     envelope.json()
 }
 
 // Closed safety classes for machine edits.
-enum FixSafety {
+FixSafety: enum {
     Formatting
     BehaviorPreserving
     APIChanging
     TargetChanging
     NeedsReview
 
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         if self == {
             .Formatting -> "formatting"
             .BehaviorPreserving -> "behavior-preserving"
@@ -286,7 +286,7 @@ enum FixSafety {
         }
     }
 
-    fn auto_apply(self) -> Bool Never! {
+    auto_apply: fn(self) -> Bool Never! {
         if self == {
             .Formatting | .BehaviorPreserving -> true
             else -> false
@@ -295,13 +295,13 @@ enum FixSafety {
 }
 
 // The promise attached to a machine-applicable edit.
-enum FixApplicability {
+FixApplicability: enum {
     // Applying every edit with this grade is proved to make report progress.
     Safe
     // Useful to show, but a person must choose whether to apply it.
     Suggested
 
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         if self == {
             .Safe -> "safe"
             .Suggested -> "suggested"
@@ -312,15 +312,15 @@ enum FixApplicability {
 // A source identity a report consumer can open from its process. Relative
 // disk paths become absolute lexically; synthetic labels such as `<cli>`
 // stay labels.
-struct ReportPath {
+ReportPath: struct {
     priv value: String
 
-    fn from_process(value: String) -[FS, Env]> ReportPath Never! {
+    from_process: fn(value: String) -[FS, Env]> ReportPath Never! {
         if value == "" || value.starts_with("<") -> return ReportPath{value: value}
         ReportPath.from_path(value)
     }
 
-    fn from_path(path: String) -[FS, Env]> ReportPath Never! {
+    from_path: fn(path: String) -[FS, Env]> ReportPath Never! {
         if path == "" || path.starts_with("<") -> return ReportPath{value: path}
         if files.is_abs(path) -> return ReportPath{value: report_lexically_normalize(path)}
         if sys.current_dir() == {
@@ -329,18 +329,18 @@ struct ReportPath {
         }
     }
 
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         self.value
     }
 
-    fn is_empty(self) -> Bool Never! {
+    is_empty: fn(self) -> Bool Never! {
         self.value == ""
     }
 }
 
 // Rust `lexically_normalize`: drop `.`, pop on `..` (never above the root).
-fn report_lexically_normalize(path: String) -> String Never! {
-    absolute :: path.starts_with("/")
+report_lexically_normalize: fn(path: String) -> String Never! {
+    absolute: path.starts_with("/")
     parts := [String]{}
     loop part in path.split("/") {
         if part == {
@@ -355,20 +355,20 @@ fn report_lexically_normalize(path: String) -> String Never! {
             }
         }
     }
-    joined :: parts.join("/")
+    joined: parts.join("/")
     if absolute -> return "/{joined}"
     joined
 }
 
-struct ReportSpan {
+ReportSpan: struct {
     start: Int
     end: Int
 
-    fn new(start: Int, end: Int) -> ReportSpan Never! {
+    new: fn(start: Int, end: Int) -> ReportSpan Never! {
         ReportSpan{start: start, end: end}
     }
 
-    fn to_tree(self) -> Dyn Never! {
+    to_tree: fn(self) -> Dyn Never! {
         object := [String: Dyn]{}
         object["start"] = Dyn.Int(self.start)
         object["end"] = Dyn.Int(self.end)
@@ -376,14 +376,14 @@ struct ReportSpan {
     }
 }
 
-fn report_optional_span(span: ReportSpan?) -> Dyn Never! {
+report_optional_span: fn(span: ReportSpan?) -> Dyn Never! {
     if span == {
         .Val(value) -> value.to_tree()
         .None -> Dyn.Null
     }
 }
 
-fn report_optional_path(path: ReportPath?) -> Dyn Never! {
+report_optional_path: fn(path: ReportPath?) -> Dyn Never! {
     if path == {
         .Val(file) -> {
             if file.is_empty() -> return Dyn.Null
@@ -395,23 +395,23 @@ fn report_optional_path(path: ReportPath?) -> Dyn Never! {
 
 // One ordered cause in a `jet.report/v3` diagnostic. Every location field is
 // independent; an unknown one stays unknown instead of inheriting the root's.
-struct ReportCause {
+ReportCause: struct {
     code: String
     file: ReportPath?
     line: Int?
     col: Int?
     span: ReportSpan?
 
-    fn new(code: String) -> ReportCause Never! {
+    new: fn(code: String) -> ReportCause Never! {
         ReportCause{code: code, file: None, line: None, col: None, span: None}
     }
 
     // Code-only access for non-report status projections.
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         self.code
     }
 
-    fn to_tree(self) -> Dyn Never! {
+    to_tree: fn(self) -> Dyn Never! {
         object := [String: Dyn]{}
         object["code"] = Dyn.Text(self.code.copy())
         object["file"] = report_optional_path(self.file)
@@ -422,17 +422,17 @@ struct ReportCause {
     }
 }
 
-struct ReportEdit {
+ReportEdit: struct {
     file: ReportPath
     span: ReportSpan
     new_text: String
     safety: FixSafety
 
-    fn new(file: ReportPath, span: ReportSpan, new_text: String, safety: FixSafety) -> ReportEdit Never! {
+    new: fn(file: ReportPath, span: ReportSpan, new_text: String, safety: FixSafety) -> ReportEdit Never! {
         ReportEdit{file: file, span: span, new_text: new_text, safety: safety}
     }
 
-    fn to_tree(self) -> Dyn Never! {
+    to_tree: fn(self) -> Dyn Never! {
         object := [String: Dyn]{}
         object["file"] = Dyn.Text(self.file.as_str())
         object["span"] = self.span.to_tree()
@@ -443,21 +443,21 @@ struct ReportEdit {
 }
 
 // The crypto finding extension of a report.
-struct ReportCryptoExtension {
+ReportCryptoExtension: struct {
     reason: String
     operation: String
     expected: String?
     actual: Int?
 }
 
-enum ReportExtension {
+ReportExtension: enum {
     Crypto(ReportCryptoExtension)
     // An already rendered build-error JSON document.
     BuildError(String)
 }
 
 // A `jet.report/v3` diagnostic or machine finding.
-struct ReportEnvelope {
+ReportEnvelope: struct {
     schema_name: String
     schema_version: Int
     moment: String
@@ -482,7 +482,7 @@ struct ReportEnvelope {
     scope_chain: [String]
     nearest_granting_scope: String?
 
-    fn new(moment: String, severity: String, code: String, what: String, why: String, fix: String) -> ReportEnvelope Never! {
+    new: fn(moment: String, severity: String, code: String, what: String, why: String, fix: String) -> ReportEnvelope Never! {
         ReportEnvelope{
             schema_name: REPORT_NAME,
             schema_version: REPORT_VERSION,
@@ -510,30 +510,30 @@ struct ReportEnvelope {
         }
     }
 
-    fn push_fix_edit(&self, edit: ReportEdit) ReportError! {
+    push_fix_edit: fn(&self, edit: ReportEdit) ReportError! {
         if self.no_fix_reason != None -> return Err(ReportError.new("a report cannot carry fix_edits and no_fix_reason"))
         &self.fix_edits.push(edit)
     }
 
-    fn with_fix_edits(self, edits: [ReportEdit]) -> ReportEnvelope ReportError! {
+    with_fix_edits: fn(self, edits: [ReportEdit]) -> ReportEnvelope ReportError! {
         report := self
         loop edit in edits -> &report.push_fix_edit(edit)
         Ok(report)
     }
 
-    fn set_no_fix_reason(&self, reason: NoFixReason) ReportError! {
+    set_no_fix_reason: fn(&self, reason: NoFixReason) ReportError! {
         reason.validate()
         if self.fix_edits.len() > 0 -> return Err(ReportError.new("a report cannot carry fix_edits and no_fix_reason"))
         self.no_fix_reason = Val(reason)
     }
 
-    fn with_no_fix_reason(self, reason: NoFixReason) -> ReportEnvelope ReportError! {
+    with_no_fix_reason: fn(self, reason: NoFixReason) -> ReportEnvelope ReportError! {
         report := self
         &report.set_no_fix_reason(reason)
         Ok(report)
     }
 
-    fn validate(self) ReportError! {
+    validate: fn(self) ReportError! {
         if self.schema_name != REPORT_NAME || self.schema_version != REPORT_VERSION {
             return Err(ReportError.new("report envelope has an unsupported schema identity"))
         }
@@ -546,7 +546,7 @@ struct ReportEnvelope {
         }
     }
 
-    fn to_tree(self) -> Dyn Never! {
+    to_tree: fn(self) -> Dyn Never! {
         self.validate() ?? panic("invalid jet.report/v3 envelope")
         object := [String: Dyn]{}
         object["schema"] = Dyn.Text("{self.schema_name}/v{self.schema_version}")
@@ -595,18 +595,18 @@ struct ReportEnvelope {
         Dyn.Object(object)
     }
 
-    fn json(self) -> String ReportError! {
+    json: fn(self) -> String ReportError! {
         report_json(self.to_tree())
     }
 
-    fn json_line(self) -> String ReportError! {
-        text :: self.json() ?? return Err(err)
+    json_line: fn(self) -> String ReportError! {
+        text: self.json() ?? return Err(err)
         Ok("{text}\n")
     }
 }
 
 // The extension's fields, appended after `clears`.
-fn report_extension_fields(object: &[String: Dyn], extension: ReportExtension) Never! {
+report_extension_fields: fn(object: &[String: Dyn], extension: ReportExtension) Never! {
     if extension == {
         .Crypto(crypto) -> {
             object["reason"] = Dyn.Text(crypto.reason)

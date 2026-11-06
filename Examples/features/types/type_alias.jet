@@ -1,46 +1,46 @@
 // D-TYPEALIAS1: transparent generic type aliases shorten fallible signatures.
-// Owner ruling #6176: an alias is a `Name :: Type` or `Name<T> :: Type`
+// Owner ruling #6176: an alias is a `Name: Type` or `Name<T>: Type`
 // declaration; the `alias` keyword is gone.
 #Error
-enum AppError {
+AppError: enum {
     Empty
 }
 
-Parsed<T> :: T AppError!
+Parsed<T>: T AppError!
 
-fn parse_count(raw: String) -> Parsed<Int> { if raw == "" -> Err(AppError.Empty) else -> Ok(42) }
+parse_count: fn(raw: String) -> Parsed<Int> { if raw == "" -> Err(AppError.Empty) else -> Ok(42) }
 
-struct Point {
+Point: struct {
     x: Int
 }
 
-struct Box<T> {
+Box: struct<T> {
     value: T
 }
 
-P<T> :: Point
+P<T>: Point
 
-Wrapped<T> :: Box<T>
+Wrapped<T>: Box<T>
 
-Chained<T> :: Wrapped<T>
+Chained<T>: Wrapped<T>
 
-Spot :: Point
+Spot: Point
 
-module shapes {
-    Pair<T> :: Box<T>
+shapes: module {
+    Pair<T>: Box<T>
 }
 
-fn run() {
-    n :: parse_count("7") ?? 0
+run: fn() {
+    n: parse_count("7") ?? 0
     print(n)
-    p :: P<Int>{x: 3}
+    p: P<Int>{x: 3}
     print(p.x)  // aliases of non-generic targets discard the alias's arguments
-    boxed :: Wrapped<Int>{value: 7}
+    boxed: Wrapped<Int>{value: 7}
     print(boxed.value)
-    chained :: Chained<String>{value: "jet"}
+    chained: Chained<String>{value: "jet"}
     print(chained.value)
-    spot :: Spot{x: 5}
+    spot: Spot{x: 5}
     print(spot.x)
-    pair :: shapes.Pair<Int>{value: 9}
+    pair: shapes.Pair<Int>{value: 9}
     print(pair.value)
 }

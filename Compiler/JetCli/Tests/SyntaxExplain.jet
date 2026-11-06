@@ -6,15 +6,15 @@ use jet_cli.[
 ]
 
 #Test("syntax_explain") {
-    keyword_index :: jet_cli_syntax_lookup("  Fn  ") ?? panic("case-insensitive syntax lookup")
-    keyword :: JET_CLI_SYNTAX_ROWS[keyword_index]
+    keyword_index: jet_cli_syntax_lookup("  Fn  ") ?? panic("case-insensitive syntax lookup")
+    keyword: JET_CLI_SYNTAX_ROWS[keyword_index]
     if keyword.token != "fn" || keyword.kind != JetCLISyntaxKind.Keyword -> panic("canonical keyword")
-    if jet_cli_syntax_plain_text(keyword) != "The Jet keyword `fn`.\nExample:\n  fn …\n" -> panic("keyword essay")
-    marker_index :: jet_cli_syntax_lookup("#Inline") ?? panic("marker display lookup")
-    marker_row :: JET_CLI_SYNTAX_ROWS[marker_index]
+    if jet_cli_syntax_plain_text(keyword) != "The Jet keyword `fn`.\nExample:\n  name: fn …\n" -> panic("keyword essay")
+    marker_index: jet_cli_syntax_lookup("#Inline") ?? panic("marker display lookup")
+    marker_row: JET_CLI_SYNTAX_ROWS[marker_index]
     if marker_row.kind != JetCLISyntaxKind.Marker || jet_cli_syntax_display(marker_row) != "#Inline" -> panic("marker identity")
-    move_index :: jet_cli_syntax_lookup("^") ?? panic("move token lookup")
-    essay :: jet_cli_syntax_plain_text(JET_CLI_SYNTAX_ROWS[move_index])
+    move_index: jet_cli_syntax_lookup("^") ?? panic("move token lookup")
+    essay: jet_cli_syntax_plain_text(JET_CLI_SYNTAX_ROWS[move_index])
     if !essay.contains("Before a name (move):\n") || !essay.contains("Before a parameter's type:\n") -> panic("one token's multiple meanings")
     if essay.contains("power") -> panic("infix power is retired; `^` teaches only take")
     if !jet_cli_syntax_query("#Inlin") || !jet_cli_syntax_query(":::") || !jet_cli_syntax_query("é") -> panic("syntax typo classification")
@@ -28,7 +28,7 @@ use jet_cli.[
     if jet_cli_explain_build_fact_name("$build.settings.") != .None || jet_cli_explain_build_fact_name("$build.settings.a.b") != .None -> panic("invalid setting paths are not source queries")
     loop row in JET_CLI_SYNTAX_ROWS {
         if row.meanings.len() == 0 || row.registry_name == "" -> panic("every syntax row explains itself")
-        found :: jet_cli_syntax_lookup(jet_cli_syntax_display(row)) ?? panic("every dictionary display is searchable")
+        found: jet_cli_syntax_lookup(jet_cli_syntax_display(row)) ?? panic("every dictionary display is searchable")
         if JET_CLI_SYNTAX_ROWS[found].token != row.token -> panic("dictionary lookup precedence")
     }
 }

@@ -1,11 +1,11 @@
 // Foundation real-time example: a canonical callback fake plus a 1 kHz
 // control loop. Receipt values are host observations, not hard WCET claims.
 use {
-    rt :: core.rt
-    time :: core.time
+    rt: core.rt
+    time: core.time
 }
 
-struct ControlStats {
+ControlStats: struct {
     ticks: Int
     missed: Int
     min_jitter_us: Int
@@ -13,8 +13,8 @@ struct ControlStats {
     sum_jitter_us: Int
 }
 
-fn control_loop() -> ControlStats {
-    started :: time.instant()
+control_loop: fn() -> ControlStats {
+    started: time.instant()
     next_due := started + 1ms
     ticks := 0
     missed := 0
@@ -26,9 +26,9 @@ fn control_loop() -> ControlStats {
     // observation (the loop began after its due time), not a hard deadline.
     loop ticks < 10000 {
         time.sleep_until(next_due)
-        due_us :: (ticks + 1) * 1000
-        observed_us :: started.elapsed().in(.Microseconds)
-        jitter :: observed_us - due_us
+        due_us: (ticks + 1) * 1000
+        observed_us: started.elapsed().in(.Microseconds)
+        jitter: observed_us - due_us
         if ticks == 0 {
             min_jitter = jitter
             max_jitter = jitter
@@ -51,7 +51,7 @@ fn control_loop() -> ControlStats {
     }
 }
 
-fn run() {
+run: fn() {
     // `core.rt` owns scheduling, the reusable 256-sample block, and stream
     // cancellation. The callback does bounded work only: one pass over its
     // fixed-size input, with no allocation, wait, or I/O.
@@ -65,18 +65,18 @@ fn run() {
     )
     stream.next_deadline().drop("the stream is armed; this run does not schedule against its first deadline")
 
-    control :: control_loop()
+    control: control_loop()
     &stream.cancel()
-    receipt :: stream.receipt()
+    receipt: stream.receipt()
 
     // These are measured host facts from the callback receipt. They do not
     // certify hardware scheduling, audio-device delivery, or a hard WCET.
     // Counts and latencies vary per host, so the example checks how they
     // relate and prints the relations, not the measurements.
-    whole_blocks :: receipt.completed_frames == receipt.completed_callbacks * receipt.requested_frames
-    lateness_measured :: receipt.max_lateness_ns >= 0
-    jitter_ordered :: control.min_jitter_us <= control.max_jitter_us
-    misses_bounded :: control.missed >= 0 && control.missed <= control.ticks
+    whole_blocks: receipt.completed_frames == receipt.completed_callbacks * receipt.requested_frames
+    lateness_measured: receipt.max_lateness_ns >= 0
+    jitter_ordered: control.min_jitter_us <= control.max_jitter_us
+    misses_bounded: control.missed >= 0 && control.missed <= control.ticks
     print("audio_callback=cancelled rate:{receipt.requested_rate_hz} frames:{receipt.requested_frames} whole_blocks:{whole_blocks} lateness_measured:{lateness_measured}")
     print("control_loop=1kHz ticks:{control.ticks} jitter_ordered:{jitter_ordered} misses_bounded:{misses_bounded}")
     print("receipt cancelled:{stream.is_cancelled()} joined:{receipt.end_identity > 0}")

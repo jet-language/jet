@@ -1,21 +1,21 @@
 
 use {
-    process :: core.process
-    tasks :: core.tasks
-    time :: core.time
+    process: core.process
+    tasks: core.tasks
+    time: core.time
 }
 
-fn run() {
-    (ready_tx, ready_rx) :: channel<Int>()
-    worker :: task {
-        child :: process.cmd(["{work}/cancel-tree.sh"]).stdout(.Capture).stderr(.Capture).spawn() ?? panic("spawn failed")
+run: fn() {
+    (ready_tx, ready_rx): channel<Int>()
+    worker: task {
+        child: process.cmd(["{work}/cancel-tree.sh"]).stdout(.Capture).stderr(.Capture).spawn() ?? panic("spawn failed")
         ready_tx.send(1)
         child.wait() ?? panic("cancelled wait returned")
     }
-    _ready :: ready_rx.receive() ?? panic("ready failed")
+    _ready: ready_rx.receive() ?? panic("ready failed")
     time.sleep(100ms)
     worker.cancel()
-    result :: worker.join()
+    result: worker.join()
     if result == {
         .Err(error) -> {
             if error == {

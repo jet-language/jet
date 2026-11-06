@@ -1,20 +1,20 @@
 // D-NARG-D2 (S61): a default may reference an earlier parameter.
 // `height: Int{width}` fills height with whatever width was given.
-struct Rect {
+Rect: struct {
     width: Int
     height: Int
 }
 
 impl Rect {
-    fn square(width: Int, height: Int{width}) -> Rect { return Rect{width: width, height: height} }
+    square: fn(width: Int, height: Int{width}) -> Rect { return Rect{width: width, height: height} }
 }
 
-fn box_dims(w: Int, h: Int{w}, d: Int{h}) -> String { "{w}x{h}x{d}" }
+box_dims: fn(w: Int, h: Int{w}, d: Int{h}) -> String { "{w}x{h}x{d}" }
 
-fn run() {
-    s :: Rect.square(5)
+run: fn() {
+    s: Rect.square(5)
     print("{s.width}x{s.height}")
-    r :: Rect.square(5, 3)
+    r: Rect.square(5, 3)
     print("{r.width}x{r.height}")
     print(box_dims(4))
     print(box_dims(4, 2))

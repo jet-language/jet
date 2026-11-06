@@ -11,6 +11,7 @@ copy: {root}/tests/cases/jetpack_services/services_up_health_logs_down_roundtrip
 mkdir: state
 chmod: bin/systemd-run 755
 chmod: bin/systemctl 755
+step: jetpack config trust add {work}
 step: jetpack services up --no-color
 file: .jet/services/api/lifecycle ~ "backend=linux-systemd-user" # original ed77c235f tests/jetpack_services.rs:1257-1259 lifecycle contains backend
 file: .jet/services/api/lifecycle ~ "containment=delegated-cgroup" # original ed77c235f tests/jetpack_services.rs:1261-1263 lifecycle contains containment

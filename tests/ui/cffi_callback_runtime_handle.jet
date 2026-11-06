@@ -1,12 +1,12 @@
-use c :: c.cb
+use c: c.cb
 
-fn schedules(x: I32) -[]> I32 {
-    handle :: task x
+schedules: fn(x: I32) -[]> I32 {
+    handle: task x
     return handle.join() ?? 0
 }
 
-#Import module c.cb {
-    fn call(cb: fn(I32) -[]> I32, x: I32) -> I32 = "call"
+#Import c.cb: module {
+    call: fn(cb: fn(I32) -[]> I32, x: I32) -> I32 = "call"
 }
 
-fn run() { print(c.call(schedules, 1)) }
+run: fn() { print(c.call(schedules, 1)) }

@@ -33,12 +33,12 @@ The input directory contains exactly this, with small files shown inline:
       | 
     project/
     project/examples/
-    project/examples/main.jet  (130 bytes)
-      | fn prepare() {
+    project/examples/main.jet  (132 bytes)
+      | prepare: fn() {
       |     print("ready")
       | }
       | 
-      | fn run() {
+      | run: fn() {
       |     prepare()
       |     print("prepare stays in text")
       | }
@@ -53,11 +53,11 @@ Trailing newline matters. Do not print anything else -- no logging, no
 progress, no banner.
 
 ----- BEGIN EXPECTED STDOUT -----
-fn configure() {
+configure: fn() {
     print("ready")
 }
 
-fn run() {
+run: fn() {
     configure()
     print("prepare stays in text")
 }

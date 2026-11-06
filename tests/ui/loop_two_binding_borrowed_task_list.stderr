@@ -19,7 +19,7 @@ More: jet-lang.dev/e/E0142
 Error [jet.SingleUseDropped]: `handles` still owes `consume`
   --> tests/ui/loop_two_binding_borrowed_task_list.jet:8:5
     |
-  8 |     handles :: [task 1, task 2]
+  8 |     handles: [task 1, task 2]
     |     ^^^^^^^
  Why: This value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
  Fix: Consume it exactly once: move it to a parameter with the move marker `^`, or `return` it — or write `#Unsafe("reason") { consume(handles) }` to discard it deliberately

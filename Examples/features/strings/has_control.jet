@@ -1,6 +1,6 @@
-use text :: core.text
+use text: core.text
 
-fn scalar(cp: Int) -> String {
+scalar: fn(cp: Int) -> String {
     raw := [U8]{}
     if {
         cp < 128 -> &raw.push(U8{cp})
@@ -23,7 +23,7 @@ fn scalar(cp: Int) -> String {
     String.from_bytes(raw.copy()) ?? panic("invalid Unicode scalar")
 }
 
-fn run() {
+run: fn() {
     print(text.has_control(""))
     print(text.has_control("ann"))
     print(text.has_control("ann\n"))
@@ -35,7 +35,7 @@ fn run() {
     all_match := true
     loop cp in 0..<1114112 {
         if cp < 55296 || cp > 57343 {
-            cc :: cp < 32 || (cp >= 127 && cp <= 159)
+            cc: cp < 32 || (cp >= 127 && cp <= 159)
             if text.has_control(scalar(cp)) != cc -> all_match = false
         }
     }

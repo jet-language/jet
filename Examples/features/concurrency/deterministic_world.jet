@@ -1,19 +1,19 @@
-package {
+package: {
     name: "deterministic_world"
     authority: { allow: [IO, Time] }
 }
 
 use {
-    testing :: core.testing
-    time :: core.time
+    testing: core.testing
+    time: core.time
 }
 
-fn work() { time.sleep(40ms) ?? return }
+work: fn() { time.sleep(40ms) ?? return }
 
-fn run() {
+run: fn() {
     testing.world(
     world -> {
-        slow :: task work() ?? return
+        slow: task work() ?? return
         world.advance(40ms)
         ^slow.join() ?? return
     },

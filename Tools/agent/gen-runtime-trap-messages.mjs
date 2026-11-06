@@ -28,7 +28,7 @@ function field(code, name) {
 // compile time; the runtime's stop and String-error leaves use this projection.
 function nativeTlsRefusal() {
   const routes = readFileSync(resolve(root, "Compiler/JetIR/Source/RouteCarriers.jet"), "utf8");
-  const value = /\nfn ir_tls_transport_message\(\) -> String Never! \{\n    ("(?:[^"\\]|\\.)*")\n\}/.exec(routes);
+  const value = /\nir_tls_transport_message: fn\(\) -> String Never! \{\n    ("(?:[^"\\]|\\.)*")\n\}/.exec(routes);
   if (!value) throw new Error("missing RouteCarriers.jet ir_tls_transport_message literal");
   const text = JSON.parse(value[1]);
   if (!/^[\x20-\x7e]+$/.test(text)) throw new Error("native TLS refusal must be printable ASCII for word projection");
@@ -37,12 +37,12 @@ function nativeTlsRefusal() {
 function emit(name, text, sink = "trap_write_word") {
   const bytes = Buffer.from(text);
   if (sink === "trap_write_word" && staticTextWorthy(text)) {
-    return `fn ${name}_text() -> I64 { ${staticText(text)} }\n\n`
-      + `fn ${name}() { trap_write_static(${name}_text()) }\n\n`
-      + `fn trap_build_${name.slice(5)}(builder: I64) { jet_rt_string_builder_push(builder, ${name}_text()) }\n`;
+    return `${name}_text: fn() -> I64 { ${staticText(text)} }\n\n`
+      + `${name}: fn() { trap_write_static(${name}_text()) }\n\n`
+      + `trap_build_${name.slice(5)}: fn(builder: I64) { jet_rt_string_builder_push(builder, ${name}_text()) }\n`;
   }
-  let out = `fn ${name}() {\n`;
-  let owned = `fn trap_build_${name.slice(5)}(builder: I64) {\n`;
+  let out = `${name}: fn() {\n`;
+  let owned = `trap_build_${name.slice(5)}: fn(builder: I64) {\n`;
   for (let at = 0; at < bytes.length; at += 8) {
     const piece = bytes.subarray(at, at + 8);
     let word = 0n;
@@ -93,8 +93,8 @@ for (const code of CODED_STOPS) {
   source += `\n// ${code} Why: ${why}\n// Fix: ${fix}\n`;
   source += emit(`trap_footer_${code.toLowerCase()}`, ` Why: ${why}\n Fix: ${fix}\nMore: jet-lang.dev/e/${code}\n`);
 }
-source += `\nfn trap_coded_registered(code: I64) -> Bool {\n    ${CODED_STOPS.map((code) => `code == I64{${codeWord(code)}}`).join(" || ")}\n}\n`;
-source += `\nfn trap_coded_footer(code: I64) {\n    if {\n${CODED_STOPS.slice(0, -1).map((code) => `        (code == I64{${codeWord(code)}}) -> trap_footer_${code.toLowerCase()}()\n`).join("")}        else -> trap_footer_${CODED_STOPS.at(-1).toLowerCase()}()\n    }\n}\n`;
+source += `\ntrap_coded_registered: fn(code: I64) -> Bool {\n    ${CODED_STOPS.map((code) => `code == I64{${codeWord(code)}}`).join(" || ")}\n}\n`;
+source += `\ntrap_coded_footer: fn(code: I64) {\n    if {\n${CODED_STOPS.slice(0, -1).map((code) => `        (code == I64{${codeWord(code)}}) -> trap_footer_${code.toLowerCase()}()\n`).join("")}        else -> trap_footer_${CODED_STOPS.at(-1).toLowerCase()}()\n    }\n}\n`;
 const literals = {
   header_panic: "Stop [E3001]: " + field("E3001", "what").split("{msg}")[0],
   header_numeric: "Stop [E3010]: " + field("E3010", "what").split("{msg}")[0],
@@ -164,8 +164,8 @@ if (!boundaries) throw new Error("missing Rust Debug scalar interval table");
 const values = boundaries[1].match(/\d+/gu).map(Number);
 if (values.length % 2 || values.some((value, i) => i && value < values[i - 1])) throw new Error("invalid Rust Debug intervals");
 source += "\n// Canonical Text/RustDebug.jet intervals, retyped to machine words.\n";
-source += `TRAP_DEBUG_RANGE_COUNT :: comptime { I64{${values.length / 2}} }\n`;
-source += "TRAP_DEBUG_RANGES :: comptime { [I64]{\n";
+source += `TRAP_DEBUG_RANGE_COUNT: comptime { I64{${values.length / 2}} }\n`;
+source += "TRAP_DEBUG_RANGES: comptime { [I64]{\n";
 for (let i = 0; i < values.length; i += 12) source += `    ${values.slice(i, i + 12).map((n) => `I64{${n}}`).join(", ")},\n`;
 source += "} }\n";
 // Both projections use the same canonical facts. Scoped private generation

@@ -1,14 +1,14 @@
 use {
-    http :: core.http
-    server :: core.http.server
+    http: core.http
+    server: core.http.server
 }
 
-fn handle(req: HTTPRequest) -> HTTPResponse HTTPError! { Ok(server.response(200, "ok")) }
+handle: fn(req: HTTPRequest) -> HTTPResponse HTTPError! { Ok(server.response(200, "ok")) }
 
-fn run() {
-    router :: http.router()
-    id :: "42"
+run: fn() {
+    router: http.router()
+    id: "42"
     router.get("/users/{id}", handle)
-    doubled :: comptime { "/teams/{{name}}" }
+    doubled: comptime { "/teams/{{name}}" }
     router.get(doubled, handle)
 }

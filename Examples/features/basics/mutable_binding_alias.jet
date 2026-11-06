@@ -1,41 +1,41 @@
 // A `:=` binding of a place that nothing ever writes reads the place in
-// place like a `::` binding (#5041); one that is written, or whose root
+// place like a `:` binding (#5041); one that is written, or whose root
 // changes while it is still read, keeps its own copy. So does one read in
 // the same call that borrows its root for writing: the call's operands are
 // live together, so the callee may change the root under the binding.
-struct Blob {
+Blob: struct {
     data: [Int]
     text: String
 }
 
-fn pick(rows: [Blob], i: Int) -> Int {
+pick: fn(rows: [Blob], i: Int) -> Int {
     row := rows[i]
     row.data.len() + row.text.len()
 }
 
-struct Machine {
+Machine: struct {
     frames: [[String]]
     log: [String]
 }
 
 // Drops every frame, including the one `value` was read from, then reads
 // `value`.
-fn record(value: String, machine: &Machine) -> Int {
+record: fn(value: String, machine: &Machine) -> Int {
     &machine.frames.clear()
     &machine.log.push(value)
     machine.log.len()
 }
 
-fn parameter(machine: &Machine, frame: Int, index: Int) -> Int {
+parameter: fn(machine: &Machine, frame: Int, index: Int) -> Int {
     value := machine.frames[frame][index]
     record(value, &machine)
 }
 
-fn validate(name: String, module_identity: String, seen: &[String]) {
+validate: fn(name: String, module_identity: String, seen: &[String]) {
     &seen.push("{module_identity}:{name}")
 }
 
-fn run() {
+run: fn() {
     rows := [Blob]{Blob{data: [Int]{1, 2, 3}, text: "a"}, Blob{data: [Int]{4}, text: "bb"}}
     first := rows[0]
     rows[0] = Blob{data: [Int]{}, text: "z"}

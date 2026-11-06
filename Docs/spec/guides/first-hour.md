@@ -79,9 +79,9 @@ run.jet
 The generated `run.jet` prints a greeting and carries one smoke `#Test`:
 
 ```jet
-fn greeting(name: String) -> String { "hello, {name}" }
+greeting: fn(name: String) -> String { "hello, {name}" }
 
-fn run() { print(greeting("world")) }
+run: fn() { print(greeting("world")) }
 
 #Test("the greeting stays stable") {
     assert_eq(greeting("world"), "hello, world")
@@ -125,13 +125,13 @@ replacing the generated source.
 ## 5. Lesson 3: `check`
 
 Replace `run.jet` with the canonical onboarding source below. Its function
-signature uses the current `fn name(params) -> Type { ... }` form:
+signature uses the current `name: fn(params) -> Type { ... }` form:
 
 ```jet
-fn greet(name: String) -> String { "hello, {name}" }
+greet: fn(name: String) -> String { "hello, {name}" }
 
 #CLI
-struct GreetingArgs {
+GreetingArgs: struct {
     #Doc("name to greet") name: String{"Jet"}
 }
 
@@ -139,7 +139,7 @@ struct GreetingArgs {
     assert_eq(greet("Jet"), "hello, Jet")
 }
 
-fn run(args: GreetingArgs) { print(greet(args.name)) }
+run: fn(args: GreetingArgs) { print(greet(args.name)) }
 ```
 
 Check the edited source without running its entry function:
@@ -154,7 +154,7 @@ A successful check exits with code zero and prints one line:
 ok: `run.jet` has no problems
 ```
 
-`jet check` is a source check; it does not run `fn run`. Add `--verbose` to see
+`jet check` is a source check; it does not run `run: fn`. Add `--verbose` to see
 the check's scope and proof rows.
 
 ## 6. Lesson 4: `test`
@@ -197,11 +197,11 @@ jet check run.jet
 ```
 
 Jet reports E0621 because an ordinary source file executes only through an
-explicit `fn run`. Put the statement inside the entry function, then check
+explicit `run: fn`. Put the statement inside the entry function, then check
 and run it:
 
 ```jet
-fn run() {
+run: fn() {
     print("before")
 }
 ```

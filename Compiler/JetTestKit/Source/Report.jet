@@ -1,14 +1,14 @@
 use {
-    json :: core.encoding.json
-    files :: core.files
+    json: core.encoding.json
+    files: core.files
 }
 
 
-fn kit_report_row(result: KitCaseResult) {
+kit_report_row: fn(result: KitCaseResult) {
     print("{result.status}\t{result.case}\t{result.tier}\t{result.detail}")
 }
 
-fn kit_report_count(results: [KitCaseResult], status: String) -> Int {
+kit_report_count: fn(results: [KitCaseResult], status: String) -> Int {
     total := 0
     loop result in results {
         if result.status == status -> total += 1
@@ -16,37 +16,37 @@ fn kit_report_count(results: [KitCaseResult], status: String) -> Int {
     total
 }
 
-fn kit_report_counts(results: [KitCaseResult], suites: [String]) -> String {
-    pass :: kit_report_count(results, "PASS")
-    fail :: kit_report_count(results, "FAIL")
-    unsupported :: kit_report_count(results, "UNSUPPORTED")
-    skip :: kit_report_count(results, "SKIP-HOST")
-    opt_in :: kit_report_count(results, "OPT-IN")
-    refused :: kit_report_count(results, "REFUSED")
-    error :: kit_report_count(results, "ERROR")
-    timeout :: kit_report_count(results, "TIMEOUT")
-    known :: kit_report_count(results, "KNOWN-FAILING")
-    unexpected :: kit_report_count(results, "UNEXPECTED-PASS")
-    names :: json.to_string(Dyn.Array(suites.map(suite -> Dyn.Text(suite.copy())))) ?? panic("testkit suite report encode: {err}")
+kit_report_counts: fn(results: [KitCaseResult], suites: [String]) -> String {
+    pass: kit_report_count(results, "PASS")
+    fail: kit_report_count(results, "FAIL")
+    unsupported: kit_report_count(results, "UNSUPPORTED")
+    skip: kit_report_count(results, "SKIP-HOST")
+    opt_in: kit_report_count(results, "OPT-IN")
+    refused: kit_report_count(results, "REFUSED")
+    error: kit_report_count(results, "ERROR")
+    timeout: kit_report_count(results, "TIMEOUT")
+    known: kit_report_count(results, "KNOWN-FAILING")
+    unexpected: kit_report_count(results, "UNEXPECTED-PASS")
+    names: json.to_string(Dyn.Array(suites.map(suite -> Dyn.Text(suite.copy())))) ?? panic("testkit suite report encode: {err}")
     "{{\"PASS\":{pass},\"FAIL\":{fail},\"KNOWN-FAILING\":{known},\"UNEXPECTED-PASS\":{unexpected},\"UNSUPPORTED\":{unsupported},\"SKIP-HOST\":{skip},\"OPT-IN\":{opt_in},\"REFUSED\":{refused},\"ERROR\":{error},\"TIMEOUT\":{timeout},\"suites\":{names}}}"
 }
 
 // One case verdict as its report record.
-fn kit_report_record(result: KitCaseResult) -> Dyn {
+kit_report_record: fn(result: KitCaseResult) -> Dyn {
     fields := [String: Dyn]{}
-    _ :: &fields.add("suite", Dyn.Text(result.suite.copy()))
-    _ :: &fields.add("case", Dyn.Text(result.case.copy()))
-    _ :: &fields.add("tier", Dyn.Text(result.tier.copy()))
-    _ :: &fields.add("status", Dyn.Text(result.status.copy()))
-    _ :: &fields.add("detail", Dyn.Text(result.detail.copy()))
-    _ :: &fields.add("exit", Dyn.Int(result.exit))
-    _ :: &fields.add("diff", Dyn.Text(result.diff.copy()))
-    _ :: &fields.add("wall_ms", Dyn.Int(result.wall_ms))
-    _ :: &fields.add("peak_kib", Dyn.Int(result.peak_kib))
+    _: &fields.add("suite", Dyn.Text(result.suite.copy()))
+    _: &fields.add("case", Dyn.Text(result.case.copy()))
+    _: &fields.add("tier", Dyn.Text(result.tier.copy()))
+    _: &fields.add("status", Dyn.Text(result.status.copy()))
+    _: &fields.add("detail", Dyn.Text(result.detail.copy()))
+    _: &fields.add("exit", Dyn.Int(result.exit))
+    _: &fields.add("diff", Dyn.Text(result.diff.copy()))
+    _: &fields.add("wall_ms", Dyn.Int(result.wall_ms))
+    _: &fields.add("peak_kib", Dyn.Int(result.peak_kib))
     Dyn.Object(fields)
 }
 
-fn kit_report_exit_code(results: [KitCaseResult]) -> Int {
+kit_report_exit_code: fn(results: [KitCaseResult]) -> Int {
     if kit_report_count(results, "REFUSED") + kit_report_count(results, "ERROR") + kit_report_count(results, "TIMEOUT") > 0 -> return 2
     if kit_report_count(results, "FAIL") + kit_report_count(results, "UNEXPECTED-PASS") > 0 -> return 1
     0
@@ -54,13 +54,13 @@ fn kit_report_exit_code(results: [KitCaseResult]) -> Int {
 
 // One verdict document: the compiler, the counts and every row's record, as
 // `--results` and `jet test`'s `results` setting write it.
-fn kit_report_document(jet: String, results: [KitCaseResult], suites: [String]) -> String {
-    records :: results.map(result -> json.to_string(kit_report_record(result)) ?? panic("testkit case report encode: {err}")).join(",")
-    compiler :: json.to_string(Dyn.Text(jet.copy())) ?? panic("testkit compiler report encode: {err}")
+kit_report_document: fn(jet: String, results: [KitCaseResult], suites: [String]) -> String {
+    records: results.map(result -> json.to_string(kit_report_record(result)) ?? panic("testkit case report encode: {err}")).join(",")
+    compiler: json.to_string(Dyn.Text(jet.copy())) ?? panic("testkit compiler report encode: {err}")
     "{{\"jet\":{compiler},\"counts\":{kit_report_counts(results, suites)},\"results\":[{records}]}}\n"
 }
 
-fn kit_report_finish(jet: String, results: [KitCaseResult], path: String, suites: [String]) -> Int {
+kit_report_finish: fn(jet: String, results: [KitCaseResult], path: String, suites: [String]) -> Int {
     if path != "" {
         files.write(path, kit_report_document(jet, results, suites)) ?? {
             print("ERROR\tresults\t\t{err}")

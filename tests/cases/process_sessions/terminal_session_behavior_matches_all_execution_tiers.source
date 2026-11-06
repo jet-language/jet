@@ -1,14 +1,14 @@
 
-use process :: core.process
+use process: core.process
 
-fn run() {
-    child :: process.cmd(["{work}/session_fixture", "terminal"]).terminal().spawn() ?? panic("spawn failed")
-    session :: child.terminal ?? panic("missing terminal session")
+run: fn() {
+    child: process.cmd(["{work}/session_fixture", "terminal"]).terminal().spawn() ?? panic("spawn failed")
+    session: child.terminal ?? panic("missing terminal session")
     session.resize(TerminalSize{ cols: 100, rows: 30 }) ?? panic("resize failed")
-    exited :: child.exited() ?? panic("poll failed")
+    exited: child.exited() ?? panic("poll failed")
     print(!exited)
     child.stdin.write_text("typed\n") ?? panic("write failed")
-    result :: child.wait() ?? panic("wait failed")
+    result: child.wait() ?? panic("wait failed")
     print(result.success)
     print(result.output.contains("input:typed"))
     print(result.output.contains("size:30x100"))

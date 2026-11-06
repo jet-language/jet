@@ -8,12 +8,12 @@ use {
         jet_cli_perf_source_position, jet_cli_perf_source_profile,
     ]
     jet_foundation.[TraceHardware, TraceToolchain, sha256_hex, verify_jettrace]
-    perf_hex :: core.encoding.hex
+    perf_hex: core.encoding.hex
 }
 
 // A decoded, process-bound live snapshot (LiveSnapshot.jet's codec is
 // witnessed by Tests/LiveInspect.jet).
-fn jet_cli_perf_test_snapshot(task_id: Int) -> JetCLILiveSnapshot Never! {
+jet_cli_perf_test_snapshot: fn(task_id: Int) -> JetCLILiveSnapshot Never! {
     resources := [String:Int]{}
     resources["workers"] = 1
     resources["running"] = 0
@@ -35,7 +35,7 @@ fn jet_cli_perf_test_snapshot(task_id: Int) -> JetCLILiveSnapshot Never! {
     }
 }
 #Test("perf live view retains observations, not live value payloads") {
-    live :: jet_cli_perf_live_from(jet_cli_perf_test_snapshot(1))
+    live: jet_cli_perf_live_from(jet_cli_perf_test_snapshot(1))
     assert_eq(live.pid, 12)
     assert_eq(live.start_id, "123")
     assert_eq(live.tasks.len(), 1)
@@ -46,7 +46,7 @@ fn jet_cli_perf_test_snapshot(task_id: Int) -> JetCLILiveSnapshot Never! {
     assert_eq(live.runtime.cpu_ns, Val(U64{25}))
 }
 #Test("perf source spans use one-based Unicode scalar columns") {
-    at :: jet_cli_perf_source_position("é\nλx", 5) ?? panic(err.message)
+    at: jet_cli_perf_source_position("é\nλx", 5) ?? panic(err.message)
     assert_eq(at.line, U64{2})
     assert_eq(at.column, U64{2})
     if jet_cli_perf_source_position("é", 1) == {
@@ -55,15 +55,15 @@ fn jet_cli_perf_test_snapshot(task_id: Int) -> JetCLILiveSnapshot Never! {
     }
 }
 #Test("perf profile counts snapshots, never guessed invocations") {
-    source :: jet_cli_perf_source("app.jet", "fn run() -> Int {{ 1 }}")
-    profile :: jet_cli_perf_source_profile(source, U64{2}, U64{1}, false) ?? panic(err.message)
+    source: jet_cli_perf_source("app.jet", "run: fn() -> Int {{ 1 }}")
+    profile: jet_cli_perf_source_profile(source, U64{2}, U64{1}, false) ?? panic(err.message)
     assert_eq(profile.status, "captured")
     assert_eq(profile.coverage, "partial")
     assert_eq(profile.rows.len(), 2)
     assert_eq(profile.rows[0].execution_count, None)
     assert_eq(profile.rows[0].sample_count, U64{2})
     assert_eq(profile.overhead_ns, None)
-    bounded :: jet_cli_perf_source_profile(source, U64{5000}, U64{4500}, false) ?? panic(err.message)
+    bounded: jet_cli_perf_source_profile(source, U64{5000}, U64{4500}, false) ?? panic(err.message)
     assert_eq(bounded.status, "truncated")
     assert_eq(bounded.rows[0].sample_count, U64{4096})
     assert_eq(bounded.rows[0].sample_weight, U64{4096})
@@ -71,9 +71,9 @@ fn jet_cli_perf_test_snapshot(task_id: Int) -> JetCLILiveSnapshot Never! {
     assert_eq(bounded.rows[1].sample_weight, U64{4096})
 }
 #Test("perf capture keeps observed IO, locks and allocations causal") {
-    live :: jet_cli_perf_live_from(jet_cli_perf_test_snapshot(17))
-    observations :: [JetCLIPerfObservation]{JetCLIPerfObservation{at_ns: U64{10}, live: live}, JetCLIPerfObservation{at_ns: U64{20}, live: live}}
-    capture :: jet_cli_perf_capture_source("app.jet", "fn run() -> Int {{ 1 }}", observations, "x86_64-unknown-linux-gnu") ?? panic(err.message)
+    live: jet_cli_perf_live_from(jet_cli_perf_test_snapshot(17))
+    observations: [JetCLIPerfObservation]{JetCLIPerfObservation{at_ns: U64{10}, live: live}, JetCLIPerfObservation{at_ns: U64{20}, live: live}}
+    capture: jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", observations, "x86_64-unknown-linux-gnu") ?? panic(err.message)
     assert_eq(capture.io.len(), 1)
     assert_eq(capture.io[0].start_ns, U64{20})
     assert_eq(capture.io[0].end_ns, U64{20})
@@ -82,30 +82,30 @@ fn jet_cli_perf_test_snapshot(task_id: Int) -> JetCLILiveSnapshot Never! {
     assert_eq(capture.tasks[0].id, U64{1})
     assert_eq(capture.spans[0].start_ns, Val(U64{10}))
     assert_eq(capture.spans[0].end_ns, Val(U64{20}))
-    toolchain :: TraceToolchain{jet_version: "test", compiler_build_id: "test", stdlib_id: "test", runner_id: "test"}
-    hardware :: TraceHardware{cpu_arch: "x86_64", logical_cpus: U64{1}, os: "linux", target: "x86_64-unknown-linux-gnu"}
-    bytes :: jet_cli_perf_capture_bytes(capture, "run", [String]{"app.jet"}, toolchain, hardware) ?? panic(err.message)
-    _ :: verify_jettrace(bytes) ?? panic(err.message)
+    toolchain: TraceToolchain{jet_version: "test", compiler_build_id: "test", stdlib_id: "test", runner_id: "test"}
+    hardware: TraceHardware{cpu_arch: "x86_64", logical_cpus: U64{1}, os: "linux", target: "x86_64-unknown-linux-gnu"}
+    bytes: jet_cli_perf_capture_bytes(capture, "run", [String]{"app.jet"}, toolchain, hardware) ?? panic(err.message)
+    _: verify_jettrace(bytes) ?? panic(err.message)
 }
 #Test("perf observations refuse mixed process revisions") {
-    live :: jet_cli_perf_live_from(jet_cli_perf_test_snapshot(1))
+    live: jet_cli_perf_live_from(jet_cli_perf_test_snapshot(1))
     other := live
     other.revision = "different"
-    observations :: [JetCLIPerfObservation]{JetCLIPerfObservation{at_ns: U64{10}, live: live}, JetCLIPerfObservation{at_ns: U64{20}, live: other}}
-    if jet_cli_perf_capture_source("app.jet", "fn run() -> Int {{ 1 }}", observations, "test") == {
+    observations: [JetCLIPerfObservation]{JetCLIPerfObservation{at_ns: U64{10}, live: live}, JetCLIPerfObservation{at_ns: U64{20}, live: other}}
+    if jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", observations, "test") == {
         .Err(_) -> {}
         else -> panic("accepted mixed observation revisions")
     }
 }
 #Test("perf browser decode uses compiler source carrier and refuses unknown symbols") {
-    digest :: sha256_hex("fn run() -> Int {{ 1 }}")
-    table :: "source\t{perf_hex.encode("app.jet".bytes())}\t{digest}\nsymbol\t{perf_hex.encode("app.jet".bytes())}\t{perf_hex.encode("run".bytes())}\tfn\n"
-    header :: "{{\"schema\":\"jet.status/v1\",\"action\":\"browser.relay\",\"ok\":true,\"reports\":[],\"nonce\":\"n\",\"pid\":12,\"started\":\"123\",\"sources\":\"{perf_hex.encode(table.bytes())}\"}}"
-    row :: "{{\"schema\":\"jet.status/v1\",\"action\":\"browser.relay.row\",\"ok\":true,\"reports\":[],\"class\":\"wasm\",\"duration_ns\":4,\"start_ns\":5,\"symbol\":\"run\"}}"
-    capture :: jet_cli_perf_browser_decode("{header}\n{row}\n", 12, "123") ?? panic(err.message)
+    digest: sha256_hex("run: fn() -> Int {{ 1 }}")
+    table: "source\t{perf_hex.encode("app.jet".bytes())}\t{digest}\nsymbol\t{perf_hex.encode("app.jet".bytes())}\t{perf_hex.encode("run".bytes())}\tfn\n"
+    header: "{{\"schema\":\"jet.status/v1\",\"action\":\"browser.relay\",\"ok\":true,\"reports\":[],\"nonce\":\"n\",\"pid\":12,\"started\":\"123\",\"sources\":\"{perf_hex.encode(table.bytes())}\"}}"
+    row: "{{\"schema\":\"jet.status/v1\",\"action\":\"browser.relay.row\",\"ok\":true,\"reports\":[],\"class\":\"wasm\",\"duration_ns\":4,\"start_ns\":5,\"symbol\":\"run\"}}"
+    capture: jet_cli_perf_browser_decode("{header}\n{row}\n", 12, "123") ?? panic(err.message)
     assert_eq(capture.rows[0].symbol.path, "app.jet")
     assert_eq(capture.rows[0].duration_ns, U64{4})
-    invalid :: "{header}\n{row.replace("\"symbol\":\"run\"", "\"symbol\":\"missing\"")}\n"
+    invalid: "{header}\n{row.replace("\"symbol\":\"run\"", "\"symbol\":\"missing\"")}\n"
     if jet_cli_perf_browser_decode(invalid, 12, "123") == {
         .Err(_) -> {}
         else -> panic("accepted un-attributed browser observation")

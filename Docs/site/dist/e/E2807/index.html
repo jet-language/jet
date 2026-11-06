@@ -38,19 +38,19 @@
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E2807</code>: <code>tests/ui/web_app_route_collision.stderr</code>.</p>
 <pre class="diag">Error [jet.DuplicateRoute]: Route `/` is registered both by `builder` and `routes_collision/index.jet`
-  --&gt; tests/ui/web_app_route_collision.jet:6:39
+  --&gt; tests/ui/web_app_route_collision.jet:6:40
     |
-  6 | fn run() { web.app().route(&quot;/&quot;, home).routes(from: &quot;routes_collision&quot;).csr().serve() }
-    |                                       ^^^^^^
+  6 | run: fn() { web.app().route(&quot;/&quot;, home).routes(from: &quot;routes_collision&quot;).csr().serve() }
+    |                                        ^^^^^^
  Why: Explicit builder entries and `.routes(from:)` conventions must not claim the same path.
  Fix: Remove one registration, or rename the convention file.
 More: jet-lang.dev/e/E2807
 
 Error [jet.DuplicateRoute]: Earlier registration of route `/`
-  --&gt; tests/ui/web_app_route_collision.jet:6:22
+  --&gt; tests/ui/web_app_route_collision.jet:6:23
     |
-  6 | fn run() { web.app().route(&quot;/&quot;, home).routes(from: &quot;routes_collision&quot;).csr().serve() }
-    |                      ^^^^^
+  6 | run: fn() { web.app().route(&quot;/&quot;, home).routes(from: &quot;routes_collision&quot;).csr().serve() }
+    |                       ^^^^^
  Why: Both spans are kept so the provenance of each registration stays visible
  Fix: Delete or rename this registration
 More: jet-lang.dev/e/E2807

@@ -1,8 +1,8 @@
 // #4576: fixed-width map keys and values stay raw words. 5846639821254430312
 // has top bits 01 and is 8-aligned, the exact-Int pointer tag: read as an
 // exact carrier it was dereferenced as a JetInt node and crashed the JIT.
-fn run() {
-    tagged :: U64{5846639821254430312}
+run: fn() {
+    tagged: U64{5846639821254430312}
     keys := [U64:Int]{}
     print("absent {keys.get(tagged) == None}")
     &keys.add(tagged, 1).drop("checked absent above")
@@ -17,6 +17,6 @@ fn run() {
     values := [String:U64]{}
     &values.add("id", tagged).drop("fresh key")
     print("value {values.get("id") ?? U64{0}}")
-    literal :: [U64:String]{U64{5846639821254430312}: "literal"}
+    literal: [U64:String]{U64{5846639821254430312}: "literal"}
     print(literal.get(tagged) ?? "missing")
 }

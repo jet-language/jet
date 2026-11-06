@@ -1,15 +1,15 @@
 // core-conformance: core.encoding.csv.writer
 use {
-    csv :: core.encoding.csv
-    files :: core.files
-    testing :: core.testing
+    csv: core.encoding.csv
+    files: core.files
+    testing: core.testing
 }
 
-fn run() {
-    root :: testing.temp_dir("csv-writer")
-    path :: Path.from(root).join("rows.csv")
-    output :: files.create(path) ?? panic("create")
-    writer :: csv.writer(^output) ?? panic("writer")
+run: fn() {
+    root: testing.temp_dir("csv-writer")
+    path: Path.from(root).join("rows.csv")
+    output: files.create(path) ?? panic("create")
+    writer: csv.writer(^output) ?? panic("writer")
     writer.write(["name", "score"]) ?? panic("write")
     writer.finish()
     print(true)

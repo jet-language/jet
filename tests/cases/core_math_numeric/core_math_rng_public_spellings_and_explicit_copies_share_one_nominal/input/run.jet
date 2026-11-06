@@ -1,19 +1,19 @@
 
 use {
-    random :: core.math.random
-    testing :: core.testing
+    random: core.math.random
+    testing: core.testing
 }
 
-struct Envelope { stream: testing.RNG }
-fn identity<T>(value: ^T) -> T { return value }
-fn into_testing(value: ^RNG) -> testing.RNG { return value }
-fn into_random(value: ^testing.RNG) -> random.RNG { return value }
-fn into_bare(value: ^random.RNG) -> RNG { return value }
-fn draw(stream: &RNG) {
+Envelope: struct { stream: testing.RNG }
+identity: fn<T>(value: ^T) -> T { return value }
+into_testing: fn(value: ^RNG) -> testing.RNG { return value }
+into_random: fn(value: ^testing.RNG) -> random.RNG { return value }
+into_bare: fn(value: ^random.RNG) -> RNG { return value }
+draw: fn(stream: &RNG) {
     print(&stream.bool())
     print(&stream.bool(0.25))
 }
-fn run() {
+run: fn() {
     original := random.rng(42)
     independent := original.copy()
     envelope := Envelope{stream: into_testing(identity<RNG>(^original))}

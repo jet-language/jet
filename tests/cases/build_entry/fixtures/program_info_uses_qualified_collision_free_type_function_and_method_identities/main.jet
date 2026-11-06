@@ -1,10 +1,10 @@
 
 use {
-    left :: "./left"
-    right :: "./right"
+    left: "./left"
+    right: "./right"
 }
-fn build(b: Build) {
-    answer :: left.answer()
+build: fn(b: Build) {
+    answer: left.answer()
     if answer == 7 { b.error(b.program.functions()[0].span, "CALL", "qualified", "evaluator", "ok") }
     loop ty in b.program.types() {
         if ty.identity == "left::Choice" { b.error(ty.span, "ENUM", "enum", "identity", "ok") }
@@ -18,7 +18,7 @@ fn build(b: Build) {
         if f.identity == "right::same" && (f.effects.has("Net") || f.reaches_panic()) { b.error(f.span, "BAD", "collision", "effect", "fix") }
     }
 }
-fn run() {
+run: fn() {
     left.same()
     right.same()
 }

@@ -1,15 +1,15 @@
-use c :: c.close
+use c: c.close
 #Layout(c)
-struct Handle {
+Handle: struct {
     value: I64
 }
-#Import module c.close {
+#Import c.close: module {
     #Close(release)
-    fn acquire() -> Handle = "jet_close_acquire"
-    fn release(handle: ^Handle) = "jet_close_release"
-    fn released() -> I64 = "jet_close_released"
+    acquire: fn() -> Handle = "jet_close_acquire"
+    release: fn(handle: ^Handle) = "jet_close_release"
+    released: fn() -> I64 = "jet_close_released"
 }
-fn run() {
+run: fn() {
     handle := c.acquire()
     close(^handle)
     print(c.released())

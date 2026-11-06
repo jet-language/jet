@@ -1,11 +1,11 @@
-package {
+package: {
     name: "fixture"
     authority: { allow: [IO, Net, Time.Wait] }
 }
 
-use tls :: core.net.tls
+use tls: core.net.tls
 
-fn run() -[IO, Net]> {
+run: fn() -[IO, Net]> {
     print(tls.client("localhost", 0) == .Err(_))
     stream := TLSStream{}
     print(tls.read(&stream, 0) == .Err(_))

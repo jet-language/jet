@@ -1,37 +1,37 @@
 
 use {
-    service :: core.service
-    testing :: core.testing
-    time :: core.time
+    service: core.service
+    testing: core.testing
+    time: core.time
 }
 
-fn worker() {}
+worker: fn() {}
 
-fn receipt_id(receipt: ^Delivery) -> Delivery {
+receipt_id: fn(receipt: ^Delivery) -> Delivery {
     return receipt
 }
 
-fn run() {
+run: fn() {
     temp := testing.temp_dir("durable-retry")
-    state_path :: Path.from(temp).join("state.log").to_string()
-    delivery_path :: Path.from(temp).join("state.log.delivery").to_string()
-    retention :: Duration.seconds(86400) ?? panic("retention")
+    state_path: Path.from(temp).join("state.log").to_string()
+    delivery_path: Path.from(temp).join("state.log.delivery").to_string()
+    retention: Duration.seconds(86400) ?? panic("retention")
     runtime := service.runtime(delivery_path, retention: retention)
     tree := service.tree("durable-retry")
     &tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
-    state :: service.state_store(state_path) ?? panic("state")
+    state: service.state_store(state_path) ?? panic("state")
     &tree.set_state_event_log(state, "events", 1, "reversible") ?? panic("state adapter")
-    endpoint :: &tree.worker("api", worker, capacity: 1) ?? panic("worker")
+    endpoint: &tree.worker("api", worker, capacity: 1) ?? panic("worker")
     &tree.start() ?? panic("start")
 
-    receipt :: &tree.send_durable(endpoint, "once", key: "once") ?? panic("send")
-    id :: receipt_id(^receipt)
+    receipt: &tree.send_durable(endpoint, "once", key: "once") ?? panic("send")
+    id: receipt_id(^receipt)
     print("first:{&tree.receive(endpoint) ?? panic("first")}")
     if &tree.receive(endpoint) == {
         .Ok(_) -> { print("duplicate:accepted") }
         .Err(_) -> { print("duplicate:rejected") }
     }
-    retry :: runtime.retry(id) ?? panic("retry")
+    retry: runtime.retry(id) ?? panic("retry")
     print("retry:{&tree.receive(endpoint) ?? panic("retry receive")}")
     runtime.commit(retry) ?? panic("commit")
     &tree.stop() ?? panic("stop")

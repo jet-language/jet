@@ -4,21 +4,21 @@
 // dynamic dispatch. `Renderable` is satisfied by anything already
 // interpolatable (`{value}`): every primitive, and any struct/enum that's
 // auto-printable or has an explicit `Display` impl.
-fn log_all(parts: ...Renderable) {
+log_all: fn(parts: ...Renderable) {
     loop p in parts -> print("{p}")
 }
 
-struct Point {
+Point: struct {
     x: Int
     y: Int
 
     impl Display {
-        fn display(self) -> String { "({self.x}, {self.y})" }
+        display: fn(self) -> String { "({self.x}, {self.y})" }
     }
 }
 
-fn run() {
-    p :: Point{x: 3, y: 4}
+run: fn() {
+    p: Point{x: 3, y: 4}
     log_all(1, "two", true, p)
     log_all(3.5, false)
 }

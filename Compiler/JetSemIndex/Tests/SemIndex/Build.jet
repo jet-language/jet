@@ -2,15 +2,15 @@
 // fabricated checked graph. The checked fixture/oracle pairs below are
 // unregistered until C4/S6–S8/S20/CP-NAMES provide the real walk.
 
-fn semindex_build_test_hover(path: String, start: Int, end: Int, text: String) -> HoverEntry Never! {
+semindex_build_test_hover: fn(path: String, start: Int, end: Int, text: String) -> HoverEntry Never! {
     HoverEntry{span: Span{start: start, end: end}, module_path: path, text: text}
 }
-fn semindex_build_test_operation(path: String, start: Int, end: Int) -> ArithmeticOperationFact Never! {
+semindex_build_test_operation: fn(path: String, start: Int, end: Int) -> ArithmeticOperationFact Never! {
     ArithmeticOperationFact{operation: "add", policy: "Wrapping", module_path: path, operation_span: SourceSpan{start: start, end: end}, scope_span: SourceSpan{start: 0, end: 100}}
 }
 
 #Test("symbol_db_hover_keeps_inclusive_endpoints_module_and_first_match") {
-    rows :: [HoverEntry]{
+    rows: [HoverEntry]{
         semindex_build_test_hover("other.jet", 2, 8, "unrelated"),
         semindex_build_test_hover("main.jet", 2, 8, "first"),
         semindex_build_test_hover("main.jet", 2, 4, "shorter"),
@@ -27,12 +27,12 @@ fn semindex_build_test_operation(path: String, start: Int, end: Int) -> Arithmet
 }
 
 #Test("symbol_db_arithmetic_hover_selects_innermost_exact_fixed_width_row") {
-    operations :: [ArithmeticOperationFact]{
+    operations: [ArithmeticOperationFact]{
         semindex_build_test_operation("other.jet", 6, 6),
         semindex_build_test_operation("main.jet", 0, 20),
         semindex_build_test_operation("main.jet", 4, 8),
     }
-    rows :: [HoverEntry]{
+    rows: [HoverEntry]{
         semindex_build_test_hover("main.jet", 4, 8, "symbol name"),
         semindex_build_test_hover("other.jet", 4, 8, "fixed-width unrelated"),
         semindex_build_test_hover("main.jet", 0, 20, "fixed-width outer"),
@@ -48,11 +48,11 @@ fn semindex_build_test_operation(path: String, start: Int, end: Int) -> Arithmet
 }
 
 #Test("symbol_db_arithmetic_hover_keeps_first_equal_width_fact") {
-    operations :: [ArithmeticOperationFact]{
+    operations: [ArithmeticOperationFact]{
         semindex_build_test_operation("main.jet", 2, 6),
         semindex_build_test_operation("main.jet", 4, 8),
     }
-    rows :: [HoverEntry]{
+    rows: [HoverEntry]{
         semindex_build_test_hover("main.jet", 4, 8, "fixed-width second fact"),
         semindex_build_test_hover("main.jet", 2, 6, "fixed-width first fact"),
     }
@@ -60,13 +60,13 @@ fn semindex_build_test_operation(path: String, start: Int, end: Int) -> Arithmet
 }
 
 #Test("symbol_db_arithmetic_hover_does_not_fall_back_to_outer_or_symbol_hover") {
-    operations :: [ArithmeticOperationFact]{
+    operations: [ArithmeticOperationFact]{
         semindex_build_test_operation("main.jet", 0, 20),
         semindex_build_test_operation("main.jet", 4, 8),
     }
-    rows :: [HoverEntry]{
+    rows: [HoverEntry]{
         semindex_build_test_hover("main.jet", 0, 20, "fixed-width outer"),
-        semindex_build_test_hover("main.jet", 4, 8, "fn operand()"),
+        semindex_build_test_hover("main.jet", 4, 8, "operand: fn()"),
         semindex_build_test_hover("main.jet", 4, 9, "fixed-width different end"),
     }
     assert_eq(semindex_arithmetic_hover_index(operations, rows, "main.jet", 6), None)
@@ -75,11 +75,11 @@ fn semindex_build_test_operation(path: String, start: Int, end: Int) -> Arithmet
 }
 
 #Test("symbol_db_arithmetic_hover_zero_width_and_reversed_spans") {
-    operations :: [ArithmeticOperationFact]{
+    operations: [ArithmeticOperationFact]{
         semindex_build_test_operation("main.jet", 8, 4),
         semindex_build_test_operation("main.jet", 6, 6),
     }
-    rows :: [HoverEntry]{semindex_build_test_hover("main.jet", 6, 6, "fixed-width point")}
+    rows: [HoverEntry]{semindex_build_test_hover("main.jet", 6, 6, "fixed-width point")}
     assert_eq(semindex_arithmetic_hover_index(operations, rows, "main.jet", 6), Val(0))
     assert_eq(semindex_arithmetic_hover_index(operations, rows, "main.jet", 5), None)
 }
@@ -91,62 +91,62 @@ fn semindex_build_test_operation(path: String, start: Int, end: Int) -> Arithmet
         {span: Span{start: 1, end: 2}, module_path: "other.jet", label: ": Float"},
         {span: Span{start: 3, end: 4}, module_path: "main.jet", label: ": Bool"},
     }
-    hints :: db.inlay_hints_for("main.jet")
+    hints: db.inlay_hints_for("main.jet")
     assert_eq(hints.len(), 2)
     assert_eq(hints[0][0].label, ": Int")
     assert_eq(hints[0][0].span.start, 8)
     assert_eq(hints[1][0].label, ": Bool")
     assert_eq(hints[1][0].span.start, 3)
     assert_eq(db.inlay_hints_for("absent.jet").len(), 0)
-    empty :: SymbolDB.new()
+    empty: SymbolDB.new()
     assert_eq(empty.inlay_hints_for("main.jet").len(), 0)
 }
 
 // Only the retained-text transformation: `line` is an explicit function input,
 // not a fabricated sema/package fact or a substitute effect renderer.
 #Test("symbol_db_refresh_retained_text_keeps_prefix_and_first_marker") {
-    line :: "replacement"
+    line: "replacement"
     rows := [HoverEntry]{
-        semindex_build_test_hover("main.jet", 0, 2, "fn café()\nrequired effects: stale\nrequired effects: stale again"),
-        semindex_build_test_hover("main.jet", 3, 4, "fn fresh()\nreturn = Int"),
-        semindex_build_test_hover("main.jet", 5, 6, "struct Café\nrequired effects: preserved"),
-        semindex_build_test_hover("main.jet", 7, 8, "fn marker() required effects: not a newline marker"),
+        semindex_build_test_hover("main.jet", 0, 2, "café: fn()\nrequired effects: stale\nrequired effects: stale again"),
+        semindex_build_test_hover("main.jet", 3, 4, "fresh: fn()\nreturn = Int"),
+        semindex_build_test_hover("main.jet", 5, 6, "Café: struct\nrequired effects: preserved"),
+        semindex_build_test_hover("main.jet", 7, 8, "marker: fn() required effects: not a newline marker"),
     }
     semindex_refresh_effect_hover_rows(&rows, line)
-    assert_eq(rows[0].text, "fn café()\nreplacement")
-    assert_eq(rows[1].text, "fn fresh()\nreturn = Int\nreplacement")
-    assert_eq(rows[2].text, "struct Café\nrequired effects: preserved")
-    assert_eq(rows[3].text, "fn marker() required effects: not a newline marker\nreplacement")
+    assert_eq(rows[0].text, "café: fn()\nreplacement")
+    assert_eq(rows[1].text, "fresh: fn()\nreturn = Int\nreplacement")
+    assert_eq(rows[2].text, "Café: struct\nrequired effects: preserved")
+    assert_eq(rows[3].text, "marker: fn() required effects: not a newline marker\nreplacement")
 }
 
 #Test("symbol_db_refresh_retained_text_is_idempotent_with_projection_marker") {
-    line :: "required effects: replacement"
-    rows := [HoverEntry]{semindex_build_test_hover("main.jet", 0, 2, "fn fresh()")}
+    line: "required effects: replacement"
+    rows := [HoverEntry]{semindex_build_test_hover("main.jet", 0, 2, "fresh: fn()")}
     semindex_refresh_effect_hover_rows(&rows, line)
-    assert_eq(rows[0].text, "fn fresh()\nrequired effects: replacement")
+    assert_eq(rows[0].text, "fresh: fn()\nrequired effects: replacement")
     semindex_refresh_effect_hover_rows(&rows, line)
-    assert_eq(rows[0].text, "fn fresh()\nrequired effects: replacement")
+    assert_eq(rows[0].text, "fresh: fn()\nrequired effects: replacement")
     semindex_refresh_effect_hover_rows(&rows, line)
-    assert_eq(rows[0].text, "fn fresh()\nrequired effects: replacement")
+    assert_eq(rows[0].text, "fresh: fn()\nrequired effects: replacement")
 }
 
 // Real PackageModel projection, not a local provider. This test needs the
 // canonical Jetpack PackageModel aggregate; excluded from the row-only proof.
 #Test("symbol_db_refresh_replaces_only_function_effect_projection_once") {
-    projection :: pkg_project_application_effects([String]{"IO"}, None)
-    line :: pkg_render_effect_projection_line(projection)
+    projection: pkg_project_application_effects([String]{"IO"}, None)
+    line: pkg_render_effect_projection_line(projection)
     rows := [HoverEntry]{
-        semindex_build_test_hover("main.jet", 0, 2, "fn café()\nrequired effects: stale\nextra stale detail"),
-        semindex_build_test_hover("main.jet", 3, 4, "fn fresh()\nreturn = Int"),
-        semindex_build_test_hover("main.jet", 5, 6, "struct Café\nrequired effects: preserved"),
+        semindex_build_test_hover("main.jet", 0, 2, "café: fn()\nrequired effects: stale\nextra stale detail"),
+        semindex_build_test_hover("main.jet", 3, 4, "fresh: fn()\nreturn = Int"),
+        semindex_build_test_hover("main.jet", 5, 6, "Café: struct\nrequired effects: preserved"),
     }
     semindex_refresh_effect_hover_rows(&rows, line)
-    assert_eq(rows[0].text, "fn café()\n{line}")
-    assert_eq(rows[1].text, "fn fresh()\nreturn = Int\n{line}")
-    assert_eq(rows[2].text, "struct Café\nrequired effects: preserved")
+    assert_eq(rows[0].text, "café: fn()\n{line}")
+    assert_eq(rows[1].text, "fresh: fn()\nreturn = Int\n{line}")
+    assert_eq(rows[2].text, "Café: struct\nrequired effects: preserved")
     semindex_refresh_effect_hover_rows(&rows, line)
-    assert_eq(rows[0].text, "fn café()\n{line}")
-    assert_eq(rows[1].text, "fn fresh()\nreturn = Int\n{line}")
+    assert_eq(rows[0].text, "café: fn()\n{line}")
+    assert_eq(rows[1].text, "fresh: fn()\nreturn = Int\n{line}")
 }
 
 // Package attachment exercises the actual PackageFacts/EffectProjection owners
@@ -156,14 +156,14 @@ fn semindex_build_test_operation(path: String, start: Int, end: Int) -> Arithmet
     &db.index.set_effect_projection(pkg_project_application_effects([String]{"IO"}, None))
     db.defs = [SymDef]{semindex_build_test_definition("instance:retained", .Module, "main.jet", 0, 2)}
     db.hover = [HoverEntry]{
-        semindex_build_test_hover("main.jet", 3, 5, "fn café()\nrequired effects: stale"),
-        semindex_build_test_hover("main.jet", 6, 8, "struct Café"),
+        semindex_build_test_hover("main.jet", 3, 5, "café: fn()\nrequired effects: stale"),
+        semindex_build_test_hover("main.jet", 6, 8, "Café: struct"),
     }
     facts := PackageFacts.default()
     facts.authority.allow = Val([String]{"Net"})
     facts.authority.deny = Val([String]{"IO"})
     &db.attach_package_facts(^facts)
-    projection :: db.index.effect_projection
+    projection: db.index.effect_projection
     assert_eq(projection.required_effects, [String]{"IO"})
     assert_eq(projection.granted_effects, [String]{"Net"})
     assert_eq(projection.denied_effects, [String]{"IO"})
@@ -171,12 +171,12 @@ fn semindex_build_test_operation(path: String, start: Int, end: Int) -> Arithmet
     assert(db.index.package_facts != None)
     assert_eq(db.defs.len(), 1)
     assert_eq(db.defs[0].identity, "instance:retained")
-    assert_eq(db.hover[0].text, "fn café()\n{pkg_render_effect_projection_line(projection)}")
-    assert_eq(db.hover[1].text, "struct Café")
+    assert_eq(db.hover[0].text, "café: fn()\n{pkg_render_effect_projection_line(projection)}")
+    assert_eq(db.hover[1].text, "Café: struct")
 }
 
 #Test("symbol_db_new_has_no_program_facts_and_language_symbols") {
-    db :: SymbolDB.new()
+    db: SymbolDB.new()
     assert_eq(db.defs.len(), 0)
     assert_eq(db.refs.len(), 0)
     assert_eq(db.calls.len(), 0)
@@ -191,10 +191,10 @@ fn semindex_build_test_operation(path: String, start: Int, end: Int) -> Arithmet
     assert(db.symbols.lookup_qualified("Int") != None)
 }
 
-fn semindex_build_test_definition(identity: String, kind: SymKind, path: String, start: Int, end: Int) -> SymDef Never! {
+semindex_build_test_definition: fn(identity: String, kind: SymKind, path: String, start: Int, end: Int) -> SymDef Never! {
     SymDef{identity: identity, name: "same-spelling", def_span: Span{start: start, end: end}, module_path: path, kind: kind}
 }
-fn semindex_build_test_reference(kind: String, path: String, start: Int, end: Int, identity: String?) -> SymRef Never! {
+semindex_build_test_reference: fn(kind: String, path: String, start: Int, end: Int, identity: String?) -> SymRef Never! {
     SymRef{name: "different-spelling", span: Span{start: 40, end: 44}, module_path: "use.jet", scope_identity: None, target: Val(DefinitionAnchor{module_path: path, kind: kind, def_span: SourceSpan{start: start, end: end}, semantic_identity: identity}), fact: None}
 }
 #Test("symbol_db_align_targets_requires_unique_exact_kind_module_and_span") {
@@ -238,12 +238,12 @@ fn semindex_build_test_reference(kind: String, path: String, start: Int, end: In
 // accepting actual checked products, deliberately not passing #Tests around
 // prefilled facts. C4 must load/check the fixture before invoking each oracle.
 
-fn semindex_build_test_arithmetic_source() -> String Never! {
-    "fn run() {{\n    #Arithmetic(.Wrapping) {{\n        value :: U8{{250}} + U8{{10}}\n    }}\n}}\n"
+semindex_build_test_arithmetic_source: fn() -> String Never! {
+    "run: fn() {{\n    #Arithmetic(.Wrapping) {{\n        value: U8{{250}} + U8{{10}}\n    }}\n}}\n"
 }
-fn semindex_build_test_semindex_projects_arithmetic_policy_and_exact_scope(db: SymbolDB, path: String, json: String) {
+semindex_build_test_semindex_projects_arithmetic_policy_and_exact_scope: fn(db: SymbolDB, path: String, json: String) {
     assert(db.arithmetic.len() > 0)
-    operation :: db.arithmetic[0]
+    operation: db.arithmetic[0]
     assert_eq(operation.operation, "add")
     assert_eq(operation.policy, "Wrapping")
     assert(operation.scope_span.start < operation.operation_span.start)
@@ -259,10 +259,10 @@ fn semindex_build_test_semindex_projects_arithmetic_policy_and_exact_scope(db: S
 }
 
 // (terminal_state_graph.jet), including dossier wires.
-fn semindex_build_test_terminal_source() -> String Never! {
-    "\nstruct Door {{\n    state {{ Closed, Open, Orphan }}\n}}\nimpl Door {{\n    #Transition(_, Closed) fn close() -> Door -> Door{{}}\n    #Transition(Closed, Open) fn open(self: ^Door) -> Door -> self\n    #Transition(Closed, Closed) fn hold(self: ^Door) -> Door -> self\n}}\nfn run() {{}}\n"
+semindex_build_test_terminal_source: fn() -> String Never! {
+    "\nDoor: struct {{\n    state {{ Closed, Open, Orphan }}\n}}\nimpl Door {{\n    #Transition(_, Closed) close: fn() -> Door -> Door{{}}\n    #Transition(Closed, Open) open: fn(self: ^Door) -> Door -> self\n    #Transition(Closed, Closed) hold: fn(self: ^Door) -> Door -> self\n}}\nrun: fn() {{}}\n"
 }
-fn semindex_build_test_semindex_projects_terminal_and_reachability_graph(index: SemIndex, json: String, dossier_text: String, dossier_json: String) {
+semindex_build_test_semindex_projects_terminal_and_reachability_graph: fn(index: SemIndex, json: String, dossier_text: String, dossier_json: String) {
     found := false
     loop graph in index.state_graphs() {
         if graph.owner != "Door" -> next
@@ -284,10 +284,10 @@ fn semindex_build_test_semindex_projects_terminal_and_reachability_graph(index: 
     assert(dossier_json.contains("\"terminal\":true"))
 }
 
-fn semindex_build_test_terminal_hover_source() -> String Never! {
-    "struct Door {{\n    state {{ Closed, Open, Orphan }}\n}}\nimpl Door {{\n    #Transition(_, Closed) fn new() -[]> Door {{ return Door{{}} }}\n    #Transition(Closed, Open) fn open(self: ^Door) -[]> Door {{ return self }}\n}}\nfn run() {{}}\n"
+semindex_build_test_terminal_hover_source: fn() -> String Never! {
+    "Door: struct {{\n    state {{ Closed, Open, Orphan }}\n}}\nimpl Door {{\n    #Transition(_, Closed) new: fn() -[]> Door {{ return Door{{}} }}\n    #Transition(Closed, Open) open: fn(self: ^Door) -[]> Door {{ return self }}\n}}\nrun: fn() {{}}\n"
 }
-fn semindex_build_test_semindex_hover_projects_terminal_and_reachability_facts(db: SymbolDB) {
+semindex_build_test_semindex_hover_projects_terminal_and_reachability_facts: fn(db: SymbolDB) {
     closed := false
     orphan := false
     loop hover in db.hover {
@@ -300,7 +300,7 @@ fn semindex_build_test_semindex_hover_projects_terminal_and_reachability_facts(d
 // The Rust original uses Examples/features/tooling/output_callable.jet as
 // checked by the Driver (including its Output-binding lowering, not a local
 // rewrite of APP into app).
-fn semindex_build_test_semindex_reconstructs_checked_output_callable(index: SemIndex, json: String) {
+semindex_build_test_semindex_reconstructs_checked_output_callable: fn(index: SemIndex, json: String) {
     found := false
     loop output in index.outputs() {
         if found -> break
@@ -320,10 +320,10 @@ fn semindex_build_test_semindex_reconstructs_checked_output_callable(index: SemI
 }
 
 // (main.jet), exact equivalent generic applications.
-fn semindex_build_test_generic_source() -> String Never! {
-    "module boxed<T>(n: Int) {{ fn value() -> Int {{ return n }} }}\nmodule a :: boxed<Int>(3)\nmodule b :: boxed<Int>(3)\nfn run() {{}}\n"
+semindex_build_test_generic_source: fn() -> String Never! {
+    "boxed: module<T>(n: Int) {{ value: fn() -> Int {{ return n }} }}\na: boxed<Int>(3)\nb: boxed<Int>(3)\nrun: fn() {{}}\n"
 }
-fn semindex_build_test_generic_instance_identity_reaches_index_and_symbol_database(index: SemIndex, path: String, json: String) {
+semindex_build_test_generic_instance_identity_reaches_index_and_symbol_database: fn(index: SemIndex, path: String, json: String) {
     count := 0
     loop instance in index.instances() {
         count += 1
@@ -332,7 +332,7 @@ fn semindex_build_test_generic_instance_identity_reaches_index_and_symbol_databa
         assert_eq(instance.applications.len(), 2)
         assert_eq(instance.applications[0].name, "a")
         assert_eq(instance.applications[1].name, "b")
-        identity :: "instance:{instance.fingerprint}"
+        identity: "instance:{instance.fingerprint}"
         loop application in instance.applications {
             assert_eq(application.module_path, path)
             assert_eq(application.semantic_identity, identity)
@@ -353,17 +353,17 @@ fn semindex_build_test_generic_instance_identity_reaches_index_and_symbol_databa
 }
 
 // Actual two-module import/receiver fixtures.
-fn semindex_build_test_reference_library_source() -> String Never! { "fn report() {{ print(\"library\") }}\n" }
-fn semindex_build_test_reference_main_source() -> String Never! {
-    "use api :: \"./library\"\nuse alias_report :: api.report\n\nstruct Worker {{ value: Int }}\nimpl Worker {{\n    fn step(self) {{ print(\"worker\") }}\n}}\nstruct Other {{ value: Int }}\nimpl Other {{\n    fn step(self) {{ print(\"other\") }}\n}}\n\nfn run() {{\n    api.report()\n    alias_report()\n    worker :: Worker{{value: 1}}\n    worker.step()\n    other :: Other{{value: 2}}\n    other.step()\n}}\n"
+semindex_build_test_reference_library_source: fn() -> String Never! { "report: fn() {{ print(\"library\") }}\n" }
+semindex_build_test_reference_main_source: fn() -> String Never! {
+    "use api: \"./library\"\nuse alias_report: api.report\n\nWorker: struct {{ value: Int }}\nimpl Worker {{\n    step: fn(self) {{ print(\"worker\") }}\n}}\nOther: struct {{ value: Int }}\nimpl Other {{\n    step: fn(self) {{ print(\"other\") }}\n}}\n\nrun: fn() {{\n    api.report()\n    alias_report()\n    worker: Worker{{value: 1}}\n    worker.step()\n    other: Other{{value: 2}}\n    other.step()\n}}\n"
 }
-fn semindex_build_test_checked_reference_facts_cover_import_members_aliases_and_receivers(index: SemIndex) {
+semindex_build_test_checked_reference_facts_cover_import_members_aliases_and_receivers: fn(index: SemIndex) {
     loop expected in ([String]{"api", "report", "alias_report", "step"}) {
         found := false
         loop reference in index.references() {
             if reference.name != expected -> next
             if reference.target == .Val(target) {
-                kind :: if expected == "api" -> "import_alias" else -> "function"
+                kind: if expected == "api" -> "import_alias" else -> "function"
                 if target.kind == kind -> found = true
             }
         }
@@ -402,9 +402,9 @@ fn semindex_build_test_checked_reference_facts_cover_import_members_aliases_and_
 }
 
 // The same file is checked before and after.
-fn semindex_build_test_ancestry_before_source() -> String Never! { "fn score(n: Int) -> Int {{ return n + 1 }}\nfn run() {{ print(score(1)) }}\n" }
-fn semindex_build_test_ancestry_after_source() -> String Never! { "fn score(n: Float, bonus: Float) -> Float {{ return n * bonus }}\nfn run() {{ print(score(1.0, 2.0)) }}\n" }
-fn semindex_build_test_definition_ancestry_identity_ignores_signature_and_body_shape(before: SemIndex, after: SemIndex) {
+semindex_build_test_ancestry_before_source: fn() -> String Never! { "score: fn(n: Int) -> Int {{ return n + 1 }}\nrun: fn() {{ print(score(1)) }}\n" }
+semindex_build_test_ancestry_after_source: fn() -> String Never! { "score: fn(n: Float, bonus: Float) -> Float {{ return n * bonus }}\nrun: fn() {{ print(score(1.0, 2.0)) }}\n" }
+semindex_build_test_definition_ancestry_identity_ignores_signature_and_body_shape: fn(before: SemIndex, after: SemIndex) {
     found := false
     loop old in before.definition_facts() {
         if old.name != "score" -> next
@@ -421,11 +421,11 @@ fn semindex_build_test_definition_ancestry_identity_ignores_signature_and_body_s
     assert(found)
 }
 
-fn semindex_build_test_inferred_effects_source() -> String Never! { "fn announce() {{ print(\"hello\") }}\nfn run() {{ announce() }}\n" }
-fn semindex_build_test_semindex_projects_omitted_inferred_effects(index: SemIndex) {
+semindex_build_test_inferred_effects_source: fn() -> String Never! { "announce: fn() {{ print(\"hello\") }}\nrun: fn() {{ announce() }}\n" }
+semindex_build_test_semindex_projects_omitted_inferred_effects: fn(index: SemIndex) {
     if index.effect_of("announce") == {
         .Val(rows) -> {
-            announce :: rows[0]
+            announce: rows[0]
             assert_eq(announce.inferred, [String]{"IO"})
             assert_eq(announce.callees.len(), 0)
             assert_eq(announce.provenance.len(), 1)
@@ -444,8 +444,8 @@ fn semindex_build_test_semindex_projects_omitted_inferred_effects(index: SemInde
     }
 }
 
-fn semindex_build_test_rename_source() -> String Never! { "fn helper() -> Int {{ return 1 }}\nfn run() {{ print(helper()) }}\n" }
-fn semindex_build_test_semindex_rename_sites_keep_definition_identity_in_json(index: SemIndex, json: String) {
+semindex_build_test_rename_source: fn() -> String Never! { "helper: fn() -> Int {{ return 1 }}\nrun: fn() {{ print(helper()) }}\n" }
+semindex_build_test_semindex_rename_sites_keep_definition_identity_in_json: fn(index: SemIndex, json: String) {
     found := false
     loop definition in index.definitions() {
         if definition.name != "helper" -> next
@@ -466,7 +466,7 @@ fn semindex_build_test_semindex_rename_sites_keep_definition_identity_in_json(in
 
 // Additional finalization oracle: every checked definition retains derivation
 // evidence with its stable subject and the original content/signature inputs.
-fn semindex_build_test_checked_definition_derivations(index: SemIndex) {
+semindex_build_test_checked_definition_derivations: fn(index: SemIndex) {
     count := 0
     loop fact in index.definition_facts() {
         found := false
@@ -476,7 +476,7 @@ fn semindex_build_test_checked_definition_derivations(index: SemIndex) {
             assert_eq(record.producer, "jet-sema")
             assert_eq(record.method, DerivationMethod.StaticDerivation)
             assert_eq(record.rule, "checked-definition")
-            expected :: derivation_record(fact.stable_id, fact.human_identity, "jet-sema", DerivationMethod.StaticDerivation, "checked-definition", [String]{fact.signature_id, fact.content_id}, derivation_identity(fact.content_id, fact.signature_id, "", fact.module_path))
+            expected: derivation_record(fact.stable_id, fact.human_identity, "jet-sema", DerivationMethod.StaticDerivation, "checked-definition", [String]{fact.signature_id, fact.content_id}, derivation_identity(fact.content_id, fact.signature_id, "", fact.module_path))
             assert_eq(record.premises, expected.premises)
             assert_eq(record.id, expected.id)
             assert_eq(record.identity, derivation_identity(fact.content_id, fact.signature_id, "", fact.module_path))

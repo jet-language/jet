@@ -7,22 +7,22 @@
 // ); identity is the ratified Stat identity.
 use {
     jet_foundation.[Diagnostic, diagnostic_from_registry]
-    files :: core.files
-    sys :: core.sys
+    files: core.files
+    sys: core.sys
 }
 
-AUTHORITY_KIND_FILE :: "regular file"
-AUTHORITY_KIND_DIRECTORY :: "directory"
-AUTHORITY_KIND_SPECIAL :: "special file"
-AUTHORITY_KIND_SYMLINK :: "symlink"
-AUTHORITY_HARDLINK_DETAIL :: "authority file must have exactly one hard link"
+AUTHORITY_KIND_FILE: "regular file"
+AUTHORITY_KIND_DIRECTORY: "directory"
+AUTHORITY_KIND_SPECIAL: "special file"
+AUTHORITY_KIND_SYMLINK: "symlink"
+AUTHORITY_HARDLINK_DETAIL: "authority file must have exactly one hard link"
 
 // The kind proven by a checked open.
-enum AuthorityKind {
+AuthorityKind: enum {
     File
     Directory
 
-    fn name(self) -> String Never! {
+    name: fn(self) -> String Never! {
         if self == {
             .File -> AUTHORITY_KIND_FILE
             .Directory -> AUTHORITY_KIND_DIRECTORY
@@ -38,14 +38,14 @@ enum AuthorityKind {
 // itself (kind plus device and inode): its length and mtime change whenever a
 // legitimate writer creates or removes an entry below the authority root, and
 // a path swapped between two observations still yields a different inode.
-struct FileIdentity {
+FileIdentity: struct {
     kind: AuthorityKind
     length: Int
     modified_ns: Int?
     device: Int
     inode: Int
 
-    fn from_stat(info: files.Stat, kind: AuthorityKind) -> FileIdentity Never! {
+    from_stat: fn(info: files.Stat, kind: AuthorityKind) -> FileIdentity Never! {
         if kind == AuthorityKind.Directory {
             return FileIdentity{kind: kind, length: 0, modified_ns: None, device: info.id.device, inode: info.id.inode}
         }
@@ -54,7 +54,7 @@ struct FileIdentity {
 }
 
 // One no-follow opened file and the bytes read from that same handle.
-struct CheckedFile {
+CheckedFile: struct {
     path: String
     relative: String
     identity: FileIdentity
@@ -62,14 +62,14 @@ struct CheckedFile {
     bytes: [U8]
 
     // Decode the bytes that were read from the opened object.
-    fn text(self) -> String AuthorityError! {
-        text :: String.from_bytes(self.bytes) ?? return Err(AuthorityError.NotText{path: self.path, detail: pkg_authority_utf8_error(self.bytes)})
+    text: fn(self) -> String AuthorityError! {
+        text: String.from_bytes(self.bytes) ?? return Err(AuthorityError.NotText{path: self.path, detail: pkg_authority_utf8_error(self.bytes)})
         Ok(text)
     }
 }
 
 // One checked directory: only descendants own a new no-follow handle.
-struct CheckedDirectory {
+CheckedDirectory: struct {
     path: String
     relative: String
     identity: FileIdentity
@@ -78,26 +78,26 @@ struct CheckedDirectory {
 }
 
 // A parsed canonical `package.jet` plus the opened manifest snapshot.
-struct CheckedManifest {
+CheckedManifest: struct {
     file: CheckedFile
     facts: PackageFacts
 }
 
 // A checked member directory and its canonical manifest.
-struct CheckedMember {
+CheckedMember: struct {
     directory: CheckedDirectory
     manifest: CheckedManifest
 }
 
 // A member snapshot after checked Config composition and member validation.
-struct CheckedPackage {
+CheckedPackage: struct {
     member: CheckedMember
     facts: PackageFacts
 }
 
 // Failure from the shared authority resolver.
 #Error
-enum AuthorityError {
+AuthorityError: enum {
     // `cause` is the native open/stat failure text, or why a probe found nothing.
     Missing(path: String, cause: String)
     // `package.jet` parsed as text but violates the manifest vocabulary; kept
@@ -116,7 +116,7 @@ enum AuthorityError {
     Changed(String)
     Unsupported(String)
 
-    fn is_missing(self) -> Bool Never! {
+    is_missing: fn(self) -> Bool Never! {
         if self == {
             .Missing(_, _) -> true
             else -> false
@@ -124,7 +124,7 @@ enum AuthorityError {
     }
 
     // The Rust `Display` text.
-    fn message(self) -> String Never! {
+    message: fn(self) -> String Never! {
         if self == {
             .Missing(path, _) -> "authority path `{path}` is missing"
             .IO(path, operation, detail) -> "couldn't {operation} `{path}`: {detail}"
@@ -142,7 +142,7 @@ enum AuthorityError {
         }
     }
 
-    fn diagnostic(self) -> Diagnostic Never! {
+    diagnostic: fn(self) -> Diagnostic Never! {
         if self == {
             .WorkspaceAmbiguous(paths) -> pkg_e1239_ambiguous_workspace(paths)
             .WorkspaceNoModule -> pkg_e0995_no_workspace_module()
@@ -190,7 +190,7 @@ enum AuthorityError {
         }
     }
 
-    fn workspace_diagnostic(self) -> Diagnostic Never! {
+    workspace_diagnostic: fn(self) -> Diagnostic Never! {
         if self == {
             .ManifestParse(path, error) -> pkg_manifest_parse_diagnostic(path, error)
             .WorkspaceAmbiguous(paths) -> pkg_e1239_ambiguous_workspace(paths)
@@ -205,16 +205,16 @@ enum AuthorityError {
     }
 }
 
-fn pkg_authority_error_diagnostic(code: String, what: String, why: String, fix: String) -> Diagnostic Never! {
+pkg_authority_error_diagnostic: fn(code: String, what: String, why: String, fix: String) -> Diagnostic Never! {
     diagnostic_from_registry(code, None, what, why, fix)
 }
 
 // Rust `FromUtf8Error` Display: where the first invalid sequence starts.
-fn pkg_authority_utf8_error(bytes: [U8]) -> String Never! {
+pkg_authority_utf8_error: fn(bytes: [U8]) -> String Never! {
     valid := 0
     loop valid < bytes.len() {
-        lead :: Int.from_u8(bytes[valid])
-        width :: if {
+        lead: Int.from_u8(bytes[valid])
+        width: if {
             lead < 0x80 -> 1
             lead >= 0xC2 && lead <= 0xDF -> 2
             lead >= 0xE0 && lead <= 0xEF -> 3
@@ -230,12 +230,12 @@ fn pkg_authority_utf8_error(bytes: [U8]) -> String Never! {
 }
 
 // `authority_limit_error`: every walk/read bound is an `Invalid` detail.
-fn pkg_authority_limit_error(path: String, detail: String) -> AuthorityError Never! {
+pkg_authority_limit_error: fn(path: String, detail: String) -> AuthorityError Never! {
     AuthorityError.Invalid{path: path, detail: detail}
 }
 
 // The `kind_name` of a no-follow Stat.
-fn pkg_authority_kind_name(info: files.Stat) -> String Never! {
+pkg_authority_kind_name: fn(info: files.Stat) -> String Never! {
     if {
         info.is_dir -> AUTHORITY_KIND_DIRECTORY
         info.is_file -> AUTHORITY_KIND_FILE
@@ -244,7 +244,7 @@ fn pkg_authority_kind_name(info: files.Stat) -> String Never! {
 }
 
 // `kind_name_from_file_type`: a directory entry kind, links included.
-fn pkg_authority_entry_kind_name(info: files.Stat) -> String Never! {
+pkg_authority_entry_kind_name: fn(info: files.Stat) -> String Never! {
     if {
         info.is_dir -> AUTHORITY_KIND_DIRECTORY
         info.is_file -> AUTHORITY_KIND_FILE
@@ -254,13 +254,13 @@ fn pkg_authority_entry_kind_name(info: files.Stat) -> String Never! {
 }
 
 // `require_single_link_file`.
-fn pkg_authority_require_single_link(path: String, info: files.Stat) AuthorityError! {
+pkg_authority_require_single_link: fn(path: String, info: files.Stat) AuthorityError! {
     if info.links == 1 -> return
     return Err(AuthorityError.Invalid{path: path, detail: AUTHORITY_HARDLINK_DETAIL})
 }
 
 // The OS error number behind a provider failure, when known.
-fn pkg_io_os_code(error: IOError) -> Int? Never! {
+pkg_io_os_code: fn(error: IOError) -> Int? Never! {
     if error == {
         .InvalidInput(context) | .NotFound(context) | .PermissionDenied(context) |
         .TimedOut(context) | .Cancelled(context) | .Closed(context) |
@@ -272,7 +272,7 @@ fn pkg_io_os_code(error: IOError) -> Int? Never! {
 
 // The native cause behind an IO failure (`No such file or directory (os error
 // 2)`), without the public IOError display prefix.
-fn pkg_io_cause(error: IOError) -> String Never! {
+pkg_io_cause: fn(error: IOError) -> String Never! {
     if error == {
         .InvalidInput(context) | .NotFound(context) | .PermissionDenied(context) |
         .TimedOut(context) | .Cancelled(context) | .Closed(context) |
@@ -283,20 +283,20 @@ fn pkg_io_cause(error: IOError) -> String Never! {
 }
 
 // ELOOP: the final component was a link opened with no-follow.
-fn pkg_io_is_symlink_error(error: IOError) -[Env]> Bool Never! {
-    code :: pkg_io_os_code(error) ?? return false
+pkg_io_is_symlink_error: fn(error: IOError) -[Env]> Bool Never! {
+    code: pkg_io_os_code(error) ?? return false
     if sys.is_linux() -> return code == 40
     if sys.is_macos() -> return code == 62
     false
 }
 
 // ENOTDIR: a directory open reached a non-directory.
-fn pkg_io_is_not_a_directory(error: IOError) -> Bool Never! {
-    code :: pkg_io_os_code(error) ?? return false
+pkg_io_is_not_a_directory: fn(error: IOError) -> Bool Never! {
+    code: pkg_io_os_code(error) ?? return false
     code == 20
 }
 
-fn pkg_io_is_not_found(error: IOError) -> Bool Never! {
+pkg_io_is_not_found: fn(error: IOError) -> Bool Never! {
     if error == {
         .NotFound(_) -> true
         else -> false
@@ -304,18 +304,18 @@ fn pkg_io_is_not_found(error: IOError) -> Bool Never! {
 }
 
 // `map_io`: the typed authority failure of one open.
-fn pkg_authority_map_io(path: String, error: IOError, directory: Bool) -[Env]> AuthorityError Never! {
+pkg_authority_map_io: fn(path: String, error: IOError, directory: Bool) -[Env]> AuthorityError Never! {
     if pkg_io_is_not_found(error) -> return AuthorityError.Missing{path: path, cause: pkg_io_cause(error)}
     if pkg_io_is_symlink_error(error) -> return AuthorityError.Symlink(path)
     if directory && pkg_io_is_not_a_directory(error) {
         return AuthorityError.WrongKind{path: path, expected: AUTHORITY_KIND_DIRECTORY, actual: AUTHORITY_KIND_FILE}
     }
-    operation :: if directory -> "open directory" else -> "open file"
+    operation: if directory -> "open directory" else -> "open file"
     AuthorityError.IO{path: path, operation: operation, detail: "{error}"}
 }
 
 // `root.join(relative)`: an empty relative keeps Rust's trailing separator.
-fn pkg_authority_join(root: String, relative: String) -> String Never! {
+pkg_authority_join: fn(root: String, relative: String) -> String Never! {
     if relative == "" {
         if root.ends_with("/") -> return root.copy()
         return "{root}/"
@@ -324,8 +324,8 @@ fn pkg_authority_join(root: String, relative: String) -> String Never! {
 }
 
 // Whether `path` is `root` itself or lies below it, component-wise.
-fn pkg_authority_path_within(path: String, root: String) -> Bool Never! {
-    trimmed :: if root.ends_with("/") && root != "/" -> root.removesuffix("/") else -> root
+pkg_authority_path_within: fn(path: String, root: String) -> Bool Never! {
+    trimmed: if root.ends_with("/") && root != "/" -> root.removesuffix("/") else -> root
     if path == trimmed || path == ("{trimmed}/") -> return true
     if trimmed == "/" -> return path.starts_with("/")
     path.starts_with("{trimmed}/")
@@ -333,8 +333,8 @@ fn pkg_authority_path_within(path: String, root: String) -> Bool Never! {
 
 // `Path::extension`: the text after the last `.` of the final component,
 // unless that dot starts the name.
-fn pkg_authority_extension(name: String) -> String? Never! {
-    raw :: name.bytes()
+pkg_authority_extension: fn(name: String) -> String? Never! {
+    raw: name.bytes()
     index := raw.len() - 1
     loop index > 0 {
         if Int.from_u8(raw[index]) == 46 -> return Val(String.from_bytes(raw[index + 1..<raw.len()]) ?? "")

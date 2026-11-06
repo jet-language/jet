@@ -5,30 +5,30 @@
 // panic's report after "while rolling back, this also failed:", and the next
 // hook still runs. After the rollback the panic keeps propagating
 // (D-NOPANIC1), so the program stops with the panic's report.
-struct Ledger {
+Ledger: struct {
     balance: Int
 }
 
-struct LedgerSnap {
+LedgerSnap: struct {
     balance: Int
 }
 
 impl Ledger.Rollback {
-    type Snapshot = LedgerSnap
+    Snapshot: LedgerSnap
 
-    fn snapshot(self) -> LedgerSnap { return LedgerSnap{balance: self.balance} }
+    snapshot: fn(self) -> LedgerSnap { return LedgerSnap{balance: self.balance} }
 
-    fn restore(&self, snap: ^LedgerSnap) {
+    restore: fn(&self, snap: ^LedgerSnap) {
         print("balance {self.balance} restored to {snap.balance}")
         self.balance = snap.balance
     }
 }
 
-fn audit() {
+audit: fn() {
     panic("the audit log is unavailable")
 }
 
-fn withdraw(ledger: &Ledger) {
+withdraw: fn(ledger: &Ledger) {
     #Transact(tx) {
         ledger.balance -= 10
         tx.on_rollback(() -> print("hook: release the hold"))
@@ -38,7 +38,7 @@ fn withdraw(ledger: &Ledger) {
     }
 }
 
-fn run() {
+run: fn() {
     ledger := Ledger{balance: 100}
     withdraw(&ledger)
     print("not reached: balance {ledger.balance}")

@@ -1,15 +1,15 @@
 
-fn build(b: Build) -[Exec, FS]> {
+build: fn(b: Build) -[Exec, FS]> {
     #Impure("exercise hostile output path") {
-    action :: b.action(
+    action: b.action(
         "escape",
         [],
         ["redirect/pwn"],
         ["sh", "-c", "mkdir -p redirect; printf escaped > redirect/pwn"],
         ["Exec", "FS"]
     )
-    app :: b.add_executable("app", ["main.jet"], [action])
+    app: b.add_executable("app", ["main.jet"], [action])
     b.default(app)
     }
 }
-fn run() {}
+run: fn() {}

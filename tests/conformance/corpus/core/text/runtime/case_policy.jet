@@ -5,13 +5,13 @@
 // #4318/#4392 retained assets/bytes/views, native String receiver integration
 // and composed O0/O1/O2/Web remain original gates, not proved by these values.
 use {
-    case_kernel :: core.text.runtime.kernel_unicode_string
-    case_parse :: core.text.parse
-    case_text :: core.text
+    case_kernel: core.text.runtime.kernel_unicode_string
+    case_parse: core.text.parse
+    case_text: core.text
 }
 
 #Test("full title mappings distinguish title from uppercase") {
-    rows :: [
+    rows: [
         (input: "", expected: ""),
         (input: "ß ﬃ և", expected: "Ss Ffi Եւ"),
         (input: "ǄǄ ǆǆ ǅǅ", expected: "ǅǆ ǅǆ ǅǆ"),
@@ -33,7 +33,7 @@ use {
 }
 
 #Test("lowercase FinalSigma context and full multiscalar expansions") {
-    rows :: [
+    rows: [
         (input: "ΟΣ", expected: "ος"),
         (input: "Σ", expected: "σ"),
         (input: "ΟΣΑ", expected: "οσα"),
@@ -53,7 +53,7 @@ use {
 }
 
 #Test("capitalize title-first and suffix-only FinalSigma") {
-    rows :: [
+    rows: [
         (input: "", expected: ""),
         (input: "ßABC", expected: "Ssabc"),
         (input: "ﬃABC", expected: "Ffiabc"),
@@ -77,7 +77,7 @@ use {
 }
 
 #Test("literal Rust cased predicates and title-state owner gate") {
-    rows :: [
+    rows: [
         (input: "", lower: false, upper: false, title: false),
         (input: "AB", lower: false, upper: true, title: true),
         (input: "ABC abc", lower: false, upper: false, title: false),
@@ -133,7 +133,7 @@ use {
     assert_eq(case_parse.isalnum("界²٣Ⅻͅ"), true)
     assert_eq(case_parse.is_alnum("abc-1"), false)
     assert_eq(case_parse.isalnum(""), false)
-    whitespace :: String.from_bytes([U8]{9, 10, 13, 194, 133, 194, 160, 225, 154, 128, 226, 128, 131, 226, 128, 168, 226, 128, 175, 227, 128, 128}) ?? panic("whitespace fixture")
+    whitespace: String.from_bytes([U8]{9, 10, 13, 194, 133, 194, 160, 225, 154, 128, 226, 128, 131, 226, 128, 168, 226, 128, 175, 227, 128, 128}) ?? panic("whitespace fixture")
     assert_eq(case_parse.is_space(whitespace), true)
     assert_eq(case_text.is_whitespace(whitespace), true)
     assert_eq(case_text.is_alphabetic("Ж界ְͅ𐐀"), true)
@@ -168,7 +168,7 @@ use {
 }
 
 #Test("default caseless is NFD fold NFD without compatibility or locale") {
-    rows :: [
+    rows: [
         (left: "Straße", right: "STRASSE", equal: true),
         (left: "É", right: "é", equal: true),
         (left: "Å", right: "å", equal: true),

@@ -40,12 +40,12 @@ if (mode === 'assemble') {
   writeFileSync(join(out, 'exports.nm'), symbols);
   for (const file of ['HostFiles.jet', 'HostSpawn.jet']) {
     const source = readFileSync(join(root, 'Compiler/JetRuntime/Source', file), 'utf8');
-    for (const match of source.matchAll(/^#Export\(c\)\s+fn\s+(\w+)\(/gm)) if (!new RegExp(`^${match[1]} T `, 'm').test(symbols)) throw Error(`missing real host leaf ${match[1]}`);
+    for (const match of source.matchAll(/^#Export\(c\)\s+(\w+): fn\(/gm)) if (!new RegExp(`^${match[1]} T `, 'm').test(symbols)) throw Error(`missing real host leaf ${match[1]}`);
   }
   writeFileSync(join(out, 'disassembly.txt'), command('objdump', ['-dr', object]).stdout);
 } else if (mode === 'compile') {
   const collections = readFileSync(join(root, 'Compiler/JetRuntime/Source/Collections.jet'), 'utf8');
-  const stride = /RT_HOST_U8_STRIDE\s*::\s*comptime\s*\{\s*I64\{(1|8)\}\s*\}/.exec(collections)?.[1];
+  const stride = /RT_HOST_U8_STRIDE\s*:\s*comptime\s*\{\s*I64\{(1|8)\}\s*\}/.exec(collections)?.[1];
   if (!stride) throw Error('TCP witness requires the canonical native U8 epoch');
   for (const [name, source] of fixtures) command(join(root, 'Tools/agent/jet-env'), [nativeCCompiler, '-std=c11', '-O1', '-fno-stack-protector', '-fno-PIE', '-fno-builtin', '-Wall', '-Wextra', '-Werror', ...(name === 'tcp-routes' ? [`-DJET_TCP_U8_STRIDE=${stride}`] : name === 'build-http' ? [`-DJET_U8_STRIDE=${stride}`] : []), '-c', join(root, 'Compiler/JetRuntime/Tests', source), '-o', join(out, `${name}.o`)]);
 } else if (mode === 'link') {

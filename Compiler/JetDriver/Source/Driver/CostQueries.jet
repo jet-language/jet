@@ -1,21 +1,21 @@
 // One invocation-scoped checked cost producer for every consumer.
 use jet_foundation.[Span, TCostKind, TCostState]
 
-struct TCostSite {
+TCostSite: struct {
     function: String
     span: Span
     loop_depth: Int
     kind: TCostKind
     state: TCostState
 }
-struct TCostReport { sites: [TCostSite]{[TCostSite]{}} }
+TCostReport: struct { sites: [TCostSite]{[TCostSite]{}} }
 
-struct JetDriverCostQueryResult {
+JetDriverCostQueryResult: struct {
     compile: JetDriverCompileResult
     report: TCostReport?
     gaps: [String]
 }
-fn jet_driver_cost_query(request: ^JetDriverCompileRequest) -> JetDriverCostQueryResult {
+jet_driver_cost_query: fn(request: ^JetDriverCompileRequest) -> JetDriverCostQueryResult {
     selected := ^request
     selected.mode = JetDriverCompileMode.Doc
     selected.capture_cost_report = true

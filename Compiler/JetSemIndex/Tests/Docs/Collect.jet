@@ -4,14 +4,14 @@
 // claims do not establish C4/S8 or CLI execution parity.
 use jet_parser.[parse_source]
 
-fn doc_collect_test_source(source: String, rows: &[DocItem], impls: &[DocImpl]) Never! {
-    parsed :: parse_source(source.bytes())
+doc_collect_test_source: fn(source: String, rows: &[DocItem], impls: &[DocImpl]) Never! {
+    parsed: parse_source(source.bytes())
     assert_eq(parsed.diagnostics.len(), 0)
     names := [String:Bool]{}
     doc_collect_protocol_names(parsed.program.items, &names)
     doc_collect_items(parsed.program.items, "main.jet", "", parsed.program.pub_file, doc_test_os_path("/project/main.jet"), "logical", source, doc_test_os_path("/project"), names, &rows, &impls)
 }
-fn doc_collect_test_item(rows: [DocItem], qualified_name: String, kind: String) -> Int Never! {
+doc_collect_test_item: fn(rows: [DocItem], qualified_name: String, kind: String) -> Int Never! {
     loop index in 0..<rows.len() {
         if rows[index].qualified_name == qualified_name && rows[index].kind == kind -> return index
     }
@@ -21,26 +21,26 @@ fn doc_collect_test_item(rows: [DocItem], qualified_name: String, kind: String) 
 // Input and collector-side assertions, with no enrichment/serialization
 // shortcut standing in for the CLI JSON test.
 #Test("nested_state_docs_stay_on_the_struct_item") {
-    source :: "struct Door {{ state {{ Closed, Open }} }}\nfn run() {{}}\n"
+    source: "Door: struct {{ state {{ Closed, Open }} }}\nrun: fn() {{}}\n"
     rows := [DocItem]{}
     impls := [DocImpl]{}
     doc_collect_test_source(source, &rows, &impls)
-    door :: doc_collect_test_item(rows, "Door", "struct")
-    assert_eq(rows[door].signature, "struct Door {{ state {{ Closed, Open }} }}")
+    door: doc_collect_test_item(rows, "Door", "struct")
+    assert_eq(rows[door].signature, "Door: struct {{ state {{ Closed, Open }} }}")
     loop row in rows -> assert(row.kind != "state")
-    run :: doc_collect_test_item(rows, "run", "function")
+    run: doc_collect_test_item(rows, "run", "function")
     assert(!rows[run].signature.contains("state"))
 }
 
 #Test("doc_collect_comments_attach_to_each_declaration_not_global_or_state") {
-    source :: "/// Module overview.\n\n/// Door summary é.\nstruct Door {{\n    state {{ Closed, Open }}\n    /// Field summary λ.\n    value: Int\n    /// Method summary.\n    /// Example: `door.read()`\n    fn read(self) -> Int {{ 1 }}\n}}\n\nfn run() {{}}\n"
+    source: "/// Module overview.\n\n/// Door summary é.\nDoor: struct {{\n    state {{ Closed, Open }}\n    /// Field summary λ.\n    value: Int\n    /// Method summary.\n    /// Example: `door.read()`\n    read: fn(self) -> Int {{ 1 }}\n}}\n\nrun: fn() {{}}\n"
     rows := [DocItem]{}
     impls := [DocImpl]{}
     doc_collect_test_source(source, &rows, &impls)
-    door :: doc_collect_test_item(rows, "Door", "struct")
-    field :: doc_collect_test_item(rows, "Door::value", "field")
-    method :: doc_collect_test_item(rows, "Door::read", "function")
-    run :: doc_collect_test_item(rows, "run", "function")
+    door: doc_collect_test_item(rows, "Door", "struct")
+    field: doc_collect_test_item(rows, "Door::value", "field")
+    method: doc_collect_test_item(rows, "Door::read", "function")
+    run: doc_collect_test_item(rows, "run", "function")
     assert_eq(rows[door].summary, "Door summary é.")
     assert_eq(rows[field].summary, "Field summary λ.")
     assert_eq(rows[method].summary, "Method summary.")
@@ -51,7 +51,7 @@ fn doc_collect_test_item(rows: [DocItem], qualified_name: String, kind: String) 
     assert_eq(rows[field].source.path, "main.jet")
     assert_eq(rows[field].source.link, "main.jet#L7")
     // Retain actual name bytes and the exclusive byte end for the field row.
-    bytes :: source.bytes()
+    bytes: source.bytes()
     selected := [U8]{}
     loop offset in rows[field].source.start..<rows[field].source.end -> &selected.push(bytes[offset])
     assert_eq(String.from_bytes(selected) ?? panic("field name UTF8"), "value")
@@ -61,14 +61,14 @@ fn doc_collect_test_item(rows: [DocItem], qualified_name: String, kind: String) 
 }
 
 #Test("doc_collect_inherited_visibility_keeps_fields_and_package_bits_independent") {
-    source :: "module Outer {{\n    struct Box {{\n        priv hidden: Int\n        visible: Int\n        fn method(self) {{}}\n    }}\n    enum Choice {{ First, Second }}\n    trait Service {{ fn call(self) }}\n    fn work() {{}}\n}}\npriv(package) module Sibling {{}}\n"
+    source: "Outer: module {{\n    Box: struct {{\n        priv hidden: Int\n        visible: Int\n        method: fn(self) {{}}\n    }}\n    Choice: enum {{ First, Second }}\n    Service: trait {{ call: fn(self) }}\n    work: fn() {{}}\n}}\npriv(package) Sibling: module {{}}\n"
     rows := [DocItem]{}
     impls := [DocImpl]{}
     doc_collect_test_source(source, &rows, &impls)
-    box :: doc_collect_test_item(rows, "Outer::Box", "struct")
-    hidden :: doc_collect_test_item(rows, "Outer::Box::hidden", "field")
-    visible :: doc_collect_test_item(rows, "Outer::Box::visible", "field")
-    sibling :: doc_collect_test_item(rows, "Sibling", "module")
+    box: doc_collect_test_item(rows, "Outer::Box", "struct")
+    hidden: doc_collect_test_item(rows, "Outer::Box::hidden", "field")
+    visible: doc_collect_test_item(rows, "Outer::Box::visible", "field")
+    sibling: doc_collect_test_item(rows, "Sibling", "module")
     assert(rows[box].public)
     assert(!rows[box].package_public)
     assert(!rows[hidden].public)
@@ -78,7 +78,7 @@ fn doc_collect_test_item(rows: [DocItem], qualified_name: String, kind: String) 
     assert(rows[sibling].package_public)
     loop name in ([String]{"Outer::Box::method", "Outer::Service::call", "Outer::work"}) -> assert(rows[doc_collect_test_item(rows, name, "function")].public)
     loop name in ([String]{"Outer::Choice::First", "Outer::Choice::Second"}) {
-        variant :: doc_collect_test_item(rows, name, "variant")
+        variant: doc_collect_test_item(rows, name, "variant")
         assert(rows[variant].public)
         assert(!rows[variant].package_public)
     }
@@ -86,7 +86,7 @@ fn doc_collect_test_item(rows: [DocItem], qualified_name: String, kind: String) 
 }
 
 #Test("doc_collect_nested_impls_retain_authored_rows_sorted_method_names_and_rust_owner") {
-    source :: "module Outer {{\n    struct Box {{\n        fn own(self) {{}}\n        impl Zed {{ fn z(self) {{}} fn a(self) {{}} }}\n        impl Alpha {{ fn alpha(self) {{}} }}\n    }}\n    enum Choice {{\n        First\n        impl Zed {{ fn choose(self) {{}} }}\n    }}\n}}\n"
+    source: "Outer: module {{\n    Box: struct {{\n        own: fn(self) {{}}\n        impl Zed {{ z: fn(self) {{}} a: fn(self) {{}} }}\n        impl Alpha {{ alpha: fn(self) {{}} }}\n    }}\n    Choice: enum {{\n        First\n        impl Zed {{ choose: fn(self) {{}} }}\n    }}\n}}\n"
     rows := [DocItem]{}
     impls := [DocImpl]{}
     doc_collect_test_source(source, &rows, &impls)
@@ -98,7 +98,7 @@ fn doc_collect_test_item(rows: [DocItem], qualified_name: String, kind: String) 
     assert_eq(impls[1].trait_name, Val("Alpha"))
     assert_eq(impls[2].type_name, "Choice")
     assert_eq(impls[2].methods, [String]{"choose"})
-    box :: doc_collect_test_item(rows, "Outer::Box", "struct")
+    box: doc_collect_test_item(rows, "Outer::Box", "struct")
     assert_eq(impls[0].source, rows[box].source)
     assert_eq(impls[1].source, rows[box].source)
     assert(rows[doc_collect_test_item(rows, "Outer::Box::own", "function")].public)
@@ -109,8 +109,8 @@ fn doc_collect_test_item(rows: [DocItem], qualified_name: String, kind: String) 
 }
 
 #Test("doc_collect_protocol_prepass_visits_generic_and_private_modules_before_impls") {
-    first :: parse_source("impl Box.Exchange {{ fn z(self) {{}} fn a(self) {{}} }}\n".bytes())
-    second :: parse_source("module Hidden {{ module Generic<T> {{ protocol Exchange {{ client: Hello() }} }} }}\n".bytes())
+    first: parse_source("impl Box.Exchange {{ z: fn(self) {{}} a: fn(self) {{}} }}\n".bytes())
+    second: parse_source("Hidden: module {{ Generic: module<T> {{ protocol Exchange {{ client: Hello() }} }} }}\n".bytes())
     assert_eq(first.diagnostics.len(), 0)
     assert_eq(second.diagnostics.len(), 0)
     names := [String:Bool]{}
@@ -120,22 +120,22 @@ fn doc_collect_test_item(rows: [DocItem], qualified_name: String, kind: String) 
     assert(names.has_key("Exchange"))
     rows := [DocItem]{}
     impls := [DocImpl]{}
-    source :: "impl Box.Exchange {{ fn z(self) {{}} fn a(self) {{}} }}\n"
+    source: "impl Box.Exchange {{ z: fn(self) {{}} a: fn(self) {{}} }}\n"
     doc_collect_items(first.program.items, "first.jet", "", false, doc_test_os_path("/project/first.jet"), "first", source, doc_test_os_path("/project"), names, &rows, &impls)
     assert_eq(impls[0].kind, "protocol_impl")
     assert_eq(impls[0].methods, [String]{"a", "z"})
     assert(impls[0].public)
     assert(!rows[doc_collect_test_item(rows, "Box::z", "function")].public)
-    doc_collect_items(second.program.items, "second.jet", "", false, doc_test_os_path("/project/second.jet"), "second", "module Hidden {{ module Generic<T> {{ protocol Exchange {{ client: Hello() }} }} }}\n", doc_test_os_path("/project"), names, &rows, &impls)
-    protocol :: doc_collect_test_item(rows, "Hidden::Generic::Exchange", "protocol")
+    doc_collect_items(second.program.items, "second.jet", "", false, doc_test_os_path("/project/second.jet"), "second", "Hidden: module {{ Generic: module<T> {{ protocol Exchange {{ client: Hello() }} }} }}\n", doc_test_os_path("/project"), names, &rows, &impls)
+    protocol: doc_collect_test_item(rows, "Hidden::Generic::Exchange", "protocol")
     assert(!rows[protocol].public)
     assert_eq(rows[protocol].module_path, "second.jet")
-    generic :: doc_collect_test_item(rows, "Hidden::Generic", "module")
+    generic: doc_collect_test_item(rows, "Hidden::Generic", "module")
     assert(!rows[generic].public)
 }
 
 #Test("doc_collect_endpoint_impl_classification_is_terminal_and_dot_sensitive") {
-    source :: "impl Exchange.Client {{ fn c(self) {{}} }}\nimpl Exchange.Server {{ fn s(self) {{}} }}\nimpl Client {{ fn bare(self) {{}} }}\nimpl Exchange.Clientish {{ fn other(self) {{}} }}\nimpl Box.Displayable {{ fn display(self) {{}} }}\n"
+    source: "impl Exchange.Client {{ c: fn(self) {{}} }}\nimpl Exchange.Server {{ s: fn(self) {{}} }}\nimpl Client {{ bare: fn(self) {{}} }}\nimpl Exchange.Clientish {{ other: fn(self) {{}} }}\nimpl Box.Displayable {{ display: fn(self) {{}} }}\n"
     rows := [DocItem]{}
     impls := [DocImpl]{}
     doc_collect_test_source(source, &rows, &impls)
@@ -150,15 +150,15 @@ fn doc_collect_test_item(rows: [DocItem], qualified_name: String, kind: String) 
 }
 
 #Test("doc_collect_pubfile_leaf_declarations_keep_exact_special_visibility") {
-    source :: "#MustUse\nToken :: distinct Int\nCount :: Int\n#UnitFamily(Currency) {{ usd, eur }}\ntag Safe {{ deny: [console] }}\neffect Clock\nstruct Checked {{\n    impl Marker {{\n        sites :: [.Block]\n    }}\n}}\nfact Known()\nANSWER :: 42\nfn run() {{}}\n#Test(\"ignored test\") {{ assert(true) }}\n"
+    source: "#MustUse\nToken: distinct Int\nCount: Int\n#UnitFamily(Currency) {{ usd, eur }}\nSafe: tag {{ deny: [console] }}\nClock: effect\nChecked: struct {{\n    impl Marker {{\n        sites: [.Block]\n    }}\n}}\nfact Known()\nANSWER: 42\nrun: fn() {{}}\n#Test(\"ignored test\") {{ assert(true) }}\n"
     rows := [DocItem]{}
     impls := [DocImpl]{}
     doc_collect_test_source(source, &rows, &impls)
-    token :: doc_collect_test_item(rows, "Token", "distinct")
+    token: doc_collect_test_item(rows, "Token", "distinct")
     assert(rows[token].public)
     assert_eq(rows[token].markers, [String]{"MustUse"})
     assert(rows[doc_collect_test_item(rows, "Count", "type_alias")].public)
-    currency :: doc_collect_test_item(rows, "Currency", "unit_family")
+    currency: doc_collect_test_item(rows, "Currency", "unit_family")
     assert(rows[currency].public)
     assert(rows[currency].signature.contains("Currency"))
     assert(rows[doc_collect_test_item(rows, "Safe", "tag")].public)
@@ -173,13 +173,13 @@ fn doc_collect_test_item(rows: [DocItem], qualified_name: String, kind: String) 
 }
 
 #Test("doc_collect_module_alias_and_external_module_preserve_declaration_context") {
-    source :: "/// External module docs.\npriv(package) module External;\n/// Alias docs.\nmodule Alias :: External;\n"
+    source: "/// External module docs.\npriv(package) External: module;\n/// Alias docs.\nAlias: External;\n"
     rows := [DocItem]{}
     impls := [DocImpl]{}
     doc_collect_test_source(source, &rows, &impls)
     assert_eq(rows.len(), 2)
-    external :: doc_collect_test_item(rows, "External", "module")
-    alias :: doc_collect_test_item(rows, "Alias", "module_alias")
+    external: doc_collect_test_item(rows, "External", "module")
+    alias: doc_collect_test_item(rows, "Alias", "module_alias")
     assert(!rows[external].public)
     assert(rows[external].package_public)
     assert_eq(rows[external].summary, "External module docs.")
@@ -192,13 +192,13 @@ fn doc_collect_test_item(rows: [DocItem], qualified_name: String, kind: String) 
 }
 
 #Test("doc_collect_marker_rows_preserve_order_duplicates_and_exact_owner_visibility") {
-    source :: "struct Box {{\n    #First #Second #First\n    value: Int\n    #First #Second\n    fn own(self) {{}}\n}}\nenum Choice {{\n    #First #Second #First\n    One\n}}\n"
+    source: "Box: struct {{\n    #First #Second #First\n    value: Int\n    #First #Second\n    own: fn(self) {{}}\n}}\nChoice: enum {{\n    #First #Second #First\n    One\n}}\n"
     rows := [DocItem]{}
     impls := [DocImpl]{}
     doc_collect_test_source(source, &rows, &impls)
-    field :: doc_collect_test_item(rows, "Box::value", "field")
-    method :: doc_collect_test_item(rows, "Box::own", "function")
-    variant :: doc_collect_test_item(rows, "Choice::One", "variant")
+    field: doc_collect_test_item(rows, "Box::value", "field")
+    method: doc_collect_test_item(rows, "Box::own", "function")
+    variant: doc_collect_test_item(rows, "Choice::One", "variant")
     assert_eq(rows[field].markers, [String]{"First", "Second", "First"})
     assert_eq(rows[method].markers, [String]{"First", "Second"})
     assert_eq(rows[variant].markers, [String]{"First", "Second", "First"})
@@ -211,7 +211,7 @@ fn doc_collect_test_item(rows: [DocItem], qualified_name: String, kind: String) 
 
 // Existing run.jet remains the fixture owner: the eventual checked runner
 // passes its actual AST and source, not a copied fixture or fabricated rows.
-fn doc_collect_test_original_run_fixture(items: [Item], source: String, inherited_public: Bool) Never! {
+doc_collect_test_original_run_fixture: fn(items: [Item], source: String, inherited_public: Bool) Never! {
     names := [String:Bool]{}
     doc_collect_protocol_names(items, &names)
     rows := [DocItem]{}
@@ -223,9 +223,9 @@ fn doc_collect_test_original_run_fixture(items: [Item], source: String, inherite
         assert(found)
     }
     assert(rows[doc_collect_test_item(rows, "Widget::value", "field")].public)
-    display :: doc_collect_test_item(rows, "Displayable::display", "function")
+    display: doc_collect_test_item(rows, "Displayable::display", "function")
     assert(rows[display].public)
-    answer :: doc_collect_test_item(rows, "answer", "function")
+    answer: doc_collect_test_item(rows, "answer", "function")
     assert_eq(rows[answer].summary, "Return the fixture answer.")
     assert_eq(rows[answer].examples, [String]{"`answer()`"})
     assert_eq(impls.len(), 1)

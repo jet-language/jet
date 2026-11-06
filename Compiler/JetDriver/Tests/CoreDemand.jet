@@ -4,17 +4,17 @@ use {
     jet_foundation.[compiler_threads_single]
 }
 
-fn jet_driver_test_codec_demand(source: String) -> Bool {
-    parsed :: jet_driver_parse_one(JetDriverParseJob.Source{text: source}, compiler_threads_single())
+jet_driver_test_codec_demand: fn(source: String) -> Bool {
+    parsed: jet_driver_parse_one(JetDriverParseJob.Source{text: source}, compiler_threads_single())
     assert(!jet_driver_has_errors(parsed.parsed.diagnostics), "demand fixture parses")
     parsed.demand.codec_decode
 }
 
 #Test("a FieldError value or type alone does not load core.encoding; FieldError.under and decode<T> do") {
-    plain :: "fn rejected(kind: String) -> Int [FieldError]! {{\n    Err([FieldError]{{FieldError{{path: \"\", reason: kind}}}})\n}}\n"
+    plain: "rejected: fn(kind: String) -> Int [FieldError]! {{\n    Err([FieldError]{{FieldError{{path: \"\", reason: kind}}}})\n}}\n"
     assert(!jet_driver_test_codec_demand(plain), "a FieldError value is compiler-owned")
-    framed :: "fn framed(inner: Int [FieldError]!) -> Int [FieldError]! {{\n    FieldError.under(\"port\", inner)\n}}\n"
+    framed: "framed: fn(inner: Int [FieldError]!) -> Int [FieldError]! {{\n    FieldError.under(\"port\", inner)\n}}\n"
     assert(jet_driver_test_codec_demand(framed), "FieldError.under lowers to the core.encoding helper")
-    typed :: "fn typed(tree: Dyn) -> [Int] [FieldError]! {{\n    tree.decode<[Int]>()\n}}\n"
+    typed: "typed: fn(tree: Dyn) -> [Int] [FieldError]! {{\n    tree.decode<[Int]>()\n}}\n"
     assert(jet_driver_test_codec_demand(typed), "a generic decode lowers to the core.encoding helper")
 }

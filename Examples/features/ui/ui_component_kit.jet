@@ -1,4 +1,4 @@
-package {
+package: {
     name: "ui_ui_component_kit"
     version: "0.1.0"
     authority: { allow: [Browser, Exec, IO, Mem.Alloc] }
@@ -6,54 +6,54 @@ package {
 
 // The ownable component kit composes the same canonical UiNode tree consumed
 // by null, TUI, DOM, and GTK backends.
-use ui :: core.ui
+use ui: core.ui
 
-struct Label {
+Label: struct {
     text: String
 }
 
-fn label(text: String) -> Label { {text: text.copy()} }
+label: fn(text: String) -> Label { {text: text.copy()} }
 
-fn label_view(value: Label) -> UINode { ui.text(value.text) }
+label_view: fn(value: Label) -> UINode { ui.text(value.text) }
 
-struct Input {
+Input: struct {
     value: String
     placeholder: String
 }
 
-fn input(placeholder: String) -> Input { {value: "", placeholder: placeholder.copy()} }
+input: fn(placeholder: String) -> Input { {value: "", placeholder: placeholder.copy()} }
 
-fn type_char(value: Input, ch: String) -> Input { {value: "{value.value}{ch}", placeholder: value.placeholder.copy()} }
+type_char: fn(value: Input, ch: String) -> Input { {value: "{value.value}{ch}", placeholder: value.placeholder.copy()} }
 
-fn input_view(value: Input) -> UINode {
+input_view: fn(value: Input) -> UINode {
     shown := value.value.copy()
     if value.value == "" -> shown = value.placeholder.copy()
     return ui.node_role("[{shown}]", 20.0, 1.0, ui.aria_role_text_input())
 }
 
-struct Button {
+Button: struct {
     label: String
     clicks: Int
 }
 
-fn button(label: String) -> Button { {label: label.copy(), clicks: 0} }
+button: fn(label: String) -> Button { {label: label.copy(), clicks: 0} }
 
-fn press(value: Button) -> Button { {label: value.label.copy(), clicks: value.clicks + 1} }
+press: fn(value: Button) -> Button { {label: value.label.copy(), clicks: value.clicks + 1} }
 
-fn button_view(value: Button) -> UINode { ui.button("[{value.label}] clicks={value.clicks}") }
+button_view: fn(value: Button) -> UINode { ui.button("[{value.label}] clicks={value.clicks}") }
 
-fn container(children: [UINode]) -> UINode { ui.box(children) }
+container: fn(children: [UINode]) -> UINode { ui.box(children) }
 
-fn paint_form(name: Label, input_value: Input, save: Button) {
-    tree :: container([label_view(name), input_view(input_value), button_view(save)])
+paint_form: fn(name: Label, input_value: Input, save: Button) {
+    tree: container([label_view(name), input_view(input_value), button_view(save)])
     backend := ui.null_backend()
-    size :: backend.measure(tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
+    size: backend.measure(tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
     backend.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))
     backend.paint(tree)
 }
 
-fn run() {
-    name :: label("Name:")
+run: fn() {
+    name: label("Name:")
     name_input := input("type here…")
     save := button("Save")
     paint_form(name, name_input, save)

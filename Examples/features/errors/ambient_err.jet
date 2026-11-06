@@ -1,5 +1,5 @@
 #Error
-struct AmbientError {
+AmbientError: struct {
     message: String
     code: String
     cause: String
@@ -7,7 +7,7 @@ struct AmbientError {
     notes: [String]
 }
 
-fn fail() -> String AmbientError! {
+fail: fn() -> String AmbientError! {
     return Err(
     AmbientError{
         message: "row 3 is invalid",
@@ -19,11 +19,11 @@ fn fail() -> String AmbientError! {
     )
 }
 
-fn run() {
-    message :: fail() ?? err.message
+run: fn() {
+    message: fail() ?? err.message
     print(message)
 
-    recovered :: fail() ?? {
+    recovered: fail() ?? {
         print(err.code)
         print(err.cause)
         print(err.partial.join(", "))

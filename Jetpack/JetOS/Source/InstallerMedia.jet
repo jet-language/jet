@@ -3,25 +3,25 @@
 // (copy_dir_recursive_deref) and generation_files.rs:1263-1270
 // (copy_runtime_symlink). Rust copy_runtime_file_filtered is exactly
 // copy_file_replace, so the payload copies call jetos_copy_file_replace.
-fn jetos_render_installed_limine_conf(system: SystemPlan, generation: JetOSGeneration) -> String Never! {
+jetos_render_installed_limine_conf: fn(system: SystemPlan, generation: JetOSGeneration) -> String Never! {
     "timeout: 1\nserial: yes\ngraphics: no\nverbose: yes\n/{jetos_release_label(false)} — {system.name} verify\n    protocol: linux\n    kernel_path: boot():/boot/kernel\n    module_path: boot():/boot/initrd\n    textmode: yes\n    cmdline: console=ttyS0 rdinit=/jetos/init init=/jetos/init jetos.mode=verify jetos.host={system.name} jetos.generation={generation.name} root=LABEL=jetos-root rw\n"
 }
 
-fn jetos_render_installer_limine_conf(system: SystemPlan, generation: JetOSGeneration, disk: String) -> String Never! {
-    target :: if disk.starts_with("/dev/") -> disk else -> "/dev/sda"
+jetos_render_installer_limine_conf: fn(system: SystemPlan, generation: JetOSGeneration, disk: String) -> String Never! {
+    target: if disk.starts_with("/dev/") -> disk else -> "/dev/sda"
     "timeout: 5\nserial: yes\ngraphics: no\nverbose: yes\n/Install {jetos_release_label(false)} — {system.name}\n    protocol: linux\n    kernel_path: boot():/boot/kernel\n    module_path: boot():/boot/initrd\n    textmode: yes\n    cmdline: console=ttyS0 rdinit=/jetos/init init=/jetos/init jetos.mode=install jetos.host={system.name} jetos.generation={generation.name} jetos.disk={target}\n"
 }
 
 // Every generation entry except `root`, in name order: directories copy with
 // links dereferenced, anything else (a link included, never followed for the
 // choice) as one replaced file; then sw/bin store links become real files.
-fn jetos_copy_generation_payload_deref(source: String, destination: String) IOError! -[FS]> {
+jetos_copy_generation_payload_deref: fn(source: String, destination: String) IOError! -[FS]> {
     files.create_dir_all(destination)
     entries := files.list_dir(source)
     &entries.sort_by(entry -> entry.name)
     loop entry in entries {
         if entry.name == "root" -> next
-        target :: files.join(destination, entry.name)
+        target: files.join(destination, entry.name)
         if files.stat(entry.path).is_dir {
             jetos_copy_dir_recursive_deref(entry.path, target)
         } else {
@@ -32,14 +32,14 @@ fn jetos_copy_generation_payload_deref(source: String, destination: String) IOEr
 }
 
 // A missing sw/bin is no profile to dereference.
-fn jetos_deref_profile_bin_symlinks(system: String) IOError! -[FS]> {
-    entries :: if files.list_dir(files.join(system, "sw/bin")) == {
+jetos_deref_profile_bin_symlinks: fn(system: String) IOError! -[FS]> {
+    entries: if files.list_dir(files.join(system, "sw/bin")) == {
         .Ok(listed) -> listed
         .Err(_) -> { return }
     }
     loop entry in entries {
         if !files.stat(entry.path).is_symlink -> next
-        link :: files.read_link(entry.path)
+        link: files.read_link(entry.path)
         if !jetos_is_store_path(link) -> next
         if files.remove(entry.path) == {
             .Ok(_) -> {}
@@ -51,14 +51,14 @@ fn jetos_deref_profile_bin_symlinks(system: String) IOError! -[FS]> {
 
 // Store and relative links stay links; any other link is copied through, and
 // a dangling one that is neither is skipped.
-fn jetos_copy_dir_recursive_deref(source: String, destination: String) IOError! -[FS]> {
+jetos_copy_dir_recursive_deref: fn(source: String, destination: String) IOError! -[FS]> {
     files.create_dir_all(destination)
     entries := files.list_dir(source)
     &entries.sort_by(entry -> entry.name)
     loop entry in entries {
-        path :: entry.path
-        target :: files.join(destination, entry.name)
-        is_link :: files.stat(path).is_symlink
+        path: entry.path
+        target: files.join(destination, entry.name)
+        is_link: files.stat(path).is_symlink
         if is_link && jetos_should_preserve_staged_symlink(files.read_link(path)) {
             jetos_copy_runtime_symlink(path, target)
             next
@@ -78,18 +78,18 @@ fn jetos_copy_dir_recursive_deref(source: String, destination: String) IOError! 
     }
 }
 
-fn jetos_should_preserve_staged_symlink(target: String) -> Bool Never! {
+jetos_should_preserve_staged_symlink: fn(target: String) -> Bool Never! {
     jetos_is_store_path(target) || !target.starts_with("/")
 }
 
 // Rust Path::starts_with("/nix/store"): whole components, not a byte prefix.
-fn jetos_is_store_path(path: String) -> Bool Never! {
+jetos_is_store_path: fn(path: String) -> Bool Never! {
     path == "/nix/store" || path.starts_with("/nix/store/")
 }
 
 // The parent is created, a destination is removed best-effort, and the
 // source link's own target is linked again unchanged.
-fn jetos_copy_runtime_symlink(source: String, destination: String) IOError! -[FS]> {
+jetos_copy_runtime_symlink: fn(source: String, destination: String) IOError! -[FS]> {
     files.create_dir_all(files.dirname(destination))
     if files.remove(destination) == {
         .Ok(_) -> {}

@@ -18,19 +18,19 @@ use jet_foundation.[
     type_name,
 ]
 
-fn sema_ui_handle_unit() -> Type Never! {
+sema_ui_handle_unit: fn() -> Type Never! {
     Type.Named{name: "Unit"}
 }
 
-fn sema_ui_handle_result(ok: Type, error: Type) -> Type Never! {
+sema_ui_handle_result: fn(ok: Type, error: Type) -> Type Never! {
     Type.Result{ok: ok, err: error}
 }
 
-fn sema_ui_handle_positional(name: String, ty: Type, convention: AccessConvention) -> SemaCallParam Never! {
+sema_ui_handle_positional: fn(name: String, ty: Type, convention: AccessConvention) -> SemaCallParam Never! {
     SemaCallParam{label: "", name: name, zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: convention, ty: Val(ty), variadic: false}
 }
 
-fn sema_ui_handle_infer_args(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [TExpr] Never! {
+sema_ui_handle_infer_args: fn(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [TExpr] Never! {
     values := [TExpr]{}
     loop arg in args {
         if sema_check_expression(arg.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) == .Val(value) -> &values.push(value)
@@ -38,7 +38,7 @@ fn sema_ui_handle_infer_args(args: [CallArg], environment: SemaScopeEnvironment,
     values
 }
 
-fn sema_ui_handle_call_fact(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, result_type: Type, effect_name: String, diagnostics: &[Diagnostic]) -> Bool Never! {
+sema_ui_handle_call_fact: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, result_type: Type, effect_name: String, diagnostics: &[Diagnostic]) -> Bool Never! {
     effects := [EffectRowEntry]{}
     if effect_name != "" -> &effects.push(EffectRowEntry{name: effect_name, span: span})
     facts := SemaCallFacts{
@@ -51,7 +51,7 @@ fn sema_ui_handle_call_fact(environment: SemaScopeEnvironment, program: SemaProg
     sema_effect_record_intrinsic_fact(environment, program, &scopes, &context, api, span, facts, &diagnostics)
 }
 
-fn sema_ui_handle_literal_string(expr: Expr) -> String? {
+sema_ui_handle_literal_string: fn(expr: Expr) -> String? {
     return if expr == {
         .Str(parts, _, _) -> {
             value := ""
@@ -67,13 +67,13 @@ fn sema_ui_handle_literal_string(expr: Expr) -> String? {
     }
 }
 
-fn sema_ui_handle_imported_ui_alias(alias: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Bool Never! {
+sema_ui_handle_imported_ui_alias: fn(alias: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Bool Never! {
     if sema_call_core_import_module(environment, program, alias) != .Val("core.ui") -> return false
-    visible :: sema_scope_resolve(scopes, alias) ?? return false
+    visible: sema_scope_resolve(scopes, alias) ?? return false
     visible.kind == SymbolKind.Import
 }
 
-fn sema_ui_handle_interactive_role(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> String? {
+sema_ui_handle_interactive_role: fn(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> String? {
     if expr == {
         .MethodCall(receiver, method, _, _, _, _, _) -> {
             if receiver == {
@@ -90,14 +90,14 @@ fn sema_ui_handle_interactive_role(expr: Expr, environment: SemaScopeEnvironment
     None
 }
 
-fn sema_call_core_ui_node_role_lint(args: [CallArg], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) {
+sema_call_core_ui_node_role_lint: fn(args: [CallArg], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) {
     if args.len() != 4 -> return
     if sema_ui_handle_literal_string(args[0].expr) != .Val("") -> return
-    role :: sema_ui_handle_interactive_role(args[3].expr, environment, program, scopes) ?? return
+    role: sema_ui_handle_interactive_role(args[3].expr, environment, program, scopes) ?? return
     &diagnostics.push(sema_lint("E2930", span, "This {role} has no accessible label", "Screen readers announce a control by its accessible label; an empty label is invisible to assistive tech.", "Pass a real label, e.g. `ui.node_role(\"Submit\", w, h, ui.aria_role_button())`."))
 }
 
-fn sema_call_core_ui_focus_group_lint(args: [CallArg], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) {
+sema_call_core_ui_focus_group_lint: fn(args: [CallArg], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) {
     if args.len() == 0 -> return
     if args[0].expr == {
         .ListLit(items, _, _) -> {
@@ -106,10 +106,10 @@ fn sema_call_core_ui_focus_group_lint(args: [CallArg], span: Span, environment: 
                 if item == {
                     .MethodCall(receiver, method, _, _, _, call_args, _) -> {
                         if method != "node_role" || call_args.len() != 4 -> next
-                        alias :: if receiver == {.Ident(name, _, _) -> Val(name) else -> None} ?? next
+                        alias: if receiver == {.Ident(name, _, _) -> Val(name) else -> None} ?? next
                         if !sema_ui_handle_imported_ui_alias(alias, environment, program, scopes) -> next
                         if sema_ui_handle_interactive_role(call_args[3].expr, environment, program, scopes) == None -> next
-                        label :: sema_ui_handle_literal_string(call_args[0].expr) ?? next
+                        label: sema_ui_handle_literal_string(call_args[0].expr) ?? next
                         if label == "" -> next
                         duplicate := false
                         loop existing in labels {
@@ -132,7 +132,7 @@ fn sema_call_core_ui_focus_group_lint(args: [CallArg], span: Span, environment: 
     }
 }
 
-fn sema_ui_handle_callback_source_arity(expr: Expr) -> Int? {
+sema_ui_handle_callback_source_arity: fn(expr: Expr) -> Int? {
     if expr == {
         .Lambda(lambda, _) -> Val(lambda.params.len())
         .Paren(value, _, _) -> sema_ui_handle_callback_source_arity(value)
@@ -140,14 +140,14 @@ fn sema_ui_handle_callback_source_arity(expr: Expr) -> Int? {
     }
 }
 
-fn sema_ui_handle_callback_type(params: [Type]) -> Type Never! {
+sema_ui_handle_callback_type: fn(params: [Type]) -> Type Never! {
     Type.Fn{params: params, ret: Val(sema_ui_handle_unit()), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
 }
 
-fn sema_ui_handle_stored_callback(kind: String, argument: CallArg, params: [Type], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TLambda? {
-    actual_arity :: sema_ui_handle_callback_source_arity(argument.expr) ?? {
-        checked :: sema_expression_lambda_host_callback_stored(argument.expr, Val(sema_ui_handle_callback_type(params)), false, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        actual :: if checked == .Val(value) -> type_name(value.ty) else -> "an invalid value"
+sema_ui_handle_stored_callback: fn(kind: String, argument: CallArg, params: [Type], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TLambda? {
+    actual_arity: sema_ui_handle_callback_source_arity(argument.expr) ?? {
+        checked: sema_expression_lambda_host_callback_stored(argument.expr, Val(sema_ui_handle_callback_type(params)), false, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        actual: if checked == .Val(value) -> type_name(value.ty) else -> "an invalid value"
         &diagnostics.push(sema_error("E2910", argument.span, "`{kind}` needs a lambda, not {actual}", "the callback is retained and invoked later by the UI runtime", "pass a lambda expression as the callback"))
         return None
     }
@@ -156,15 +156,15 @@ fn sema_ui_handle_stored_callback(kind: String, argument: CallArg, params: [Type
         &diagnostics.push(sema_error("E2911", argument.span, "`{kind}` needs a {params.len()}-parameter lambda, got {actual_arity}", "the callback parameters must match the UI event", "use a callback with {params.len()} parameter(s)"))
         return None
     }
-    checked :: sema_expression_lambda_host_callback_stored(argument.expr, Val(sema_ui_handle_callback_type(params)), false, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    checked: sema_expression_lambda_host_callback_stored(argument.expr, Val(sema_ui_handle_callback_type(params)), false, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if checked.kind == {.Lambda(lambda) -> Val(lambda) else -> None}
 }
 
-fn sema_ui_handle_callback_param(name: String, label: String, ty: Type, span: Span, convention: AccessConvention, zone: ParamZone, default: Expr?) -> SemaCallParam Never! {
+sema_ui_handle_callback_param: fn(name: String, label: String, ty: Type, span: Span, convention: AccessConvention, zone: ParamZone, default: Expr?) -> SemaCallParam Never! {
     SemaCallParam{label: label, name: name, zone: zone, default: default, default_ref: None, convention: convention, ty: Val(ty), variadic: false}
 }
 
-fn sema_ui_handle_bind_callback_args(member: String, args: [CallArg], span: Span, callback_label: String, params: [SemaCallParam], diagnostics: &[Diagnostic]) -> [CallArg]? {
+sema_ui_handle_bind_callback_args: fn(member: String, args: [CallArg], span: Span, callback_label: String, params: [SemaCallParam], diagnostics: &[Diagnostic]) -> [CallArg]? {
     normalized := args
     loop index in 0..<normalized.len() {
         if normalized[index].flags.is_trailing_block && normalized[index].label == None {
@@ -175,23 +175,23 @@ fn sema_ui_handle_bind_callback_args(member: String, args: [CallArg], span: Span
     Val(normalized)
 }
 
-fn sema_ui_handle_typed_arg(arg: CallArg, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_ui_handle_typed_arg: fn(arg: CallArg, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     sema_check_expression(arg.expr, Val(ty), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
-fn sema_ui_handle_optional_arg(arg: CallArg, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_ui_handle_optional_arg: fn(arg: CallArg, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if sema_expression_absent_none(arg.expr) -> return Val(sema_node(&context, Type.Option{inner: ty}, NodeKind.Absent, arg.span))
-    value :: sema_ui_handle_typed_arg(arg, ty, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    value: sema_ui_handle_typed_arg(arg, ty, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     return Val(sema_tree_node(Type.Option{inner: ty}, TExprKind.Present{value: value}, value.span))
 }
 
 // `ui.button(display)` is the Core source function `button`; the trailing
 // callback form retains its click handler as closure emission. Neither has a
 // Core registry row.
-fn sema_ui_handle_button(args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_ui_handle_button: fn(args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if args.len() == 1 && !args[0].flags.is_trailing_block && args[0].label == None {
-        label :: sema_ui_handle_typed_arg(args[0], Type.String, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-        value :: sema_call_core_source("core.ui", "button", [TExpr]{label}, Type.Named{name: "UINode"}, false, span, environment, program, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+        label: sema_ui_handle_typed_arg(args[0], Type.String, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+        value: sema_call_core_source("core.ui", "button", [TExpr]{label}, Type.Named{name: "UINode"}, false, span, environment, program, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
         return SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
     }
     params := [SemaCallParam]{
@@ -200,52 +200,52 @@ fn sema_ui_handle_button(args: [CallArg], span: Span, expected: Type?, environme
         sema_ui_handle_callback_param("label", "label", Type.Option{inner: Type.String}, span, AccessConvention.Move, ParamZone.LabelOnly, Val(Expr.Absent{span: span, id: AST_NODE_GENERATED})),
         sema_ui_handle_callback_param("on_click", "on_click", sema_ui_handle_callback_type([Type]{}), span, AccessConvention.Move, ParamZone.LabelOnly, Val(Expr.Absent{span: span, id: AST_NODE_GENERATED})),
     }
-    bound :: sema_ui_handle_bind_callback_args("button", args, span, "on_click", params, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    bound: sema_ui_handle_bind_callback_args("button", args, span, "on_click", params, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     if bound.len() != 4 {
         _ := sema_ui_handle_infer_args(bound, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
-    callback_absent :: sema_expression_absent_none(bound[3].expr)
+    callback_absent: sema_expression_absent_none(bound[3].expr)
     if !bound[3].flags.is_trailing_block || callback_absent {
         &diagnostics.push(sema_error("E0335", bound[3].span, "button callbacks use a trailing block", "the callback is the button's trailing closure, after its labeled metadata", "write `button(\"Save\") {{ save() }}`"))
         _ := sema_ui_handle_infer_args(bound, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
-    label :: sema_ui_handle_typed_arg(bound[0], Type.String, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    shortcut :: sema_ui_handle_optional_arg(bound[1], Type.Named{name: "UIShortcut"}, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    accessible_label :: sema_ui_handle_optional_arg(bound[2], Type.String, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    callback :: sema_ui_handle_stored_callback("button on_click", bound[3], [Type]{}, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    label: sema_ui_handle_typed_arg(bound[0], Type.String, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    shortcut: sema_ui_handle_optional_arg(bound[1], Type.Named{name: "UIShortcut"}, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    accessible_label: sema_ui_handle_optional_arg(bound[2], Type.String, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    callback: sema_ui_handle_stored_callback("button on_click", bound[3], [Type]{}, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     result_type := Type.Named{name: "UINode"}
     value := sema_tree_node(result_type, TExprKind.CoreClosureCall{kind: TCoreClosureKind.UIButtonOnClick{label: label, shortcut: shortcut, accessible_label: accessible_label, executable: callback}}, span)
-    checked :: sema_expr_expected(value, expected, environment, program, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    checked: sema_expr_expected(value, expected, environment, program, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     if !sema_ui_handle_call_fact(environment, program, &scopes, &context, "core.ui.button", span, result_type, "Browser", &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
     SemaDirectSpecialCheck{handled: true, value: Val(checked)}
 }
 
 // `ui.text_input(state, ime)` is the Core source function `text_input`; the
 // `on_drop:` form retains its drop handler as closure emission.
-fn sema_ui_handle_text_input(args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
+sema_ui_handle_text_input: fn(args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
     params := [SemaCallParam]{
         sema_ui_handle_callback_param("state", "state", Type.String, span, AccessConvention.Read, ParamZone.PositionalOnly, None),
         sema_ui_handle_callback_param("ime", "ime", Type.Named{name: "UIIMEMode"}, span, AccessConvention.Read, ParamZone.PositionalOnly, None),
         sema_ui_handle_callback_param("on_drop", "on_drop", Type.Option{inner: sema_ui_handle_callback_type([Type]{Type.Named{name: "UIDropItem"}})}, span, AccessConvention.Move, ParamZone.LabelOnly, Val(Expr.Absent{span: span, id: AST_NODE_GENERATED})),
     }
-    bound :: sema_ui_handle_bind_callback_args("text_input", args, span, "on_drop", params, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    bound: sema_ui_handle_bind_callback_args("text_input", args, span, "on_drop", params, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     if bound.len() != 3 {
         _ := sema_ui_handle_infer_args(bound, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
-    state_value :: sema_ui_handle_typed_arg(bound[0], Type.String, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    ime_value :: sema_ui_handle_typed_arg(bound[1], Type.Named{name: "UIIMEMode"}, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    state_value: sema_ui_handle_typed_arg(bound[0], Type.String, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    ime_value: sema_ui_handle_typed_arg(bound[1], Type.Named{name: "UIIMEMode"}, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     result_type := Type.Named{name: "UINode"}
-    on_drop_absent :: sema_expression_absent_none(bound[2].expr)
+    on_drop_absent: sema_expression_absent_none(bound[2].expr)
     if on_drop_absent {
-        value :: sema_call_core_source("core.ui", "text_input", [TExpr]{state_value, ime_value}, result_type, false, span, environment, program, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+        value: sema_call_core_source("core.ui", "text_input", [TExpr]{state_value, ime_value}, result_type, false, span, environment, program, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
         return SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
     }
-    callback :: sema_ui_handle_stored_callback("text_input on_drop", bound[2], [Type]{Type.Named{name: "UIDropItem"}}, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    callback: sema_ui_handle_stored_callback("text_input on_drop", bound[2], [Type]{Type.Named{name: "UIDropItem"}}, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     value := sema_tree_node(result_type, TExprKind.CoreClosureCall{kind: TCoreClosureKind.UITextInputOnDrop{state: state_value, ime: ime_value, executable: callback}}, span)
-    checked :: sema_expr_expected(value, expected, environment, program, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    checked: sema_expr_expected(value, expected, environment, program, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     if !sema_ui_handle_call_fact(environment, program, &scopes, &context, "core.ui.text_input", span, result_type, "Browser", &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
     return SemaDirectSpecialCheck{handled: true, value: Val(checked)}
 }
@@ -253,7 +253,7 @@ fn sema_ui_handle_text_input(args: [CallArg], span: Span, expected: Type?, envir
 // `ui.reactive_render(() -> { … })`: the measure/layout/paint loop keeps its
 // zero-parameter body and re-runs it when a signal read inside changes. Like
 // `reactive.autorun` it is retained-closure emission with no registry row.
-fn sema_ui_handle_reactive_render(args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_ui_handle_reactive_render: fn(args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if args.len() != 1 {
         &diagnostics.push(sema_wrong_core_arity("reactive_render", 1, args.len(), span))
         _ := sema_ui_handle_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -263,10 +263,10 @@ fn sema_ui_handle_reactive_render(args: [CallArg], type_args: [Type], span: Span
         _ := sema_ui_handle_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
-    result_type :: sema_ui_handle_unit()
-    callback :: sema_reactive_check_retained_lambda("reactive_render", args[0], Val(result_type), None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    result_type: sema_ui_handle_unit()
+    callback: sema_reactive_check_retained_lambda("reactive_render", args[0], Val(result_type), None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     value := sema_tree_node(result_type, TExprKind.CoreClosureCall{kind: TCoreClosureKind.UIReactiveRender{executable: callback}}, span)
-    checked :: sema_expr_expected(value, expected, environment, program, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    checked: sema_expr_expected(value, expected, environment, program, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     if !sema_ui_handle_call_fact(environment, program, &scopes, &context, "core.ui.reactive_render", span, result_type, "Browser", &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
     SemaDirectSpecialCheck{handled: true, value: Val(checked)}
 }
@@ -274,48 +274,48 @@ fn sema_ui_handle_reactive_render(args: [CallArg], type_args: [Type], span: Span
 // `ui.mount(backend, tree)` or `ui.mount(backend, tree, constraint)`: one call
 // over measure/layout/paint, routed to the backend's mount; the two-argument
 // form uses the backend's default viewport.
-fn sema_ui_handle_mount(args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_ui_handle_mount: fn(args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if args.len() != 2 && args.len() != 3 {
         &diagnostics.push(sema_wrong_core_arity("mount", 2, args.len(), span))
         _ := sema_ui_handle_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
-    typed_args :: sema_ui_handle_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    typed_args: sema_ui_handle_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if typed_args.len() != args.len() -> return SemaDirectSpecialCheck{handled: true, value: None}
-    backend :: typed_args[0]
-    backend_name :: sema_expr_type_base_name(backend.ty) ?? type_name(backend.ty)
+    backend: typed_args[0]
+    backend_name: sema_expr_type_base_name(backend.ty) ?? type_name(backend.ty)
     valid := true
     if !sema_ui_backend_owner(backend_name) {
-        &diagnostics.push(sema_error("E0108", args[0].span, "`ui.mount` needs a UI backend, but the first argument is {sema_type_show(backend.ty)}", "pass `ui.null_backend()`, `ui.tui_backend()`, or `ui.gtk_backend()`", "backend :: ui.tui_backend()\nui.mount(backend, tree)"))
+        &diagnostics.push(sema_error("E0108", args[0].span, "`ui.mount` needs a UI backend, but the first argument is {sema_type_show(backend.ty)}", "pass `ui.null_backend()`, `ui.tui_backend()`, or `ui.gtk_backend()`", "backend: ui.tui_backend()\nui.mount(backend, tree)"))
         valid = false
     }
-    tree_name :: sema_expr_type_base_name(typed_args[1].ty) ?? type_name(typed_args[1].ty)
+    tree_name: sema_expr_type_base_name(typed_args[1].ty) ?? type_name(typed_args[1].ty)
     if tree_name != "UINode" {
         &diagnostics.push(sema_error("E0108", args[1].span, "`ui.mount` needs a `UINode` tree, but the second argument is {sema_type_show(typed_args[1].ty)}", "build the tree with `ui.text` / `ui.box` / `ui.node` / …", "ui.mount(backend, ui.box([ui.text(\"hi\")]))"))
         valid = false
     }
     if args.len() == 3 {
-        constraint_name :: sema_expr_type_base_name(typed_args[2].ty) ?? type_name(typed_args[2].ty)
+        constraint_name: sema_expr_type_base_name(typed_args[2].ty) ?? type_name(typed_args[2].ty)
         if constraint_name != "SizeConstraint" && !core_identity_is(constraint_name, "core.ui", "SizeConstraint") {
             &diagnostics.push(sema_error("E0108", args[2].span, "`ui.mount` optional third argument is a `SizeConstraint`, but got {sema_type_show(typed_args[2].ty)}", "use `ui.constraint(min_w, min_h, max_w, max_h)`", "ui.mount(backend, tree, ui.constraint(0.0, 0.0, 80.0, 24.0))"))
             valid = false
         }
     }
     if !valid -> return SemaDirectSpecialCheck{handled: true, value: None}
-    method :: if args.len() == 2 -> "mount_default" else -> "mount"
+    method: if args.len() == 2 -> "mount_default" else -> "mount"
     rest := [TExpr]{}
     loop index in 1..<typed_args.len() -> &rest.push(typed_args[index])
     value := sema_tree_node(sema_ui_handle_unit(), TExprKind.HandleMethod{receiver: backend, operation: THandleOp.UIBackendMethod{method: method}, args: rest}, span)
-    checked :: sema_expr_expected(value, expected, environment, program, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    checked: sema_expr_expected(value, expected, environment, program, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     SemaDirectSpecialCheck{handled: true, value: Val(checked)}
 }
 
 // `ui.mount`, `ui.button`, `ui.text_input` and `ui.reactive_render` have no
 // Core registry row, so (like `scope.guard`) they resolve through the import
 // before the registry route.
-fn sema_call_try_ui_core_call(module_name: String, member: String, alias: String, alias_span: Span, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_call_try_ui_core_call: fn(module_name: String, member: String, alias: String, alias_span: Span, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if module_name != "core.ui" || (member != "mount" && member != "button" && member != "text_input" && member != "reactive_render") -> return SemaDirectSpecialCheck{handled: false, value: None}
-    imported :: sema_call_core_import_target(environment, program, alias) ?? return SemaDirectSpecialCheck{handled: false, value: None}
+    imported: sema_call_core_import_target(environment, program, alias) ?? return SemaDirectSpecialCheck{handled: false, value: None}
     if !sema_call_core_record_import_reference(environment, program, scopes, imported, alias_span, &context) -> return SemaDirectSpecialCheck{handled: false, value: None}
     if member == {
         "button" -> sema_ui_handle_button(args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -325,11 +325,11 @@ fn sema_call_try_ui_core_call(module_name: String, member: String, alias: String
     }
 }
 
-fn sema_ui_backend_owner(owner: String) -> Bool Never! {
+sema_ui_backend_owner: fn(owner: String) -> Bool Never! {
     owner == "NullBackend" || owner == "TUIBackend" || owner == "GtkBackend"
 }
 
-fn sema_ui_backend_known_method(owner: String, method: String) -> Bool Never! {
+sema_ui_backend_known_method: fn(owner: String, method: String) -> Bool Never! {
     if (owner == "NullBackend" || owner == "TUIBackend" || owner == "GtkBackend") && (method == "measure" || method == "layout" || method == "paint" || method == "mount" || method == "on_event" || method == "set_focus_group" || method == "focused_label") -> return true
     if owner == "NullBackend" && method == "commands" -> return true
     if owner == "TUIBackend" && (method == "frame_lines" || method == "render_count") -> return true
@@ -337,7 +337,7 @@ fn sema_ui_backend_known_method(owner: String, method: String) -> Bool Never! {
     false
 }
 
-fn sema_ui_backend_result(owner: String, method: String, argc: Int) -> Type? {
+sema_ui_backend_result: fn(owner: String, method: String, argc: Int) -> Type? {
     if owner == "NullBackend" || owner == "TUIBackend" || owner == "GtkBackend" {
         if method == "measure" && argc == 2 -> return Val(Type.Named{name: "Size"})
         if method == "layout" && argc == 2 -> return Val(sema_ui_handle_unit())
@@ -359,17 +359,17 @@ fn sema_ui_backend_result(owner: String, method: String, argc: Int) -> Type? {
     None
 }
 
-fn sema_call_try_ui_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    owner :: sema_expr_type_base_name(receiver_value.ty) ?? type_name(receiver_value.ty)
+sema_call_try_ui_handle_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    owner: sema_expr_type_base_name(receiver_value.ty) ?? type_name(receiver_value.ty)
     if sema_ui_backend_owner(owner) && sema_ui_backend_known_method(owner, method) {
-        result_type :: sema_ui_backend_result(owner, method, args.len()) ?? {
+        result_type: sema_ui_backend_result(owner, method, args.len()) ?? {
             return SemaMethodSpecialCheck{handled: false, value: None}
         }
         if method == "set_focus_group" -> sema_call_core_ui_focus_group_lint(args, span, environment, program, &scopes, &diagnostics)
-        typed_args :: sema_ui_handle_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        route_method :: if method == "mount" && args.len() == 1 -> "mount_default" else -> method
+        typed_args: sema_ui_handle_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        route_method: if method == "mount" && args.len() == 1 -> "mount_default" else -> method
         value := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.UIBackendMethod{method: route_method}, args: typed_args}, span)
-        checked :: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        checked: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         return SemaMethodSpecialCheck{handled: true, value: Val(checked)}
     }
     SemaMethodSpecialCheck{handled: false, value: None}

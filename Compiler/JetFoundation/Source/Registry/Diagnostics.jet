@@ -1,9 +1,9 @@
-use diagnostic_unicode :: core.text
+use diagnostic_unicode: core.text
 
 // A retired row is never reported; it stays so `jet explain` reads old logs.
-enum DiagnosticRegistryStatus { Active Reserved Retired }
+DiagnosticRegistryStatus: enum { Active Reserved Retired }
 
-enum DiagnosticRegistryFix {
+DiagnosticRegistryFix: enum {
     SourceEdit
     SuggestedSourceEdit
     CryptoMisuse
@@ -22,7 +22,7 @@ enum DiagnosticRegistryFix {
 // canonical construction rules. Human wording at a raise site remains
 // authored input, while moment, severity, row edits, grades, and no-fix facts
 // come from the generated row. `name` is the diagnostic's type name.
-struct DiagnosticRegistryRow {
+DiagnosticRegistryRow: struct {
     code: String
     name: String
     lint_name: String?
@@ -41,7 +41,7 @@ struct DiagnosticRegistryRow {
 }
 
 impl DiagnosticRegistryRow {
-    fn has_stage(self, stage: String) -> Bool Never! {
+    has_stage: fn(self, stage: String) -> Bool Never! {
         loop component in self.stage.split("/") {
             if component == stage -> return true
         }
@@ -52,25 +52,25 @@ impl DiagnosticRegistryRow {
 // The closed set of values a row's stage column may hold. A stage names the
 // part of the toolchain that reports the row; a joined value such as
 // `parse/sema` names every part that does. Status is its own column.
-DIAGNOSTIC_STAGES :: [String]{
+DIAGNOSTIC_STAGES: [String]{
     "build", "comptime", "compile", "driver", "jet", "jetpack", "lex", "load",
     "parse", "parse/sema", "repl", "runtime", "sema", "sema/build", "sema/jetpack",
     "sema/runtime", "tooling",
 }
 
-fn diagnostic_stage_is_registered(stage: String) -> Bool Never! {
+diagnostic_stage_is_registered: fn(stage: String) -> Bool Never! {
     loop known in DIAGNOSTIC_STAGES {
         if known == stage -> return true
     }
     false
 }
 
-fn diagnostic_byte_at(source: [U8], index: Int) -> Int Never! {
+diagnostic_byte_at: fn(source: [U8], index: Int) -> Int Never! {
     if index < 0 || index >= source.len() -> return -1
     Int.from_u8(source[index])
 }
 
-fn diagnostic_utf8_width(source: [U8], index: Int) -> Int Never! {
+diagnostic_utf8_width: fn(source: [U8], index: Int) -> Int Never! {
     width := foundation_utf8_lead_width(diagnostic_byte_at(source, index))
     if width <= 1 -> return width
     width = foundation_utf8_width(width, diagnostic_byte_at(source, index + 1))
@@ -80,8 +80,8 @@ fn diagnostic_utf8_width(source: [U8], index: Int) -> Int Never! {
     foundation_utf8_width(width, diagnostic_byte_at(source, index + 3))
 }
 
-fn diagnostic_scalar_at(source: [U8], index: Int) -> String Never! {
-    width :: diagnostic_utf8_width(source, index)
+diagnostic_scalar_at: fn(source: [U8], index: Int) -> String Never! {
+    width: diagnostic_utf8_width(source, index)
     if width <= 0 -> return ""
     out := [U8]{}
     loop offset in 0..<width {
@@ -91,8 +91,8 @@ fn diagnostic_scalar_at(source: [U8], index: Int) -> String Never! {
     String.from_bytes(out) ?? ""
 }
 
-fn diagnostic_is_whitespace_at(source: [U8], index: Int) -> Bool Never! {
-    value :: diagnostic_byte_at(source, index)
+diagnostic_is_whitespace_at: fn(source: [U8], index: Int) -> Bool Never! {
+    value: diagnostic_byte_at(source, index)
     if {
         value < 0 -> false
         value < 128 -> value == 9 || value == 10 || value == 11 || value == 12 || value == 13 || value == 32
@@ -100,11 +100,11 @@ fn diagnostic_is_whitespace_at(source: [U8], index: Int) -> Bool Never! {
     }
 }
 
-fn diagnostic_is_sentence_digit(value: Int) -> Bool Never! {
+diagnostic_is_sentence_digit: fn(value: Int) -> Bool Never! {
     value >= 48 && value <= 57
 }
 
-fn diagnostic_sentence_case_line(value: String) -> String Never! {
+diagnostic_sentence_case_line: fn(value: String) -> String Never! {
     bytes := value.bytes()
     first := -1
     token_len := 0
@@ -114,12 +114,12 @@ fn diagnostic_sentence_case_line(value: String) -> String Never! {
     finished := false
     index := 0
     loop index < bytes.len() {
-        width :: diagnostic_utf8_width(bytes, index)
+        width: diagnostic_utf8_width(bytes, index)
         if finished {
             index += width
             next
         }
-        character :: diagnostic_byte_at(bytes, index)
+        character: diagnostic_byte_at(bytes, index)
         if first < 0 {
             if diagnostic_is_whitespace_at(bytes, index) || character == 42 || character == 126 || character == 95 {
                 index += width
@@ -164,7 +164,7 @@ fn diagnostic_sentence_case_line(value: String) -> String Never! {
 // wrote, after the last `::`. `head` is the name's first identifier, which a
 // clash compares, and `qualifier` the module as the user writes it: `crypto`
 // for `<corelib>/core.crypto::Secret`, the file stem for a source module.
-struct DiagnosticIdentity {
+DiagnosticIdentity: struct {
     start: Int
     end: Int
     name: String
@@ -174,9 +174,9 @@ struct DiagnosticIdentity {
 
 // A message names a type by its plain name. Only when two different types in
 // one message share that name does each print as `module.Name`.
-fn diagnostic_display_identities(value: String, clashes: [String]) -> String Never! {
-    bytes :: value.bytes()
-    identities :: diagnostic_identities_in(bytes)
+diagnostic_display_identities: fn(value: String, clashes: [String]) -> String Never! {
+    bytes: value.bytes()
+    identities: diagnostic_identities_in(bytes)
     // copy: the caller keeps its text; the displayed line is a new value.
     if identities.len() == 0 -> return value.copy()
     out := [U8]{}
@@ -203,8 +203,8 @@ fn diagnostic_display_identities(value: String, clashes: [String]) -> String Nev
 // The names in `context` (a whole message) that two different types share:
 // two identities from different modules, or an identity and a type the
 // message already prints by its plain name.
-fn diagnostic_identity_clashes(context: [U8]) -> [String] Never! {
-    identities :: diagnostic_identities_in(context)
+diagnostic_identity_clashes: fn(context: [U8]) -> [String] Never! {
+    identities: diagnostic_identities_in(context)
     clashes := [String]{}
     loop identity in identities {
         if clashes.contains(identity.head) -> next
@@ -217,11 +217,11 @@ fn diagnostic_identity_clashes(context: [U8]) -> [String] Never! {
     clashes
 }
 
-fn diagnostic_identities_in(bytes: [U8]) -> [DiagnosticIdentity] Never! {
+diagnostic_identities_in: fn(bytes: [U8]) -> [DiagnosticIdentity] Never! {
     found := [DiagnosticIdentity]{}
     index := 0
     loop index < bytes.len() {
-        end :: diagnostic_identity_push(bytes, index, &found)
+        end: diagnostic_identity_push(bytes, index, &found)
         index = if end > index -> end else -> index + 1
     }
     found
@@ -230,12 +230,12 @@ fn diagnostic_identities_in(bytes: [U8]) -> [DiagnosticIdentity] Never! {
 // Reads the identity starting at `index` into `found` and returns its end, or
 // -1 when no identity starts there. A module identity's package part is
 // skipped by its length prefix, since it may hold `:`.
-fn diagnostic_identity_push(bytes: [U8], index: Int, found: &[DiagnosticIdentity]) -> Int Never! {
+diagnostic_identity_push: fn(bytes: [U8], index: Int, found: &[DiagnosticIdentity]) -> Int Never! {
     // Both forms start with `m` or `<`; every other byte position returns
     // before any prefix bytes are built.
-    first :: diagnostic_byte_at(bytes, index)
+    first: diagnostic_byte_at(bytes, index)
     if first != 109 && first != 60 -> return -1
-    module_form :: diagnostic_bytes_at(bytes, index, "module:")
+    module_form: diagnostic_bytes_at(bytes, index, "module:")
     if !module_form && !diagnostic_bytes_at(bytes, index, "<corelib>/") -> return -1
     cursor := -1
     qualifier := ""
@@ -252,7 +252,7 @@ fn diagnostic_identity_push(bytes: [U8], index: Int, found: &[DiagnosticIdentity
         cursor += 1 + length
         if diagnostic_byte_at(bytes, cursor) != 58 -> return -1
         cursor += 1
-        path_start :: cursor
+        path_start: cursor
         loop cursor < bytes.len() && !diagnostic_identity_ends(diagnostic_byte_at(bytes, cursor)) && !diagnostic_colons_at(bytes, cursor) -> cursor += 1
         stem_start := path_start
         stem_end := cursor
@@ -291,8 +291,8 @@ fn diagnostic_identity_push(bytes: [U8], index: Int, found: &[DiagnosticIdentity
 // Whether `head` also appears in `context` as a plain type name outside every
 // identity: a whole word, not part of a path (`.`, `/`, `:` before it) and not
 // a prose compound (`Secret-bearing`).
-fn diagnostic_identity_plain_use(context: [U8], identities: [DiagnosticIdentity], head: String) -> Bool Never! {
-    word :: head.bytes()
+diagnostic_identity_plain_use: fn(context: [U8], identities: [DiagnosticIdentity], head: String) -> Bool Never! {
+    word: head.bytes()
     if word.len() == 0 -> return false
     index := 0
     loop index + word.len() <= context.len() {
@@ -301,8 +301,8 @@ fn diagnostic_identity_plain_use(context: [U8], identities: [DiagnosticIdentity]
             if index >= identity.start && index < identity.end -> inside = true
         }
         if !inside && diagnostic_bytes_match(context, index, word) {
-            before :: diagnostic_byte_at(context, index - 1)
-            after :: diagnostic_byte_at(context, index + word.len())
+            before: diagnostic_byte_at(context, index - 1)
+            after: diagnostic_byte_at(context, index + word.len())
             if !diagnostic_is_word_byte(before) && before != 46 && before != 47 && before != 58 && !diagnostic_is_word_byte(after) && after != 45 && after != 58 -> return true
         }
         index += 1
@@ -310,12 +310,12 @@ fn diagnostic_identity_plain_use(context: [U8], identities: [DiagnosticIdentity]
     false
 }
 
-fn diagnostic_bytes_at(bytes: [U8], index: Int, text: String) -> Bool Never! {
+diagnostic_bytes_at: fn(bytes: [U8], index: Int, text: String) -> Bool Never! {
     diagnostic_bytes_match(bytes, index, text.bytes())
 }
 
 // Whether `bytes` holds `expected` at `index`.
-fn diagnostic_bytes_match(bytes: [U8], index: Int, expected: [U8]) -> Bool Never! {
+diagnostic_bytes_match: fn(bytes: [U8], index: Int, expected: [U8]) -> Bool Never! {
     if index < 0 || index + expected.len() > bytes.len() -> return false
     loop offset in 0..<expected.len() {
         if bytes[index + offset] != expected[offset] -> return false
@@ -324,33 +324,33 @@ fn diagnostic_bytes_match(bytes: [U8], index: Int, expected: [U8]) -> Bool Never
 }
 
 // Whether a `::` path separator starts at `index`.
-fn diagnostic_colons_at(bytes: [U8], index: Int) -> Bool Never! {
+diagnostic_colons_at: fn(bytes: [U8], index: Int) -> Bool Never! {
     diagnostic_byte_at(bytes, index) == 58 && diagnostic_byte_at(bytes, index + 1) == 58
 }
 
-fn diagnostic_is_word_byte(value: Int) -> Bool Never! {
+diagnostic_is_word_byte: fn(value: Int) -> Bool Never! {
     (value >= 48 && value <= 57) || (value >= 65 && value <= 90) || (value >= 97 && value <= 122) || value == 95
 }
 
 // A byte that ends a type name in prose: whitespace, a quote, or punctuation
 // around a type (`<>`, `()`, `[]`, `{}`, `,`, `|`, `?`, `!`).
-fn diagnostic_identity_ends(value: Int) -> Bool Never! {
+diagnostic_identity_ends: fn(value: Int) -> Bool Never! {
     value < 0 || value <= 32 || value == 96 || value == 34 || value == 39 || value == 60 || value == 62 || value == 40 || value == 41 || value == 91 || value == 93 || value == 123 || value == 125 || value == 44 || value == 124 || value == 63 || value == 33
 }
 
-fn diagnostic_registry_row_in(rows: [DiagnosticRegistryRow], code: String) -> DiagnosticRegistryRow? Never! {
+diagnostic_registry_row_in: fn(rows: [DiagnosticRegistryRow], code: String) -> DiagnosticRegistryRow? Never! {
     loop row in rows {
         if row.code == code -> return Val(row)
     }
     None
 }
 
-fn diagnostic_registry_row(code: String) -> DiagnosticRegistryRow? Never! {
+diagnostic_registry_row: fn(code: String) -> DiagnosticRegistryRow? Never! {
     diagnostic_registry_row_in(DIAGNOSTIC_ROWS, code)
 }
 
 // The row whose Diagnostic type path is `name` (`jet.UnknownName`).
-fn diagnostic_registry_row_named(name: String) -> DiagnosticRegistryRow? Never! {
+diagnostic_registry_row_named: fn(name: String) -> DiagnosticRegistryRow? Never! {
     loop row in DIAGNOSTIC_ROWS {
         if row.name == name -> return Val(row)
     }
@@ -360,7 +360,7 @@ fn diagnostic_registry_row_named(name: String) -> DiagnosticRegistryRow? Never! 
 // What a report's header prints for `code`: a registered row's type path
 // (`jet.UnknownName`); any other code is already a type path (`web.BadPath`).
 // A row the runtime reports keeps its code, which is what the runtime prints.
-fn diagnostic_display_name(code: String) -> String Never! {
+diagnostic_display_name: fn(code: String) -> String Never! {
     if diagnostic_registry_row(code) == .Val(row) {
         if !row.has_stage("runtime") -> return row.name
     }
@@ -368,10 +368,10 @@ fn diagnostic_display_name(code: String) -> String Never! {
 }
 
 // Every registry row in source order, retired rows included.
-fn diagnostic_registry_rows() -> [DiagnosticRegistryRow] Never! { DIAGNOSTIC_ROWS }
+diagnostic_registry_rows: fn() -> [DiagnosticRegistryRow] Never! { DIAGNOSTIC_ROWS }
 
-fn diagnostic_registry_static_edit(row: DiagnosticRegistryRow, span: Span) -> TextEdit? {
-    fix :: row.structured_fix ?? return None
+diagnostic_registry_static_edit: fn(row: DiagnosticRegistryRow, span: Span) -> TextEdit? {
+    fix: row.structured_fix ?? return None
     if fix == {
         .Replace(_, replacement) -> Val(TextEdit{span: span, new_text: replacement})
         .Remove(_) -> Val(TextEdit{span: span, new_text: ""})
@@ -379,20 +379,20 @@ fn diagnostic_registry_static_edit(row: DiagnosticRegistryRow, span: Span) -> Te
     }
 }
 
-fn diagnostic_registry_applicability(row: DiagnosticRegistryRow, has_edit: Bool) -> DiagnosticFixApplicability? {
+diagnostic_registry_applicability: fn(row: DiagnosticRegistryRow, has_edit: Bool) -> DiagnosticFixApplicability? {
     if !has_edit -> return None
-    safety :: row.fix_safety ?? return None
+    safety: row.fix_safety ?? return None
     if safety == {
         .Formatting | .BehaviorPreserving -> Val(DiagnosticFixApplicability.Safe)
         else -> Val(DiagnosticFixApplicability.Suggested)
     }
 }
 
-fn diagnostic_registry_project_row(diagnostic: ^Diagnostic, row: DiagnosticRegistryRow) -> Diagnostic Never! {
+diagnostic_registry_project_row: fn(diagnostic: ^Diagnostic, row: DiagnosticRegistryRow) -> Diagnostic Never! {
     updated := diagnostic
     if updated.span != None {
-        span :: updated.span ?? return updated
-        edit :: diagnostic_registry_static_edit(row, span)
+        span: updated.span ?? return updated
+        edit: diagnostic_registry_static_edit(row, span)
         if edit == Val(static_edit) {
             updated.edit = Val(static_edit)
             updated.applicability = diagnostic_registry_applicability(row, true)
@@ -407,11 +407,11 @@ fn diagnostic_registry_project_row(diagnostic: ^Diagnostic, row: DiagnosticRegis
 // span; the generated registry row owns protocol metadata and static edits.
 // Every type in the prose prints by the shared display rule
 // (diagnostic_display_identities), with clashes judged over the whole message.
-fn diagnostic_from_registry(code: String, span: Span?, what: String, why: String, fix: String) -> Diagnostic Never! {
-    row :: diagnostic_registry_row(code) ?? panic("diagnostic `{code}` has no generated Source registry row")
+diagnostic_from_registry: fn(code: String, span: Span?, what: String, why: String, fix: String) -> Diagnostic Never! {
+    row: diagnostic_registry_row(code) ?? panic("diagnostic `{code}` has no generated Source registry row")
     if row.status == DiagnosticRegistryStatus.Retired -> panic("diagnostic `{code}` is retired and is never reported")
-    clashes :: diagnostic_identity_clashes("{what}\n{why}\n{fix}".bytes())
-    diagnostic :: Diagnostic{
+    clashes: diagnostic_identity_clashes("{what}\n{why}\n{fix}".bytes())
+    diagnostic: Diagnostic{
         moment: row.moment,
         severity: row.severity,
         code: code,
@@ -426,11 +426,11 @@ fn diagnostic_from_registry(code: String, span: Span?, what: String, why: String
 // Dynamic Source edits are authorized and graded by the generated row. This
 // preserves the exact replacement/span authored by the producer without
 // deriving safety from human Fix prose.
-fn diagnostic_registry_with_edit(diagnostic: ^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
+diagnostic_registry_with_edit: fn(diagnostic: ^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     updated := diagnostic
-    row :: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
+    row: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
     if updated.no_fix_reason != None || row.no_fix_reason != None -> panic("updated `{updated.code}` cannot carry an edit and a registry no-fix reason")
-    fix :: row.structured_fix ?? panic("updated `{updated.code}` has no registry-owned edit channel")
+    fix: row.structured_fix ?? panic("updated `{updated.code}` has no registry-owned edit channel")
     if !diagnostic_registry_is_source_edit(fix) -> panic("updated `{updated.code}` has no Source edit registry channel")
     updated.edit = Val(edit)
     updated.applicability = diagnostic_registry_applicability(row, true)
@@ -438,11 +438,11 @@ fn diagnostic_registry_with_edit(diagnostic: ^Diagnostic, edit: TextEdit) -> Dia
     updated
 }
 
-fn diagnostic_registry_is_source_edit(fix: DiagnosticRegistryFix) -> Bool Never! {
+diagnostic_registry_is_source_edit: fn(fix: DiagnosticRegistryFix) -> Bool Never! {
     if fix == {.SourceEdit | .SuggestedSourceEdit -> true else -> false}
 }
 
-fn diagnostic_registry_is_generated_edit(fix: DiagnosticRegistryFix) -> Bool Never! {
+diagnostic_registry_is_generated_edit: fn(fix: DiagnosticRegistryFix) -> Bool Never! {
     if fix == {
         .GeneratedMarkerGroup
         | .GeneratedMissingArms
@@ -453,18 +453,18 @@ fn diagnostic_registry_is_generated_edit(fix: DiagnosticRegistryFix) -> Bool Nev
     }
 }
 
-fn diagnostic_registry_safety_auto_apply(safety: DiagnosticFixSafety) -> Bool Never! {
+diagnostic_registry_safety_auto_apply: fn(safety: DiagnosticFixSafety) -> Bool Never! {
     if safety == {
         .Formatting | .BehaviorPreserving -> true
         else -> false
     }
 }
 
-fn diagnostic_registry_with_edit_grade(diagnostic: ^Diagnostic, edit: TextEdit, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic Never! {
+diagnostic_registry_with_edit_grade: fn(diagnostic: ^Diagnostic, edit: TextEdit, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic Never! {
     updated := diagnostic
-    row :: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
+    row: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
     if updated.no_fix_reason != None || row.no_fix_reason != None -> panic("updated `{updated.code}` cannot carry an edit and a registry no-fix reason")
-    fix :: row.structured_fix ?? panic("updated `{updated.code}` has no registry-owned edit channel")
+    fix: row.structured_fix ?? panic("updated `{updated.code}` has no registry-owned edit channel")
     if !diagnostic_registry_is_source_edit(fix) -> panic("updated `{updated.code}` has no Source edit registry channel")
     if applicability == DiagnosticFixApplicability.Safe && !diagnostic_registry_safety_auto_apply(safety) -> panic("safe updated edit `{updated.code}` must have an auto-applicable safety grade")
     updated.edit = Val(edit)
@@ -473,11 +473,11 @@ fn diagnostic_registry_with_edit_grade(diagnostic: ^Diagnostic, edit: TextEdit, 
     updated
 }
 
-fn diagnostic_registry_with_structured_edit(diagnostic: ^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
+diagnostic_registry_with_structured_edit: fn(diagnostic: ^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     updated := diagnostic
-    row :: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
+    row: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
     if updated.no_fix_reason != None || row.no_fix_reason != None -> panic("updated `{updated.code}` cannot carry an edit and a registry no-fix reason")
-    fix :: row.structured_fix ?? panic("updated `{updated.code}` has no registry-owned generated edit channel")
+    fix: row.structured_fix ?? panic("updated `{updated.code}` has no registry-owned generated edit channel")
     if !diagnostic_registry_is_generated_edit(fix) -> panic("updated `{updated.code}` has no generated structured edit registry channel")
     updated.edit = Val(edit)
     updated.applicability = diagnostic_registry_applicability(row, true)
@@ -485,10 +485,10 @@ fn diagnostic_registry_with_structured_edit(diagnostic: ^Diagnostic, edit: TextE
     updated
 }
 
-fn diagnostic_registry_with_source_derived_suggestion(diagnostic: ^Diagnostic, span: Span, new_text: String) -> Diagnostic Never! {
+diagnostic_registry_with_source_derived_suggestion: fn(diagnostic: ^Diagnostic, span: Span, new_text: String) -> Diagnostic Never! {
     updated := diagnostic
     if updated.edit != None -> panic("updated `{updated.code}` already carries an edit")
-    row :: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
+    row: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
     if row.no_fix_reason == None -> panic("updated `{updated.code}` has no explanatory row reason to replace")
     updated.no_fix_reason = None
     updated.applicability = Val(DiagnosticFixApplicability.Suggested)
@@ -497,7 +497,7 @@ fn diagnostic_registry_with_source_derived_suggestion(diagnostic: ^Diagnostic, s
     updated
 }
 
-fn diagnostic_registry_with_alternative_edit(diagnostic: ^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
+diagnostic_registry_with_alternative_edit: fn(diagnostic: ^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     updated := diagnostic
     if updated.no_fix_reason != None -> panic("updated `{updated.code}` cannot carry an edit and no-fix reason")
     if updated.edit == None || updated.applicability == None || updated.safety == None -> panic("updated `{updated.code}` needs a graded primary edit before an alternative")
@@ -505,7 +505,7 @@ fn diagnostic_registry_with_alternative_edit(diagnostic: ^Diagnostic, edit: Text
         updated.structured = Val(DiagnosticStructured.SuggestedEdits{edits: [TextEdit]{edit}})
         return updated
     }
-    structured :: updated.structured ?? return updated
+    structured: updated.structured ?? return updated
     if structured == {
         .SuggestedEdits(edits) -> {
             alternatives := edits.copy()

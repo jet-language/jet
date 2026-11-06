@@ -23,7 +23,7 @@ SRC = {
     "rs": ('main.rs', 'fn main(){println!("hello");}\n'),
     "go": ('main.go', 'package main\nimport "fmt"\nfunc main(){fmt.Println("hello")}\n'),
     "odin": ('main.odin', 'package main\nimport "core:fmt"\nmain :: proc() { fmt.println("hello") }\n'),
-    "jet": ('main.jet', 'fn run() {\n    print("hello")\n}\n'),
+    "jet": ('main.jet', 'run: fn() {\n    print("hello")\n}\n'),
     "asm": ('hello.S', open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "hello.S")).read()),
 }
 

@@ -18,11 +18,11 @@
 // (D-MIGRATE2F) and needs no op. Without these declarations the compiler would
 // emit E0910 and refuse to build.
 // `MemberRank` (not `Rank`: that names the built-in ordered set, D-COLLNAME1).
-struct MemberRank {
+MemberRank: struct {
     value: Int
 }
 
-#PublishedSchema struct Profile {
+#PublishedSchema Profile: struct {
     title: String
     id: Int
     score: MemberRank
@@ -36,7 +36,7 @@ migration Profile {
     add active: Bool = true
 }
 
-fn run() {
-    p :: Profile{title: "Ada", id: 7, score: MemberRank{value: 95}, active: true}
+run: fn() {
+    p: Profile{title: "Ada", id: 7, score: MemberRank{value: 95}, active: true}
     print("profile: {p.title} #{p.id}, rank {p.score.value}, active {p.active}")
 }

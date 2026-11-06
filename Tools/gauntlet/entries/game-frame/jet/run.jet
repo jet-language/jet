@@ -1,4 +1,4 @@
-use rl :: core.game.raylib
+use rl: core.game.raylib
 
 // A 2D game's frame loop on Jet's software rasterizer (core.game.raylib):
 // 1200 frames of a 320x200 canvas, each a clear, a scrolling tile map of
@@ -6,45 +6,45 @@ use rl :: core.game.raylib
 // two lines of bitmap-font text (one translucent at scale 2). With
 // JET_RAYLIB_CAPTURE set, every presented frame is written there as a PAM.
 #CLI
-struct Args {}
-fn run(args: Args) {
-    frames :: 1200
-    palette :: [rl.RaylibColor]{
+Args: struct {}
+run: fn(args: Args) {
+    frames: 1200
+    palette: [rl.RaylibColor]{
         rl.color(0, 0, 0, 0),
         rl.color(52, 101, 164, 255),
         rl.color(78, 154, 6, 255),
         rl.color(196, 160, 0, 255),
     }
-    sky :: rl.color(16, 20, 32, 255)
-    bar :: rl.color(0, 0, 0, 160)
-    white :: rl.color(255, 255, 255, 255)
-    gold :: rl.color(255, 220, 120, 200)
-    title :: "JET RASTER"
+    sky: rl.color(16, 20, 32, 255)
+    bar: rl.color(0, 0, 0, 160)
+    white: rl.color(255, 255, 255, 255)
+    gold: rl.color(255, 220, 120, 200)
+    title: "JET RASTER"
     tiles := 0
     sprites := 0
     glyphs := 0
-    window :: rl.window_open(320, 200, "game-frame")
+    window: rl.window_open(320, 200, "game-frame")
     loop f in 0..<frames {
         rl.begin_drawing(window)
         rl.clear_background(sky)
-        scroll :: f % 16
-        base :: f /% 16
+        scroll: f % 16
+        base: f /% 16
         loop ty in 0..<12 {
             loop tx in 0..<21 {
-                p :: ((tx + base) * 7 + ty * 5) % 4
+                p: ((tx + base) * 7 + ty * 5) % 4
                 if p == 0 -> next
                 rl.draw_rectangle(tx * 16 - scroll, ty * 16 + 8, 15, 15, palette[p])
                 tiles += 1
             }
         }
         loop i in 0..<48 {
-            x :: (i * 41 + f * (1 + i % 4)) % 344 - 12
-            y :: (i * 29 + f * (1 + i % 3)) % 224 - 12
+            x: (i * 41 + f * (1 + i % 4)) % 344 - 12
+            y: (i * 29 + f * (1 + i % 3)) % 224 - 12
             rl.draw_rectangle(x, y, 12, 12, rl.color((i * 53) % 256, (i * 97) % 256, (i * 31 + f) % 256, 180))
             sprites += 1
         }
         rl.draw_rectangle(0, 0, 320, 12, bar)
-        hud :: "SCORE {(f * 7) % 100000} FRAME {f}"
+        hud: "SCORE {(f * 7) % 100000} FRAME {f}"
         rl.draw_text(hud, 4, 2, 10, white)
         rl.draw_text(title, 196, 176, 20, gold)
         glyphs += hud.len() + title.len()

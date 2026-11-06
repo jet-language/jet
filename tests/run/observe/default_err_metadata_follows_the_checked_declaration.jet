@@ -5,7 +5,7 @@ impl IOError -> Err {
     return Err("store unavailable", code: "E_STORE")
 }
 
-fn read_store() -> Int IOError! {
+read_store: fn() -> Int IOError! {
     return Err(IOError.InvalidInput(IOContext{
         operation: .Read,
         resource: None,
@@ -14,28 +14,28 @@ fn read_store() -> Int IOError! {
     }))
 }
 
-fn get_user() -> Int Err! {
-    value :: read_store()?("loading store")
+get_user: fn() -> Int Err! {
+    value: read_store()?("loading store")
     value
 }
 
-fn fresh_errors() {
-    literal :: Err{message: "plain", code: Val("E1"), cause: None}
-    call :: Err("plain", code: "E1")
+fresh_errors: fn() {
+    literal: Err{message: "plain", code: Val("E1"), cause: None}
+    call: Err("plain", code: "E1")
     print(literal == call)
     print(literal.message)
     print(literal.code ?? "none")
     print(literal.cause == None)
-    caused :: Err{message: "outer", code: None, cause: Val(Err("inner"))}
+    caused: Err{message: "outer", code: None, cause: Val(Err("inner"))}
     print(caused.cause ?? Err("none"))
 }
 
-fn run() {
+run: fn() {
     fresh_errors()
     if get_user() == .Err(failed) {
-        kept :: failed.copy()
+        kept: failed.copy()
         print(kept == failed)
-        bare :: Err("store unavailable", code: "E_STORE")
+        bare: Err("store unavailable", code: "E_STORE")
         print(kept == bare)
         print(kept.message)
         print(kept.code ?? "none")

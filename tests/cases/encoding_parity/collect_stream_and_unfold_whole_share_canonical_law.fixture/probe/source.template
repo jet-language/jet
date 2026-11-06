@@ -1,16 +1,16 @@
 
 use {
-    json :: core.encoding.json
-    cbor :: core.encoding.cbor
-    encoding :: core.encoding
-    files :: core.files
+    json: core.encoding.json
+    cbor: core.encoding.cbor
+    encoding: core.encoding
+    files: core.files
 }
 
-fn run() {
+run: fn() {
     whole := json.parse("{{\"a\":1,\"b\":2}}") ?? panic("json")
     canon := json.to_string(whole)
     path := "@DIR@/round.json"
-    output :: files.create(path) ?? panic("create")
+    output: files.create(path) ?? panic("create")
     writer := json.writer(^output, encoding.EncodingLimits.safe(), false) ?? panic("writer")
     &writer.write(encoding.DataEvent.ObjectStart) ?? panic("os")
     &writer.write(encoding.DataEvent.Key("a")) ?? panic("ka")
@@ -24,7 +24,7 @@ fn run() {
     print(json.to_string(collected))
 
     cbor_path := "@DIR@/round.cbor"
-    cbor_out :: files.create(cbor_path) ?? panic("cbor create")
+    cbor_out: files.create(cbor_path) ?? panic("cbor create")
     cbor_writer := cbor.writer(^cbor_out) ?? panic("cbor writer")
     &cbor_writer.write(encoding.DataEvent.ObjectStart) ?? panic("cs")
     &cbor_writer.write(encoding.DataEvent.Key("a")) ?? panic("ck")

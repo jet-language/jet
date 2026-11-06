@@ -1,32 +1,32 @@
 // Native-private JetKey16. Ordinals follow seed declaration order. Char/Ctrl
 // payloads are raw u32 Unicode scalars, F is raw i64, unit variants have no
 // meaningful payload.
-fn ui_key_new(kind: I64, payload: I64) -> I64 {
-    result :: jet_rt_alloc(UI_KEY_BYTES, I64{8})
+ui_key_new: fn(kind: I64, payload: I64) -> I64 {
+    result: jet_rt_alloc(UI_KEY_BYTES, I64{8})
     ui_carrier_store(wrapping(result + UI_KEY_KIND), kind)
     ui_carrier_store(wrapping(result + UI_KEY_PAYLOAD), payload)
     result
 }
-fn ui_key_payload(value: I64, kind: I64) -> I64 {
+ui_key_payload: fn(value: I64, kind: I64) -> I64 {
     if (kind == I64{0} || kind == I64{11}) -> return ui_carrier_word(wrapping(value + UI_KEY_PAYLOAD)).bit_and(I64{4294967295})
     if (kind == I64{10}) -> return ui_carrier_word(wrapping(value + UI_KEY_PAYLOAD))
     I64{0}
 }
-#Export(c) fn jet_rt_handle_clone_jet_key(value: I64) -> I64 {
-    kind :: ui_carrier_word(wrapping(value + UI_KEY_KIND))
+#Export(c) jet_rt_handle_clone_jet_key: fn(value: I64) -> I64 {
+    kind: ui_carrier_word(wrapping(value + UI_KEY_KIND))
     ui_key_new(kind, ui_key_payload(value, kind))
 }
-#Export(c) fn jet_rt_handle_drop_jet_key(value: I64) {
+#Export(c) jet_rt_handle_drop_jet_key: fn(value: I64) {
     if (value != I64{0}) -> jet_rt_free(value, UI_KEY_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_eq_jet_key(a: I64, b: I64) -> Bool {
-    kind :: ui_carrier_word(wrapping(a + UI_KEY_KIND))
+#Export(c) jet_rt_handle_eq_jet_key: fn(a: I64, b: I64) -> Bool {
+    kind: ui_carrier_word(wrapping(a + UI_KEY_KIND))
     kind == ui_carrier_word(wrapping(b + UI_KEY_KIND)) && ui_key_payload(a, kind) == ui_key_payload(b, kind)
 }
-#Export(c) fn jet_rt_handle_show_jet_key(value: I64) -> I64 {
-    kind :: ui_carrier_word(wrapping(value + UI_KEY_KIND))
+#Export(c) jet_rt_handle_show_jet_key: fn(value: I64) -> I64 {
+    kind: ui_carrier_word(wrapping(value + UI_KEY_KIND))
     if (kind < I64{0} || kind >= I64{13}) -> rt_record_variant_panic()
-    target :: jet_rt_string_builder_new()
+    target: jet_rt_string_builder_new()
     if {
         (kind == I64{0} || kind == I64{11}) -> {
             rt_text_push_word(target, if (kind == I64{0}) -> I64{173717678147} else -> I64{173618132035}, I64{5})
@@ -54,5 +54,5 @@ fn ui_key_payload(value: I64, kind: I64) -> I64 {
     }
     jet_rt_string_builder_finish(target)
 }
-#Export(c) fn jet_rt_handle_debug_jet_key(value: I64) -> I64 { jet_rt_handle_show_jet_key(value) }
-#Export(c) fn jet_rt_handle_display_jet_key(value: I64) -> I64 { jet_rt_handle_show_jet_key(value) }
+#Export(c) jet_rt_handle_debug_jet_key: fn(value: I64) -> I64 { jet_rt_handle_show_jet_key(value) }
+#Export(c) jet_rt_handle_display_jet_key: fn(value: I64) -> I64 { jet_rt_handle_show_jet_key(value) }

@@ -1,20 +1,20 @@
-package {
+package: {
     name: "localtest2"
     authority: { allow: [FS.Write, IO, Mem.Alloc] }
 }
 
-use log :: "log"
+use log: "log"
 
-fn require(ok: Bool, message: String) {
+require: fn(ok: Bool, message: String) {
     if !ok -> panic(message)
 }
 
-fn run() {
-    root :: "$JET_STATE_ROOT/dx3/prim-storage"
-    p :: Path.from("{root}/local2.txt")
-    a :: log.append_record(p.copy(), "a") ?? false
+run: fn() {
+    root: "$JET_STATE_ROOT/dx3/prim-storage"
+    p: Path.from("{root}/local2.txt")
+    a: log.append_record(p.copy(), "a") ?? false
     require(a, "a")
-    b :: log.append_record(Path.from("{root}/local2.txt"), "b") ?? false
+    b: log.append_record(Path.from("{root}/local2.txt"), "b") ?? false
     require(b, "b")
     print("{a} {b}")
 }

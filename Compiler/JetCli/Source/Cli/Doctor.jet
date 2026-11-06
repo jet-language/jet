@@ -3,9 +3,9 @@
 // reports again. `--target <machine>` adds the declared target machine. A real
 // problem ends with the L2101 advisory and exit 1.
 use {
-    doctor_files :: core.files
-    doctor_process :: core.process
-    doctor_sys :: core.sys
+    doctor_files: core.files
+    doctor_process: core.process
+    doctor_sys: core.sys
     jet_driver.[
         JetDriverVerbOutput,
         JET_DRIVER_EXIT_USAGE,
@@ -24,7 +24,7 @@ use {
 }
 
 // Health of one checked thing.
-enum JetCLIDoctorHealth {
+JetCLIDoctorHealth: enum {
     // Everything is fine.
     Ok
     // Something is wrong; `fix` says what to do.
@@ -34,7 +34,7 @@ enum JetCLIDoctorHealth {
 }
 
 // One line of the doctor report.
-struct JetCLIDoctorCheck {
+JetCLIDoctorCheck: struct {
     section: String
     label: String
     health: JetCLIDoctorHealth
@@ -43,20 +43,20 @@ struct JetCLIDoctorCheck {
     auto_fixable: Bool
 }
 
-fn jet_cli_doctor_ok(section: String, label: String, detail: String) -> JetCLIDoctorCheck Never! {
+jet_cli_doctor_ok: fn(section: String, label: String, detail: String) -> JetCLIDoctorCheck Never! {
     JetCLIDoctorCheck{section: section, label: label, health: .Ok, detail: detail, fix: None, auto_fixable: false}
 }
 
-fn jet_cli_doctor_note(section: String, label: String, detail: String) -> JetCLIDoctorCheck Never! {
+jet_cli_doctor_note: fn(section: String, label: String, detail: String) -> JetCLIDoctorCheck Never! {
     JetCLIDoctorCheck{section: section, label: label, health: .Note, detail: detail, fix: None, auto_fixable: false}
 }
 
-fn jet_cli_doctor_problem(section: String, label: String, detail: String, fix: String, auto_fixable: Bool) -> JetCLIDoctorCheck Never! {
+jet_cli_doctor_problem: fn(section: String, label: String, detail: String, fix: String, auto_fixable: Bool) -> JetCLIDoctorCheck Never! {
     JetCLIDoctorCheck{section: section, label: label, health: .Problem, detail: detail, fix: Val(fix), auto_fixable: auto_fixable}
 }
 
 // Every check in report order.
-fn jet_cli_doctor_run(online: Bool, cross_target: String?) -[FS, Env, Exec, Time, Time.Wait, Rand]> [JetCLIDoctorCheck] Never! {
+jet_cli_doctor_run: fn(online: Bool, cross_target: String?) -[FS, Env, Exec, Time, Time.Wait, Rand]> [JetCLIDoctorCheck] Never! {
     out := [JetCLIDoctorCheck]{}
     &out.push(jet_cli_doctor_check_native_linker())
     &out.push(jet_cli_doctor_artifact_store())
@@ -74,7 +74,7 @@ fn jet_cli_doctor_run(online: Bool, cross_target: String?) -[FS, Env, Exec, Time
     out
 }
 
-fn jet_cli_doctor_has_problem(checks: [JetCLIDoctorCheck]) -> Bool Never! {
+jet_cli_doctor_has_problem: fn(checks: [JetCLIDoctorCheck]) -> Bool Never! {
     loop check in checks {
         if check.health == .Problem -> return true
     }
@@ -82,7 +82,7 @@ fn jet_cli_doctor_has_problem(checks: [JetCLIDoctorCheck]) -> Bool Never! {
 }
 
 // The child's stdout, or None when it could not run or failed.
-fn jet_cli_doctor_stdout(argv: [String]) -[Exec, Time.Wait]> String? Never! {
+jet_cli_doctor_stdout: fn(argv: [String]) -[Exec, Time.Wait]> String? Never! {
     if doctor_process.cmd(argv).run() == {
         .Ok(receipt) -> {
             if !receipt.success -> return None
@@ -92,22 +92,22 @@ fn jet_cli_doctor_stdout(argv: [String]) -[Exec, Time.Wait]> String? Never! {
     }
 }
 
-fn jet_cli_doctor_command_ok(argv: [String]) -[Exec, Time.Wait]> Bool Never! {
+jet_cli_doctor_command_ok: fn(argv: [String]) -[Exec, Time.Wait]> Bool Never! {
     jet_cli_doctor_stdout(argv) != None
 }
 
-fn jet_cli_doctor_check_native_linker() -[FS, Env, Exec, Time.Wait]> JetCLIDoctorCheck Never! {
+jet_cli_doctor_check_native_linker: fn() -[FS, Env, Exec, Time.Wait]> JetCLIDoctorCheck Never! {
     if jet_cli_doctor_command_ok([String]{"cc", "--version"}) {
         return jet_cli_doctor_ok("toolchain", "native linker (cc)", doctor_process.which("cc") ?? "found")
     }
     jet_cli_doctor_problem("toolchain", "native linker (cc)", "not found on PATH", "run from `nix develop`, or install a C toolchain that provides `cc` (`gcc`/`clang`; on Debian/Ubuntu: `build-essential`, on Arch: `base-devel`)", false)
 }
 
-fn jet_cli_doctor_artifact_store() -[FS, Env, Exec, Time, Rand]> JetCLIDoctorCheck Never! {
-    store :: ArtifactStore.from_env() ?? {
+jet_cli_doctor_artifact_store: fn() -[FS, Env, Exec, Time, Rand]> JetCLIDoctorCheck Never! {
+    store: ArtifactStore.from_env() ?? {
         return jet_cli_doctor_problem("cache", "artifact store", "could not open the machine-wide store: {err.message()}", "check JET_STORE_DIR and its permissions, then run `jet cache status`", false)
     }
-    status :: store.status() ?? {
+    status: store.status() ?? {
         return jet_cli_doctor_problem("cache", "artifact store", "could not read the machine-wide store: {err.message()}", "check JET_STORE_DIR and its permissions, then run `jet cache status`", false)
     }
     jet_cli_doctor_ok("cache", "artifact store", "{status.root} (footprint {jet_cli_cache_format_size(status.footprint_bytes)}; cap {jet_cli_cache_format_size(status.limit_bytes)}; reserve {jet_cli_cache_format_size(status.reserve_bytes)}; {status.entries.len()} entries; {status.live_leases} live leases)")
@@ -116,21 +116,21 @@ fn jet_cli_doctor_artifact_store() -[FS, Env, Exec, Time, Rand]> JetCLIDoctorChe
 // A cache dir is healthy when it is a directory or does not exist yet (it is
 // created on demand). A path that exists but is not a directory is a problem
 // with an auto-fix: remove it.
-fn jet_cli_doctor_cache_dir(label: String, dir: String) -[FS]> JetCLIDoctorCheck Never! {
+jet_cli_doctor_cache_dir: fn(label: String, dir: String) -[FS]> JetCLIDoctorCheck Never! {
     if !doctor_files.exists(dir) -> return jet_cli_doctor_ok("cache", label, "{dir} (created on demand)")
     if !doctor_files.is_dir(dir) -> return jet_cli_doctor_problem("cache", label, "{dir} exists but is not a directory", "remove `{dir}` so Jet can recreate it", true)
     jet_cli_doctor_ok("cache", label, dir)
 }
 
 // PATH sanity: is the running `jet` binary reachable as `jet` on PATH?
-fn jet_cli_doctor_check_path() -[FS, Env]> JetCLIDoctorCheck Never! {
+jet_cli_doctor_check_path: fn() -[FS, Env]> JetCLIDoctorCheck Never! {
     if doctor_process.which(JET_CLI_BINARY) != None -> return jet_cli_doctor_ok("path", JET_CLI_BINARY, "on PATH")
     jet_cli_doctor_problem("path", JET_CLI_BINARY, "`{JET_CLI_BINARY}` is not on your PATH", "add the directory containing `{JET_CLI_BINARY}` to PATH so commands and `{JET_CLI_BINARY}-<plugin>` discovery work", false)
 }
 
-fn jet_cli_doctor_check_registry() -[FS, Env, Exec, Time.Wait]> JetCLIDoctorCheck Never! {
-    registry :: publication_resolve_publish_registry()
-    safe_url :: publication_redact_registry_url(registry.url)
+jet_cli_doctor_check_registry: fn() -[FS, Env, Exec, Time.Wait]> JetCLIDoctorCheck Never! {
+    registry: publication_resolve_publish_registry()
+    safe_url: publication_redact_registry_url(registry.url)
     if safe_url != registry.url {
         return jet_cli_doctor_problem("registry", registry.name, "{safe_url} (embedded credentials or URL parameters are not allowed)", "remove credentials and query parameters from JET_REGISTRY_URL; configure the host Git credential provider instead", false)
     }
@@ -139,7 +139,7 @@ fn jet_cli_doctor_check_registry() -[FS, Env, Exec, Time.Wait]> JetCLIDoctorChec
         return jet_cli_doctor_problem("registry", registry.name, "{safe_url} (local index is missing)", "create the configured local registry or set JET_REGISTRY_URL to a reachable index", false)
     }
     git := doctor_process.cmd([String]{"git", "-c", "credential.useHttpPath=true", "ls-remote", "--", registry.url}).env("GIT_TERMINAL_PROMPT", "0")
-    names :: doctor_sys.vars() ?? [String]{}
+    names: doctor_sys.vars() ?? [String]{}
     loop name in names {
         if name.starts_with("JET_REGISTRY_") -> git = git.env_remove(name)
     }
@@ -153,7 +153,7 @@ fn jet_cli_doctor_check_registry() -[FS, Env, Exec, Time.Wait]> JetCLIDoctorChec
 }
 
 // Rust `io::ErrorKind` Display text.
-fn jet_cli_doctor_io_kind(error: IOError) -> String Never! {
+jet_cli_doctor_io_kind: fn(error: IOError) -> String Never! {
     if error == {
         .NotFound(_) -> "entity not found"
         .PermissionDenied(_) -> "permission denied"
@@ -168,7 +168,7 @@ fn jet_cli_doctor_io_kind(error: IOError) -> String Never! {
     }
 }
 
-fn jet_cli_doctor_check_ffi() -[FS, Env, Exec, Time.Wait]> [JetCLIDoctorCheck] Never! {
+jet_cli_doctor_check_ffi: fn() -[FS, Env, Exec, Time.Wait]> [JetCLIDoctorCheck] Never! {
     out := [JetCLIDoctorCheck]{}
     // pkg-config discovers C libraries that are not in the hangar.
     if jet_cli_doctor_command_ok([String]{"pkg-config", "--version"}) {
@@ -177,7 +177,7 @@ fn jet_cli_doctor_check_ffi() -[FS, Env, Exec, Time.Wait]> [JetCLIDoctorCheck] N
         &out.push(jet_cli_doctor_problem("c-ffi", "pkg-config", "not found", "install pkg-config (e.g. `pacman -S pkgconf` / `apt install pkg-config`); only needed if you link C libraries", false))
     }
     // The user-owned C-library store, inspected without following a final link.
-    hangar :: pkg_resolve_roots().hangar_dir()
+    hangar: pkg_resolve_roots().hangar_dir()
     if doctor_files.stat(hangar) == {
         .Ok(metadata) -> {
             if metadata.is_symlink {
@@ -197,7 +197,7 @@ fn jet_cli_doctor_check_ffi() -[FS, Env, Exec, Time.Wait]> [JetCLIDoctorCheck] N
                         break
                     }
                 }
-                detail :: if source == .Val(legacy) -> "{hangar} not present; legacy Hangar at {legacy} awaits atomic migration" else -> "{hangar} not present (created when you realize a C library)"
+                detail: if source == .Val(legacy) -> "{hangar} not present; legacy Hangar at {legacy} awaits atomic migration" else -> "{hangar} not present (created when you realize a C library)"
                 &out.push(jet_cli_doctor_note("c-ffi", "hangar", detail))
             } else {
                 &out.push(jet_cli_doctor_problem("c-ffi", "hangar", "{hangar} cannot be inspected ({jet_cli_doctor_io_kind(error)})", "restore access to the resolved user Hangar path", false))
@@ -215,18 +215,18 @@ fn jet_cli_doctor_check_ffi() -[FS, Env, Exec, Time.Wait]> [JetCLIDoctorCheck] N
 
 // Apply the auto-fixable problems; the labels that were fixed. The only
 // auto-fix: a cache path that is a stray file.
-fn jet_cli_doctor_apply_fixes(checks: [JetCLIDoctorCheck]) -[FS]> [String] Never! {
+jet_cli_doctor_apply_fixes: fn(checks: [JetCLIDoctorCheck]) -[FS]> [String] Never! {
     fixed := [String]{}
     loop check in checks {
         if check.health != .Problem || !check.auto_fixable || check.section != "cache" -> next
         // The detail is "<path> exists but is not a directory".
-        path :: if check.detail.split_once(" exists") == .Val(pair) -> pair.before else -> check.detail
+        path: if check.detail.split_once(" exists") == .Val(pair) -> pair.before else -> check.detail
         if jet_cli_doctor_remove(path) -> &fixed.push(check.label)
     }
     fixed
 }
 
-fn jet_cli_doctor_remove(path: String) -[FS]> Bool Never! {
+jet_cli_doctor_remove: fn(path: String) -[FS]> Bool Never! {
     if doctor_files.remove(path) == {
         .Err(_) -> {}
         else -> return true
@@ -237,17 +237,17 @@ fn jet_cli_doctor_remove(path: String) -[FS]> Bool Never! {
     }
 }
 
-fn jet_cli_doctor_home() -[Env]> String Never! {
+jet_cli_doctor_home: fn() -[Env]> String Never! {
     doctor_sys.get("HOME") ?? doctor_sys.get("USERPROFILE") ?? "/tmp"
 }
 
-fn jet_cli_doctor_ffi_cache_dir() -[Env]> String Never! {
+jet_cli_doctor_ffi_cache_dir: fn() -[Env]> String Never! {
     doctor_files.join(doctor_files.join(doctor_files.join(jet_cli_doctor_home(), ".cache"), "jet"), "ffi")
 }
 
 // A `--target` machine: the plan admitted only declared target machines.
-fn jet_cli_doctor_check_cross_target(name: String) -> JetCLIDoctorCheck Never! {
-    machine :: jet_driver_target_machine_by_name(name, JET_CLI_VERSION) ?? {
+jet_cli_doctor_check_cross_target: fn(name: String) -> JetCLIDoctorCheck Never! {
+    machine: jet_driver_target_machine_by_name(name, JET_CLI_VERSION) ?? {
         return jet_cli_doctor_problem("cross", name, "not a declared target machine", "use one of {JET_DRIVER_TARGET_MACHINE_NAMES.join(", ")}", false)
     }
     jet_cli_doctor_ok("cross", machine.name, "declared target machine ({machine.triple})")
@@ -255,14 +255,14 @@ fn jet_cli_doctor_check_cross_target(name: String) -> JetCLIDoctorCheck Never! {
 
 // The report; `apply` first prints what `--fix` changed, then the report of
 // the world after the fixes.
-fn jet_cli_doctor(online: Bool, apply: Bool, cross_target: String?, color: Bool) -[FS, Env, Exec, Time, Time.Wait, Rand]> JetDriverVerbOutput Never! {
+jet_cli_doctor: fn(online: Bool, apply: Bool, cross_target: String?, color: Bool) -[FS, Env, Exec, Time, Time.Wait, Rand]> JetDriverVerbOutput Never! {
     prefix := ""
     if apply {
-        fixed :: jet_cli_doctor_apply_fixes(jet_cli_doctor_run(online, cross_target))
+        fixed: jet_cli_doctor_apply_fixes(jet_cli_doctor_run(online, cross_target))
         if fixed.len() == 0 -> prefix = "doctor: nothing to auto-fix\n"
         loop label in fixed -> prefix = "{prefix}fixed: {label}\n"
     }
-    checks :: jet_cli_doctor_run(online, cross_target)
+    checks: jet_cli_doctor_run(online, cross_target)
     out := "{prefix}{diagnostic_theme_paint(color, "1", "{JET_CLI_BINARY} doctor")}\n"
     last_section := ""
     loop check in checks {
@@ -270,7 +270,7 @@ fn jet_cli_doctor(online: Bool, apply: Bool, cross_target: String?, color: Bool)
             out = "{out}\n{diagnostic_theme_paint(color, "1", check.section)}\n"
             last_section = check.section
         }
-        mark :: if check.health == {
+        mark: if check.health == {
             .Ok -> diagnostic_theme_paint(color, "32", "ok  ")
             .Note -> "note"
             .Problem -> diagnostic_theme_paint(color, "33", "warn")
@@ -283,7 +283,7 @@ fn jet_cli_doctor(online: Bool, apply: Bool, cross_target: String?, color: Bool)
     }
     out = "{out}\n"
     if jet_cli_doctor_has_problem(checks) {
-        report :: jet_cli_report("L2101", "Toolchain checks need attention", "One or more required tools or paths are unavailable", "Follow the fixes above, then run `jet self doctor` again", color)
+        report: jet_cli_report("L2101", "Toolchain checks need attention", "One or more required tools or paths are unavailable", "Follow the fixes above, then run `jet self doctor` again", color)
         out = "{out}{report}{jet_driver_explain_pointer_line("L2101", color)}\n"
         return JetDriverVerbOutput{stdout: out, stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
@@ -292,13 +292,13 @@ fn jet_cli_doctor(online: Bool, apply: Bool, cross_target: String?, color: Bool)
 
 // `jet self doctor [--online] [--fix] [--target <machine>]`: a name that is not a
 // declared target machine is refused.
-fn jet_cli_doctor_plan(raw: [String], jet_argv: [String], color: Bool) -> JetCLIPlan Never! {
+jet_cli_doctor_plan: fn(raw: [String], jet_argv: [String], color: Bool) -> JetCLIPlan Never! {
     cross_target := String?{None}
     if jet_cli_target_flag(jet_argv) == {
         .Absent -> {}
         .Missing -> return jet_cli_fail("E2104", "`--target` needs a value", jet_cli_why("E2104"), "write `--target=<machine>` or `--target <machine>`", color, JET_DRIVER_EXIT_USAGE)
         .Named(name) -> {
-            machine :: jet_driver_target_machine_by_name(name, JET_CLI_VERSION) ?? {
+            machine: jet_driver_target_machine_by_name(name, JET_CLI_VERSION) ?? {
                 return jet_cli_fail("E3302", "target `{name}` is not available", "the name is not a declared target machine", "use one of {JET_DRIVER_TARGET_MACHINE_NAMES.join(", ")}", color, JET_DRIVER_EXIT_USAGE)
             }
             cross_target = Val(machine.name)

@@ -10,15 +10,15 @@
 use {
     jetpack_foundation.[env_runtime_lock]
     jet_pkg_model.[ConfigFacts, PackageFacts, PackageOutputKind, PackageParseError, pkg_debug_output, pkg_sha256_hex]
-    files :: core.files
+    files: core.files
 }
 
-enum SplitTarget {
+SplitTarget: enum {
     Environment
     Package(String)
     Hosts(String)
 
-    fn operation(self) -> String Never! {
+    operation: fn(self) -> String Never! {
         if self == {
             .Environment -> "split-env"
             .Package(name) -> "split-package-{name}"
@@ -27,12 +27,12 @@ enum SplitTarget {
     }
 }
 
-enum ChangeAction {
+ChangeAction: enum {
     Create
     Remove
     Update
 
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         if self == {
             .Create -> "create"
             .Remove -> "remove"
@@ -41,12 +41,12 @@ enum ChangeAction {
     }
 }
 
-struct ChangeSummary {
+ChangeSummary: struct {
     path: String
     action: ChangeAction
 }
 
-struct TransitionSummary {
+TransitionSummary: struct {
     operation: String
     changes: [ChangeSummary]
     before_fingerprint: String
@@ -54,11 +54,11 @@ struct TransitionSummary {
     journal: String
 }
 
-struct TransitionResult {
+TransitionResult: struct {
     summary: TransitionSummary
 }
 
-struct TransitionPlan {
+TransitionPlan: struct {
     root: String
     operation: String
     changes: [TransitionFileChange]
@@ -68,56 +68,56 @@ struct TransitionPlan {
     after_fingerprint: String
     reverse: Bool
 
-    fn summary(self) -> TransitionSummary Never! {
+    summary: fn(self) -> TransitionSummary Never! {
         changes := [ChangeSummary]{}
         loop change in self.changes {
-            old :: if self.reverse -> change.after else -> change.before
-            new :: if self.reverse -> change.before else -> change.after
+            old: if self.reverse -> change.after else -> change.before
+            new: if self.reverse -> change.before else -> change.after
             if old == new -> next
-            action :: if old == None -> ChangeAction.Create else -> if new == None -> ChangeAction.Remove else -> ChangeAction.Update
+            action: if old == None -> ChangeAction.Create else -> if new == None -> ChangeAction.Remove else -> ChangeAction.Update
             &changes.push(ChangeSummary{path: change.relative, action: action})
         }
         TransitionSummary{operation: self.operation, changes: changes, before_fingerprint: self.before_fingerprint, after_fingerprint: self.after_fingerprint, journal: self.journal_path}
     }
 
     // The summary for a `--check` preview, or the applied result.
-    fn finish(self, check_only: Bool) -[FS, Env, Time]> TransitionResult EnvironmentError! {
+    finish: fn(self, check_only: Bool) -[FS, Env, Time]> TransitionResult EnvironmentError! {
         if check_only -> return Ok(TransitionResult{summary: self.summary()})
         self.apply()
     }
 
-    fn apply(self) -[FS, Env, Time]> TransitionResult EnvironmentError! {
-        held :: env_runtime_lock(self.root, "package-transition") ?? return Err(env_transition_error("couldn't lock package transition: {err}"))
+    apply: fn(self) -[FS, Env, Time]> TransitionResult EnvironmentError! {
+        held: env_runtime_lock(self.root, "package-transition") ?? return Err(env_transition_error("couldn't lock package transition: {err}"))
         if self.apply_locked() == {
             .Ok(result) -> Ok(result)
             .Err(error) -> Err(env_transition_error("couldn't lock package transition: {error.message()}"))
         }
     }
 
-    fn apply_locked(self) -[FS, Env]> TransitionResult EnvironmentError! {
-        forward :: !self.reverse
+    apply_locked: fn(self) -[FS, Env]> TransitionResult EnvironmentError! {
+        forward: !self.reverse
         loop change in self.changes {
-            path :: env_transition_safe_path(self.root, change.relative)
-            current :: env_transition_read_state(path)
+            path: env_transition_safe_path(self.root, change.relative)
+            current: env_transition_read_state(path)
             // A journal is durable before the first file mutation, so a
             // crash can leave a mix of before and after states; fold may
             // finish that rollback while no file holds unrecorded bytes.
-            expected :: if forward -> current == change.before else -> current == change.after || current == change.before
+            expected: if forward -> current == change.before else -> current == change.after || current == change.before
             if !expected {
-                verb :: if self.reverse -> "fold" else -> "split"
+                verb: if self.reverse -> "fold" else -> "split"
                 return Err(env_transition_error("stale transition: {change.relative} changed after the plan was created; rerun jet {verb} --check"))
             }
         }
         snapshots := [TransitionSnapshot]{}
         loop change in self.changes {
-            path :: env_transition_safe_path(self.root, change.relative)
+            path: env_transition_safe_path(self.root, change.relative)
             &snapshots.push(TransitionSnapshot{path: path, state: env_transition_read_state(path)})
         }
         // Publish the exact recovery record before touching any authored or
         // generated file: `jet fold` can then restore every path that reached
         // its after-state and leave any untouched path alone.
         if forward {
-            journal_parent :: files.dirname(self.journal_path)
+            journal_parent: files.dirname(self.journal_path)
             if journal_parent == "" -> return Err(env_transition_error("transition journal has no parent"))
             env_transition_create_real_dirs(self.root, journal_parent)
             env_transition_write_atomic(self.journal_path, self.journal)
@@ -129,10 +129,10 @@ struct TransitionPlan {
         Ok(TransitionResult{summary: self.summary()})
     }
 
-    fn apply_changes(self) EnvironmentError! -[FS, Env]> {
+    apply_changes: fn(self) EnvironmentError! -[FS, Env]> {
         loop change in self.changes {
-            path :: env_transition_safe_path(self.root, change.relative)
-            desired :: if self.reverse -> change.before else -> change.after
+            path: env_transition_safe_path(self.root, change.relative)
+            desired: if self.reverse -> change.before else -> change.after
             env_transition_apply_state(self.root, path, desired)
         }
         if self.reverse && files.exists(self.journal_path) {
@@ -142,14 +142,14 @@ struct TransitionPlan {
 
     // Restore each path this attempt wrote, newest first. A path that holds
     // bytes neither recorded nor written is preserved and reported.
-    fn rollback(self, snapshots: [TransitionSnapshot], error: EnvironmentError) -[FS, Env]> EnvironmentError Never! {
+    rollback: fn(self, snapshots: [TransitionSnapshot], error: EnvironmentError) -[FS, Env]> EnvironmentError Never! {
         failures := [String]{}
-        count :: self.changes.len()
+        count: self.changes.len()
         loop offset in 0..<count {
-            index :: count - 1 - offset
-            change :: self.changes[index]
-            snapshot :: snapshots[index]
-            written :: if self.reverse -> change.before else -> change.after
+            index: count - 1 - offset
+            change: self.changes[index]
+            snapshot: snapshots[index]
+            written: if self.reverse -> change.before else -> change.after
             if env_transition_read_state(snapshot.path) == {
                 .Ok(current) -> {
                     if current == snapshot.state -> next
@@ -171,83 +171,83 @@ struct TransitionPlan {
 }
 
 // One path's state just before an apply attempt.
-struct TransitionSnapshot {
+TransitionSnapshot: struct {
     path: String
     state: [U8]?
 }
 
 // Plan and apply one of the ratified `jet split` transitions.
-fn env_transition_split(root: String, target: SplitTarget, check_only: Bool) -[FS, Env, Time]> TransitionResult EnvironmentError! {
-    plan :: env_transition_split_plan(root, target)
+env_transition_split: fn(root: String, target: SplitTarget, check_only: Bool) -[FS, Env, Time]> TransitionResult EnvironmentError! {
+    plan: env_transition_split_plan(root, target)
     plan.finish(check_only)
 }
 
 // Plan and apply the reverse of a recorded transition. `path` is the
 // generated file named by `jet fold`, relative to the Package root or an
 // absolute path inside it.
-fn env_transition_fold(root: String, path: String, check_only: Bool) -[FS, Env, Time]> TransitionResult EnvironmentError! {
-    plan :: env_transition_fold_plan(root, path)
+env_transition_fold: fn(root: String, path: String, check_only: Bool) -[FS, Env, Time]> TransitionResult EnvironmentError! {
+    plan: env_transition_fold_plan(root, path)
     plan.finish(check_only)
 }
 
-fn env_transition_package_error(path: String, error: PackageParseError) -> EnvironmentError Never! {
+env_transition_package_error: fn(path: String, error: PackageParseError) -> EnvironmentError Never! {
     env_transition_error("typed Package {path} is invalid: {error.message()}")
 }
 
-fn env_transition_parse_error(path: String, error: PackageParseError) -> EnvironmentError Never! {
+env_transition_parse_error: fn(path: String, error: PackageParseError) -> EnvironmentError Never! {
     env_transition_error("Config {path} is not a closed typed contribution: {error.message()}")
 }
 
-fn env_transition_split_plan(root: String, target: SplitTarget) -[FS, Env]> TransitionPlan EnvironmentError! {
-    canonical :: env_transition_canonical_root(root)
-    package_path :: files.join(canonical, TRANSITION_PACKAGE_FILE)
-    package_bytes :: env_transition_read_regular(package_path)
-    package_text :: String.from_bytes(package_bytes) ?? return Err(env_transition_error("{TRANSITION_PACKAGE_FILE} must be UTF-8"))
-    loaded :: if PackageFacts.load(canonical) == {
+env_transition_split_plan: fn(root: String, target: SplitTarget) -[FS, Env]> TransitionPlan EnvironmentError! {
+    canonical: env_transition_canonical_root(root)
+    package_path: files.join(canonical, TRANSITION_PACKAGE_FILE)
+    package_bytes: env_transition_read_regular(package_path)
+    package_text: String.from_bytes(package_bytes) ?? return Err(env_transition_error("{TRANSITION_PACKAGE_FILE} must be UTF-8"))
+    loaded: if PackageFacts.load(canonical) == {
         .Ok(found) -> found
         .Err(error) -> { return Err(env_transition_package_error(package_path, error)) }
     }
-    package :: loaded ?? return Err(env_transition_error("no {TRANSITION_PACKAGE_FILE} found in {canonical}"))
-    entries :: env_transition_source_entries(package_text)
+    package: loaded ?? return Err(env_transition_error("no {TRANSITION_PACKAGE_FILE} found in {canonical}"))
+    entries: env_transition_source_entries(package_text)
     changes := [TransitionFileChange]{}
     root_after := ""
     semantic_before := env_transition_semantic_fingerprint(package)
     semantic_after := semantic_before
     if target == {
         .Environment -> {
-            field :: env_transition_required_field(entries, "environments", package_path)
-            names :: env_transition_record_names(field.value, "environments")
+            field: env_transition_required_field(entries, "environments", package_path)
+            names: env_transition_record_names(field.value, "environments")
             if names.len() == 0 {
                 return Err(env_transition_error("environments is empty; there is no closed fact to split"))
             }
-            config_name :: if names.len() == 1 -> names[0] else -> if names.contains("development") -> "development" else -> ""
+            config_name: if names.len() == 1 -> names[0] else -> if names.contains("development") -> "development" else -> ""
             if config_name == "" {
                 return Err(env_transition_error("jet split env found more than one Environment; name one closed Config first"))
             }
-            destination :: "package/env.jet"
+            destination: "package/env.jet"
             env_transition_ensure_new_file(canonical, destination)
             root_after = env_transition_remove_entry(package_text, field.entry)
             root_after = env_transition_add_config_reference(root_after, package.configs, destination)
-            config_text :: env_transition_render_config(config_name, "environments", field.value)
-            config :: ConfigFacts.parse(config_text, destination) ?? return Err(env_transition_parse_error(destination, err))
+            config_text: env_transition_render_config(config_name, "environments", field.value)
+            config: ConfigFacts.parse(config_text, destination) ?? return Err(env_transition_parse_error(destination, err))
             env_transition_validate_composed_root(root_after, package, config)
             &changes.push(TransitionFileChange{relative: destination, before: None, after: Val(config_text.bytes())})
         }
         .Package(name) -> {
             env_transition_validate_name(name, "Package")
-            existing :: package.member_names_in(canonical) ?? return Err(env_transition_error(err.message()))
+            existing: package.member_names_in(canonical) ?? return Err(env_transition_error(err.message()))
             if existing.contains(name) {
                 return Err(env_transition_error("member Package name `{name}` is declared more than once"))
             }
-            inline :: env_transition_required_inline_config(entries, name, package_path)
-            destination :: "packages/{name}/package.jet"
+            inline: env_transition_required_inline_config(entries, name, package_path)
+            destination: "packages/{name}/package.jet"
             env_transition_ensure_new_file(canonical, destination)
-            member :: env_transition_render_member_package(name, inline.value)
+            member: env_transition_render_member_package(name, inline.value)
             PackageFacts.parse(member, destination) ?? return Err(env_transition_parse_error(destination, err))
-            member_config :: ConfigFacts.parse(inline.value, destination) ?? return Err(env_transition_parse_error(destination, err))
+            member_config: ConfigFacts.parse(inline.value, destination) ?? return Err(env_transition_parse_error(destination, err))
             root_after = env_transition_remove_entry(package_text, inline.entry)
             root_after = env_transition_add_member_reference(root_after, package.members, destination)
-            root_after_facts :: PackageFacts.parse_uncomposed(root_after, package_path) ?? return Err(env_transition_package_error(package_path, err))
+            root_after_facts: PackageFacts.parse_uncomposed(root_after, package_path) ?? return Err(env_transition_package_error(package_path, err))
             root_after_facts.validate_members() ?? return Err(env_transition_error(err.message()))
             composed_after := root_after_facts
             &composed_after.compose([ConfigFacts]{member_config}) ?? return Err(env_transition_error(err.message()))
@@ -258,12 +258,12 @@ fn env_transition_split_plan(root: String, target: SplitTarget) -[FS, Env]> Tran
         .Hosts(name) -> {
             env_transition_validate_name(name, "host")
             env_transition_require_output_declaration(entries, name, package_path)
-            output :: package.outputs.get(name) ?? return Err(env_transition_error("outputs.{name} is not declared in {TRANSITION_PACKAGE_FILE}"))
+            output: package.outputs.get(name) ?? return Err(env_transition_error("outputs.{name} is not declared in {TRANSITION_PACKAGE_FILE}"))
             if output.kind != PackageOutputKind.System -> return Err(env_transition_error("outputs.{name} is {output.kind.debug_name()}, but host extraction needs a System Output"))
-            destination :: "package/fleet.jet"
+            destination: "package/fleet.jet"
             env_transition_ensure_new_file(canonical, destination)
-            config_text :: env_transition_render_fleet_config(name, output.name)
-            config :: ConfigFacts.parse(config_text, destination) ?? return Err(env_transition_parse_error(destination, err))
+            config_text: env_transition_render_fleet_config(name, output.name)
+            config: ConfigFacts.parse(config_text, destination) ?? return Err(env_transition_parse_error(destination, err))
             root_after = env_transition_add_config_reference(package_text, package.configs, destination)
             env_transition_validate_composed_root(root_after, package, config)
             semantic_before = "sha256:{pkg_sha256_hex(pkg_debug_output(output).bytes())}"
@@ -278,20 +278,20 @@ fn env_transition_split_plan(root: String, target: SplitTarget) -[FS, Env]> Tran
     env_transition_forward_plan(canonical, target.operation(), changes, semantic_before, semantic_after)
 }
 
-fn env_transition_fold_plan(root: String, path: String) -[FS, Env]> TransitionPlan EnvironmentError! {
-    canonical :: env_transition_canonical_root(root)
-    relative :: env_transition_relative_inside(canonical, path)
+env_transition_fold_plan: fn(root: String, path: String) -[FS, Env]> TransitionPlan EnvironmentError! {
+    canonical: env_transition_canonical_root(root)
+    relative: env_transition_relative_inside(canonical, path)
     if relative == TRANSITION_PACKAGE_FILE {
         return Err(env_transition_error("jet fold needs the generated file named by a split, not package.jet"))
     }
-    journal_dir :: files.join(canonical, TRANSITION_JOURNAL_DIR)
-    entries :: files.list_dir(journal_dir) ?? return Err(env_transition_error("no transition journal for {relative}: {err}"))
+    journal_dir: files.join(canonical, TRANSITION_JOURNAL_DIR)
+    entries: files.list_dir(journal_dir) ?? return Err(env_transition_error("no transition journal for {relative}: {err}"))
     matches := [TransitionJournalMatch]{}
     loop entry in entries {
-        journal_path :: files.join(journal_dir, entry.name)
-        info :: files.stat(journal_path) ?? return Err(env_transition_error("couldn't read transition journal: {err}"))
+        journal_path: files.join(journal_dir, entry.name)
+        info: files.stat(journal_path) ?? return Err(env_transition_error("couldn't read transition journal: {err}"))
         if info.is_symlink || !info.is_file -> next
-        journal :: env_transition_read_journal(journal_path)
+        journal: env_transition_read_journal(journal_path)
         records_relative := false
         loop change in journal.changes {
             if change.relative == relative -> records_relative = true
@@ -301,18 +301,18 @@ fn env_transition_fold_plan(root: String, path: String) -[FS, Env]> TransitionPl
     if matches.len() != 1 {
         return Err(env_transition_error("expected one transition journal for {relative}, found {matches.len()}"))
     }
-    found :: matches[0]
+    found: matches[0]
     Ok(TransitionPlan{root: canonical, operation: "fold-{found.journal.operation}", changes: found.journal.changes, journal_path: found.path, journal: [U8]{}, before_fingerprint: found.journal.after_fingerprint, after_fingerprint: found.journal.before_fingerprint, reverse: true})
 }
 
-struct TransitionJournalMatch {
+TransitionJournalMatch: struct {
     path: String
     journal: TransitionJournal
 }
 
-fn env_transition_forward_plan(root: String, operation: String, changes: [TransitionFileChange], before_fingerprint: String, after_fingerprint: String) -> TransitionPlan EnvironmentError! {
-    journal_path :: env_transition_journal_path(root, operation, changes)
-    encoded :: env_transition_encode_journal(TransitionJournal{operation: operation, before_fingerprint: before_fingerprint, after_fingerprint: after_fingerprint, changes: changes})
+env_transition_forward_plan: fn(root: String, operation: String, changes: [TransitionFileChange], before_fingerprint: String, after_fingerprint: String) -> TransitionPlan EnvironmentError! {
+    journal_path: env_transition_journal_path(root, operation, changes)
+    encoded: env_transition_encode_journal(TransitionJournal{operation: operation, before_fingerprint: before_fingerprint, after_fingerprint: after_fingerprint, changes: changes})
     if encoded.len() > TRANSITION_MAX_JOURNAL_BYTES {
         return Err(env_transition_error("transition journal exceeds the {TRANSITION_MAX_JOURNAL_BYTES}-byte limit"))
     }
@@ -322,7 +322,7 @@ fn env_transition_forward_plan(root: String, operation: String, changes: [Transi
 // `original` is already fully composed by PackageFacts.load and serves as
 // the semantic baseline, so file-backed Configs stay visible while the
 // generated contribution is checked for real conflicts and default errors.
-fn env_transition_validate_composed_root(root_text: String, original: PackageFacts, config: ConfigFacts) EnvironmentError! {
+env_transition_validate_composed_root: fn(root_text: String, original: PackageFacts, config: ConfigFacts) EnvironmentError! {
     PackageFacts.parse_uncomposed(root_text, TRANSITION_PACKAGE_FILE) ?? return Err(env_transition_error(err.message()))
     candidate := original
     &candidate.compose([ConfigFacts]{config}) ?? return Err(env_transition_error(err.message()))

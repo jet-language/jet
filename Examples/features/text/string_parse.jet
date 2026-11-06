@@ -1,15 +1,15 @@
 // 84 — String parsing and line splitting for *small in-memory* text
 // (D-STRPARSE1). File-scale work → text/stream_lines.jet (streaming reader).
-fn run() {
+run: fn() {
     // Int.parse(text) — fallible integer parse, returns Int !ParseError.
-    n :: Int.parse("42") ?? -1
+    n: Int.parse("42") ?? -1
     print(n + 1)
     // A bad parse takes the `??` fallback.
-    bad :: Int.parse("oops") ?? -1
+    bad: Int.parse("oops") ?? -1
     print(bad)
     // String.lines() — split text into its lines.
-    text :: "first\nsecond\nthird"
-    lines :: text.lines()
+    text: "first\nsecond\nthird"
+    lines: text.lines()
     print(lines.len())
     loop line in lines -> print(line)
     // Sum the numbers on each line.
@@ -19,10 +19,10 @@ fn run() {
     // D-STR-DECLINE1=C: `to_int`/`to_float` — direct String spellings of the
     // same `Int.parse`/`Float.parse` builtin (the string is the receiver
     // either way), reached one call shorter from cleaned-up text.
-    port :: "  8080  ".trim().to_int() ?? -1
+    port: "  8080  ".trim().to_int() ?? -1
     print(port)
-    price :: "19.95".to_float() ?? -1.0
+    price: "19.95".to_float() ?? -1.0
     print(price)
-    bad_num :: "oops".to_int() ?? -1
+    bad_num: "oops".to_int() ?? -1
     print(bad_num)
 }

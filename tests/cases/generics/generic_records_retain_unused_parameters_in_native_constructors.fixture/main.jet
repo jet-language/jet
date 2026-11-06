@@ -1,26 +1,26 @@
 
-struct Token<T> {}
-struct Plan<T> {
+Token: struct<T> {}
+Plan: struct<T> {
     json: String
     phantom: Int
 }
-struct Mixed<T, Value> {
+Mixed: struct<T, Value> {
     values: [Value]
 }
-fn token<T>() -> Token<T> { Token<T>{} }
-fn plan<T>(json: ^String) -> Plan<T> {
+token: fn<T>() -> Token<T> { Token<T>{} }
+plan: fn<T>(json: ^String) -> Plan<T> {
     Plan<T>{json: json, phantom: 7}
 }
-fn mixed<T, Value>(value: ^Value) -> Mixed<T, Value> {
+mixed: fn<T, Value>(value: ^Value) -> Mixed<T, Value> {
     Mixed<T, Value>{values: [Value]{value}}
 }
-CONSTANT :: comptime { Plan<Int>{json: "constant", phantom: 9} }
-fn run() {
-    empty :: token<Int>()
-    another :: token<String>()
-    copied :: empty.copy()
-    item :: plan<Int>("literal")
-    values :: mixed<String, Int>(3)
+CONSTANT: comptime { Plan<Int>{json: "constant", phantom: 9} }
+run: fn() {
+    empty: token<Int>()
+    another: token<String>()
+    copied: empty.copy()
+    item: plan<Int>("literal")
+    values: mixed<String, Int>(3)
     print(item.json)
     print(item.phantom)
     print(values.values[0])

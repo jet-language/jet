@@ -1,7 +1,7 @@
 
 #Target(Web)
 #Target(JS)
-fn slow() -> String {
+slow: fn() -> String {
     turns := 0
     loop _ in 0..<50000 {
         turns += 1
@@ -9,12 +9,12 @@ fn slow() -> String {
     return "slow"
 }
 #Target(JS)
-fn fast() -> Int {
+fast: fn() -> Int {
     return 7
 }
 #Target(JS)
-fn run() {
-    values :: (task.all {
+run: fn() {
+    values: (task.all {
         z: slow(),
         a: fast()
     }) ?? panic("named task.all failed")

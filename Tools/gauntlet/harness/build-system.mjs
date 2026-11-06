@@ -152,7 +152,7 @@ class Workspace {
   edit(peer) {
     this.edits += 1;
     const n = this.edits;
-    const text = peer === "jet" ? `\nfn edit_probe_${n}() -> Int {\n    return ${n}\n}\n` : `\nint64_t edit_probe_${n}(void) { return ${n}; }\n`;
+    const text = peer === "jet" ? `\nedit_probe_${n}: fn() -> Int {\n    return ${n}\n}\n` : `\nint64_t edit_probe_${n}(void) { return ${n}; }\n`;
     fs.appendFileSync(path.join(this.project, EDIT_FILES[peer]), text);
   }
 

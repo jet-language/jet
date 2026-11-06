@@ -1,50 +1,50 @@
 use {
     core.mem
-    c :: c.jetmatrix
+    c: c.jetmatrix
 }
 
 #Layout(c)
-struct Coord {
+Coord: struct {
     x: Int
     y: Int
 }
 #Layout(c)
-enum Status {
+Status: enum {
     Ok = 0
     Lost = 7
 }
 #Layout(c, tag: U8)
-enum Packet {
+Packet: enum {
     Ping(Int) = 3
     Data(x: Int, y: Int) = 7
 }
 #Layout(c)
-struct Record {
+Record: struct {
     id: U64
     flags: U32
 }
 
-fn increment(x: I32) -[]> I32 { return x + 1 }
+increment: fn(x: I32) -[]> I32 { return x + 1 }
 
-#Import module c.jetmatrix {
-    fn coord_sum(p: Coord) -> Int = "coord_sum"
-    fn status_value(s: Status) -> I32 = "status_value"
-    fn packet_value(p: Packet) -> I32 = "packet_value"
-    fn packet_size() -> I32 = "packet_size"
-    fn packet_align() -> I32 = "packet_align"
-    fn packet_payload_offset() -> I32 = "packet_payload_offset"
-    fn callback_twice(cb: fn(I32) -[]> I32, x: I32) -> I32 = "callback_twice"
-    fn callback_parallel(cb: fn(I32) -[]> I32) -> I32 = "callback_parallel"
-    fn load_record(id: U64, out: *Record) -> I32 = "load_record"
-    fn abi_default(a: I32, b: I32) -> I32 = "abi_default"
-    #ABI(sysv64) fn abi_explicit(a: I32, b: I32) -> I32 = "abi_explicit"
+#Import c.jetmatrix: module {
+    coord_sum: fn(p: Coord) -> Int = "coord_sum"
+    status_value: fn(s: Status) -> I32 = "status_value"
+    packet_value: fn(p: Packet) -> I32 = "packet_value"
+    packet_size: fn() -> I32 = "packet_size"
+    packet_align: fn() -> I32 = "packet_align"
+    packet_payload_offset: fn() -> I32 = "packet_payload_offset"
+    callback_twice: fn(cb: fn(I32) -[]> I32, x: I32) -> I32 = "callback_twice"
+    callback_parallel: fn(cb: fn(I32) -[]> I32) -> I32 = "callback_parallel"
+    load_record: fn(id: U64, out: *Record) -> I32 = "load_record"
+    abi_default: fn(a: I32, b: I32) -> I32 = "abi_default"
+    #ABI(sysv64) abi_explicit: fn(a: I32, b: I32) -> I32 = "abi_explicit"
 }
 
-fn load(id: U64) -[]> Record String! {
+load: fn(id: U64) -[]> Record String! {
     slot := Record{id: 0, flags: 0}
     status := I32{ 1 }
     #Unsafe("live non-null out slot; read only after status zero") {
-        p :: mem.Ptr<Record>.from_addr(mem.address_of(slot))
+        p: mem.Ptr<Record>.from_addr(mem.address_of(slot))
         status = c.load_record(id, p)
         if Int.from_i32(status) == 0 { slot = p.*.copy() }
     }
@@ -52,7 +52,7 @@ fn load(id: U64) -[]> Record String! {
     return Ok(slot)
 }
 
-fn run() {
+run: fn() {
     print(c.coord_sum(Coord{x: 3, y: 4}))
     print(c.status_value(Status.Lost))
     print(c.packet_value(Packet.Ping(41)))

@@ -3,12 +3,12 @@
 // why: service topology values must stay visible to sema before runtime construction
 // fix: pass a top-level function, not a local or captured function value
 // Diagnostic execution is reserved for the composed verifier.
-use service :: core.service
+use service: core.service
 
-fn reject(callback: fn()) {
+reject: fn(callback: fn()) {
     tree := service.tree("checked")
-    _ :: tree.worker("worker", callback, capacity: 1) ?? return
+    _: tree.worker("worker", callback, capacity: 1) ?? return
 }
 
-fn ordinary() {}
-fn run() { reject(ordinary) }
+ordinary: fn() {}
+run: fn() { reject(ordinary) }

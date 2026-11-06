@@ -1,13 +1,13 @@
-enum MetadataType {
+MetadataType: enum {
     Named(name: String)
     Apply(name: String, args: [MetadataType])
 }
-struct DeferredMetadata { key: Int, ty: MetadataType }
-struct MetadataBuilder { deferred: [DeferredMetadata], mutations: Int }
-fn mutate(builder: &MetadataBuilder) Never! {
+DeferredMetadata: struct { key: Int, ty: MetadataType }
+MetadataBuilder: struct { deferred: [DeferredMetadata], mutations: Int }
+mutate: fn(builder: &MetadataBuilder) Never! {
     builder.mutations += 1
 }
-fn read_snapshot(builder: &MetadataBuilder) -> MetadataType Never! {
+read_snapshot: fn(builder: &MetadataBuilder) -> MetadataType Never! {
     loop row_view in builder.deferred {
         if row_view.key != 7 -> next
         row := row_view.copy()
@@ -16,7 +16,7 @@ fn read_snapshot(builder: &MetadataBuilder) -> MetadataType Never! {
     }
     panic("missing deferred metadata")
 }
-fn run() Never! {
+run: fn() Never! {
     builder := MetadataBuilder{
         deferred: [DeferredMetadata]{DeferredMetadata{
             key: 7,

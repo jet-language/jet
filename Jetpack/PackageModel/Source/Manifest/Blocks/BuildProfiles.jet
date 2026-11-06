@@ -11,12 +11,12 @@ use {
 }
 
 // Rust `BuildOptimize::None` is spelled `Off`: `None` is reserved in Jet.
-enum BuildOptimize {
+BuildOptimize: enum {
     Off
     Basic
     Full
 
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         if self == {
             .Off -> BUILD_OPTIMIZE_NONE
             .Basic -> BUILD_OPTIMIZE_BASIC
@@ -24,7 +24,7 @@ enum BuildOptimize {
         }
     }
 
-    fn cache_tag(self) -> String Never! {
+    cache_tag: fn(self) -> String Never! {
         if self == {
             .Off -> "opt:none"
             .Basic -> "opt:basic"
@@ -33,46 +33,46 @@ enum BuildOptimize {
     }
 }
 
-enum BuildPanic {
+BuildPanic: enum {
     Unwind
     Abort
 }
 
 // Development-time replay policy from the package's `dev: { … }` block.
-struct DevRecordsBudget {
+DevRecordsBudget: struct {
     max_bytes: Int
 
-    fn default() -> DevRecordsBudget Never! {
+    default: fn() -> DevRecordsBudget Never! {
         DevRecordsBudget{max_bytes: 268435456}
     }
 }
 
-enum DevCaptureSetting {
+DevCaptureSetting: enum {
     Default
     On
     Off
 }
 
-struct DevRecordsPolicy {
+DevRecordsPolicy: struct {
     capture: DevCaptureSetting
     budget: DevRecordsBudget
 
-    fn default() -> DevRecordsPolicy Never! {
+    default: fn() -> DevRecordsPolicy Never! {
         DevRecordsPolicy{capture: DevCaptureSetting.Default, budget: DevRecordsBudget.default()}
     }
 }
 
-struct DevPolicy {
+DevPolicy: struct {
     swap: Bool
     records: DevRecordsPolicy
 
-    fn default() -> DevPolicy Never! {
+    default: fn() -> DevPolicy Never! {
         DevPolicy{swap: true, records: DevRecordsPolicy.default()}
     }
 }
 
 // One named build profile declared in `build: { … }`.
-struct BuildProfileDef {
+BuildProfileDef: struct {
     name: String
     optimize: BuildOptimize
     debug_info: Bool
@@ -88,14 +88,14 @@ struct BuildProfileDef {
 }
 
 // `Blocks::record_body`: the text between the first `{` and the last `}`.
-fn pkg_block_record_body(value: String, field: String) -> String PackageParseError! {
-    open :: pkg_text_find_byte(value, 123) ?? return Err(PackageParseError.Composition("{field} needs a record value"))
-    close :: pkg_text_rfind_byte(value, 125) ?? return Err(PackageParseError.Composition("{field} needs a closed record value"))
+pkg_block_record_body: fn(value: String, field: String) -> String PackageParseError! {
+    open: pkg_text_find_byte(value, 123) ?? return Err(PackageParseError.Composition("{field} needs a record value"))
+    close: pkg_text_rfind_byte(value, 125) ?? return Err(PackageParseError.Composition("{field} needs a closed record value"))
     Ok(pkg_binder_slice(value, open + 1, close))
 }
 
-fn pkg_parse_dev(value: String) -> DevPolicy PackageParseError! {
-    body :: pkg_block_record_body(value, "dev")
+pkg_parse_dev: fn(value: String) -> DevPolicy PackageParseError! {
+    body: pkg_block_record_body(value, "dev")
     policy := DevPolicy.default()
     seen_swap := false
     seen_records := false
@@ -123,8 +123,8 @@ fn pkg_parse_dev(value: String) -> DevPolicy PackageParseError! {
     Ok(policy)
 }
 
-fn pkg_parse_dev_records(value: String) -> DevRecordsPolicy PackageParseError! {
-    body :: pkg_block_record_body(value, "dev.records")
+pkg_parse_dev_records: fn(value: String) -> DevRecordsPolicy PackageParseError! {
+    body: pkg_block_record_body(value, "dev.records")
     policy := DevRecordsPolicy.default()
     seen_capture := false
     seen_budget := false
@@ -153,8 +153,8 @@ fn pkg_parse_dev_records(value: String) -> DevRecordsPolicy PackageParseError! {
     Ok(policy)
 }
 
-fn pkg_parse_dev_records_budget(value: String) -> DevRecordsBudget PackageParseError! {
-    body :: pkg_block_record_body(value, "dev.records.budget")
+pkg_parse_dev_records_budget: fn(value: String) -> DevRecordsBudget PackageParseError! {
+    body: pkg_block_record_body(value, "dev.records.budget")
     budget := DevRecordsBudget.default()
     seen_size := false
     loop entry in pkg_key_value_entries(body) {
@@ -168,11 +168,11 @@ fn pkg_parse_dev_records_budget(value: String) -> DevRecordsBudget PackageParseE
 
 // A byte quantity with an optional `bytes`/`gib`/`gb`/`mib`/`mb`/`kib`/`kb`/`b`
 // suffix, checked in that order.
-fn pkg_parse_dev_record_bytes(value: String) -> Int PackageParseError! {
-    compact :: pkg_ascii_lower(pkg_unquote(value)).trim()
+pkg_parse_dev_record_bytes: fn(value: String) -> Int PackageParseError! {
+    compact: pkg_ascii_lower(pkg_unquote(value)).trim()
     digits := compact
     multiplier := 1
-    suffixes :: [String]{"bytes", "gib", "gb", "mib", "mb", "kib", "kb", "b"}
+    suffixes: [String]{"bytes", "gib", "gb", "mib", "mb", "kib", "kb", "b"}
     loop suffix in suffixes {
         if compact.ends_with(suffix) {
             digits = compact.removesuffix(suffix).trim()
@@ -185,18 +185,18 @@ fn pkg_parse_dev_record_bytes(value: String) -> Int PackageParseError! {
             break
         }
     }
-    count :: pkg_parse_u64(pkg_without_whitespace(digits.replace("_", ""))) ?? return Err(PackageParseError.Composition("dev.records.budget.size must be a positive whole-byte quantity"))
+    count: pkg_parse_u64(pkg_without_whitespace(digits.replace("_", ""))) ?? return Err(PackageParseError.Composition("dev.records.budget.size must be a positive whole-byte quantity"))
     if count == 0 -> return Err(PackageParseError.Composition("dev.records.budget.size must be a positive whole-byte quantity"))
     if count > PKG_MAX_U64_IN_INT /% multiplier -> return Err(PackageParseError.Composition("dev.records.budget.size does not fit in 64 bits"))
     Ok(count * multiplier)
 }
 
 // Parse every named profile of a `build: { … }` body (`allow` is skipped).
-fn pkg_parse_build(body: String) -> [BuildProfileDef] PackageParseError! {
+pkg_parse_build: fn(body: String) -> [BuildProfileDef] PackageParseError! {
     profiles := [BuildProfileDef]{}
     seen := [String]{}
     loop entry in pkg_key_value_entries(body) {
-        name :: entry.key
+        name: entry.key
         if seen.contains(name) -> return Err(PackageParseError.Composition("build field `{name}` is declared more than once"))
         &seen.push(name)
         if name == BUILD_FIELD_ALLOW -> next
@@ -205,18 +205,18 @@ fn pkg_parse_build(body: String) -> [BuildProfileDef] PackageParseError! {
     Ok(profiles)
 }
 
-fn pkg_parse_build_profile(name: String, value: String) -> BuildProfileDef PackageParseError! {
+pkg_parse_build_profile: fn(name: String, value: String) -> BuildProfileDef PackageParseError! {
     inner_block := String?{None}
     if value.starts_with(BUILD_CTOR) {
-        rest :: pkg_trim_start_matches(value.removeprefix(BUILD_CTOR), ".").trim()
+        rest: pkg_trim_start_matches(value.removeprefix(BUILD_CTOR), ".").trim()
         if pkg_strip_wrapped(rest, "{{", "}}") == .Val(inner) -> inner_block = Val(inner.trim())
     } else if value.starts_with("{{") {
-        rest :: value.removeprefix("{{")
+        rest: value.removeprefix("{{")
         if rest.ends_with("}}") -> inner_block = Val(rest.removesuffix("}}").trim())
     } else {
         return Err(PackageParseError.Composition("build profile `{name}` needs a `Build.{{ optimize: none|basic|full, … }}` value"))
     }
-    inner :: inner_block ?? ""
+    inner: inner_block ?? ""
     optimize_value := String?{None}
     profile := BuildProfileDef{
         name: name,
@@ -231,7 +231,7 @@ fn pkg_parse_build_profile(name: String, value: String) -> BuildProfileDef Packa
     }
     seen_fields := [String]{}
     loop field in pkg_key_value_entries(inner) {
-        key :: field.key
+        key: field.key
         if seen_fields.contains(key) -> return Err(PackageParseError.Composition("build profile `{name}.{key}` is declared more than once"))
         &seen_fields.push(key)
         if key == {
@@ -239,7 +239,7 @@ fn pkg_parse_build_profile(name: String, value: String) -> BuildProfileDef Packa
             BUILD_FIELD_DEBUG_INFO -> profile.debug_info = pkg_parse_build_bool(name, field.value)
             BUILD_FIELD_SMALL -> profile.small = pkg_parse_build_bool(name, field.value)
             BUILD_FIELD_PANIC -> {
-                spelled :: pkg_unquote(field.value)
+                spelled: pkg_unquote(field.value)
                 if spelled == BUILD_PANIC_ABORT {
                     profile.panic = Val(BuildPanic.Abort)
                 } else if spelled == BUILD_PANIC_UNWIND {
@@ -254,12 +254,12 @@ fn pkg_parse_build_profile(name: String, value: String) -> BuildProfileDef Packa
             }
             "game_development_stripping" -> profile.game_development_stripping = Val(pkg_parse_build_bool(name, field.value))
             "game_cook_mode" -> {
-                mode :: pkg_unquote(field.value)
+                mode: pkg_unquote(field.value)
                 if mode != "fast" && mode != "reproducible" && mode != "scripts-only" -> return Err(PackageParseError.Composition("build profile `{name}` has an unknown `game_cook_mode:` value `{mode}`"))
                 profile.game_cook_mode = Val(mode)
             }
             BUILD_FIELD_SETTINGS -> {
-                settings_body :: pkg_strip_wrapped(pkg_trim_start_matches(field.value, ".").trim(), "{{", "}}") ?? return Err(PackageParseError.Composition("build profile `{name}` needs `settings: {{ key: value, … }}`"))
+                settings_body: pkg_strip_wrapped(pkg_trim_start_matches(field.value, ".").trim(), "{{", "}}") ?? return Err(PackageParseError.Composition("build profile `{name}` needs `settings: {{ key: value, … }}`"))
                 loop setting in pkg_key_value_entries(settings_body.trim()) {
                     if profile.settings.has_key(setting.key) -> return Err(PackageParseError.Composition("build profile `{name}.settings.{setting.key}` is declared more than once"))
                     profile.settings[setting.key] = pkg_unquote(setting.value)
@@ -269,7 +269,7 @@ fn pkg_parse_build_profile(name: String, value: String) -> BuildProfileDef Packa
                 // Another row of the build-option table (JET_BUILD_OPTIONS,
                 // `bounds: off`): the CLI resolves it with the profile layer.
                 if build_option_row(key) == .Val(row) {
-                    chosen :: pkg_build_option_value(row, field.value) ?? return Err(PackageParseError.Composition("build profile `{name}` field `{key}:` needs {build_option_profile_hint(row)}"))
+                    chosen: pkg_build_option_value(row, field.value) ?? return Err(PackageParseError.Composition("build profile `{name}` field `{key}:` needs {build_option_profile_hint(row)}"))
                     if !build_option_accepts(row, chosen) -> return Err(PackageParseError.Composition("build profile `{name}` has an unknown `{key}:` value `{chosen}` — use {build_option_profile_hint(row)}"))
                 } else if build_option_refusal(key) == .Val(refusal) {
                     return Err(PackageParseError.Composition("build profile `{name}` field `{key}` isn't a build option: {refusal.law}"))
@@ -279,7 +279,7 @@ fn pkg_parse_build_profile(name: String, value: String) -> BuildProfileDef Packa
             }
         }
     }
-    selected :: optimize_value ?? return Err(PackageParseError.Composition("build profile `{name}` is missing `optimize: none|basic|full`"))
+    selected: optimize_value ?? return Err(PackageParseError.Composition("build profile `{name}` is missing `optimize: none|basic|full`"))
     if selected == BUILD_OPTIMIZE_NONE {
         profile.optimize = BuildOptimize.Off
     } else if selected == BUILD_OPTIMIZE_BASIC {
@@ -295,12 +295,12 @@ fn pkg_parse_build_profile(name: String, value: String) -> BuildProfileDef Packa
 // A build-option profile field's value as the row holds it: the word or
 // string, or for a List row the strings of `["a", "b"]` joined by newlines
 // (build_option_list_value); None when a List row's field is no such list.
-fn pkg_build_option_value(row: BuildOptionRow, written: String) -> String? {
+pkg_build_option_value: fn(row: BuildOptionRow, written: String) -> String? {
     if row.kind != BuildOptionKind.List -> return Val(pkg_unquote(written))
-    body :: pkg_strip_wrapped(written.trim(), "[", "]") ?? return None
+    body: pkg_strip_wrapped(written.trim(), "[", "]") ?? return None
     items := [String]{}
     loop piece in pkg_top_level_commas(body) {
-        item :: piece.trim()
+        item: piece.trim()
         if item == "" -> next
         if !item.starts_with("\"") -> return None
         &items.push(pkg_unquote(item))
@@ -309,16 +309,16 @@ fn pkg_build_option_value(row: BuildOptionRow, written: String) -> String? {
 }
 
 // `build: { allow: #(FS, Exec) }`.
-fn pkg_parse_build_allow(body: String) -> [String] PackageParseError! {
+pkg_parse_build_allow: fn(body: String) -> [String] PackageParseError! {
     allow := [String]{}
     seen_allow := false
     loop entry in pkg_key_value_entries(body) {
         if entry.key != BUILD_FIELD_ALLOW -> next
         if seen_allow -> return Err(PackageParseError.BadEffectsBlock("`build.allow:` is declared more than once"))
         seen_allow = true
-        inner :: pkg_strip_wrapped(entry.value.trim(), "#(", ")") ?? return Err(PackageParseError.BadEffectsBlock("`build.allow:` must be an effect tuple like `#(FS, Exec)`"))
+        inner: pkg_strip_wrapped(entry.value.trim(), "#(", ")") ?? return Err(PackageParseError.BadEffectsBlock("`build.allow:` must be an effect tuple like `#(FS, Exec)`"))
         loop piece in pkg_top_level_commas(inner) {
-            name :: pkg_unquote(piece.trim())
+            name: pkg_unquote(piece.trim())
             if !pkg_effect_root_known(authority_root(name)) -> return Err(PackageParseError.BadEffectsBlock("`{name}` isn't a known build effect"))
             &allow.push(name)
         }
@@ -326,7 +326,7 @@ fn pkg_parse_build_allow(body: String) -> [String] PackageParseError! {
     Ok(allow)
 }
 
-fn pkg_parse_build_bool(profile: String, value: String) -> Bool PackageParseError! {
+pkg_parse_build_bool: fn(profile: String, value: String) -> Bool PackageParseError! {
     if value.trim() == {
         "true" -> Ok(true)
         "false" -> Ok(false)

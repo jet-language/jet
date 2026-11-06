@@ -14,27 +14,27 @@ use {
 }
 
 // A toolchain tree holding one asset at `file`.
-struct CoreInputsTestReader {
+CoreInputsTestReader: struct {
     file: String
     bytes: [U8]
 }
 
 impl CoreInputsTestReader.JetDriverCoreSourceReader {
-    fn read(self, file: String) -[FS.Read]> String? {
+    read: fn(self, file: String) -[FS.Read]> String? {
         None
     }
-    fn read_bytes(self, file: String) -[FS.Read]> [U8] JetDriverBuildInputError! {
+    read_bytes: fn(self, file: String) -[FS.Read]> [U8] JetDriverBuildInputError! {
         if file != self.file -> return Err(JetDriverBuildInputError{message: "No such file or directory (os error 2)"})
         Ok(self.bytes.copy())
     }
 }
 
-fn core_inputs_test_row(path: String, text: Shared<JetDriverCoreText>) -> JetDriverCoreSource Never! {
+core_inputs_test_row: fn(path: String, text: Shared<JetDriverCoreText>) -> JetDriverCoreSource Never! {
     JetDriverCoreSource{module_name: "core.fixture", alias: "fixture", path: path, owner: "", owned_members: [String]{}, runtime: false, text: text}
 }
 
 // A request with no build-input transport and an empty comptime input log.
-fn core_inputs_test_request(rows: [JetDriverCoreSource], log: Shared<JetDriverComptimeInputLog>) -> JetDriverCompileRequest {
+core_inputs_test_request: fn(rows: [JetDriverCoreSource], log: Shared<JetDriverComptimeInputLog>) -> JetDriverCompileRequest {
     request := JetDriverCompileRequest{
         authorized_sources: JetDriverAuthorizedSourceSnapshot{roots: [], entry_root_identity: "core-inputs", entry_path: "/project/main.jet"},
         canonical_effect_source: "", core_sources: rows, host_facts: JetDriverHostFacts{target_triple: None, active_os: None, compiler_identity: None}, eval_config: jet_eval_default_config(), record_store: None, trace_sink: None, compiler_threads: compiler_threads_single(),
@@ -44,16 +44,16 @@ fn core_inputs_test_request(rows: [JetDriverCoreSource], log: Shared<JetDriverCo
 }
 
 #Test("a Core file's comptime inputs are read beside it by its Core row's reader and stay out of the program's input lock") {
-    asset :: [U8]{0x4A, 0x55, 0x00, 0xFF}
-    rows :: [JetDriverCoreSource]{
+    asset: [U8]{0x4A, 0x55, 0x00, 0xFF}
+    rows: [JetDriverCoreSource]{
         core_inputs_test_row("Core/Text/Assets/Fixture.jet", jet_driver_core_text_file("/toolchain/Core/Text/Assets/Fixture.jet", CoreInputsTestReader{file: "/toolchain/Core/Text/Assets/Fixture.bin", bytes: asset.copy()})),
         core_inputs_test_row("Core/Embedded.jet", jet_driver_core_text("")),
     }
-    log :: shared JetDriverComptimeInputLog{records: [JetDriverComptimeInputRecord]{}}
+    log: shared JetDriverComptimeInputLog{records: [JetDriverComptimeInputRecord]{}}
     // copy: the request shares the log's cell, so the test reads what the reads recorded.
-    request :: core_inputs_test_request(rows, log.copy())
-    span :: Span{start: 0, end: 1}
-    adapter :: jet_driver_comptime_inputs_for(request, "{JET_DRIVER_CORE_SOURCE_ROOT}/Core/Text/Assets/Fixture.jet") ?? panic("a Core row read from a toolchain tree has a comptime input host")
+    request: core_inputs_test_request(rows, log.copy())
+    span: Span{start: 0, end: 1}
+    adapter: jet_driver_comptime_inputs_for(request, "{JET_DRIVER_CORE_SOURCE_ROOT}/Core/Text/Assets/Fixture.jet") ?? panic("a Core row read from a toolchain tree has a comptime input host")
     if adapter.comptime_input("embed_bytes", "Fixture.bin", span) == {
         .Ok(value) -> if value == .Bytes(bytes) -> assert_eq(bytes, asset) else -> panic("Core embed_bytes gives bytes")
         .Err(problem) -> panic("Core embed_bytes: {problem.diagnostic.what}: {problem.diagnostic.why}")

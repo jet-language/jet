@@ -8,33 +8,33 @@ use {
         pkg_lock_write_atomically,
     ]
     jetpack_foundation.[env_runtime_project_lock]
-    files :: core.files
+    files: core.files
 }
 
-SEMANTIC_LOCK_SCOPE :: "semantic-lock"
+SEMANTIC_LOCK_SCOPE: "semantic-lock"
 
 // Rust `live_path`: the project's `.jet/lock`.
-fn trust_semantic_lock_live_path(project: String) -> String Never! {
+trust_semantic_lock_live_path: fn(project: String) -> String Never! {
     pkg_lock_path(project)
 }
 
 // Rust `load`: the semantic sections of the live lock, or None when the lock
 // cannot be read. A lock without semantic content reads as an empty
 // semantic lock (the Rust marker check returns the same empty value).
-fn trust_semantic_lock_load(project: String) -[FS]> SemanticLockFile? {
-    raw :: files.read(trust_semantic_lock_live_path(project)) ?? return None
+trust_semantic_lock_load: fn(project: String) -[FS]> SemanticLockFile? {
+    raw: files.read(trust_semantic_lock_live_path(project)) ?? return None
     Val(trust_parse_semantic_lock(raw))
 }
 
 // Rust `atomic_commit`: revalidate, then splice the semantic sections into
 // `.jet/lock` atomically under the project lock. A missing or unstamped
 // machine half gains a build stamp first.
-fn trust_semantic_lock_atomic_commit(project: String, lock: SemanticLockFile) TrustError! -[FS, Env, Exec, Time, Time.Wait]> {
+trust_semantic_lock_atomic_commit: fn(project: String, lock: SemanticLockFile) TrustError! -[FS, Env, Exec, Time, Time.Wait]> {
     trust_revalidate_semantic_lock(lock)
-    path :: trust_semantic_lock_live_path(project)
-    _guard :: env_runtime_project_lock(project, SEMANTIC_LOCK_SCOPE)
-    existing :: files.read(path) ?? ""
-    stripped :: trust_strip_semantic_sections(existing)
+    path: trust_semantic_lock_live_path(project)
+    _guard: env_runtime_project_lock(project, SEMANTIC_LOCK_SCOPE)
+    existing: files.read(path) ?? ""
+    stripped: trust_strip_semantic_sections(existing)
     machine := stripped.copy()
     if {
         stripped.trim() == "" -> {
@@ -50,15 +50,15 @@ fn trust_semantic_lock_atomic_commit(project: String, lock: SemanticLockFile) Tr
             }
         }
     }
-    semantic :: trust_write_semantic_lock(lock)
-    body :: if machine.trim() == "" -> "version = 1\n\n{semantic}" else -> "{machine.trim_end()}\n\n{semantic}"
+    semantic: trust_write_semantic_lock(lock)
+    body: if machine.trim() == "" -> "version = 1\n\n{semantic}" else -> "{machine.trim_end()}\n\n{semantic}"
     pkg_lock_write_atomically(project, body.bytes()) ?? return Err(trust_lock_error(err))
 }
 
 // Rust `merge_revalidate_commit`: merge three ways, refuse conflicts before
 // any write, then commit the merged lock.
-fn trust_semantic_lock_merge_revalidate_commit(project: String, base: SemanticLockFile, left: SemanticLockFile, right: SemanticLockFile) -[FS, Env, Exec, Time, Time.Wait]> SemanticLockFile TrustError! {
-    merged :: trust_merge_for_commit(base, left, right)
+trust_semantic_lock_merge_revalidate_commit: fn(project: String, base: SemanticLockFile, left: SemanticLockFile, right: SemanticLockFile) -[FS, Env, Exec, Time, Time.Wait]> SemanticLockFile TrustError! {
+    merged: trust_merge_for_commit(base, left, right)
     trust_semantic_lock_atomic_commit(project, merged)
     Ok(merged)
 }

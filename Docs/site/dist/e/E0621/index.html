@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>E0621 — Jet diagnostic</title>
-<meta name="description" content="Top-level executable statements require an explicit `fn run`">
+<meta name="description" content="Top-level executable statements require an explicit `run: fn`">
 <meta property="og:title" content="E0621 — Jet diagnostic">
-<meta property="og:description" content="Top-level executable statements require an explicit `fn run`">
+<meta property="og:description" content="Top-level executable statements require an explicit `run: fn`">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,34 +25,34 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic</p>
 <h1>E0621</h1>
-<p>Top-level executable statements require an explicit `fn run`</p>
+<p>Top-level executable statements require an explicit `run: fn`</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">Top-level executable statements require an explicit `fn run`</p>
+<p class="diag-copy what" data-registry-field="what">Top-level executable statements require an explicit `run: fn`</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">Jet does not invent a runtime function for ordinary files; only an explicit `fn run` executes code.</p>
+<p class="diag-copy why" data-registry-field="why">Jet does not invent a runtime function for ordinary files; only an explicit `run: fn` executes code.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Move the statements into `fn run`.</p>
+<p class="diag-copy fix" data-registry-field="fix">Move the statements into `run: fn`.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0621</code>: <code>tests/ui/E0927_unknown_marker_constant.stderr</code>.</p>
 <pre class="diag">Error [jet.UnknownAppliedRule]: `#Bogus` isn&#39;t a known applied rule
   --&gt; tests/ui/E0927_unknown_marker_constant.jet:2:2
     |
-  2 | #Bogus $limit :: 1
+  2 | #Bogus $limit: 1
     |  ^^^^^
  Why: `Bogus` isn&#39;t registered as an applied rule — Jet rules are a closed, registered vocabulary (I7), not any PascalCase word.
  Fix: Check the spelling, or see Docs/spec/syntax-decisions.md for the full applied-rule list.
 More: jet-lang.dev/e/E0927
 
-Error [jet.TopLevelStatementsWithoutRun]: Top-level executable statements require an explicit `fn run`
-  --&gt; tests/ui/E0927_unknown_marker_constant.jet:2:15
+Error [jet.TopLevelStatementsWithoutRun]: Top-level executable statements require an explicit `run: fn`
+  --&gt; tests/ui/E0927_unknown_marker_constant.jet:2:14
     |
-  2 | #Bogus $limit :: 1
-    |               ^^^^
- Why: Jet does not invent a runtime function for ordinary files; only `fn run` executes code
- Fix: Move the statements into `fn run`
+  2 | #Bogus $limit: 1
+    |              ^^^
+ Why: Jet does not invent a runtime function for ordinary files; only `run: fn` executes code
+ Fix: Move the statements into `run: fn`
 More: jet-lang.dev/e/E0621
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

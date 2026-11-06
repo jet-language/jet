@@ -53,24 +53,24 @@ def full_mask(k: int) -> str:
 
 # --- Jet sources -----------------------------------------------------------
 
-JET_COMMON = """use time :: core.time
+JET_COMMON = """use time: core.time
 
-enum Case {{
+Case: enum {{
 {cases}
 }}
 
-ALL :: [{all}]
+ALL: [{all}]
 
-fn dense(r: Int) -> Int {{
-    x :: (r * 40503 + 12345) % 1000003
+dense: fn(r: Int) -> Int {{
+    x: (r * 40503 + 12345) % 1000003
     return (x | (x << 20) | (x << 40)) & {full}
 }}
 
-fn sparse(r: Int) -> Int {{
+sparse: fn(r: Int) -> Int {{
     return (1 << (r % {kbits})) | (1 << ((r * 7) % {kbits}))
 }}
 
-fn mask_of(r: Int) -> Int {{
+mask_of: fn(r: Int) -> Int {{
     if r % 2 == 0 -> return dense(r)
     return sparse(r)
 }}
@@ -78,7 +78,7 @@ fn mask_of(r: Int) -> Int {{
 
 JET_REPS = {
     "jet_set_enum": """
-fn mk(mask: Int) -> Set<Case> {{
+mk: fn(mask: Int) -> Set<Case> {{
     out := Set.from([Case]{{}})
     i := 0
     loop i < {k} {{
@@ -88,20 +88,20 @@ fn mk(mask: Int) -> Set<Case> {{
     return out
 }}
 
-fn has(s: Set<Case>, i: Int) -> Bool {{ s.has(ALL[i]) }}
+has: fn(s: Set<Case>, i: Int) -> Bool {{ s.has(ALL[i]) }}
 
-fn set_bit(s: &Set<Case>, i: Int) {{ &s.add(ALL[i]) }}
+set_bit: fn(s: &Set<Case>, i: Int) {{ &s.add(ALL[i]) }}
 
-fn clear_bit(s: &Set<Case>, i: Int) {{ &s.remove(ALL[i]) }}
+clear_bit: fn(s: &Set<Case>, i: Int) {{ &s.remove(ALL[i]) }}
 
-fn uni(a: Set<Case>, b: Set<Case>) -> Set<Case> {{ a.union(b) }}
+uni: fn(a: Set<Case>, b: Set<Case>) -> Set<Case> {{ a.union(b) }}
 
-fn inter(a: Set<Case>, b: Set<Case>) -> Set<Case> {{ a.intersection(b) }}
+inter: fn(a: Set<Case>, b: Set<Case>) -> Set<Case> {{ a.intersection(b) }}
 
-fn diff(a: Set<Case>, b: Set<Case>) -> Set<Case> {{ a.difference(b) }}
+diff: fn(a: Set<Case>, b: Set<Case>) -> Set<Case> {{ a.difference(b) }}
 """,
     "jet_bits": """
-fn mk(mask: Int) -> Bits {{
+mk: fn(mask: Int) -> Bits {{
     out := Bits.new()
     i := 0
     loop i < {k} {{
@@ -111,18 +111,18 @@ fn mk(mask: Int) -> Bits {{
     return out
 }}
 
-fn has(s: Bits, i: Int) -> Bool {{ s.has(i) }}
+has: fn(s: Bits, i: Int) -> Bool {{ s.has(i) }}
 
-fn set_bit(s: &Bits, i: Int) {{ &s.add(i) }}
+set_bit: fn(s: &Bits, i: Int) {{ &s.add(i) }}
 
-fn clear_bit(s: &Bits, i: Int) {{ &s.remove(i) }}
+clear_bit: fn(s: &Bits, i: Int) {{ &s.remove(i) }}
 
-fn combine(a: Bits, b: Bits, op: Int) -> Bits {{
+combine: fn(a: Bits, b: Bits, op: Int) -> Bits {{
     out := Bits.new()
     i := 0
     loop i < {k} {{
-        x :: a.has(i)
-        y :: b.has(i)
+        x: a.has(i)
+        y: b.has(i)
         keep := x && !y
         if op == 0 -> keep = x || y
         if op == 1 -> keep = x && y
@@ -132,50 +132,50 @@ fn combine(a: Bits, b: Bits, op: Int) -> Bits {{
     return out
 }}
 
-fn uni(a: Bits, b: Bits) -> Bits {{ combine(a, b, 0) }}
+uni: fn(a: Bits, b: Bits) -> Bits {{ combine(a, b, 0) }}
 
-fn inter(a: Bits, b: Bits) -> Bits {{ combine(a, b, 1) }}
+inter: fn(a: Bits, b: Bits) -> Bits {{ combine(a, b, 1) }}
 
-fn diff(a: Bits, b: Bits) -> Bits {{ combine(a, b, 2) }}
+diff: fn(a: Bits, b: Bits) -> Bits {{ combine(a, b, 2) }}
 """,
     "jet_int_mask": """
-fn mk(mask: Int) -> Int {{ mask }}
+mk: fn(mask: Int) -> Int {{ mask }}
 
-fn has(s: Int, i: Int) -> Bool {{ (s >> i) & 1 == 1 }}
+has: fn(s: Int, i: Int) -> Bool {{ (s >> i) & 1 == 1 }}
 
-fn set_bit(s: &Int, i: Int) {{ s = s | (1 << i) }}
+set_bit: fn(s: &Int, i: Int) {{ s = s | (1 << i) }}
 
-fn clear_bit(s: &Int, i: Int) {{ s = s - (s & (1 << i)) }}
+clear_bit: fn(s: &Int, i: Int) {{ s = s - (s & (1 << i)) }}
 
-fn uni(a: Int, b: Int) -> Int {{ a | b }}
+uni: fn(a: Int, b: Int) -> Int {{ a | b }}
 
-fn inter(a: Int, b: Int) -> Int {{ a & b }}
+inter: fn(a: Int, b: Int) -> Int {{ a & b }}
 
-fn diff(a: Int, b: Int) -> Int {{ a - (a & b) }}
+diff: fn(a: Int, b: Int) -> Int {{ a - (a & b) }}
 """,
     "jet_packed_fields": """
-struct Word {{
+Word: struct {{
     bits: Int
 }}
 
-fn mk(mask: Int) -> Word {{ Word{{bits: mask}} }}
+mk: fn(mask: Int) -> Word {{ Word{{bits: mask}} }}
 
-fn has(s: Word, i: Int) -> Bool {{ (s.bits >> i) & 1 == 1 }}
+has: fn(s: Word, i: Int) -> Bool {{ (s.bits >> i) & 1 == 1 }}
 
-fn set_bit(s: &Word, i: Int) {{ s.bits = s.bits | (1 << i) }}
+set_bit: fn(s: &Word, i: Int) {{ s.bits = s.bits | (1 << i) }}
 
-fn clear_bit(s: &Word, i: Int) {{ s.bits = s.bits - (s.bits & (1 << i)) }}
+clear_bit: fn(s: &Word, i: Int) {{ s.bits = s.bits - (s.bits & (1 << i)) }}
 
-fn uni(a: Word, b: Word) -> Word {{ Word{{bits: a.bits | b.bits}} }}
+uni: fn(a: Word, b: Word) -> Word {{ Word{{bits: a.bits | b.bits}} }}
 
-fn inter(a: Word, b: Word) -> Word {{ Word{{bits: a.bits & b.bits}} }}
+inter: fn(a: Word, b: Word) -> Word {{ Word{{bits: a.bits & b.bits}} }}
 
-fn diff(a: Word, b: Word) -> Word {{ Word{{bits: a.bits - (a.bits & b.bits)}} }}
+diff: fn(a: Word, b: Word) -> Word {{ Word{{bits: a.bits - (a.bits & b.bits)}} }}
 """,
 }
 
 JET_DRIVER = """
-fn to_mask(s: {ty}) -> Int {{
+to_mask: fn(s: {ty}) -> Int {{
     m := 0
     i := 0
     loop i < {k} {{
@@ -185,7 +185,7 @@ fn to_mask(s: {ty}) -> Int {{
     return m % 1000003
 }}
 
-fn items(s: {ty}) -> [Int] {{
+items: fn(s: {ty}) -> [Int] {{
     out := [Int]{{}}
     i := 0
     loop i < {k} {{
@@ -195,25 +195,25 @@ fn items(s: {ty}) -> [Int] {{
     return out
 }}
 
-fn from_items(xs: [Int]) -> {ty} {{
+from_items: fn(xs: [Int]) -> {ty} {{
     m := 0
     loop x in xs -> m = m | (1 << x)
     return mk(m)
 }}
 
-fn run() {{
-    rounds :: {rounds}
+run: fn() {{
+    rounds: {rounds}
     check := 0
 
-    w :: time.instant()
+    w: time.instant()
     r := 0
     loop r < rounds {{
         check = (check * 31 + to_mask(mk(mask_of(r)))) % 1000000007
         r += 1
     }}
-    t_construction :: w.elapsed().in(.Nanoseconds)
+    t_construction: w.elapsed().in(.Nanoseconds)
 
-    w2 :: time.instant()
+    w2: time.instant()
     s := mk(0)
     r = 0
     loop r < rounds {{
@@ -222,10 +222,10 @@ fn run() {{
         r += 1
     }}
     check = (check * 31 + to_mask(s)) % 1000000007
-    t_update :: w2.elapsed().in(.Nanoseconds)
+    t_update: w2.elapsed().in(.Nanoseconds)
 
-    w3 :: time.instant()
-    probe :: mk(dense(7))
+    w3: time.instant()
+    probe: mk(dense(7))
     hits := 0
     r = 0
     loop r < rounds {{
@@ -233,19 +233,19 @@ fn run() {{
         r += 1
     }}
     check = (check * 31 + hits) % 1000000007
-    t_membership :: w3.elapsed().in(.Nanoseconds)
+    t_membership: w3.elapsed().in(.Nanoseconds)
 
-    w4 :: time.instant()
+    w4: time.instant()
     r = 0
     loop r < rounds {{
-        a :: mk(mask_of(r))
-        b :: mk(mask_of(r + 1))
+        a: mk(mask_of(r))
+        b: mk(mask_of(r + 1))
         check = (check * 31 + to_mask(uni(a, b)) + to_mask(inter(a, b)) * 3 + to_mask(diff(a, b)) * 5) % 1000000007
         r += 1
     }}
-    t_setops :: w4.elapsed().in(.Nanoseconds)
+    t_setops: w4.elapsed().in(.Nanoseconds)
 
-    w5 :: time.instant()
+    w5: time.instant()
     total := 0
     r = 0
     loop r < rounds /% 8 {{
@@ -253,15 +253,15 @@ fn run() {{
         r += 1
     }}
     check = (check * 31 + total) % 1000000007
-    t_iteration :: w5.elapsed().in(.Nanoseconds)
+    t_iteration: w5.elapsed().in(.Nanoseconds)
 
-    w6 :: time.instant()
+    w6: time.instant()
     r = 0
     loop r < rounds /% 8 {{
         check = (check * 31 + to_mask(from_items(items(mk(mask_of(r)))))) % 1000000007
         r += 1
     }}
-    t_conversion :: w6.elapsed().in(.Nanoseconds)
+    t_conversion: w6.elapsed().in(.Nanoseconds)
 
     print("k={k} order={{items(mk(dense(3)))}}")
     print("check={{check}}")

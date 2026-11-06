@@ -7,11 +7,13 @@ use {
         PackageProfilePlan, envmodel_evaluate_env, envmodel_evaluate_source,
     ]
     jet_foundation.[Diagnostic, diagnostic_display_name, diagnostic_render_all]
+    files: core.files
+    sys: core.sys
 }
 
 // Rust `std::env::temp_dir()`: the evaluation base for sources that read no
 // files.
-fn envmodel_test_base_dir() -[Env]> String {
+envmodel_test_base_dir: fn() -[Env]> String {
     sys.temp_dir()
 }
 
@@ -19,53 +21,53 @@ fn envmodel_test_base_dir() -[Env]> String {
 // `CARGO_MANIFEST_DIR/../..`): JET_TOOLCHAIN_ROOT, which check.sh exports as
 // the Jet tree it runs from. The claims run inside an assembled scratch
 // project, so the working directory is never that tree.
-fn envmodel_test_repo_root() -[Env]> String {
+envmodel_test_repo_root: fn() -[Env]> String {
     sys.get("JET_TOOLCHAIN_ROOT") ?? panic("JET_TOOLCHAIN_ROOT must name the Jet repository whose committed fixtures the claims read")
 }
 
 // A fresh, empty directory under the system temp dir, unique per call.
-fn envmodel_test_fresh_dir(slug: String) -[FS]> String {
+envmodel_test_fresh_dir: fn(slug: String) -[FS]> String {
     files.tmpdir("modeval-{slug}-") ?? panic("create a fresh temp dir")
 }
 
 // A fresh temp dir with a package manifest declaring `app: executable` — the
 // package an `.Oci` image's `from: packages.app` cross-checks against (E1267).
-fn envmodel_test_oci_base_dir(slug: String) -[FS]> String {
-    dir :: files.tmpdir("jet-oci-modeval-{slug}-") ?? panic("create a fresh temp dir")
+envmodel_test_oci_base_dir: fn(slug: String) -[FS]> String {
+    dir: files.tmpdir("jet-oci-modeval-{slug}-") ?? panic("create a fresh temp dir")
     files.write(files.join(dir, PACKAGE_FILE), "name: \"t\"\nversion: \"0.1.0\"\npackages: {{ app: executable }}\n") ?? panic("write the package manifest")
     dir
 }
 
 // The first writer's value of one setting in a module's entry contribution.
-fn envmodel_test_setting_value(entry: EntryContribution, key: String) -> FactValue? {
-    writers :: entry.settings.get(key) ?? return None
+envmodel_test_setting_value: fn(entry: EntryContribution, key: String) -> FactValue? {
+    writers: entry.settings.get(key) ?? return None
     if writers.len() == 0 -> return None
     Val(writers[0].value)
 }
 
 // The one lowered integration of `kind` in a plan.
-fn envmodel_test_integration(plan: EnvPlan, kind: IntegrationKind) -> EnvironmentIntegration {
+envmodel_test_integration: fn(plan: EnvPlan, kind: IntegrationKind) -> EnvironmentIntegration {
     loop integration in plan.integrations {
         if integration.kind == kind -> return integration
     }
     panic("the plan has no {kind.as_str()} integration")
 }
 
-fn envmodel_test_env_error(result: EnvPlan EnvModelEvalError!) -> Diagnostic {
+envmodel_test_env_error: fn(result: EnvPlan EnvModelEvalError!) -> Diagnostic {
     if result == {
         .Ok(_) -> panic("expected the environment to be rejected")
         .Err(error) -> error.diagnostic
     }
 }
 
-fn envmodel_test_source_error(result: [EvaluatedModule] EnvModelEvalError!) -> Diagnostic {
+envmodel_test_source_error: fn(result: [EvaluatedModule] EnvModelEvalError!) -> Diagnostic {
     if result == {
         .Ok(_) -> panic("expected the source to be rejected")
         .Err(error) -> error.diagnostic
     }
 }
 
-fn envmodel_test_profile_error(result: PackageProfilePlan EnvModelEvalError!) -> Diagnostic {
+envmodel_test_profile_error: fn(result: PackageProfilePlan EnvModelEvalError!) -> Diagnostic {
     if result == {
         .Ok(_) -> panic("expected the package generation to be rejected")
         .Err(error) -> error.diagnostic
@@ -73,41 +75,41 @@ fn envmodel_test_profile_error(result: PackageProfilePlan EnvModelEvalError!) ->
 }
 
 // Rust `Diagnostics::render_all(file, src, &[diagnostic])`.
-fn envmodel_test_render(file: String, src: String, diagnostic: Diagnostic) -> String {
+envmodel_test_render: fn(file: String, src: String, diagnostic: Diagnostic) -> String {
     diagnostic_render_all(file, src, [Diagnostic]{diagnostic}, false)
 }
 
 // `rendered` with the fresh directory `dir` (envmodel_test_fresh_dir(slug))
 // spelled `<TMP>/modeval-<slug>`, so the pinned snapshot does not depend on
 // the generated directory name.
-fn envmodel_test_redact_dir(rendered: String, dir: String, slug: String) -> String {
+envmodel_test_redact_dir: fn(rendered: String, dir: String, slug: String) -> String {
     rendered.replace(dir, "<TMP>/modeval-{slug}")
 }
 
 // Compare a rendered diagnostic with its pinned snapshot; `UPDATE_EXPECT`
 // rewrites the snapshot first.
-fn envmodel_test_check_snapshot(code: String, rendered: String) -[FS, Env]> {
+envmodel_test_check_snapshot: fn(code: String, rendered: String) -[FS, Env]> {
     assert(rendered.starts_with("Error [{diagnostic_display_name(code)}]:"))
     assert(rendered.contains("\n Why: "))
     assert(rendered.contains("\n Fix: "))
-    path :: files.join(envmodel_test_repo_root(), "tests/fixtures/module-eval-diagnostics/{code}.stderr")
+    path: files.join(envmodel_test_repo_root(), "tests/fixtures/module-eval-diagnostics/{code}.stderr")
     if sys.get("UPDATE_EXPECT") != None {
         files.create_dir_all(files.dirname(path)) ?? panic("create the snapshot directory")
         files.write(path, rendered) ?? panic("write the snapshot")
     }
-    expected :: files.read(path) ?? panic("missing diagnostic snapshot {path}")
+    expected: files.read(path) ?? panic("missing diagnostic snapshot {path}")
     assert_eq(rendered, expected)
 }
 
 // EnvPlan carries no fleet or vmtest captures: `envmodel_evaluate_env`
 // cross-checks each host's system, and the evaluated modules keep the groups.
-fn envmodel_test_host_groups(source: String, vmtests: Bool) -[Env, Exec, FS]> [FleetPlan] {
-    base :: envmodel_test_base_dir()
-    _ :: envmodel_evaluate_env(source, base) ?? panic("the host environment evaluates")
-    modules :: envmodel_evaluate_source(source, base) ?? panic("the host source evaluates")
+envmodel_test_host_groups: fn(source: String, vmtests: Bool) -[Env, Exec, FS]> [FleetPlan] {
+    base: envmodel_test_base_dir()
+    _: envmodel_evaluate_env(source, base) ?? panic("the host environment evaluates")
+    modules: envmodel_evaluate_source(source, base) ?? panic("the host source evaluates")
     groups := [FleetPlan]{}
     loop evaluated in modules {
-        captured :: if vmtests -> evaluated.vmtests else -> evaluated.fleets
+        captured: if vmtests -> evaluated.vmtests else -> evaluated.fleets
         loop group in captured -> &groups.push(group)
     }
     groups

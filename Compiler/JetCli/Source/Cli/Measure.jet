@@ -20,11 +20,11 @@ use {
     jet_sema.[BudgetSpec, sema_budget_elaborate_items]
 }
 
-JET_CLI_MEASURE_OPEN :: "\tjet-measure\t"
-JET_CLI_MEASURE_CLOSE :: "\tjet-measure-end\t\n"
+JET_CLI_MEASURE_OPEN: "\tjet-measure\t"
+JET_CLI_MEASURE_CLOSE: "\tjet-measure-end\t\n"
 
 // One declared budget and the file whose source its spans index.
-struct JetCLIMeasureBudget {
+JetCLIMeasureBudget: struct {
     spec: BudgetSpec
     shown: String
     source: String
@@ -32,7 +32,7 @@ struct JetCLIMeasureBudget {
 
 // What `--measure` needs from the tested files: the measured claims' names,
 // the budgets the files declare and the selected profile.
-struct JetCLIMeasurePlan {
+JetCLIMeasurePlan: struct {
     claims: [String]
     budgets: [JetCLIMeasureBudget]
     profile: String
@@ -40,7 +40,7 @@ struct JetCLIMeasurePlan {
 
 // One budget's outcome against a record. `status` is "pass", "miss", "warn"
 // (a miss under `.Warn`) or "unevaluated" (a relative budget).
-struct JetCLIMeasureVerdict {
+JetCLIMeasureVerdict: struct {
     name: String
     metric: String
     status: String
@@ -49,7 +49,7 @@ struct JetCLIMeasureVerdict {
 }
 
 // One measured claim's record. Times are per iteration, in picoseconds.
-struct JetCLIMeasureRecord {
+JetCLIMeasureRecord: struct {
     name: String
     ok: Bool
     profile: String
@@ -66,13 +66,13 @@ struct JetCLIMeasureRecord {
 // The measure plan of the tested files: every root file of a package, else the
 // entry alone (as doctests, Doctests.jet). The compile validates the budgets
 // (and reports a broken one), so this only reads them.
-fn jet_cli_measure_plan(snapshot: JetDriverAuthorizedSourceSnapshot, package: Bool, profile: String) -> JetCLIMeasurePlan Never! {
+jet_cli_measure_plan: fn(snapshot: JetDriverAuthorizedSourceSnapshot, package: Bool, profile: String) -> JetCLIMeasurePlan Never! {
     plan := JetCLIMeasurePlan{claims: [String]{}, budgets: [JetCLIMeasureBudget]{}, profile: profile}
     if snapshot.roots.len() == 0 -> return plan
     loop file in snapshot.roots[0].files {
         if !package && file.path != snapshot.entry_path -> next
         if !file.path.ends_with(".jet") -> next
-        parsed :: jet_driver_parse_user_source(file.source)
+        parsed: jet_driver_parse_user_source(file.source)
         loop item in parsed.program.items {
             if item == .Test(test) {
                 loop statement in test.body {
@@ -92,7 +92,7 @@ fn jet_cli_measure_plan(snapshot: JetDriverAuthorizedSourceSnapshot, package: Bo
 }
 
 // The selected claims `plan` measures, in their order.
-fn jet_cli_measure_claims(tests: [JetNativeTestCase], plan: JetCLIMeasurePlan) -> [JetNativeTestCase] Never! {
+jet_cli_measure_claims: fn(tests: [JetNativeTestCase], plan: JetCLIMeasurePlan) -> [JetNativeTestCase] Never! {
     claims := [JetNativeTestCase]{}
     loop test in tests {
         if plan.claims.contains(test.name) -> &claims.push(test)
@@ -100,17 +100,17 @@ fn jet_cli_measure_claims(tests: [JetNativeTestCase], plan: JetCLIMeasurePlan) -
     claims
 }
 
-fn jet_cli_measure_word(text: String) -> Int Err! {
+jet_cli_measure_word: fn(text: String) -> Int Err! {
     Int.parse(text) ?? return Err("the measurement record has a malformed number `{text}`")
 }
 
 // The percentile `permille` (500: P50) of `sorted` by nearest rank.
-fn jet_cli_measure_rank(sorted: [Int], permille: Int) -> Int Never! {
-    rank :: (permille * sorted.len() + 999).div_euclid(1000)
+jet_cli_measure_rank: fn(sorted: [Int], permille: Int) -> Int Never! {
+    rank: (permille * sorted.len() + 999).div_euclid(1000)
     sorted[if rank < 1 -> 0 else -> rank - 1]
 }
 
-fn jet_cli_measure_permille(metric: String) -> Int? Never! {
+jet_cli_measure_permille: fn(metric: String) -> Int? Never! {
     if metric == {
         "BenchTime(P50)" -> Val(500)
         "BenchTime(P90)" -> Val(900)
@@ -124,13 +124,13 @@ fn jet_cli_measure_permille(metric: String) -> Int? Never! {
 // Settles one measured claim's outcome wire: strips its record frame, records
 // it in `records`, and fails the claim on a `.Fail` budget miss (E2907) or
 // on a region that left before its samples finished.
-fn jet_cli_measure_settle(wire: String, name: String, plan: JetCLIMeasurePlan, color: Bool, records: &[JetCLIMeasureRecord]) -> String Err! {
+jet_cli_measure_settle: fn(wire: String, name: String, plan: JetCLIMeasurePlan, color: Bool, records: &[JetCLIMeasureRecord]) -> String Err! {
     parts := jet_cli_native_test_wire_parts(wire)
-    pieces :: parts.stdout.split(JET_CLI_MEASURE_OPEN).to_list()
+    pieces: parts.stdout.split(JET_CLI_MEASURE_OPEN).to_list()
     output := pieces[0]
     frame := String?{None}
     loop index in 1..<pieces.len() {
-        framed :: pieces[index].split(JET_CLI_MEASURE_CLOSE).to_list()
+        framed: pieces[index].split(JET_CLI_MEASURE_CLOSE).to_list()
         if framed.len() < 2 || frame != None {
             output = "{output}{JET_CLI_MEASURE_OPEN}{pieces[index]}"
             next
@@ -141,8 +141,8 @@ fn jet_cli_measure_settle(wire: String, name: String, plan: JetCLIMeasurePlan, c
         output = "{output}{rest}"
     }
     parts.stdout = output
-    passed :: parts.flags.bit_and(5) == 1
-    fields :: (frame ?? {
+    passed: parts.flags.bit_and(5) == 1
+    fields: (frame ?? {
         if passed {
             parts.flags = parts.flags.bit_and(6)
             parts.stderr = "{parts.stderr}the `.measure` region of `{name}` left before its samples finished\n"
@@ -150,19 +150,19 @@ fn jet_cli_measure_settle(wire: String, name: String, plan: JetCLIMeasurePlan, c
         return Ok(jet_cli_native_test_wire(parts))
     }).split("\t").to_list()
     if fields.len() != 3 -> return Err("the measurement record of `{name}` is malformed")
-    warmups :: jet_cli_measure_word(fields[0])
-    iterations :: jet_cli_measure_word(fields[1])
+    warmups: jet_cli_measure_word(fields[0])
+    iterations: jet_cli_measure_word(fields[1])
     if iterations < 1 -> return Err("the measurement record of `{name}` has no iterations")
     times := [Int]{}
     total := 0
     loop text in fields[2].split(",") {
-        time :: (jet_cli_measure_word(text) * 1000).div_euclid(iterations)
+        time: (jet_cli_measure_word(text) * 1000).div_euclid(iterations)
         &times.push(time)
         total += time
     }
     if times.len() == 0 -> return Err("the measurement record of `{name}` has no samples")
     &times.sort()
-    sorted :: times
+    sorted: times
     record := JetCLIMeasureRecord{
         name: name,
         ok: passed,
@@ -176,13 +176,13 @@ fn jet_cli_measure_settle(wire: String, name: String, plan: JetCLIMeasurePlan, c
         max_ps: sorted[sorted.len() - 1],
         budgets: [JetCLIMeasureVerdict]{},
     }
-    missed :: diagnostic_registry_row("E2907") ?? return Err("the budget miss diagnostic is registered")
-    unproven :: diagnostic_registry_row("E2906") ?? return Err("the budget evidence diagnostic is registered")
+    missed: diagnostic_registry_row("E2907") ?? return Err("the budget miss diagnostic is registered")
+    unproven: diagnostic_registry_row("E2906") ?? return Err("the budget evidence diagnostic is registered")
     loop budget in plan.budgets {
-        spec :: budget.spec
+        spec: budget.spec
         if spec.scope != "Test({name})" -> next
-        permille :: jet_cli_measure_permille(spec.metric) ?? next
-        value :: jet_cli_measure_rank(sorted, permille)
+        permille: jet_cli_measure_permille(spec.metric) ?? next
+        value: jet_cli_measure_rank(sorted, permille)
         diagnostics := [Diagnostic]{}
         verdict := JetCLIMeasureVerdict{name: spec.name, metric: spec.metric, status: "pass", value_ps: value, limit_ns: None}
         if spec.comparison == "AbsoluteFrom" && spec.limit_fact.quantity == .DurationNs(limit) {
@@ -211,29 +211,29 @@ fn jet_cli_measure_settle(wire: String, name: String, plan: JetCLIMeasurePlan, c
 }
 
 // Picoseconds as nanoseconds with three decimals.
-fn jet_cli_measure_ns(ps: Int) -> String Never! {
-    fraction :: ps % 1000
-    pad :: if fraction < 10 -> "00" else if fraction < 100 -> "0" else -> ""
+jet_cli_measure_ns: fn(ps: Int) -> String Never! {
+    fraction: ps % 1000
+    pad: if fraction < 10 -> "00" else if fraction < 100 -> "0" else -> ""
     "{ps.div_euclid(1000)}.{pad}{fraction}"
 }
 
 // One record as a text line (with one indented line per budget), or as one
 // JSON object line: the same fields in the same order.
-fn jet_cli_measure_render(record: JetCLIMeasureRecord, json: Bool) -> String Never! {
+jet_cli_measure_render: fn(record: JetCLIMeasureRecord, json: Bool) -> String Never! {
     if json {
-        budgets :: loop verdict in record.budgets -> "{{\"name\":{jet_cli_json_string(verdict.name)},\"metric\":{jet_cli_json_string(verdict.metric)},\"status\":\"{verdict.status}\",\"value_ns\":{jet_cli_measure_ns(verdict.value_ps)},\"limit_ns\":{if verdict.limit_ns == .Val(limit) -> "{limit}" else -> "null"}}}"
+        budgets: loop verdict in record.budgets -> "{{\"name\":{jet_cli_json_string(verdict.name)},\"metric\":{jet_cli_json_string(verdict.metric)},\"status\":\"{verdict.status}\",\"value_ns\":{jet_cli_measure_ns(verdict.value_ps)},\"limit_ns\":{if verdict.limit_ns == .Val(limit) -> "{limit}" else -> "null"}}}"
         return "{{\"name\":{jet_cli_json_string(record.name)},\"ok\":{record.ok},\"tier\":\"aot\",\"profile\":{jet_cli_json_string(record.profile)},\"warmups\":{record.warmups},\"iterations\":{record.iterations},\"serial\":true,\"samples\":{record.samples},\"min_ns\":{jet_cli_measure_ns(record.min_ps)},\"median_ns\":{jet_cli_measure_ns(record.median_ps)},\"mean_ns\":{jet_cli_measure_ns(record.mean_ps)},\"max_ns\":{jet_cli_measure_ns(record.max_ps)},\"budgets\":[{budgets.join(",")}]}}\n"
     }
     line := "measure {record.name}: ok={record.ok} tier=aot profile={record.profile} warmups={record.warmups} iterations={record.iterations} serial=true samples={record.samples} min_ns={jet_cli_measure_ns(record.min_ps)} median_ns={jet_cli_measure_ns(record.median_ps)} mean_ns={jet_cli_measure_ns(record.mean_ps)} max_ns={jet_cli_measure_ns(record.max_ps)}\n"
     loop verdict in record.budgets {
-        limit :: if verdict.limit_ns == .Val(value) -> " limit_ns={value}" else -> ""
+        limit: if verdict.limit_ns == .Val(value) -> " limit_ns={value}" else -> ""
         line = "{line}  budget {verdict.name}: status={verdict.status} metric={verdict.metric} value_ns={jet_cli_measure_ns(verdict.value_ps)}{limit}\n"
     }
     line
 }
 
 #Test("measure ranks pick the nearest-rank percentile") {
-    sorted :: [Int]{10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200}
+    sorted: [Int]{10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200}
     assert_eq(jet_cli_measure_rank(sorted, 500), 100)
     assert_eq(jet_cli_measure_rank(sorted, 900), 180)
     assert_eq(jet_cli_measure_rank(sorted, 999), 200)

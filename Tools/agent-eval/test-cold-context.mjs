@@ -138,6 +138,6 @@ test("capsule removal canary rejects a changed verb or missing program", async (
   const capsule = await fs.readFile(capsulePath, "utf8");
   validateCapsule(capsule);
   assert.throws(() => validateCapsule(capsule.replace("`term.print`", "`term.removed`")), HarnessUsageError);
-  assert.throws(() => validateCapsule(capsule.replace("fn run() {\n    print(\"Hello, Jet\")\n}", "print(\"Hello, Jet\")")), HarnessUsageError);
+  assert.throws(() => validateCapsule(capsule.replace("run: fn() {\n    print(\"Hello, Jet\")\n}", "print(\"Hello, Jet\")")), HarnessUsageError);
   assert.throws(() => validateCapsule(capsule.replace(/\n### 10\. HTTP health endpoint[\s\S]*?\n## 7\. Cold-agent rules/u, "\n## 7. Cold-agent rules")), HarnessUsageError);
 });

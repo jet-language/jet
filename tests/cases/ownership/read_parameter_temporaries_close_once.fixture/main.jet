@@ -4,38 +4,38 @@
 // exit out of the statement they close on the way out. One made in a branch
 // or a loop condition of the statement closes right after its call.
 
-struct Res { name: String }
+Res: struct { name: String }
 impl Res.Close {
-    fn close(^self) { print("close {self.name}") }
+    close: fn(^self) { print("close {self.name}") }
 }
 
-struct Held {
+Held: struct {
     res: Res
 }
 
-fn make(name: String) -> Res { Res{name: name} }
-fn make_opt(name: String) -> Res? { Val(Res{name: name}) }
-fn make_held(name: String) -> Held? { Val(Held{res: Res{name: name}}) }
+make: fn(name: String) -> Res { Res{name: name} }
+make_opt: fn(name: String) -> Res? { Val(Res{name: name}) }
+make_held: fn(name: String) -> Held? { Val(Held{res: Res{name: name}}) }
 
-fn show(r: Res) { print("show {r.name}") }
-fn show_opt(r: Res?) { print("show_opt {r != None}") }
-fn show_held(r: Held?) { print("show_held {r != None}") }
-fn show_pair(a: Res, b: Res) { print("show_pair {a.name} {b.name}") }
-fn name_of(r: Res) -> String { r.name }
-fn short(r: Res) -> Bool { r.name.len() < 3 }
-fn found(r: Res, key: String) -> Int? { if r.name == key -> Val(r.name.len()) else -> None }
+show: fn(r: Res) { print("show {r.name}") }
+show_opt: fn(r: Res?) { print("show_opt {r != None}") }
+show_held: fn(r: Held?) { print("show_held {r != None}") }
+show_pair: fn(a: Res, b: Res) { print("show_pair {a.name} {b.name}") }
+name_of: fn(r: Res) -> String { r.name }
+short: fn(r: Res) -> Bool { r.name.len() < 3 }
+found: fn(r: Res, key: String) -> Int? { if r.name == key -> Val(r.name.len()) else -> None }
 
-fn early(key: String) -> String {
-    size :: found(make("probe"), key) ?? return "{key}: missing"
+early: fn(key: String) -> String {
+    size: found(make("probe"), key) ?? return "{key}: missing"
     "{key}: {size}"
 }
 
-fn branches(wide: Bool) {
+branches: fn(wide: Bool) {
     if wide || short(make("skipped")) -> print("wide")
     if !wide || short(make("ab")) -> print("short")
 }
 
-fn run() {
+run: fn() {
     show(make("plain"))
     show_opt(make_opt("opt"))
     show_held(make_held("held"))

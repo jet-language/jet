@@ -1,5 +1,5 @@
 use {
-    canvas_javascript_test_process :: core.process
+    canvas_javascript_test_process: core.process
     jet_canvas.[canvas_js]
 }
 
@@ -7,12 +7,12 @@ use {
 // oracle, not its incidental glue LOC assertion. Missing Node/assets or a
 // failed harness is fatal, never skipped.
 #Test("canvas_javascript_assets_are_independently_syntax_checked_and_ordered") {
-    child :: canvas_javascript_test_process.cmd([String]{"node", "Compiler/JetCanvas/Tests/CanvasAssets/javascript-assets.mjs"})
+    child: canvas_javascript_test_process.cmd([String]{"node", "Compiler/JetCanvas/Tests/CanvasAssets/javascript-assets.mjs"})
         .stdin(.Stream).stdout(.Capture).stderr(.Capture)
         .spawn() ?? panic("Canvas JavaScript proof requires Node and its asset harness")
     child.stdin.write_text(canvas_js()) ?? panic("Canvas JavaScript proof input failed")
     child.stdin.close()
-    receipt :: child.wait() ?? panic("Canvas JavaScript proof failed to finish")
+    receipt: child.wait() ?? panic("Canvas JavaScript proof failed to finish")
     if !receipt.success -> panic("Canvas JavaScript syntax/order proof: {receipt.errors}")
 }
 

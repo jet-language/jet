@@ -200,20 +200,20 @@ their declared spelling; see S66.
 
 ```jet
 use {
-    fs :: core.files
-    term :: core.term
-    sys :: core.sys
-    process :: core.process
+    fs: core.files
+    term: core.term
+    sys: core.sys
+    process: core.process
 }
 
-fn run() {
-    args :: process.args()
+run: fn() {
+    args: process.args()
     if args.len() < 1 {
         term.eprint("usage: greet <name>")
         return
     }
-    name :: args.get(0) ?? return
-    greeting :: sys.get("GREETING") ?? "hello"
+    name: args.get(0) ?? return
+    greeting: sys.get("GREETING") ?? "hello"
     fs.write("/tmp/greet.txt", "{greeting}, {name}!") ?? return
     print(fs.read("/tmp/greet.txt") ?? return)
 }
@@ -237,8 +237,8 @@ compiler-known Core modules:
 
 ```jet
 use {
-    fs :: core.files
-    json :: core.encoding.json
+    fs: core.files
+    json: core.encoding.json
 }
 ```
 
@@ -285,10 +285,10 @@ use the same names.
 For example, `#Inline` accepts an imported enum value or a dot literal:
 
 ```jet
-use lang :: core.compiler.lang
+use lang: core.compiler.lang
 
 #Inline(lang.InlineMode.Always)
-fn parse_fast(text: String) -> Int {
+parse_fast: fn(text: String) -> Int {
     text.to_int() ?? 0
 }
 ```
@@ -307,11 +307,11 @@ provide a runtime path-loading fallback. A runtime call is E0956.
 
 The source declarations supply the public typed vocabulary; calls retain the
 compiler-owned compile-time provider route even when that source package is loaded.
-In a `comptime` binding or `fn build`, the evaluator hands each `lex`, `parse`,
+In a `comptime` binding or `build: fn`, the evaluator hands each `lex`, `parse`,
 or `check` call to the compiler, which answers with its own lexer, parser, and
 check query over the call's argument (the same check `jet inspect compiler
 check` runs). A comptime constant that holds one of these values is read back
-as the compiler's value for that constant, so `PARSED :: comptime { … }` can
+as the compiler's value for that constant, so `PARSED: comptime { … }` can
 feed `compiler.check(PARSED)`.
 
 The package-view field matrix is versioned by
@@ -345,12 +345,12 @@ Declared Config files contribute package facts and build identity, not ordinary
 source declarations; a Config binding cannot shadow a package function.
 
 ```jet
-use compiler :: core.compiler
+use compiler: core.compiler
 
-@manifest :: compiler.manifest() ?? panic("manifest")
-@package :: compiler.package() ?? panic("package")
-@lock :: compiler.lock() ?? panic("lock")
-@profiles :: compiler.profiles() ?? panic("profiles")
+@manifest: compiler.manifest() ?? panic("manifest")
+@package: compiler.package() ?? panic("package")
+@lock: compiler.lock() ?? panic("lock")
+@profiles: compiler.profiles() ?? panic("profiles")
 ```
 
 ### `core.mod` — pinned library loading
@@ -361,9 +361,9 @@ before library code runs; the returned `Mod` owns its provider handle and
 releases it when dropped.
 
 ```jet
-use library :: core.mod
+use library: core.mod
 
-fn run() {
+run: fn() {
     library.load(".jet/build/loadable.jetlib", grant: {read: [".jet/build"]}) ?? return
 }
 ```
@@ -387,15 +387,15 @@ call propagates a failure from the enclosing function; `??` handles it as a
 fallback, and `?(text)` adds context while preserving propagation:
 
 ```jet
-use fs :: core.files
+use fs: core.files
 
-fn run() {
-    text :: fs.read("data.txt")
+run: fn() {
+    text: fs.read("data.txt")
     fs.write("out.txt", text.to_upper())
 }
 
-text :: fs.read("data.txt") ?? ""
-annotated :: fs.read("data.txt")?("reading the input for out.txt")
+text: fs.read("data.txt") ?? ""
+annotated: fs.read("data.txt")?("reading the input for out.txt")
 ```
 
 A function without an explicit error type uses the default `Err`. Core's
@@ -405,12 +405,12 @@ and name it in the function contract:
 
 ```jet
 #Error
-enum AppErr { Read(IOError) }
+AppErr: enum { Read(IOError) }
 
 impl IOError -> AppErr { return AppErr.Read(self) }
 
-fn load() -> String AppErr! {
-    text :: fs.read("data.txt")
+load: fn() -> String AppErr! {
+    text: fs.read("data.txt")
     return Ok(text)
 }
 ```
@@ -433,9 +433,9 @@ absent-propagating value type (D-HOLE1):
 | `Option.lift2(f, a, b)` | `?R` | Apply a two-argument function only when both options are present. |
 
 ```jet
-price :: lookup_price(id)
-qty :: lookup_qty(id)
-total :: price.zip(qty).map((pair) -> pair.a * pair.b)
+price: lookup_price(id)
+qty: lookup_qty(id)
+total: price.zip(qty).map((pair) -> pair.a * pair.b)
 ```
 
 ## Collections and iterators
@@ -523,8 +523,8 @@ longest. Omitted padding is `None`; `fill:` supplies one value for every
 missing column and `fills:` supplies one per named column.
 
 ```jet
-left :: [1, 2, 3]
-right :: [10, 20]
+left: [1, 2, 3]
+right: [10, 20]
 
 loop row in left.zip_pad(right, fill: 0) {
     print(row.b)
@@ -600,16 +600,16 @@ working directory and join it to an argument that is already relative. Use a
 `Path` when intentionally composing components.
 
 ```jet
-use fs :: core.files
+use fs: core.files
 
-fn run() {
-    path :: "/tmp/notes.txt"
+run: fn() {
+    path: "/tmp/notes.txt"
     fs.write(path, "hello\n") ?? return
     fs.append_all(path, "world\n") ?? return
     print(fs.read(path) ?? return)
     print(fs.exists(path))
     print(fs.is_dir("/tmp"))
-    entries :: fs.list_dir("/tmp") ?? return
+    entries: fs.list_dir("/tmp") ?? return
     print(entries.len())
 }
 ```
@@ -797,10 +797,10 @@ returned; invalid UTF-8 retains its byte offset and invalid-sequence length.
 Streaming constructors keep memory bounded:
 
 ```jet
-use files :: core.files
+use files: core.files
 
-fn count_lines(path: String) -> Int IOError! {
-    reader :: files.open(path)
+count_lines: fn(path: String) -> Int IOError! {
+    reader: files.open(path)
     n := 0
     loop line in reader.lines() {
         n = n + 1
@@ -858,11 +858,11 @@ are lowercased byte-wise and Punycode-encoded (`xn--`, RFC 3492); no WHATWG
 IDNA mapping is applied.
 
 ```jet
-use url :: core.net.url
+use url: core.net.url
 
-fn run() {
-    base :: url.parse("https://example.test/a/./b/../c?x=1") ?? return
-    next :: base.join("../notify?user=ada%20lovelace") ?? return
+run: fn() {
+    base: url.parse("https://example.test/a/./b/../c?x=1") ?? return
+    next: base.join("../notify?user=ada%20lovelace") ?? return
     print(next.to_string())
 }
 ```
@@ -917,12 +917,12 @@ therefore fixes the 48-bit timestamp prefix while the tail still comes from
 the same random provider; the version and variant bits are set in Jet.
 
 ```jet
-use uuid :: core.crypto.uuid
+use uuid: core.crypto.uuid
 
-fn run() {
-    id :: uuid.v4() ?? return
-    normalized :: uuid.parse("6BA7B810-9DAD-11D1-80B4-00C04FD430C8") ?? return
-    same_every_time :: uuid.v5("6ba7b810-9dad-11d1-80b4-00c04fd430c8", "python.org") ?? return
+run: fn() {
+    id: uuid.v4() ?? return
+    normalized: uuid.parse("6BA7B810-9DAD-11D1-80B4-00C04FD430C8") ?? return
+    same_every_time: uuid.v5("6ba7b810-9dad-11d1-80b4-00c04fd430c8", "python.org") ?? return
     print("{id} {normalized} {same_every_time}")
 }
 ```
@@ -1212,13 +1212,13 @@ password hashes use nominal carriers for secret-bearing values. Missing entropy
 is an error; the API does not fall back to a weak generator.
 
 ```jet
-use crypto :: core.crypto
+use crypto: core.crypto
 
-fn run() {
-    recipient :: crypto.X25519SecretKey.new_random() ?? return
-    msg :: "hello, jet".bytes()
-    box :: crypto.seal([recipient.public_key()], msg, []) ?? return
-    plain :: crypto.open(recipient, box, []) ?? return
+run: fn() {
+    recipient: crypto.X25519SecretKey.new_random() ?? return
+    msg: "hello, jet".bytes()
+    box: crypto.seal([recipient.public_key()], msg, []) ?? return
+    plain: crypto.open(recipient, box, []) ?? return
     print(plain)
 }
 ```
@@ -1362,14 +1362,14 @@ on `T`.
 
 ```jet
 use {
-    crypto :: core.crypto
-    vault :: core.crypto.vault
+    crypto: core.crypto
+    vault: core.crypto.vault
 }
 
-fn provision() -[Secret, IO]> {
-    plan :: vault.prepare_generate<crypto.SigningKey>("release") ?? return
-    write :: vault.authorize_write(plan, "create release signer") ?? return
-    key_ref :: vault.commit_generate(^write, ^plan) ?? return
+provision: fn() -[Secret, IO]> {
+    plan: vault.prepare_generate<crypto.SigningKey>("release") ?? return
+    write: vault.authorize_write(plan, "create release signer") ?? return
+    key_ref: vault.commit_generate(^write, ^plan) ?? return
     print("created {key_ref}")
 }
 ```
@@ -1594,10 +1594,10 @@ argument writes on its own line to stdout or stderr (D-VERDICT-1321-1).
 require `FS` because they access files rather than terminal streams.
 
 ```jet
-use term :: core.term
+use term: core.term
 
-fn run() {
-    name :: term.input("your name? ") ?? return
+run: fn() {
+    name: term.input("your name? ") ?? return
     print("hi, {name}")
     term.eprint("(log) done")
     out := term.stdout()
@@ -1653,16 +1653,16 @@ argument vector.
 
 ```jet
 use {
-    args :: core.args
-    process :: core.process
+    args: core.args
+    process: core.process
 }
 
-fn run() {
-    spec :: args.spec()
+run: fn() {
+    spec: args.spec()
         .flag("verbose", "print extra detail")
         .option("output", "write result to FILE", "FILE")
         .positional("input", "file to read")
-    parsed :: spec.parse(process.args()) ?? return
+    parsed: spec.parse(process.args()) ?? return
     print(parsed.flag("verbose"))
     print(parsed.option("output") ?? "(default)")
 }
@@ -1695,7 +1695,7 @@ handles `--key=value`, `--key value`, `--flag`, `--no-flag`, clustered short
 flags, negative numeric values, and `--` as the end-of-options marker.
 
 `args.decode<T>()` parses the process arguments into the `#CLI` struct `T`
-through the same spec as `fn run(args: T)`, so help and refusal text are
+through the same spec as `run: fn(args: T)`, so help and refusal text are
 identical. `--help` and `--version` print and exit zero; a refused argument
 returns `[FieldError]`. Every `#CLI` struct also gets
 `T.merge(args, settings) -> T ![FieldError]`, unless it declares its own
@@ -1725,20 +1725,20 @@ classifier `inspect`. Runtime reflection is read-only and retains typed field
 values rather than pre-rendering them.
 
 ```jet
-use reflect :: core.reflect
+use reflect: core.reflect
 
-struct Point {
+Point: struct {
     x: Int
     y: Int
 
     impl Display {
-        fn display(self) -> String { "({self.x}, {self.y})" }
+        display: fn(self) -> String { "({self.x}, {self.y})" }
     }
 }
 
-fn run() {
-    p :: Point{x: 3, y: 4}
-    value :: reflect.of(p)
+run: fn() {
+    p: Point{x: 3, y: 4}
+    value: reflect.of(p)
     print(value.type_name())
     print(value.path())
     print(value.display())
@@ -1780,15 +1780,15 @@ environment block. Child overlays snapshot once, apply sets in order, then
 apply removals; an explicitly empty value is not an absent value.
 
 ```jet
-use sys :: core.sys
+use sys: core.sys
 
-fn run() {
-    home :: sys.home_dir()
-    mode :: sys.get("MODE") ?? "dev"
+run: fn() {
+    home: sys.home_dir()
+    mode: sys.get("MODE") ?? "dev"
     sys.set("MODE", "prod")
-    removed :: sys.unset("CI") ?? false
-    names :: sys.vars() ?? []
-    here :: sys.current_dir() ?? return
+    removed: sys.unset("CI") ?? false
+    names: sys.vars() ?? []
+    here: sys.current_dir() ?? return
     print(home ?? "(no home)")
     print(mode)
     print("removed={removed} vars={names.len()} cwd={here}")
@@ -1930,15 +1930,15 @@ targets without this descriptor transfer report `Unsupported` rather than
 falling back to a lexical working directory.
 
 ```jet
-use process :: core.process
+use process: core.process
 
-fn run() -[Exec, Time.Wait]> {
-    timeout :: Duration.seconds(30) ?? return
-    spec :: process.cmd(["cp", "--", "directory with spaces;*.tmp", "backup"])
+run: fn() -[Exec, Time.Wait]> {
+    timeout: Duration.seconds(30) ?? return
+    spec: process.cmd(["cp", "--", "directory with spaces;*.tmp", "backup"])
         .stdout(.Capture)
         .stderr(.Capture)
         .timeout(timeout)
-    receipt :: spec.run_checked() ?? return
+    receipt: spec.run_checked() ?? return
     print(receipt.output)
 }
 ```
@@ -2040,14 +2040,14 @@ unavailable or disallowed operation is an error rather than an implicit host
 escape. This explicit authority boundary is the process execution contract (D-AGENT-EXEC1=A).
 
 ```jet
-fn run_with_authority() -[Exec, Time.Wait]> {
-    policy :: Authority.from_rights([
+run_with_authority: fn() -[Exec, Time.Wait]> {
+    policy: Authority.from_rights([
         "FS.Read:repo",
         "FS.Write:.jet/build",
         "Exec:/usr/bin/cargo",
     ])
-    spec :: process.cmd(["cargo", "test"]).cwd("/workspace").under(policy)
-    receipt :: process.run_spec(spec) ?? return
+    spec: process.cmd(["cargo", "test"]).cwd("/workspace").under(policy)
+    receipt: process.run_spec(spec) ?? return
     print(receipt.success)
 }
 ```
@@ -2123,9 +2123,9 @@ their own method namespaces; the source-backed primitive route grants neither
 an `abs` method nor a Core identity to a same-spelled user type.
 
 ```jet
-use math :: core.math
+use math: core.math
 
-fn run() {
+run: fn() {
     angle := math.PI / 4.0
     print(math.sin_cos(angle))
     print(math.checked_add(2, 3) ?? 0)
@@ -2183,7 +2183,7 @@ calling them. Source-owned Core wrappers preserve these same constraints.
 | `math.next_up(x)` / `next_down(x)` / `next_after(x, toward)` / `nextafter(x, toward)` | `Float` | Move to an adjacent representable value. |
 | `math.significand(x)` / `math.ulp(x)` | `Float` | Return the significand or unit in the last place. |
 | `math.ilogb(x)` / `math.ldexp(x, exponent)` / `math.scaleb(x, exponent)` / `math.radix(x)` | `?Int` or `Float` | Inspect or scale the floating-point exponent and radix. |
-| `math.PI` / `math.E` / `math.TAU` | `Float` | Mathematical constants, declared as comptime values (`PI :: Float{…}`); usable in `comptime` contexts. |
+| `math.PI` / `math.E` / `math.TAU` | `Float` | Mathematical constants, declared as comptime values (`PI: Float{…}`); usable in `comptime` contexts. |
 | `math.INFINITY` / `math.NAN` | `Float` | The IEEE-754 special values `1.0 / 0.0` and `0.0 / 0.0`, as comptime constants. `NAN` compares unequal to every value, itself included; test it with `math.is_nan`. |
 | `math.round(x)` | `Int` | Round to the nearest integer, with ties away from zero. |
 | `math.to_bits(x)` / `math.from_bits(bits)` | integer bits / `Float` | Convert between a floating value and its bit representation. |
@@ -2219,7 +2219,7 @@ The bare and `core.math`-qualified `Fraction`, `Decimal`, and `Complex`
 spellings name the same declarations; local user types retain their own
 declaration identity. These are reserved source-owned declarations, not duplicate
 compiler builtin records: only the canonical loaded Core module may declare them.
-Their `Display` implementations use the canonical `fn display(self) -> String`
+Their `Display` implementations use the canonical `display: fn(self) -> String`
 contract: rendering borrows the value and keeps the exact text policy above.
 
 Float math wrappers widen `F32` with `Float.from_f32`, not a typed literal.
@@ -2277,8 +2277,8 @@ E3110, and a write that names a lane twice (`v.xx = …`) is E3111. See
 [`swizzle.jet`](../../../Examples/features/lowlevel/swizzle.jet).
 
 ```jet
-fn rotate(v: Vec3, transform: Mat3) -> Vec3 {
-    unit :: v.normalize()
+rotate: fn(v: Vec3, transform: Mat3) -> Vec3 {
+    unit: v.normalize()
     return transform.transform(unit)
 }
 ```
@@ -2315,9 +2315,9 @@ user-defined dimension system. The module-global scale names are uppercase
 `GRAM`, `SECOND`, `BYTE_UNIT`, `KIBIBYTE`, `MEBIBYTE`, and `GIBIBYTE`).
 
 ```jet
-use units :: core.units
+use units: core.units
 
-fn run() {
+run: fn() {
     distance := units.meters(12.0)
     elapsed := units.seconds(3.0)
     print(units.show(distance))
@@ -2359,14 +2359,14 @@ it retains its 64-bit floating-point projection, while
 `core.math.random.float()` uses an exactly representable 53-bit draw.
 
 ```jet
-use random :: core.math.random
+use random: core.math.random
 
-fn roll_at(rng: &RNG) -> String {
+roll_at: fn(rng: &RNG) -> String {
     value := rng.int(1, 6)
     return "roll=" + value.to_string()
 }
 
-fn run() {
+run: fn() {
     rng := random.rng(42)
     print(roll_at(rng))
 }
@@ -2439,17 +2439,17 @@ replay/backend/frame arguments become native optional references, not references
 to the language's optional-result carrier.
 
 ```jet
-use game :: core.game
+use game: core.game
 
-fn run() {
+run: fn() {
     scene := game.Scene.new("counter")
     scene.max_frames = 3
     scene.on_frame((frame) -> {
         print("frame=" + frame.to_string())
     })
-    backend :: game.Backend.headless()
-    replay :: game.Replay.record("build/counter.replay")
-    receipt :: game.run(scene, replay: replay, backend: backend, frames: 3)
+    backend: game.Backend.headless()
+    replay: game.Replay.record("build/counter.replay")
+    receipt: game.run(scene, replay: replay, backend: backend, frames: 3)
     print(receipt)
 }
 ```
@@ -2632,7 +2632,7 @@ The civil carriers (`Date`/`LocalDate`, `LocalTime`, `DateTime`, `Period`,
 `Zone`, `ZonedDateTime`, and `Instant`) and their arithmetic, parsing,
 formatting, and text codecs are implemented in `Core/Time/Time.jet` on all
 tiers. `Date` is the prelude's name for `LocalDate`
-(`pub use Date :: core.time.LocalDate`); `core.time` declares only
+(`pub use Date: core.time.LocalDate`); `core.time` declares only
 `LocalDate`. Immutable zone tables are plain values,
 copied with their zone, and borrowed reads need no shared-memory guard or
 `Time.Wait` effect. Native seams supply raw clock samples, environment values
@@ -2671,12 +2671,12 @@ with an `unknown IANA time zone` message that points to `JET_TZDB_DIR` or
 `TZDIR` (D-FREESTAND-TIME1).
 
 ```jet
-use time :: core.time
+use time: core.time
 
-fn run() {
-    stamp :: time.parse_rfc3339("2025-01-02T03:04:05Z") ?? return
+run: fn() {
+    stamp: time.parse_rfc3339("2025-01-02T03:04:05Z") ?? return
     print(time.isoformat(stamp))
-    clock :: time.Clock.new(0)
+    clock: time.Clock.new(0)
     &clock.tick(1000)
     print(clock.now())
 }
@@ -2783,7 +2783,7 @@ replayed (D-TIMERES1=A; D-DET-CAPAPI).
 
 `core.time.calendar` provides fixed English calendar names and Monday-based
 week calculations without locale tables. Its module-global weekday constants
-are `MONDAY :: 0` through `SUNDAY :: 6`.
+are `MONDAY: 0` through `SUNDAY: 6`.
 
 All calendar behavior is implemented in the embedded `Core/Time/Calendar.jet`
 source shared by the execution tiers, including epoch conversion without a
@@ -3132,21 +3132,21 @@ interactions, terminal/browser/native/export backends, and supported/degraded
 capabilities. The default `show` backend is Browser; Terminal selects text.
 
 ```jet
-use data :: core.data
+use data: core.data
 
 #Codable
-struct Ticket {
+Ticket: struct {
     team: String
     minutes: Float
 }
 
-fn run() {
-    rows :: data.csv<Ticket>("team,minutes\nCore,4.0\nCore,8.0\nTools,5.0") ?? return
-    counts :: data.query(rows)
+run: fn() {
+    rows: data.csv<Ticket>("team,minutes\nCore,4.0\nCore,8.0\nTools,5.0") ?? return
+    counts: data.query(rows)
         .group_by(t -> t.team)
         .count()
         .collect() ?? return
-    chart :: data.bar_text(counts) ?? return
+    chart: data.bar_text(counts) ?? return
     print(chart)
 }
 ```
@@ -3177,7 +3177,7 @@ fn run() {
 | `sum(values)` / `mean(values)` | `Float !DataError` | Reduce finite numeric values. |
 | `min(values)` / `max(values)` | `Float !DataError` | Select finite numeric extrema. |
 | `variance(values)` / `stddev(values)` | `Float !DataError` | Compute finite numeric dispersion. |
-| `median(values)` / `quantile(values, q)` | `Float !DataError` | Compute bounded order statistics. |
+| `median(values)` / `quantile(values, q)` | `Float !DataError` | Compute bounded order statistics by worst-case linear rank selection on a copy; the caller's list is unchanged. |
 | `rolling_mean(values, window)` | `[Float] !DataError` | Compute a bounded rolling mean. |
 | `query(rows)` | `Query<T>` | Start a deterministic query plan. |
 | `inner_join(left, right, left -> key, right -> key)` | `[DataJoin<T, U>] !DataError` | Preserve duplicate matches. |
@@ -3566,7 +3566,7 @@ A malformed pattern is a `RegexError { offset: Int, reason: String }`.
 `offset` is the zero-based character position in the pattern where the
 problem is, and the error displays as
 `invalid regex at position {offset}: {reason}`. `RegexError` converts to
-`Err`, so `rx :: re.compile(text)` propagates inside a fallible function. The
+`Err`, so `rx: re.compile(text)` propagates inside a fallible function. The
 implementation is in [`Core/Regex/Regex.jet`](../../../Core/Regex/Regex.jet).
 
 Checked `Regex{"…"}` literals and inferred-head `{"…"}` arguments in a
@@ -3711,7 +3711,16 @@ drag/drop events (event type, data, drop effect) to `ime.poll` and
 `drag_drop.poll`; Core maps each event type to its phase (a `compositionend`
 with no text cancels), places an unreported IME caret after the composition
 text in characters, reads URI items from `text/uri-list` lines, and reports a
-host buffer overflow as `QueueFull`. Shortcuts and accessibility are
+host buffer overflow as `QueueFull`. A drag event's `operation` is a
+`UIDragOperation?`: a `none` drop effect is no operation, and a drop with no
+operation arrives as `Cancel` (D-UI-DRAG-NONE1=A). `shortcuts.register`
+claims its key from the provider, and the browser provider cancels the
+default action of a claimed key press only and queues it for
+`shortcuts.poll`, which answers the matching binding (`None` when no key is
+queued); every unclaimed key keeps its browser default (D-UI-WEB-KEYS1=A).
+Modifier bits are Control 1, Alt 2, Shift 4, Meta 8 and the logical command
+16; a key pressed with exactly one of Control and Meta also matches a command
+binding. Accessibility is
 available. `clipboard.read_text` answers the clipboard text the page last
 observed (a paste, copy or cut, or its own `write_text`), because a browser
 lends the live clipboard only to a user gesture; before any is observed it
@@ -3736,7 +3745,7 @@ reactive conformance corpus.
 | `signal<T>(value: T) -> Signal<T>` | signal | Create mutable reactive state. |
 | `computed<T>(compute: fn() -> T) -> Computed<T>` | computed | Compute an initial value from a body. |
 | `derived<T>(compute: fn() -> T) -> Derived<T>` | derived | Compute an initial derived value. |
-| `effect(body: fn()) -> Effect` | effect | Run a body once and retain an active effect record. |
+| `autorun(body: fn()) -> Effect` | effect | Run a body once and retain an active effect record. |
 | `get<T>(sig: Signal<T>) -> T` / `version<T>(sig: Signal<T>) -> Int` | value/version | Read a signal and its version. |
 | `set<T>(sig: Signal<T>, value: T) -> Signal<T>` | signal | Set a signal value and increment its version. |
 | `update(sig: Signal<Int>, delta: Int) -> Signal<Int>` | signal | Add a delta to an integer signal. |
@@ -3978,12 +3987,12 @@ the C representation of a packed byte array.
 ```jet
 use core.mem
 
-fn run() {
+run: fn() {
     #Region(scratch) {
-        arena :: mem.Arena.new()
-        bump :: mem.Bump.new(capacity: 256)
-        first :: arena.alloc(1)
-        second :: bump.alloc(2)
+        arena: mem.Arena.new()
+        bump: mem.Bump.new(capacity: 256)
+        first: arena.alloc(1)
+        second: bump.alloc(2)
         print(first)
         print(second)
     }
@@ -4442,7 +4451,7 @@ migration cannot silently replace an applied one.
 
 `DBScope` implements the prelude trait `Driver` (`query`, `query_one`,
 `execute`, `begin`, `commit`, `rollback`), which a generic bound names bare:
-`fn count<T: Driver>(conn: T)` takes any scope and calls its methods.
+`count: fn<T: Driver>(conn: T)` takes any scope and calls its methods.
 
 `DBScope.live` (D-LIVEQUERY1, #1158) refuses any statement other than one
 `SELECT` and applies the scope's policy before binding, so a refused query
@@ -4488,7 +4497,7 @@ adapter is held; it is not part of this source-owned Core integration.
 ### `core.db.sql` — pure SQL grammar and row selection
 
 [`Core/Db/Sql.jet`](../../../Core/Db/Sql.jet) is the canonical public SQL
-kernel. Import it with `use sql :: core.db.sql`; the former Core-private
+kernel. Import it with `use sql: core.db.sql`; the former Core-private
 runtime module has been relocated, without a compatibility module or re-export.
 It carries no database connection or raw-SQL execution authority.
 
@@ -4504,7 +4513,7 @@ Core's SQL tests also use `sql_tokens`, `unquote`, `identifier`,
 `compare_sql_cell`, `sql_aggregate_value`, and `sql_output_value`.
 Schema traversal, alternate index selection, parser cursors, numeric helpers,
 fixed-wide accumulation, grouping-key encoding, and sorting carriers remain
-in its `priv module internal`, rather than enlarging the public surface.
+in its `priv internal: module`, rather than enlarging the public surface.
 The enclosing SQL file can call those helpers and name the sorting carrier as
 `internal.SQLOrderedRow`; this is ordinary enclosing-module access, not a
 Core-runtime privilege. Inline-module function imports use `use internal.[…]`;
@@ -4781,7 +4790,7 @@ language:
 - `open("file")` or `File.open` → `fs.read(...)` and `fs.write(...)`
 - `getenv("X")` or `os.environ` → `env.get("X")`
 - `import core.files` → `use core.files`
-- Assignment that should not change → `name :: value`
+- Assignment that should not change → `name: value`
 - Assignment that should change → `name := value`
 
 `String.bytes()` and `String.from_bytes(...)` are the explicit text/byte

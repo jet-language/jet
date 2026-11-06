@@ -6,7 +6,7 @@ step: jet notebook document.jetnb --protocol
 stdin: commands.stdin
 exit: 0
 json: file merged.jetnb doc $.cells[?kind="markdown"] #>= 1
-json: file merged.jetnb doc $.cells[?id="shared"][0].source = "answer :: 7"
+json: file merged.jetnb doc $.cells[?id="shared"][0].source = "answer: 7"
 json: stdout ndjson $[2].body ~ "quarantined" # original ed77c235f tests/notebook.rs:317 import_loss.items has a quarantined marker; public bridge crates/jet-repl/src/Notebook/document.rs:74-82 renders only loss items verbatim after its header, protocol.rs:293-300 returns rendered loss in body
 json: file imported.jetnb doc $.cells[0].id = "keep-me"
 json: file imported.jetnb doc $.cells[0].output.bundle.quarantined = true

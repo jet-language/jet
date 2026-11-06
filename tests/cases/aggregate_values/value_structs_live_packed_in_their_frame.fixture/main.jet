@@ -1,4 +1,4 @@
-struct Mixed {
+Mixed: struct {
     a: U8
     b: Int
     c: U8
@@ -6,17 +6,17 @@ struct Mixed {
     e: U8
 }
 
-fn bump(value: &Mixed, by: Int) {
+bump: fn(value: &Mixed, by: Int) {
     value.a = value.a + U8{1}
     value.b = value.b * by
     value.d = value.d - by
 }
 
-fn total(value: Mixed) -> Int {
+total: fn(value: Mixed) -> Int {
     return Int.from_u8(value.a) + value.b + Int.from_u8(value.c) + value.d + Int.from_u8(value.e)
 }
 
-fn run() {
+run: fn() {
     value := Mixed{a: U8{1}, b: 10, c: U8{2}, d: 20, e: U8{3}}
     loop round in 1..<4 -> bump(&value, round)
     other := value

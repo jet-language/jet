@@ -13,25 +13,25 @@ use {
     ]
     jet_foundation.[diagnostic_display_name]
     jet_pkg_model.[pkg_lock_record_toolchain]
-    files :: core.files
-    process :: core.process
-    sys :: core.sys
+    files: core.files
+    process: core.process
+    sys: core.sys
 }
 
 // The project outlives this helper, so it is a `tmpdir`: a `temp_dir` would
 // remove it when its `TempDir` drops at return (#6119).
-fn trust_pin_test_root(label: String) -> String {
-    root :: files.tmpdir("jetpin_{label}") ?? panic("scratch directory")
+trust_pin_test_root: fn(label: String) -> String {
+    root: files.tmpdir("jetpin_{label}") ?? panic("scratch directory")
     files.create_dir_all(files.join(root, ".jet")) ?? panic("scratch .jet directory")
     root
 }
 
 // The project manifest is `package.jet`; the retired `pkg.jet` is not read.
-fn trust_pin_test_manifest(root: String, text: String) {
+trust_pin_test_manifest: fn(root: String, text: String) {
     files.write(files.join(root, PACKAGE_FILE), text) ?? panic("write manifest")
 }
 
-fn trust_pin_test_code(result: String TrustError!) -> String {
+trust_pin_test_code: fn(result: String TrustError!) -> String {
     if result == {
         .Ok(_) -> panic("expected a pin diagnostic")
         .Err(error) -> {
@@ -45,22 +45,22 @@ fn trust_pin_test_code(result: String TrustError!) -> String {
 
 // The text of tests/fixtures/jetpack-diagnostics/E1224.stderr. It is written here
 // because an embed may not leave this package (E0957).
-TRUST_PIN_E1224_SNAPSHOT :: "Error [jet.PackageFileOperationFailed]: Couldn't write .jet/lock\n Why: The lock file records exact toolchain identity\n Fix: Check write permissions: permission denied\nMore: jet-lang.dev/e/E1224\n"
+TRUST_PIN_E1224_SNAPSHOT: "Error [jet.PackageFileOperationFailed]: Couldn't write .jet/lock\n Why: The lock file records exact toolchain identity\n Fix: Check write permissions: permission denied\nMore: jet-lang.dev/e/E1224\n"
 
 // ── T1 ──
 
 #Test("identity block parses across unknown fields") {
     // Unknown top-level keys, an unknown nested block, and unknown fields
     // inside payload must not stop the identity read.
-    source :: "\n// leading comment\nfuture_top_key: {{ nested: {{ deep: [1, 2, 3] }}, more: \"syntax we don't know yet\" }}\npayload: {{\n    name:    \"wordstats\",\n    version: \"0.3.1\",\n    jet:     0.4,\n    someday: {{ a: 1, b: {{ c: 2 }} }},\n    license: \"MIT\",\n}}\ntomorrow: [ a, b, c ]\ndeps: {{ textkit: \"1.2.0\" }}\n"
-    identity :: trust_pin_identity_preparse(source)
+    source: "\n// leading comment\nfuture_top_key: {{ nested: {{ deep: [1, 2, 3] }}, more: \"syntax we don't know yet\" }}\npayload: {{\n    name:    \"wordstats\",\n    version: \"0.3.1\",\n    jet:     0.4,\n    someday: {{ a: 1, b: {{ c: 2 }} }},\n    license: \"MIT\",\n}}\ntomorrow: [ a, b, c ]\ndeps: {{ textkit: \"1.2.0\" }}\n"
+    identity: trust_pin_identity_preparse(source)
     assert_eq(identity.payload_name, "wordstats")
     assert_eq(identity.payload_version, "0.3.1")
     assert_eq(identity.jet, Val("0.4"))
 }
 
 #Test("identity block unpinned when no jet field") {
-    identity :: trust_pin_identity_preparse("payload: {{ name: \"x\", version: \"1.0.0\" }}\n")
+    identity: trust_pin_identity_preparse("payload: {{ name: \"x\", version: \"1.0.0\" }}\n")
     assert_eq(identity.payload_name, "x")
     assert(identity.jet == None)
 }
@@ -77,7 +77,7 @@ TRUST_PIN_E1224_SNAPSHOT :: "Error [jet.PackageFileOperationFailed]: Couldn't wr
 }
 
 #Test("classify channel rejects ranges with E1249") {
-    rejected :: [String]{">=1.0.0", "^1.2", "1", "", "0.", "1.x", "Main"}
+    rejected: [String]{">=1.0.0", "^1.2", "1", "", "0.", "1.x", "Main"}
     loop bad in rejected {
         assert(trust_pin_test_code(trust_pin_classify_channel(bad)) == "E1249", "should reject {bad}")
     }
@@ -88,11 +88,11 @@ TRUST_PIN_E1224_SNAPSHOT :: "Error [jet.PackageFileOperationFailed]: Couldn't wr
 #Test("toolchain pin locks exact") {
     // Channel `0.4` resolves to an exact `0.4.0`, recorded in the lock;
     // re-reads take the locked version, not the channel.
-    root :: trust_pin_test_root("locks_exact")
-    resolved :: trust_pin_resolve_channel("0.4") ?? panic("resolve 0.4")
+    root: trust_pin_test_root("locks_exact")
+    resolved: trust_pin_resolve_channel("0.4") ?? panic("resolve 0.4")
     assert_eq(resolved, "0.4.0")
     pkg_lock_record_toolchain(root, trust_pin_toolchain_record("0.4", resolved)) ?? panic("valid test lock record")
-    toolchain :: trust_pin_locked_toolchain(root) ?? panic("locked")
+    toolchain: trust_pin_locked_toolchain(root) ?? panic("locked")
     assert_eq(toolchain.channel, "0.4")
     assert_eq(toolchain.version, "0.4.0")
     assert(toolchain.id.starts_with("jet-0.4.0-"))
@@ -100,7 +100,7 @@ TRUST_PIN_E1224_SNAPSHOT :: "Error [jet.PackageFileOperationFailed]: Couldn't wr
 }
 
 #Test("offline unlocked channel reports E1250") {
-    root :: trust_pin_test_root("offline_e1250")
+    root: trust_pin_test_root("offline_e1250")
     trust_pin_test_manifest(root, "payload: {{ name: \"x\", version: \"1\", jet: 0.9 }}\n")
     if trust_pin_decide(root, "0.4.0", true) == {
         .Report(diagnostic) -> assert_eq(diagnostic.code, "E1250")
@@ -115,9 +115,9 @@ TRUST_PIN_E1224_SNAPSHOT :: "Error [jet.PackageFileOperationFailed]: Couldn't wr
     // stands in for a downloaded prebuilt. A running `jet` with a different
     // version realizes it and re-execs; the child reports the pinned version
     // and honours the exec marker and env passthrough.
-    root :: trust_pin_test_root("reexec")
-    object :: trust_pin_test_root("object")
-    binary_path :: files.join(object, BINARY_NAME)
+    root: trust_pin_test_root("reexec")
+    object: trust_pin_test_root("object")
+    binary_path: files.join(object, BINARY_NAME)
     files.write(binary_path, "#!/bin/sh\necho pinned-jet-0.4.0\necho marker=${TOOLCHAIN_EXEC_MARKER_ENV}\necho passthru=$JETPIN_TEST_ENV\n") ?? panic("write fixture jet")
     files.write(files.join(object, "version"), "0.4.0\n") ?? panic("write fixture version")
     if sys.is_unix() -> files.set_mode(binary_path, 493) ?? panic("chmod fixture jet")
@@ -134,7 +134,7 @@ TRUST_PIN_E1224_SNAPSHOT :: "Error [jet.PackageFileOperationFailed]: Couldn't wr
             assert_eq(binary, binary_path)
             if sys.is_unix() {
                 // Perform the exec the dispatch shim would: marker + inherited env.
-                receipt :: process.cmd([String]{binary}).env(TOOLCHAIN_EXEC_MARKER_ENV, version).env("JETPIN_TEST_ENV", "carried").stdout(.Capture).stderr(.Capture).run() ?? panic("run fixture jet")
+                receipt: process.cmd([String]{binary}).env(TOOLCHAIN_EXEC_MARKER_ENV, version).env("JETPIN_TEST_ENV", "carried").stdout(.Capture).stderr(.Capture).run() ?? panic("run fixture jet")
                 assert(receipt.output.contains("pinned-jet-0.4.0"), "child version: {receipt.output}")
                 assert(receipt.output.contains("marker=0.4.0"), "exec marker: {receipt.output}")
                 assert(receipt.output.contains("passthru=carried"), "env passthrough: {receipt.output}")
@@ -147,11 +147,11 @@ TRUST_PIN_E1224_SNAPSHOT :: "Error [jet.PackageFileOperationFailed]: Couldn't wr
     sys.set(TOOLCHAIN_EXEC_MARKER_ENV, "0.4.0")
     assert(trust_pin_decide(root, "0.4.0", false) == .RunNative)
     sys.unset(TOOLCHAIN_EXEC_MARKER_ENV) ?? panic("unset marker")
-    _ :: sys.unset(TOOLCHAIN_OBJECT_ENV) ?? panic("unset object")
+    _: sys.unset(TOOLCHAIN_OBJECT_ENV) ?? panic("unset object")
 }
 
 #Test("matched version runs native") {
-    root :: trust_pin_test_root("native")
+    root: trust_pin_test_root("native")
     trust_pin_test_manifest(root, "payload: {{ name: \"x\", version: \"1\", jet: 0.4 }}\n")
     pkg_lock_record_toolchain(root, trust_pin_toolchain_record("0.4", "0.4.0")) ?? panic("valid test lock record")
     sys.unset(TOOLCHAIN_EXEC_MARKER_ENV) ?? panic("unset marker")
@@ -177,26 +177,26 @@ TRUST_PIN_E1224_SNAPSHOT :: "Error [jet.PackageFileOperationFailed]: Couldn't wr
 // ── T4 ──
 
 #Test("jet toolchain reports pin") {
-    root :: trust_pin_test_root("report")
+    root: trust_pin_test_root("report")
     trust_pin_test_manifest(root, "payload: {{ name: \"x\", version: \"1\", jet: 0.4 }}\n")
     pkg_lock_record_toolchain(root, trust_pin_toolchain_record("0.4", "0.4.0")) ?? panic("valid test lock record")
-    report :: trust_pin_report(root)
+    report: trust_pin_report(root)
     assert(report.contains("pin:      jet 0.4"), report)
     assert(report.contains("locked:   0.4.0"), report)
     assert(report.contains("object:   jet-0.4.0-"), report)
 }
 
 #Test("jet toolchain reports unpinned") {
-    root :: trust_pin_test_root("report_unpinned")
+    root: trust_pin_test_root("report_unpinned")
     trust_pin_test_manifest(root, "payload: {{ name: \"x\", version: \"1\" }}\n")
     assert(trust_pin_report(root).contains("unpinned"))
 }
 
 #Test("jet update jet moves the lock") {
-    root :: trust_pin_test_root("update")
+    root: trust_pin_test_root("update")
     trust_pin_test_manifest(root, "payload: {{ name: \"x\", version: \"1\", jet: 0.4 }}\n")
     // Move to an explicit new channel.
-    message :: trust_pin_move(root, Val("0.7"), "9.9.9") ?? panic("move to 0.7")
+    message: trust_pin_move(root, Val("0.7"), "9.9.9") ?? panic("move to 0.7")
     assert(message.contains("0.7"), message)
     assert_eq((trust_pin_locked_toolchain(root) ?? panic("locked")).version, "0.7.0")
     assert_eq((trust_pin_locked_toolchain(root) ?? panic("locked")).channel, "0.7")
@@ -206,12 +206,12 @@ TRUST_PIN_E1224_SNAPSHOT :: "Error [jet.PackageFileOperationFailed]: Couldn't wr
 }
 
 #Test("jet init pins the running channel") {
-    root :: trust_pin_test_root("init")
+    root: trust_pin_test_root("init")
     // Running toolchain 0.6.1 pins channel 0.6.
-    message :: trust_pin_write_init(root, "myapp", "0.6.1") ?? panic("init")
+    message: trust_pin_write_init(root, "myapp", "0.6.1") ?? panic("init")
     assert(message.contains("0.6"), message)
-    text :: files.read(files.join(root, PACKAGE_FILE)) ?? panic("read package manifest")
-    identity :: trust_pin_identity_preparse(text)
+    text: files.read(files.join(root, PACKAGE_FILE)) ?? panic("read package manifest")
+    identity: trust_pin_identity_preparse(text)
     assert_eq(identity.payload_name, "myapp")
     assert_eq(identity.jet, Val("0.6"))
     // A second init refuses to clobber.
@@ -224,10 +224,10 @@ TRUST_PIN_E1224_SNAPSHOT :: "Error [jet.PackageFileOperationFailed]: Couldn't wr
 }
 
 #Test("a lock that can't be written reports E1224") {
-    root :: trust_pin_test_root("unwritable")
+    root: trust_pin_test_root("unwritable")
     trust_pin_test_manifest(root, "payload: {{ name: \"x\", version: \"1\", jet: 0.4 }}\n")
     files.create_dir_all(files.join(root, ".jet/lock")) ?? panic("lock path held by a directory")
     assert_eq(trust_pin_test_code(trust_pin_move(root, Val("0.7"), "9.9.9")), "E1224")
-    diagnostic :: trust_pin_lock_write_diagnostic("permission denied")
+    diagnostic: trust_pin_lock_write_diagnostic("permission denied")
     assert_eq(TRUST_PIN_E1224_SNAPSHOT, "Error [{diagnostic_display_name(diagnostic.code)}]: {diagnostic.what}\n Why: {diagnostic.why}\n Fix: {diagnostic.fix}\nMore: jet-lang.dev/e/{diagnostic.code}\n")
 }

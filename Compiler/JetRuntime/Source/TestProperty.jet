@@ -18,48 +18,48 @@
 // A case result (PROPERTY_RUN_BYTES): +0 owned error text (0 on success),
 // +8 owned captured stdout, +16 whole-test skip.
 
-PROPERTY_CASES :: I64{200}
-PROPERTY_SHRINK_RUNS :: I64{2000}
-PROPERTY_CTX_BYTES :: I64{72}
-PROPERTY_RUN_BYTES :: I64{24}
-PROPERTY_SEED_LIMIT :: I64{9223372036854775807}
+PROPERTY_CASES: I64{200}
+PROPERTY_SHRINK_RUNS: I64{2000}
+PROPERTY_CTX_BYTES: I64{72}
+PROPERTY_RUN_BYTES: I64{24}
+PROPERTY_SEED_LIMIT: I64{9223372036854775807}
 
-fn property_shr(value: I64, shift: I64) -> I64 {
+property_shr: fn(value: I64, shift: I64) -> I64 {
     (value >> shift).bit_and((I64{1} << (I64{64} - shift)) - I64{1})
 }
 
-fn property_next(ctx: I64) -> I64 {
-    state :: wrapping(trap_word(wrapping(ctx + I64{48})) + I64{-7046029254386353131})
+property_next: fn(ctx: I64) -> I64 {
+    state: wrapping(trap_word(wrapping(ctx + I64{48})) + I64{-7046029254386353131})
     trap_store(wrapping(ctx + I64{48}), state)
     mixed := wrapping(state.bit_xor(property_shr(state, I64{30})) * I64{-4658895280553007687})
     mixed = wrapping(mixed.bit_xor(property_shr(mixed, I64{27})) * I64{-7723592293110705685})
     mixed.bit_xor(property_shr(mixed, I64{31}))
 }
 
-fn property_words_get(list: I64, index: I64) -> I64 { trap_word(wrapping(trap_word(wrapping(list + I64{16})) + index * I64{8})) }
+property_words_get: fn(list: I64, index: I64) -> I64 { trap_word(wrapping(trap_word(wrapping(list + I64{16})) + index * I64{8})) }
 
-fn property_words_push(list: I64, value: I64) {
-    count :: trap_word(list)
+property_words_push: fn(list: I64, value: I64) {
+    count: trap_word(list)
     thread_words_grow(list, count + I64{1})
     trap_store(wrapping(trap_word(wrapping(list + I64{16})) + count * I64{8}), value)
     trap_store(list, count + I64{1})
 }
 
 // Frees the list's buffer and then its header block of `bytes`.
-fn property_words_free(list: I64, bytes: I64) {
-    capacity :: trap_word(wrapping(list + I64{8}))
+property_words_free: fn(list: I64, bytes: I64) {
+    capacity: trap_word(wrapping(list + I64{8}))
     if (capacity != I64{0}) { jet_rt_free(trap_word(wrapping(list + I64{16})), capacity * I64{8}, I64{8}) }
     jet_rt_free(list, bytes, I64{8})
 }
 
-fn property_words_new() -> I64 {
-    list :: jet_rt_alloc(I64{24}, I64{8})
+property_words_new: fn() -> I64 {
+    list: jet_rt_alloc(I64{24}, I64{8})
     thread_zero(list, I64{24})
     list
 }
 
 // `target` becomes `source` without its `size` choices from `at`.
-fn property_words_copy_without(target: I64, source: I64, at: I64, size: I64) {
+property_words_copy_without: fn(target: I64, source: I64, at: I64, size: I64) {
     trap_store(target, I64{0})
     index := I64{0}
     loop index < trap_word(source) {
@@ -69,13 +69,13 @@ fn property_words_copy_without(target: I64, source: I64, at: I64, size: I64) {
 }
 
 // Whether `left` is a simpler choice sequence than `right`.
-fn property_simpler(left: I64, right: I64) -> Bool {
-    count :: trap_word(left)
+property_simpler: fn(left: I64, right: I64) -> Bool {
+    count: trap_word(left)
     if (count != trap_word(right)) -> return count < trap_word(right)
     index := I64{0}
     loop index < count {
-        a :: property_words_get(left, index)
-        b :: property_words_get(right, index)
+        a: property_words_get(left, index)
+        b: property_words_get(right, index)
         if (a != b) -> return a < b
         index += I64{1}
     }
@@ -83,10 +83,10 @@ fn property_simpler(left: I64, right: I64) -> Bool {
 }
 
 // A choice in 0..<bound, recorded for replay and shrinking.
-#Export(c) fn jet_rt_test_property_draw(ctx: I64, bound: I64) -> I64 {
+#Export(c) jet_rt_test_property_draw: fn(ctx: I64, bound: I64) -> I64 {
     value := I64{0}
     if (trap_word(wrapping(ctx + I64{64})) != I64{0}) {
-        at :: trap_word(wrapping(ctx + I64{40}))
+        at: trap_word(wrapping(ctx + I64{40}))
         if (at < trap_word(wrapping(ctx + I64{32}))) { value = trap_word(wrapping(trap_word(wrapping(ctx + I64{24})) + at * I64{8})) }
         trap_store(wrapping(ctx + I64{40}), at + I64{1})
     } else if (bound > I64{1}) {
@@ -100,28 +100,28 @@ fn property_simpler(left: I64, right: I64) -> Bool {
 // An integer in lo...hi (lo <= hi, both within ±2^62): a side of the origin
 // (the value nearest 0), a magnitude scale, then the magnitude, so shrinking
 // moves toward the origin.
-#Export(c) fn jet_rt_test_property_word(ctx: I64, lo: I64, hi: I64) -> I64 {
-    origin :: if (lo > I64{0}) -> lo else if (hi < I64{0}) -> hi else -> I64{0}
-    negative :: jet_rt_test_property_draw(ctx, I64{2}) != I64{0}
-    room :: if negative -> origin - lo else -> hi - origin
-    scale :: jet_rt_test_property_draw(ctx, I64{4})
+#Export(c) jet_rt_test_property_word: fn(ctx: I64, lo: I64, hi: I64) -> I64 {
+    origin: if (lo > I64{0}) -> lo else if (hi < I64{0}) -> hi else -> I64{0}
+    negative: jet_rt_test_property_draw(ctx, I64{2}) != I64{0}
+    room: if negative -> origin - lo else -> hi - origin
+    scale: jet_rt_test_property_draw(ctx, I64{4})
     limit := if (scale == I64{0}) -> I64{10} else if (scale == I64{1}) -> I64{100} else if (scale == I64{2}) -> I64{10000} else -> I64{4611686018427387904}
     if (limit > room + I64{1}) { limit = room + I64{1} }
-    magnitude :: jet_rt_test_property_draw(ctx, limit)
+    magnitude: jet_rt_test_property_draw(ctx, limit)
     if negative -> origin - magnitude else -> origin + magnitude
 }
 
 // A Unicode scalar: a lowercase ASCII letter, or any scalar.
-#Export(c) fn jet_rt_test_property_char(ctx: I64) -> I64 {
+#Export(c) jet_rt_test_property_char: fn(ctx: I64) -> I64 {
     if (jet_rt_test_property_draw(ctx, I64{2}) == I64{0}) -> return I64{97} + jet_rt_test_property_draw(ctx, I64{26})
-    scalar :: jet_rt_test_property_draw(ctx, I64{1112064})
+    scalar: jet_rt_test_property_draw(ctx, I64{1112064})
     if (scalar >= I64{55296}) -> scalar + I64{2048} else -> scalar
 }
 
 // An owned String of at most 16 generated scalars.
-#Export(c) fn jet_rt_test_property_string(ctx: I64) -> I64 {
-    length :: jet_rt_test_property_draw(ctx, I64{17})
-    target :: jet_rt_string_builder_new()
+#Export(c) jet_rt_test_property_string: fn(ctx: I64) -> I64 {
+    length: jet_rt_test_property_draw(ctx, I64{17})
+    target: jet_rt_string_builder_new()
     at := I64{0}
     loop at < length {
         rt_text_push_scalar(target, jet_rt_test_property_char(ctx))
@@ -131,15 +131,15 @@ fn property_simpler(left: I64, right: I64) -> Bool {
 }
 
 // A finite Float: a whole part within ±2^52 and thousandths.
-#Export(c) fn jet_rt_test_property_float(ctx: I64) -> Float {
-    whole :: jet_rt_test_property_word(ctx, I64{-4503599627370496}, I64{4503599627370496})
-    part :: Float{jet_rt_test_property_draw(ctx, I64{1000})} / Float{1000.0}
+#Export(c) jet_rt_test_property_float: fn(ctx: I64) -> Float {
+    whole: jet_rt_test_property_word(ctx, I64{-4503599627370496}, I64{4503599627370496})
+    part: Float{jet_rt_test_property_draw(ctx, I64{1000})} / Float{1000.0}
     if (whole < I64{0}) -> Float{whole} - part else -> Float{whole} + part
 }
 
 // Takes `text`, the rendered inputs of the running case.
-#Export(c) fn jet_rt_test_property_inputs(ctx: I64, text: I64) {
-    old :: trap_word(wrapping(ctx + I64{56}))
+#Export(c) jet_rt_test_property_inputs: fn(ctx: I64, text: I64) {
+    old: trap_word(wrapping(ctx + I64{56}))
     if (old != I64{0}) { test_text_drop(old) }
     trap_store(wrapping(ctx + I64{56}), text)
 }
@@ -147,16 +147,16 @@ fn property_simpler(left: I64, right: I64) -> Bool {
 // One run of `invoke` over the context's current mode, as jet_rt_test_unit
 // runs a unit test: a stop is the case's failure, and a stop without a report
 // (process.exit) is published again on the enclosing root.
-fn property_case(ctx: I64, invoke: I64, run: I64) {
+property_case: fn(ctx: I64, invoke: I64, run: I64) {
     trap_store(ctx, I64{0})
     trap_store(wrapping(ctx + I64{40}), I64{0})
     jet_rt_test_property_inputs(ctx, I64{0})
     jet_rt_test_capture_begin()
     jet_rt_testing_clear_failure()
-    save :: jet_rt_alloc(I64{40}, I64{8})
-    root :: jet_rt_root_begin(save)
-    returned :: coll_call1(invoke, ctx)
-    record :: jet_rt_root_take_stop(root, wrapping(save + I64{32}))
+    save: jet_rt_alloc(I64{40}, I64{8})
+    root: jet_rt_root_begin(save)
+    returned: coll_call1(invoke, ctx)
+    record: jet_rt_root_take_stop(root, wrapping(save + I64{32}))
     jet_rt_root_leave(root, save)
     error := returned
     if (record != I64{0}) {
@@ -173,7 +173,7 @@ fn property_case(ctx: I64, invoke: I64, run: I64) {
     trap_store(wrapping(run + I64{16}), if jet_rt_test_take_whole_skip() -> I64{1} else -> I64{0})
 }
 
-fn property_run_drop(run: I64) {
+property_run_drop: fn(run: I64) {
     if (trap_word(run) != I64{0}) { test_text_drop(trap_word(run)) }
     test_text_drop(trap_word(wrapping(run + I64{8})))
     trap_store(run, I64{0})
@@ -182,11 +182,11 @@ fn property_run_drop(run: I64) {
 
 // Replays `candidate`; true when the replay fails (unskipped) and its
 // recorded choices are simpler than `best`, which they then replace.
-fn property_try(ctx: I64, invoke: I64, run: I64, candidate: I64, best: I64) -> Bool {
+property_try: fn(ctx: I64, invoke: I64, run: I64, candidate: I64, best: I64) -> Bool {
     trap_store(wrapping(ctx + I64{24}), trap_word(wrapping(candidate + I64{16})))
     trap_store(wrapping(ctx + I64{32}), trap_word(candidate))
     property_case(ctx, invoke, run)
-    failed :: trap_word(run) != I64{0} && trap_word(wrapping(run + I64{16})) == I64{0}
+    failed: trap_word(run) != I64{0} && trap_word(wrapping(run + I64{16})) == I64{0}
     property_run_drop(run)
     if (!failed || !property_simpler(ctx, best)) -> return false
     property_words_copy_without(best, ctx, I64{0}, I64{0})
@@ -194,8 +194,8 @@ fn property_try(ctx: I64, invoke: I64, run: I64, candidate: I64, best: I64) -> B
 }
 
 // Shrinks the failing choice sequence `best` in place.
-fn property_shrink(ctx: I64, invoke: I64, run: I64, best: I64) {
-    candidate :: property_words_new()
+property_shrink: fn(ctx: I64, invoke: I64, run: I64, best: I64) {
+    candidate: property_words_new()
     trap_store(wrapping(ctx + I64{64}), I64{1})
     runs := I64{0}
     improved := true
@@ -217,7 +217,7 @@ fn property_shrink(ctx: I64, invoke: I64, run: I64, best: I64) {
         }
         index := I64{0}
         loop index < trap_word(best) && runs < PROPERTY_SHRINK_RUNS {
-            current :: property_words_get(best, index)
+            current: property_words_get(best, index)
             if (current > I64{0}) {
                 property_words_copy_without(candidate, best, I64{0}, I64{0})
                 trap_store(wrapping(trap_word(wrapping(candidate + I64{16})) + index * I64{8}), I64{0})
@@ -226,7 +226,7 @@ fn property_shrink(ctx: I64, invoke: I64, run: I64, best: I64) {
                     low := I64{0}
                     high := current
                     loop high - low > (I64{1}) && runs < PROPERTY_SHRINK_RUNS && index < trap_word(best) {
-                        middle :: low + (high - low) /% I64{2}
+                        middle: low + (high - low) /% I64{2}
                         property_words_copy_without(candidate, best, I64{0}, I64{0})
                         trap_store(wrapping(trap_word(wrapping(candidate + I64{16})) + index * I64{8}), middle)
                         runs += I64{1}
@@ -243,14 +243,14 @@ fn property_shrink(ctx: I64, invoke: I64, run: I64, best: I64) {
 
 // The seed JET_PROP_SEED names (an integer in 0..<2^63) into `seed`; false
 // when it is not one.
-fn property_seed_parse(text: I64, seed: I64) -> Bool {
-    data :: trap_word(text)
-    length :: trap_word(wrapping(text + I64{8}))
+property_seed_parse: fn(text: I64, seed: I64) -> Bool {
+    data: trap_word(text)
+    length: trap_word(wrapping(text + I64{8}))
     if (length == I64{0}) -> return false
     value := I64{0}
     at := I64{0}
     loop at < length {
-        digit :: trap_byte(wrapping(data + at)) - I64{48}
+        digit: trap_byte(wrapping(data + at)) - I64{48}
         if (digit < I64{0} || digit > I64{9} || value > (PROPERTY_SEED_LIMIT - digit) /% I64{10}) -> return false
         value = value * I64{10} + digit
         at += I64{1}
@@ -261,10 +261,10 @@ fn property_seed_parse(text: I64, seed: I64) -> Bool {
 
 // The run's seed into ctx+48: JET_PROP_SEED, else fresh entropy below 2^63.
 // Null on success, else the owned failure text.
-fn property_seed(ctx: I64) -> I64 {
-    value :: test_environment(jet_rt_string_clone(rt_static_text("JET_PROP_SEED")))
+property_seed: fn(ctx: I64) -> I64 {
+    value: test_environment(jet_rt_string_clone(rt_static_text("JET_PROP_SEED")))
     if (value != I64{0}) {
-        parsed :: property_seed_parse(value, wrapping(ctx + I64{48}))
+        parsed: property_seed_parse(value, wrapping(ctx + I64{48}))
         test_text_drop(value)
         if parsed -> return I64{0}
         return jet_rt_string_clone(rt_static_text("JET_PROP_SEED must be an integer from 0 to 9223372036854775807"))
@@ -276,8 +276,8 @@ fn property_seed(ctx: I64) -> I64 {
 
 // The failure report of the minimized case: where it failed, how to replay
 // it, its inputs and its own report (`error`, taken).
-fn property_report(ctx: I64, failed_case: I64, seed: I64, error: I64) -> I64 {
-    target :: jet_rt_string_builder_new()
+property_report: fn(ctx: I64, failed_case: I64, seed: I64, error: I64) -> I64 {
+    target: jet_rt_string_builder_new()
     jet_rt_string_builder_push(target, rt_static_text("property failed on case "))
     rt_text_push_number(target, failed_case)
     jet_rt_string_builder_push(target, rt_static_text(" of "))
@@ -287,7 +287,7 @@ fn property_report(ctx: I64, failed_case: I64, seed: I64, error: I64) -> I64 {
     jet_rt_string_builder_push(target, rt_static_text("; replay with JET_PROP_SEED="))
     rt_text_push_number(target, seed)
     jet_rt_string_builder_push(target, rt_static_text(")\nminimized_inputs: "))
-    inputs :: trap_word(wrapping(ctx + I64{56}))
+    inputs: trap_word(wrapping(ctx + I64{56}))
     if (inputs != I64{0}) { jet_rt_string_builder_push(target, inputs) }
     jet_rt_string_builder_push(target, rt_static_text("\n"))
     jet_rt_string_builder_push(target, error)
@@ -300,17 +300,17 @@ fn property_report(ctx: I64, failed_case: I64, seed: I64, error: I64) -> I64 {
 // the failing case's number when one fails, 0 on a bad seed). A passing
 // property keeps its last case's stdout; a failing one reports its minimized
 // case.
-#Export(c) fn jet_rt_test_property(name: I64, expected: Bool, _env: I64, invoke: I64) -> I64 {
-    ctx :: jet_rt_alloc(PROPERTY_CTX_BYTES, I64{8})
+#Export(c) jet_rt_test_property: fn(name: I64, expected: Bool, _env: I64, invoke: I64) -> I64 {
+    ctx: jet_rt_alloc(PROPERTY_CTX_BYTES, I64{8})
     thread_zero(ctx, PROPERTY_CTX_BYTES)
-    run :: jet_rt_alloc(PROPERTY_RUN_BYTES, I64{8})
+    run: jet_rt_alloc(PROPERTY_RUN_BYTES, I64{8})
     thread_zero(run, PROPERTY_RUN_BYTES)
     error := property_seed(ctx)
     stdout := test_text_new(I64{0})
     skipped := false
     ran := I64{0}
     if (error == I64{0}) {
-        seed :: trap_word(wrapping(ctx + I64{48}))
+        seed: trap_word(wrapping(ctx + I64{48}))
         loop ran < PROPERTY_CASES {
             ran += I64{1}
             property_case(ctx, invoke, run)
@@ -325,7 +325,7 @@ fn property_report(ctx: I64, failed_case: I64, seed: I64, error: I64) -> I64 {
             if (trap_word(run) != I64{0}) {
                 test_text_drop(trap_word(run))
                 trap_store(run, I64{0})
-                best :: property_words_new()
+                best: property_words_new()
                 property_words_copy_without(best, ctx, I64{0}, I64{0})
                 property_shrink(ctx, invoke, run, best)
                 trap_store(wrapping(ctx + I64{24}), trap_word(wrapping(best + I64{16})))

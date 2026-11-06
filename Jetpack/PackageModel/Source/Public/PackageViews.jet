@@ -10,35 +10,35 @@ use {
 }
 
 // Version of the public package-model field matrix.
-PACKAGE_MODEL_SCHEMA_VERSION :: 1
+PACKAGE_MODEL_SCHEMA_VERSION: 1
 
 // One declared dependency (source redacted by `pkg_dep_display_redacted`).
-struct DependencyView {
+DependencyView: struct {
     name: String
     source: String
 }
 
 // One declared package target and its ordered target kinds.
-struct PackageTargetView {
+PackageTargetView: struct {
     name: String
     targets: [String]
 }
 
 // One package target name and its exact selected profile identity.
-struct TargetProfileView {
+TargetProfileView: struct {
     name: String
     profile: String
 }
 
 // One declared output.
-struct OutputView {
+OutputView: struct {
     name: String
     kind: String
     entry: String?
 }
 
 // One named build profile from the package's `build: { … }` declarations.
-struct BuildProfileView {
+BuildProfileView: struct {
     name: String
     optimize: String
     debug_info: Bool
@@ -49,7 +49,7 @@ struct BuildProfileView {
 }
 
 // The uncomposed `package.jet` declaration view.
-struct ManifestView {
+ManifestView: struct {
     schema_version: Int
     file: String
     jet: String?
@@ -66,7 +66,7 @@ struct ManifestView {
 }
 
 // The composed package-facts view.
-struct PackageView {
+PackageView: struct {
     schema_version: Int
     file: String
     jet: String?
@@ -83,7 +83,7 @@ struct PackageView {
 }
 
 // One resolved lock entry in the public lock view.
-struct LockedPackageView {
+LockedPackageView: struct {
     name: String
     version: String
     source_kind: String
@@ -97,7 +97,7 @@ struct LockedPackageView {
 }
 
 // The public projection of `.jet/lock`.
-struct LockView {
+LockView: struct {
     schema_version: Int
     file: String
     version: Int
@@ -106,13 +106,13 @@ struct LockView {
 }
 
 // One collision entry in a profile declaration.
-struct KeyValueView {
+KeyValueView: struct {
     key: String
     value: String
 }
 
 // One evaluated package profile declaration.
-struct ProfileView {
+ProfileView: struct {
     name: String
     extends: [String]
     packages: [String]
@@ -121,7 +121,7 @@ struct ProfileView {
 
     // A canonical profile projection from an environment-model declaration,
     // without coupling the package model to the EnvModel area.
-    fn from_parts(name: String, extends: [String], packages: [String], collisions: [(key: String, value: String)], sources: [String]) -> ProfileView Never! {
+    from_parts: fn(name: String, extends: [String], packages: [String], collisions: [(key: String, value: String)], sources: [String]) -> ProfileView Never! {
         pairs := [KeyValueView]{}
         loop collision in collisions -> &pairs.push(KeyValueView{key: collision.key, value: collision.value})
         ProfileView{name: name, extends: extends, packages: packages, collisions: pairs, sources: sources}
@@ -129,19 +129,19 @@ struct ProfileView {
 }
 
 // The public projection of the package profile set.
-struct ProfileSetView {
+ProfileSetView: struct {
     schema_version: Int
     file: String
     profiles: [ProfileView]
 
     // A schema-versioned profile set that keeps profile order.
-    fn from_profiles(profiles: [ProfileView]) -> ProfileSetView Never! {
+    from_profiles: fn(profiles: [ProfileView]) -> ProfileSetView Never! {
         ProfileSetView{schema_version: PACKAGE_MODEL_SCHEMA_VERSION, file: ENV_FILE, profiles: profiles}
     }
 }
 
 // Project one uncomposed package declaration into the public manifest view.
-fn pkg_manifest_view_from_facts(facts: PackageFacts) -> ManifestView Never! {
+pkg_manifest_view_from_facts: fn(facts: PackageFacts) -> ManifestView Never! {
     ManifestView{
         schema_version: PACKAGE_MODEL_SCHEMA_VERSION,
         file: PACKAGE_FILE,
@@ -160,7 +160,7 @@ fn pkg_manifest_view_from_facts(facts: PackageFacts) -> ManifestView Never! {
 }
 
 // Project composed package facts into the public package view.
-fn pkg_package_view_from_facts(facts: PackageFacts) -> PackageView Never! {
+pkg_package_view_from_facts: fn(facts: PackageFacts) -> PackageView Never! {
     PackageView{
         schema_version: PACKAGE_MODEL_SCHEMA_VERSION,
         file: PACKAGE_FILE,
@@ -179,10 +179,10 @@ fn pkg_package_view_from_facts(facts: PackageFacts) -> PackageView Never! {
 }
 
 // Project the lock model without authority or secret-bearing source fields.
-fn pkg_lock_view_from_lock(lock: LockFile) -> LockView Never! {
+pkg_lock_view_from_lock: fn(lock: LockFile) -> LockView Never! {
     packages := [LockedPackageView]{}
     loop package in lock.packages {
-        revision :: if package.locked == {
+        revision: if package.locked == {
             .Val(locked) -> Val(locked.rev)
             .None -> None
         }
@@ -208,18 +208,18 @@ fn pkg_lock_view_from_lock(lock: LockFile) -> LockView Never! {
     }
 }
 
-fn pkg_view_layer(layer: RuntimeLayer?) -> String? Never! {
-    value :: layer ?? return None
+pkg_view_layer: fn(layer: RuntimeLayer?) -> String? Never! {
+    value: layer ?? return None
     Val(jet_ring_layer_name(value))
 }
 
-fn pkg_view_redacted_repository(repository: String?) -> String? Never! {
-    value :: repository ?? return None
+pkg_view_redacted_repository: fn(repository: String?) -> String? Never! {
+    value: repository ?? return None
     Val(pkg_redact_repository_url(value))
 }
 
 // Dependencies in name order (the Rust BTreeMap order).
-fn pkg_dependency_views(dependencies: [String: DepSource]) -> [DependencyView] Never! {
+pkg_dependency_views: fn(dependencies: [String: DepSource]) -> [DependencyView] Never! {
     names := dependencies.keys().to_list()
     &names.sort()
     out := [DependencyView]{}
@@ -227,7 +227,7 @@ fn pkg_dependency_views(dependencies: [String: DepSource]) -> [DependencyView] N
     out
 }
 
-fn pkg_package_target_name(target: PackageTarget) -> String Never! {
+pkg_package_target_name: fn(target: PackageTarget) -> String Never! {
     if target == {
         .Library -> "library"
         .Executable -> "executable"
@@ -237,7 +237,7 @@ fn pkg_package_target_name(target: PackageTarget) -> String Never! {
     }
 }
 
-fn pkg_package_target_views(packages: [PackageEntry]) -> [PackageTargetView] Never! {
+pkg_package_target_views: fn(packages: [PackageEntry]) -> [PackageTargetView] Never! {
     out := [PackageTargetView]{}
     loop package in packages {
         targets := [String]{}
@@ -247,13 +247,13 @@ fn pkg_package_target_views(packages: [PackageEntry]) -> [PackageTargetView] Nev
     out
 }
 
-fn pkg_target_profile_views(targets: PackageTargets) -> [TargetProfileView] Never! {
+pkg_target_profile_views: fn(targets: PackageTargets) -> [TargetProfileView] Never! {
     out := [TargetProfileView]{}
     loop selection in targets.iter() -> &out.push(TargetProfileView{name: selection.name, profile: selection.profile.as_str()})
     out
 }
 
-fn pkg_output_kind_name(kind: PackageOutputKind) -> String Never! {
+pkg_output_kind_name: fn(kind: PackageOutputKind) -> String Never! {
     if kind == {
         .Library -> "library"
         .Executable -> "executable"
@@ -268,26 +268,26 @@ fn pkg_output_kind_name(kind: PackageOutputKind) -> String Never! {
 }
 
 // Outputs in output-name order (the Rust BTreeMap value order).
-fn pkg_output_views(outputs: [String: OutputFact]) -> [OutputView] Never! {
+pkg_output_views: fn(outputs: [String: OutputFact]) -> [OutputView] Never! {
     names := outputs.keys().to_list()
     &names.sort()
     out := [OutputView]{}
     loop name in names {
-        output :: outputs[name]
+        output: outputs[name]
         &out.push(OutputView{name: output.name, kind: pkg_output_kind_name(output.kind), entry: output.entry})
     }
     out
 }
 
-fn pkg_build_panic_name(panic_mode: BuildPanic?) -> String? Never! {
-    mode :: panic_mode ?? return None
+pkg_build_panic_name: fn(panic_mode: BuildPanic?) -> String? Never! {
+    mode: panic_mode ?? return None
     if mode == {
         .Unwind -> Val("unwind")
         .Abort -> Val("abort")
     }
 }
 
-fn pkg_build_profile_views(profiles: [BuildProfileDef]) -> [BuildProfileView] Never! {
+pkg_build_profile_views: fn(profiles: [BuildProfileDef]) -> [BuildProfileView] Never! {
     out := [BuildProfileView]{}
     loop profile in profiles {
         &out.push(BuildProfileView{
@@ -303,7 +303,7 @@ fn pkg_build_profile_views(profiles: [BuildProfileDef]) -> [BuildProfileView] Ne
     out
 }
 
-fn pkg_lock_source_kind(source: LockSource) -> String Never! {
+pkg_lock_source_kind: fn(source: LockSource) -> String Never! {
     if source == {
         .Root -> "root"
         .Path(_) -> "path"
@@ -316,7 +316,7 @@ fn pkg_lock_source_kind(source: LockSource) -> String Never! {
     }
 }
 
-fn pkg_lock_source_reference(source: LockSource) -> String? Never! {
+pkg_lock_source_reference: fn(source: LockSource) -> String? Never! {
     if source == {
         .Root -> None
         .Path(_) -> None
@@ -331,18 +331,18 @@ fn pkg_lock_source_reference(source: LockSource) -> String? Never! {
 
 // Drop query/fragment text and any `user[:password]@` from a repository URL's
 // authority; a URL without `://` keeps everything before `?`/`#`.
-fn pkg_redact_repository_url(value: String) -> String Never! {
-    raw :: value.bytes()
+pkg_redact_repository_url: fn(value: String) -> String Never! {
+    raw: value.bytes()
     end := raw.len()
     loop index in 0..<raw.len() {
-        code :: Int.from_u8(raw[index])
+        code: Int.from_u8(raw[index])
         if code == 63 || code == 35 {
             end = index
             break
         }
     }
-    base :: pkg_bytes_text(raw, 0, end)
-    bytes :: base.bytes()
+    base: pkg_bytes_text(raw, 0, end)
+    bytes: base.bytes()
     separator := -1
     loop index in 0..<bytes.len() {
         if pkg_bytes_starts_with(bytes, index, "://".bytes()) {
@@ -351,10 +351,10 @@ fn pkg_redact_repository_url(value: String) -> String Never! {
         }
     }
     if separator < 0 -> return base
-    authority_start :: separator + 3
+    authority_start: separator + 3
     authority_end := bytes.len()
     loop index in authority_start..<bytes.len() {
-        code :: Int.from_u8(bytes[index])
+        code: Int.from_u8(bytes[index])
         if code == 47 || code == 63 || code == 35 {
             authority_end = index
             break

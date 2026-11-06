@@ -1,0 +1,36 @@
+package: {
+    name: "ui_shortcut_keys"
+    version: "0.1.0"
+    authority: {
+        allow: [IO, Mem.Alloc, Browser]
+        needs: [UI.Shortcuts]
+    }
+}
+// D-UI-WEB-KEYS1=A: registering a shortcut claims its key from the browser
+// provider; only claimed keys lose their browser default and reach poll.
+use {
+    core.ui.host.[UIShortcut, UIShortcutBinding, UIShortcutModifiers]
+    shortcuts: core.ui.host.shortcuts
+}
+
+// The harness presses keys when the page first polls: Control+S and Meta+S
+// match the command binding, Alt+Shift+K the palette binding, and the unbound
+// keys never reach poll.
+run: fn() {
+    save: shortcuts.binding(UIShortcut.cmd("s"), "save") ?? panic("the save binding is valid")
+    // Alt (2) and Shift (4).
+    palette: shortcuts.binding(UIShortcut{key: "k", modifiers: UIShortcutModifiers{bits: 6}}, "palette") ?? panic("the palette binding is valid")
+    bindings: [UIShortcutBinding]{save, palette}
+    loop each in bindings {
+        if shortcuts.register(each) == .Err(error) -> print("register: {error}")
+    }
+    loop {
+        if shortcuts.poll() == {
+            .Ok(found) -> {
+                dispatch: found ?? break
+                print("poll: {dispatch}")
+            }
+            .Err(error) -> print("poll: {error}")
+        }
+    }
+}

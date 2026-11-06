@@ -86,8 +86,8 @@ The input directory contains exactly this, with small files shown inline:
       | [ -z "$workdir" ] || cd "$workdir"
       | exec "$@"
       | 
-    env.jet  (331 bytes)
-      | module env.dev {
+    env.jet  (332 bytes)
+      | env.dev: module {
       |     services: {
       |         fixture: {
       |             enable: true,
@@ -101,8 +101,8 @@ The input directory contains exactly this, with small files shown inline:
       |     }
       | }
       | 
-    run.jet  (12 bytes)
-      | fn run() {}
+    run.jet  (13 bytes)
+      | run: fn() {}
       | 
 
 ## Required output

@@ -1,8 +1,8 @@
 Error [jet.MissingMoveMarker]: `value` cannot be moved from borrowed storage
-  --> tests/ui/param_owned_callback_needs_copy.jet:5:65
+  --> tests/ui/param_owned_callback_needs_copy.jet:5:66
     |
-  5 | fn wrap(value: fn(Int) -> Int) -> Holder { return Holder{value: value} }
-    |                                                                 ^^^^^
+  5 | wrap: fn(value: fn(Int) -> Int) -> Holder { return Holder{value: value} }
+    |                                                                  ^^^^^
  Why: `value` is a read or write parameter, so its caller keeps the value, and `fn(Int) -> Int` can't be copied into the struct literal
  Fix: Declare the parameter `^` so the caller hands the value over
 More: jet-lang.dev/e/E0201

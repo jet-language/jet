@@ -1,21 +1,21 @@
 // Canonical derivation relations retained by Source facts and typed payloads.
 // IDs match the native FactsDerivation framing algorithm.
 
-struct DerivationIdentity {
+DerivationIdentity: struct {
     source: String
     build: String
     run: String
     target: String
 }
 
-struct DerivationObservation {
+DerivationObservation: struct {
     event_id: String?
     counterexample_id: String?
 }
 
-enum DerivationPayload { FrameSchedule(schedule: FrameSchedule) }
+DerivationPayload: enum { FrameSchedule(schedule: FrameSchedule) }
 
-struct DerivationRecord {
+DerivationRecord: struct {
     id: String
     subject: String
     claim: String
@@ -30,13 +30,13 @@ struct DerivationRecord {
     payload: DerivationPayload?
 }
 
-struct DerivationStore { records: [DerivationRecord] }
+DerivationStore: struct { records: [DerivationRecord] }
 
-fn derivation_identity(source: String, build: String, run: String, target: String) -> DerivationIdentity Never! {
+derivation_identity: fn(source: String, build: String, run: String, target: String) -> DerivationIdentity Never! {
     DerivationIdentity{source: source, build: build, run: run, target: target}
 }
 
-fn derivation_record(subject: String, claim: String, producer: String, method: DerivationMethod, rule: String, premises: [String], identity: DerivationIdentity) -> DerivationRecord Never! {
+derivation_record: fn(subject: String, claim: String, producer: String, method: DerivationMethod, rule: String, premises: [String], identity: DerivationIdentity) -> DerivationRecord Never! {
     sorted_premises := derivation_strings_sorted_unique(premises)
     record := DerivationRecord{
         id: "",
@@ -56,41 +56,41 @@ fn derivation_record(subject: String, claim: String, producer: String, method: D
     record
 }
 
-fn derivation_record_with_payload(record: ^DerivationRecord, payload: DerivationPayload) -> DerivationRecord Never! {
+derivation_record_with_payload: fn(record: ^DerivationRecord, payload: DerivationPayload) -> DerivationRecord Never! {
     updated := record
     updated.payload = Val(payload)
     updated.id = derivation_record_id(updated)
     updated
 }
 
-fn derivation_record_reference(record: DerivationRecord) -> DerivationRef Never! {
+derivation_record_reference: fn(record: DerivationRecord) -> DerivationRef Never! {
     DerivationRef{id: record.id}
 }
 
 // Rust DerivationRecord::invalidate_if_identity_changed, reused by evidence.
-fn derivation_record_invalidate_if_identity_changed(record: &DerivationRecord, current: DerivationIdentity) -> Bool Never! {
+derivation_record_invalidate_if_identity_changed: fn(record: &DerivationRecord, current: DerivationIdentity) -> Bool Never! {
     if record.disposition != DerivationDisposition.Current -> return false
     if record.identity.source == current.source && record.identity.build == current.build && record.identity.run == current.run && record.identity.target == current.target -> return false
     record.disposition = DerivationDisposition.Stale
     true
 }
 
-fn derivation_record_validate(record: DerivationRecord) -> Bool Never! {
+derivation_record_validate: fn(record: DerivationRecord) -> Bool Never! {
     record.id == derivation_record_id(record)
 }
 
-fn derivation_payload_json(payload: DerivationPayload) -> String Never! {
+derivation_payload_json: fn(payload: DerivationPayload) -> String Never! {
     if payload == {
         .FrameSchedule(schedule) -> frame_schedule_json(schedule)
     }
 }
 
-fn derivation_record_json(record: DerivationRecord) -> String Never! {
+derivation_record_json: fn(record: DerivationRecord) -> String Never! {
     premises := derivation_json_strings(record.premises)
     assumptions := derivation_json_strings(record.assumptions)
     observation := "null"
     if record.observation != None {
-        item :: record.observation ?? DerivationObservation{event_id: None, counterexample_id: None}
+        item: record.observation ?? DerivationObservation{event_id: None, counterexample_id: None}
         counterexample := if item.counterexample_id == None -> "null" else -> derivation_record_quote(item.counterexample_id ?? "")
         event := if item.event_id == None -> "null" else -> derivation_record_quote(item.event_id ?? "")
         observation = "{{\"counterexample\":{counterexample},\"event\":{event}}}"
@@ -98,18 +98,18 @@ fn derivation_record_json(record: DerivationRecord) -> String Never! {
     payload := derivation_optional_payload_json(record.payload, "null")
     "{{\"assumptions\":[{assumptions}],\"claim\":{derivation_record_quote(record.claim)},\"disposition\":{derivation_disposition_name(record.disposition)},\"id\":{derivation_record_quote(record.id)},\"identity\":{{\"build\":{derivation_record_quote(record.identity.build)},\"run\":{derivation_record_quote(record.identity.run)},\"source\":{derivation_record_quote(record.identity.source)},\"target\":{derivation_record_quote(record.identity.target)}}},\"method\":{derivation_method_name(record.method)},\"observation\":{observation},\"payload\":{payload},\"premises\":[{premises}],\"producer\":{derivation_record_quote(record.producer)},\"rule\":{derivation_record_quote(record.rule)},\"subject\":{derivation_record_quote(record.subject)}}}"
 }
-fn derivation_optional_payload_json(payload: DerivationPayload?, absent: String) -> String Never! {
-    value :: payload ?? return absent.copy()
+derivation_optional_payload_json: fn(payload: DerivationPayload?, absent: String) -> String Never! {
+    value: payload ?? return absent.copy()
     derivation_payload_json(value)
 }
 
-fn derivation_store_empty() -> DerivationStore Never! {
+derivation_store_empty: fn() -> DerivationStore Never! {
     DerivationStore{records: [DerivationRecord]{}}
 }
 
 // Invalid non-canonical records are not interned. Existing IDs resolve to the
 // first canonical record, preserving idempotent evidence collection.
-fn derivation_store_intern(store: &DerivationStore, record: DerivationRecord) -> DerivationRef? {
+derivation_store_intern: fn(store: &DerivationStore, record: DerivationRecord) -> DerivationRef? {
     if !derivation_record_validate(record) -> return None
     loop existing in store.records {
         if existing.id == record.id -> return Val(derivation_record_reference(existing))
@@ -119,7 +119,7 @@ fn derivation_store_intern(store: &DerivationStore, record: DerivationRecord) ->
     Val(derivation_record_reference(record))
 }
 
-fn derivation_store_sort(store: &DerivationStore) Never! {
+derivation_store_sort: fn(store: &DerivationStore) Never! {
     loop i in 1..<store.records.len() {
         value := store.records[i]
         j := i
@@ -131,7 +131,7 @@ fn derivation_store_sort(store: &DerivationStore) Never! {
     }
 }
 
-fn derivation_strings_sorted_unique(values: [String]) -> [String] Never! {
+derivation_strings_sorted_unique: fn(values: [String]) -> [String] Never! {
     sorted := values
     loop i in 1..<sorted.len() {
         value := sorted[i]
@@ -149,7 +149,7 @@ fn derivation_strings_sorted_unique(values: [String]) -> [String] Never! {
     result
 }
 
-fn derivation_method_name(method: DerivationMethod) -> String Never! {
+derivation_method_name: fn(method: DerivationMethod) -> String Never! {
     if method == {
         .StaticDerivation -> derivation_json_quote("static_derivation")
         .FormalProof -> derivation_json_quote("formal_proof")
@@ -159,7 +159,7 @@ fn derivation_method_name(method: DerivationMethod) -> String Never! {
     }
 }
 
-fn derivation_disposition_name(disposition: DerivationDisposition) -> String Never! {
+derivation_disposition_name: fn(disposition: DerivationDisposition) -> String Never! {
     if disposition == {
         .Current -> derivation_json_quote("current")
         .Stale -> derivation_json_quote("stale")
@@ -172,21 +172,21 @@ fn derivation_disposition_name(disposition: DerivationDisposition) -> String Nev
     }
 }
 
-fn derivation_json_strings(values: [String]) -> String Never! {
+derivation_json_strings: fn(values: [String]) -> String Never! {
     rows := [String]{}
     loop value in values -> &rows.push(derivation_record_quote(value))
     rows.join(",")
 }
 
-fn derivation_record_quote(value: String) -> String Never! {
-    carriage_return :: String.from_bytes([U8]{13}) ?? ""
-    escaped :: value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace(carriage_return, "\\r").replace("\t", "\\t")
+derivation_record_quote: fn(value: String) -> String Never! {
+    carriage_return: String.from_bytes([U8]{13}) ?? ""
+    escaped: value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace(carriage_return, "\\r").replace("\t", "\\t")
     "\"{escaped}\""
 }
 
-fn derivation_record_id(record: DerivationRecord) -> String Never! {
+derivation_record_id: fn(record: DerivationRecord) -> String Never! {
     payload := derivation_optional_payload_json(record.payload, "")
-    separator :: String.from_bytes([U8]{0}) ?? ""
+    separator: String.from_bytes([U8]{0}) ?? ""
     premises := record.premises.join(separator)
     state := DerivationHashState{first: U64{0xcbf29ce484222325}, second: U64{0x9e3779b185ebca87}}
     derivation_hash_frame(&state, record.subject)
@@ -203,9 +203,9 @@ fn derivation_record_id(record: DerivationRecord) -> String Never! {
     derivation_hash_hex(state)
 }
 
-struct DerivationHashState { first: U64, second: U64 }
+DerivationHashState: struct { first: U64, second: U64 }
 
-fn derivation_method_raw(method: DerivationMethod) -> String Never! {
+derivation_method_raw: fn(method: DerivationMethod) -> String Never! {
     if method == {
         .StaticDerivation -> "static_derivation"
         .FormalProof -> "formal_proof"
@@ -215,30 +215,30 @@ fn derivation_method_raw(method: DerivationMethod) -> String Never! {
     }
 }
 
-fn derivation_hash_frame(state: &DerivationHashState, value: String) Never! {
+derivation_hash_frame: fn(state: &DerivationHashState, value: String) Never! {
     bytes := value.bytes()
     length := bytes.len()
     loop index in 0..<8 -> derivation_hash_byte(&state, U8{((length >> ((7 - index) * 8))).bit_and(255)})
     loop byte in bytes -> derivation_hash_byte(&state, byte)
 }
 
-fn derivation_hash_byte(state: &DerivationHashState, byte: U8) Never! {
-    value :: U64.from_u8(byte)
+derivation_hash_byte: fn(state: &DerivationHashState, byte: U8) Never! {
+    value: U64.from_u8(byte)
     state.first = ((state.first).bit_xor(value)).wrapping_mul(U64{0x100000001b3})
     state.second = (((state.second).bit_xor(state.first.rotate_left(17))).bit_xor(value)).wrapping_mul(U64{0x9e3779b185ebca87})
 }
 
-fn derivation_hash_hex(state: DerivationHashState) -> String Never! {
+derivation_hash_hex: fn(state: DerivationHashState) -> String Never! {
     digits := "0123456789abcdef".bytes()
-    first :: Int.from_u64(state.first)
-    second :: Int.from_u64(state.second)
+    first: Int.from_u64(state.first)
+    second: Int.from_u64(state.second)
     output := [U8]{}
     loop shift in ([Int]{60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0}) -> &output.push(digits[((first >> shift)).bit_and(15)])
     loop shift in ([Int]{60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0}) -> &output.push(digits[((second >> shift)).bit_and(15)])
     String.from_bytes(output) ?? ""
 }
 
-fn derivation_json_quote(value: String) -> String Never! {
+derivation_json_quote: fn(value: String) -> String Never! {
     bytes := value.bytes()
     output := "\""
     index := 0
@@ -275,7 +275,7 @@ fn derivation_json_quote(value: String) -> String Never! {
             next
         }
         if byte == 194 && index + 1 < bytes.len() {
-            following :: Int.from_u8(bytes[index + 1])
+            following: Int.from_u8(bytes[index + 1])
             if following >= 128 && following <= 159 {
                 output += "\\u00{derivation_hex_byte(following)}"
                 index += 2
@@ -299,12 +299,12 @@ fn derivation_json_quote(value: String) -> String Never! {
     "{output}\""
 }
 
-fn derivation_hex_byte(value: Int) -> String Never! {
+derivation_hex_byte: fn(value: Int) -> String Never! {
     digits := "0123456789abcdef".bytes()
     String.from_bytes([U8]{digits[((value >> 4)).bit_and(15)], digits[(value).bit_and(15)]}) ?? "00"
 }
 
-fn frame_schedule_json(schedule: FrameSchedule) -> String Never! {
+frame_schedule_json: fn(schedule: FrameSchedule) -> String Never! {
     operations := [String]{}
     dependencies := [String]{}
     transfers := [String]{}
@@ -317,35 +317,35 @@ fn frame_schedule_json(schedule: FrameSchedule) -> String Never! {
     loop row in schedule.reuse -> &reuse.push(frame_reuse_json(row))
     loop row in schedule.retentions -> &retentions.push(frame_retention_json(row))
     loop reason in schedule.conservative -> &conservative.push(derivation_json_quote(reason))
-    operations_json :: operations.join(",")
-    dependencies_json :: dependencies.join(",")
-    transfers_json :: transfers.join(",")
-    reuse_json :: reuse.join(",")
-    retentions_json :: retentions.join(",")
-    conservative_json :: conservative.join(",")
+    operations_json: operations.join(",")
+    dependencies_json: dependencies.join(",")
+    transfers_json: transfers.join(",")
+    reuse_json: reuse.join(",")
+    retentions_json: retentions.join(",")
+    conservative_json: conservative.join(",")
     "{{\"schema\":\"jet.frame_schedule/v1\",\"operations\":[{operations_json}],\"dependencies\":[{dependencies_json}],\"transfers\":[{transfers_json}],\"reuse\":[{reuse_json}],\"retentions\":[{retentions_json}],\"conservative\":[{conservative_json}]}}"
 }
 
-fn frame_operation_json(operation: FrameOperation) -> String Never! {
+frame_operation_json: fn(operation: FrameOperation) -> String Never! {
     accesses := [String]{}
     loop access in operation.accesses -> &accesses.push(resource_access_json(access))
     provider := if operation.completion_provider == None -> "" else -> ",\"completion_provider\":{derivation_json_quote(operation.completion_provider ?? "")}"
-    accesses_json :: accesses.join(",")
+    accesses_json: accesses.join(",")
     "{{\"name\":{derivation_json_quote(operation.name)},\"source_index\":{derivation_json_quote(operation.source_index.to_string())},\"accesses\":[{accesses_json}],\"completion\":{frame_completion_json(operation.completion)},\"external_effect\":{derivation_json_bool(operation.external_effect)}{provider}}}"
 }
 
-fn resource_access_json(access: ResourceAccess) -> String Never! {
+resource_access_json: fn(access: ResourceAccess) -> String Never! {
     "{{\"resource\":{resource_identity_json(access.resource)},\"mode\":{derivation_json_quote(resource_mode_name(access.mode))},\"region\":{resource_region_json(access.region)},\"layout\":{resource_layout_json(access.layout)},\"temporary\":{derivation_json_bool(access.temporary)}}}"
 }
 
-fn resource_identity_json(identity: ResourceIdentity) -> String Never! {
+resource_identity_json: fn(identity: ResourceIdentity) -> String Never! {
     if identity == {
         .Named(name) -> "{{\"kind\":\"named\",\"value\":{derivation_json_quote(name)}}}"
         .Unknown -> "{{\"kind\":\"unknown\"}}"
     }
 }
 
-fn resource_mode_name(mode: ResourceAccessMode) -> String Never! {
+resource_mode_name: fn(mode: ResourceAccessMode) -> String Never! {
     if mode == {
         .Read -> "read"
         .Write -> "write"
@@ -353,7 +353,7 @@ fn resource_mode_name(mode: ResourceAccessMode) -> String Never! {
     }
 }
 
-fn resource_region_json(region: ResourceRegion) -> String Never! {
+resource_region_json: fn(region: ResourceRegion) -> String Never! {
     if region == {
         .Whole -> "{{\"kind\":\"whole\"}}"
         .Unknown -> "{{\"kind\":\"unknown\"}}"
@@ -361,12 +361,12 @@ fn resource_region_json(region: ResourceRegion) -> String Never! {
     }
 }
 
-fn resource_layout_json(layout: ResourceLayout?) -> String Never! {
-    value :: layout ?? return "null"
+resource_layout_json: fn(layout: ResourceLayout?) -> String Never! {
+    value: layout ?? return "null"
     "{{\"size\":{derivation_json_quote(value.size.to_string())},\"align\":{derivation_json_quote(value.align.to_string())},\"layout\":{derivation_json_quote(value.layout)},\"device\":{derivation_json_quote(value.device)}}}"
 }
 
-fn frame_completion_json(completion: FrameCompletion) -> String Never! {
+frame_completion_json: fn(completion: FrameCompletion) -> String Never! {
     if completion == {
         .Synchronous -> "{{\"kind\":\"synchronous\"}}"
         .Pending(token) -> "{{\"kind\":\"pending\",\"token\":{derivation_json_quote(token)}}}"
@@ -374,23 +374,23 @@ fn frame_completion_json(completion: FrameCompletion) -> String Never! {
     }
 }
 
-fn frame_dependency_json(row: FrameDependency) -> String Never! {
+frame_dependency_json: fn(row: FrameDependency) -> String Never! {
     "{{\"before\":{derivation_json_quote(row.before.to_string())},\"after\":{derivation_json_quote(row.after.to_string())},\"resource\":{derivation_json_quote(row.resource)},\"reason\":{derivation_json_quote(row.reason)}}}"
 }
 
-fn frame_transfer_json(row: FrameTransfer) -> String Never! {
+frame_transfer_json: fn(row: FrameTransfer) -> String Never! {
     "{{\"before\":{derivation_json_quote(row.before.to_string())},\"after\":{derivation_json_quote(row.after.to_string())},\"resource\":{derivation_json_quote(row.resource)},\"from_device\":{derivation_json_quote(row.from_device)},\"to_device\":{derivation_json_quote(row.to_device)}}}"
 }
 
-fn frame_reuse_json(row: FrameReuse) -> String Never! {
+frame_reuse_json: fn(row: FrameReuse) -> String Never! {
     "{{\"previous_resource\":{derivation_json_quote(row.previous_resource)},\"next_resource\":{derivation_json_quote(row.next_resource)},\"previous_last_use\":{derivation_json_quote(row.previous_last_use.to_string())},\"next_first_use\":{derivation_json_quote(row.next_first_use.to_string())},\"legal\":{derivation_json_bool(row.legal)},\"reason\":{derivation_json_quote(row.reason)}}}"
 }
 
-fn frame_retention_json(row: FrameRetention) -> String Never! {
+frame_retention_json: fn(row: FrameRetention) -> String Never! {
     token := if row.completion_token == None -> "null" else -> derivation_json_quote(row.completion_token ?? "")
     "{{\"resource\":{derivation_json_quote(row.resource)},\"operation\":{derivation_json_quote(row.operation.to_string())},\"owner\":{derivation_json_quote(row.owner)},\"completion_token\":{token},\"completed\":{derivation_json_bool(row.completed)}}}"
 }
 
-fn derivation_json_bool(value: Bool) -> String Never! {
+derivation_json_bool: fn(value: Bool) -> String Never! {
     if value -> "true" else -> "false"
 }

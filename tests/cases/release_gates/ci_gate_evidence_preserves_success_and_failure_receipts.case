@@ -1,5 +1,22 @@
-# Port of tests/release_gates.rs::ci_gate_evidence_preserves_success_and_failure_receipts; all original predicates, runtime UNRUN.
-step: jet {root}/Tools/ci/CiEvidence.jet --report-dir {work}/success -- bash -c "printf 'gate-ok\\n'"
+# Port of tests/release_gates.rs::ci_gate_evidence_preserves_success_and_failure_receipts; all original predicates.
+# The gate binds its receipt to the checkout holding the tool, so the case
+# builds its own one-commit repository instead of reading the kit's root.
+requires: tool:git
+mkdir: repo/Tools/ci
+mkdir: repo/.github/workflows
+copy: {root}/Tools/ci/CiEvidence.jet repo/Tools/ci/CiEvidence.jet
+write: repo/flake.lock = "candidate lock\n"
+write: repo/.github/workflows/ci.yml = "name: CI\n"
+step: git init --quiet
+cwd: repo
+exit: 0
+step: git add .
+cwd: repo
+exit: 0
+step: git -c user.email=test@jet.test -c user.name=Jet -c commit.gpgsign=false commit --quiet -m candidate
+cwd: repo
+exit: 0
+step: jet {work}/repo/Tools/ci/CiEvidence.jet --report-dir {work}/success -- bash -c "printf 'gate-ok\\n'"
 unset: GITHUB_ACTIONS
 env: RUNNER_OS=Linux
 env: RUNNER_ARCH=X64
@@ -36,7 +53,7 @@ file: success/receipt.txt ~ "provenance=github-actions:local/1" # Original succe
 file: success/receipt.txt ~ "source_manifest_sha256=" # Original success receipt.contains.
 file: success/receipt.txt ~ "toolchain_sha256=" # Original success receipt.contains.
 file: success/command.stdout = "gate-ok\n"
-step: jet {root}/Tools/ci/CiEvidence.jet --report-dir {work}/failure -- bash -c "printf 'gate-failed\\n' >&2; exit 23"
+step: jet {work}/repo/Tools/ci/CiEvidence.jet --report-dir {work}/failure -- bash -c "printf 'gate-failed\\n' >&2; exit 23"
 env: GITHUB_SHA={cap:candidate}
 env: RUNNER_OS=Linux
 env: RUNNER_ARCH=X64
@@ -45,7 +62,7 @@ file: failure/receipt.txt ~ "status=fail" # Original failure receipt.contains.
 file: failure/receipt.txt ~ "command_exit=23" # Original failure receipt.contains.
 file: failure/command.stderr = "gate-failed\n"
 file: failure/toolchain.txt is-file
-step: jet {root}/Tools/ci/CiEvidence.jet --report-dir {work}/missing-runner -- bash -c "printf 'must-not-run\\n'"
+step: jet {work}/repo/Tools/ci/CiEvidence.jet --report-dir {work}/missing-runner -- bash -c "printf 'must-not-run\\n'"
 env: GITHUB_ACTIONS=true
 env: GITHUB_SHA={cap:candidate}
 unset: RUNNER_OS
@@ -58,7 +75,7 @@ file: missing-runner/receipt.txt ~ "status=fail" # Original receipt.contains.
 file: missing-runner/command.stderr ~ "runner OS identity is missing" # Original missing runner rejection.contains.
 mkdir: stale
 write: stale/receipt.txt = "status=pass\\n"
-step: jet {root}/Tools/ci/CiEvidence.jet --report-dir {work}/stale -- bash -c "printf 'must-not-run\\n'"
+step: jet {work}/repo/Tools/ci/CiEvidence.jet --report-dir {work}/stale -- bash -c "printf 'must-not-run\\n'"
 unset: GITHUB_ACTIONS
 env: GITHUB_SHA={cap:candidate}
 env: RUNNER_OS=Linux
@@ -67,7 +84,7 @@ exit: 78
 file: stale/command.stdout = ""
 file: stale/receipt.txt ~ "status=fail" # Original stale receipt.contains.
 file: stale/command.stderr ~ "stale file" # Original stale rejection.contains.
-step: jet {root}/Tools/ci/CiEvidence.jet --report-dir {work}/artifact-mismatch -- bash -c "printf 'must-not-run\\n'"
+step: jet {work}/repo/Tools/ci/CiEvidence.jet --report-dir {work}/artifact-mismatch -- bash -c "printf 'must-not-run\\n'"
 unset: GITHUB_ACTIONS
 env: GITHUB_SHA={cap:candidate}
 env: JET_CI_ARTIFACT_NAME=ci-gate-evidence-shard-0-stale

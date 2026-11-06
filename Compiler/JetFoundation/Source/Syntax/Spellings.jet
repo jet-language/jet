@@ -3,13 +3,13 @@
 
 // Only the underscore prefix affects source visibility; a bare `_` stays an
 // ordinary binding spelling.
-enum IdentifierClass {
+IdentifierClass: enum {
     Ordinary
     SoftPublic
     Reserved
 }
 
-fn classify_identifier(name: String) -> IdentifierClass Never! {
+classify_identifier: fn(name: String) -> IdentifierClass Never! {
     if name.starts_with("__") -> return IdentifierClass.Reserved
     // After the ASCII `_`, a second character also means more than one byte.
     if name.starts_with("_") && name.bytes().len() > 1 -> return IdentifierClass.SoftPublic
@@ -20,7 +20,7 @@ fn classify_identifier(name: String) -> IdentifierClass Never! {
 // structure, control flow, declarations, compile time, migrations, ownership,
 // expert scopes, concurrency, tests, typestate, protocols, validation and the
 // reserved literals.
-JET_KEYWORD_NAMES :: comptime { [String]{
+JET_KEYWORD_NAMES: comptime { [String]{
     "fn", "pub", "priv", "use", "as", "extern", "module", "rust",
     "if", "else", "loop", "in", "break", "next", "return", "yield", "defer",
     "struct", "enum", "impl", "policy", "wrap", "trait", "tag", "effect", "derive",
@@ -36,7 +36,7 @@ JET_KEYWORD_NAMES :: comptime { [String]{
 } }
 
 // The built-in type catalog in registry order.
-JET_TYPE_NAMES :: comptime { [String]{
+JET_TYPE_NAMES: comptime { [String]{
     "Int", "Float", "Bool", "String", "()", "Char", "Err",
     "Shared", "SharedSnapshot", "SharedRevisionError", "SharedGuard", "Shared.Weak", "Condition",
     "Task", "Receiver", "Sender", "TaskFailure", "HashMap", "BTreeMap", "Map", "Queue", "Set", "Rank",
@@ -44,6 +44,6 @@ JET_TYPE_NAMES :: comptime { [String]{
     "I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64", "F32", "F64",
 } }
 
-fn jet_keyword_names() -> [String] Never! { JET_KEYWORD_NAMES.copy() }
+jet_keyword_names: fn() -> [String] Never! { JET_KEYWORD_NAMES.copy() }
 
-fn jet_type_names() -> [String] Never! { JET_TYPE_NAMES.copy() }
+jet_type_names: fn() -> [String] Never! { JET_TYPE_NAMES.copy() }

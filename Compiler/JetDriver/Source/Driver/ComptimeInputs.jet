@@ -18,21 +18,21 @@ use {
     ]
     jet_eval.[JetEvalComptimeInputAdapter, JetEvalComptimeInputError]
     jet_build_session.[BuildSessionReply, BuildSessionValue]
-    comptime_inputs_crypto :: core.crypto
+    comptime_inputs_crypto: core.crypto
 }
 
 // One locked comptime input: its path relative to the embedding file's
 // directory and the SHA-256 of its bytes.
-struct JetDriverComptimeInputRecord {
+JetDriverComptimeInputRecord: struct {
     path: String
     sha256: String
 }
 
-struct JetDriverComptimeInputLog {
+JetDriverComptimeInputLog: struct {
     records: [JetDriverComptimeInputRecord]
 }
 
-struct JetDriverComptimeInputs {
+JetDriverComptimeInputs: struct {
     inputs: JetDriverSharedBuildInputs
     base_dir: String
     log: Shared<JetDriverComptimeInputLog>?
@@ -42,63 +42,63 @@ struct JetDriverComptimeInputs {
 // toolchain's Core tree, read by the reader that reads the file's text
 // (`text`, the Core row's shared cell). Core is part of the compiler, so the
 // program's comptime input lock doesn't record these reads.
-struct JetDriverCoreComptimeInputs {
+JetDriverCoreComptimeInputs: struct {
     text: Shared<JetDriverCoreText>
     base_dir: String
 }
 
-fn jet_driver_comptime_input_fail(what: String, why: String, fix: String, span: Span) -> JetEvalComptimeInputError Never! {
+jet_driver_comptime_input_fail: fn(what: String, why: String, fix: String, span: Span) -> JetEvalComptimeInputError Never! {
     JetEvalComptimeInputError{diagnostic: diagnostic_from_registry("E0955", Val(span), what, why, fix)}
 }
 
-fn jet_driver_comptime_input_record(recorder: Shared<JetDriverComptimeInputLog>?, path: String, bytes: [U8]) Never! {
-    log :: recorder ?? return
-    permit :: log.guard_edit()
+jet_driver_comptime_input_record: fn(recorder: Shared<JetDriverComptimeInputLog>?, path: String, bytes: [U8]) Never! {
+    log: recorder ?? return
+    permit: log.guard_edit()
     &permit.value.records.push(JetDriverComptimeInputRecord{path: path, sha256: comptime_inputs_crypto.sha256(bytes).hex()})
 }
 
 impl JetDriverComptimeInputs.JetEvalComptimeInputAdapter {
-    fn clone_input_adapter(self) -[]> JetEvalComptimeInputAdapter {
+    clone_input_adapter: fn(self) -[]> JetEvalComptimeInputAdapter {
         // copy: the evaluator forks the adapter for each machine; the forks share the input
         // transport and the one input log.
         JetDriverComptimeInputs{inputs: self.inputs.copy(), base_dir: self.base_dir.copy(), log: self.log.copy()}
     }
-    fn comptime_input(self, builtin: String, path: String, span: Span) -[FS.Read]> TComptimeValue JetEvalComptimeInputError! {
+    comptime_input: fn(self, builtin: String, path: String, span: Span) -[FS.Read]> TComptimeValue JetEvalComptimeInputError! {
         if builtin == "find" -> return jet_driver_comptime_find(self, path, span)
-        bytes :: self.inputs.read_rooted(self.base_dir, path, JET_DRIVER_BUILD_MAX_FILE_BYTES) ?? return Err(jet_driver_comptime_input_fail("`{builtin}` can't open `{path}`", "{err.message} (looked next to the file doing the embedding)", "check the path — it is relative to the file's own directory", span))
+        bytes: self.inputs.read_rooted(self.base_dir, path, JET_DRIVER_BUILD_MAX_FILE_BYTES) ?? return Err(jet_driver_comptime_input_fail("`{builtin}` can't open `{path}`", "{err.message} (looked next to the file doing the embedding)", "check the path — it is relative to the file's own directory", span))
         jet_driver_comptime_input_record(self.log, path, bytes)
         jet_driver_comptime_input_value(builtin, path, bytes, span)
     }
 }
 
 impl JetDriverCoreComptimeInputs.JetEvalComptimeInputAdapter {
-    fn clone_input_adapter(self) -[]> JetEvalComptimeInputAdapter {
+    clone_input_adapter: fn(self) -[]> JetEvalComptimeInputAdapter {
         // copy: the forks share the Core row's text cell and so its reader.
         JetDriverCoreComptimeInputs{text: self.text.copy(), base_dir: self.base_dir.copy()}
     }
-    fn comptime_input(self, builtin: String, path: String, span: Span) -[FS.Read]> TComptimeValue JetEvalComptimeInputError! {
+    comptime_input: fn(self, builtin: String, path: String, span: Span) -[FS.Read]> TComptimeValue JetEvalComptimeInputError! {
         if builtin == "find" -> return Err(jet_driver_comptime_input_fail("`find` can't walk `{path}` in Core", "a Core file embeds each of its assets by name", "name each asset with `embed_bytes(\"path\")`", span))
-        permit :: self.text.guard_read()
-        reader :: permit.value.reader ?? return Err(JetEvalComptimeInputError{diagnostic: diagnostic_from_registry("E0003", Val(span), "a Core comptime input lost its reader", "the driver reads a Core file's inputs with the reader of its row", "report this compiler bug")})
-        bytes :: reader.read_bytes("{self.base_dir}/{path}") ?? return Err(jet_driver_comptime_input_fail("`{builtin}` can't open `{path}`", "{err.message} (looked next to the file doing the embedding)", "check the path — it is relative to the file's own directory", span))
+        permit: self.text.guard_read()
+        reader: permit.value.reader ?? return Err(JetEvalComptimeInputError{diagnostic: diagnostic_from_registry("E0003", Val(span), "a Core comptime input lost its reader", "the driver reads a Core file's inputs with the reader of its row", "report this compiler bug")})
+        bytes: reader.read_bytes("{self.base_dir}/{path}") ?? return Err(jet_driver_comptime_input_fail("`{builtin}` can't open `{path}`", "{err.message} (looked next to the file doing the embedding)", "check the path — it is relative to the file's own directory", span))
         jet_driver_comptime_input_value(builtin, path, bytes, span)
     }
 }
 
 // The value `builtin` makes of an input's bytes: the bytes for `embed_bytes`,
 // their UTF-8 text for `embed_file`.
-fn jet_driver_comptime_input_value(builtin: String, path: String, bytes: [U8], span: Span) -> TComptimeValue JetEvalComptimeInputError! {
+jet_driver_comptime_input_value: fn(builtin: String, path: String, bytes: [U8], span: Span) -> TComptimeValue JetEvalComptimeInputError! {
     if builtin == "embed_bytes" {
         return Ok(TComptimeValue.Bytes{value: bytes})
     }
-    text :: String.from_bytes(bytes) ?? return Err(jet_driver_comptime_input_fail("`{builtin}` can't read `{path}` as text", "the file isn't valid UTF-8; `{builtin}` returns a String", "embed it with `embed_bytes(\"path\")` instead — it returns raw `[U8]`", span))
+    text: String.from_bytes(bytes) ?? return Err(jet_driver_comptime_input_fail("`{builtin}` can't read `{path}` as text", "the file isn't valid UTF-8; `{builtin}` returns a String", "embed it with `embed_bytes(\"path\")` instead — it returns raw `[U8]`", span))
     Ok(TComptimeValue.String{value: text})
 }
 
 // `eval_locked_find`: the sorted relative files the glob matches, each read
 // (and recorded) within the tree-file bound.
-fn jet_driver_comptime_find(adapter: JetDriverComptimeInputs, glob: String, span: Span) -[FS.Read]> TComptimeValue JetEvalComptimeInputError! {
-    reply :: jet_driver_build_find(adapter.inputs, adapter.base_dir, [BuildSessionValue]{BuildSessionValue.Text{value: glob}}, span)
+jet_driver_comptime_find: fn(adapter: JetDriverComptimeInputs, glob: String, span: Span) -[FS.Read]> TComptimeValue JetEvalComptimeInputError! {
+    reply: jet_driver_build_find(adapter.inputs, adapter.base_dir, [BuildSessionValue]{BuildSessionValue.Text{value: glob}}, span)
     found := [String]{}
     if reply == {
         .Value(value) -> {
@@ -113,7 +113,7 @@ fn jet_driver_comptime_find(adapter: JetDriverComptimeInputs, glob: String, span
     }
     strings := [TComptimeValue]{}
     loop relative in found {
-        bytes :: adapter.inputs.read_rooted(adapter.base_dir, relative, JET_DRIVER_BUILD_MAX_FILE_BYTES) ?? return Err(jet_driver_comptime_input_fail("`find` can't open `{relative}`", "{err.message} (matched while expanding `{glob}`)", "check the path — it is relative to the file's own directory", span))
+        bytes: adapter.inputs.read_rooted(adapter.base_dir, relative, JET_DRIVER_BUILD_MAX_FILE_BYTES) ?? return Err(jet_driver_comptime_input_fail("`find` can't open `{relative}`", "{err.message} (matched while expanding `{glob}`)", "check the path — it is relative to the file's own directory", span))
         jet_driver_comptime_input_record(adapter.log, relative, bytes)
         &strings.push(TComptimeValue.String{value: relative})
     }
@@ -125,10 +125,10 @@ fn jet_driver_comptime_find(adapter: JetDriverComptimeInputs, glob: String, span
 // request's build-input transport; a request without one (a host that reads
 // no files) has no comptime input host. A Core file's is its own directory in
 // the toolchain's Core tree (jet_driver_core_comptime_inputs).
-fn jet_driver_comptime_inputs_for(request: JetDriverCompileRequest, source_file: String) -> JetEvalComptimeInputAdapter? {
+jet_driver_comptime_inputs_for: fn(request: JetDriverCompileRequest, source_file: String) -> JetEvalComptimeInputAdapter? {
     if source_file.starts_with("{JET_DRIVER_CORE_SOURCE_ROOT}/") -> return jet_driver_core_comptime_inputs(request.core_sources, source_file)
-    inputs :: request.build_inputs ?? return None
-    physical :: jet_driver_physical_path(jet_driver_entry_root_path(request.authorized_sources), source_file)
+    inputs: request.build_inputs ?? return None
+    physical: jet_driver_physical_path(jet_driver_entry_root_path(request.authorized_sources), source_file)
     // copy: the adapter shares the request's transport handle; the request keeps its own.
     Val(JetDriverComptimeInputs{inputs: inputs.copy(), base_dir: jet_driver_parent_path(physical), log: request.comptime_input_log.copy()})
 }
@@ -136,11 +136,11 @@ fn jet_driver_comptime_inputs_for(request: JetDriverCompileRequest, source_file:
 // The comptime input host of the Core file `source_file` names: the directory
 // of its row's file, read by its row's reader. A host that embeds a Core row's
 // text has no file to read beside it, so that row has no comptime input host.
-fn jet_driver_core_comptime_inputs(core_sources: [JetDriverCoreSource], source_file: String) -> JetEvalComptimeInputAdapter? {
-    relative :: source_file.removeprefix("{JET_DRIVER_CORE_SOURCE_ROOT}/")
+jet_driver_core_comptime_inputs: fn(core_sources: [JetDriverCoreSource], source_file: String) -> JetEvalComptimeInputAdapter? {
+    relative: source_file.removeprefix("{JET_DRIVER_CORE_SOURCE_ROOT}/")
     loop row in core_sources {
         if row.path != relative -> next
-        permit :: row.text.guard_read()
+        permit: row.text.guard_read()
         if permit.value.reader == None -> return None
         // copy: the adapter shares the row's text cell; the row keeps its own handle.
         return Val(JetDriverCoreComptimeInputs{text: row.text.copy(), base_dir: jet_driver_parent_path(permit.value.file)})
@@ -149,7 +149,7 @@ fn jet_driver_core_comptime_inputs(core_sources: [JetDriverCoreSource], source_f
 }
 
 // Whether a checked comptime value is exactly one comptime input.
-fn jet_driver_comptime_input_expression(expression: BodyExpr) -> Bool Never! {
+jet_driver_comptime_input_expression: fn(expression: BodyExpr) -> Bool Never! {
     if body_node(expression.tree, expression.root).kind == .HostCall(call) {
         if call == .ComptimeInput(_, _) -> return true
     }
@@ -157,11 +157,11 @@ fn jet_driver_comptime_input_expression(expression: BodyExpr) -> Bool Never! {
 }
 
 // Reads the comptime input `expression` names for an item in `source_file`.
-fn jet_driver_comptime_read_input(request: JetDriverCompileRequest, source_file: String, expression: BodyExpr) -[FS.Read]> TComptimeValue JetEvalComptimeInputError! {
-    node :: body_node(expression.tree, expression.root)
+jet_driver_comptime_read_input: fn(request: JetDriverCompileRequest, source_file: String, expression: BodyExpr) -[FS.Read]> TComptimeValue JetEvalComptimeInputError! {
+    node: body_node(expression.tree, expression.root)
     if node.kind == .HostCall(call) {
         if call == .ComptimeInput(builtin, path) {
-            adapter :: jet_driver_comptime_inputs_for(request, source_file) ?? return Err(JetEvalComptimeInputError{diagnostic: diagnostic_from_registry("E0956", Val(node.span), "`{builtin}` can't read files here", "this compile has no comptime input host, so it can't read `{path}`", "build the program with `jet build` or `jet run`, which read comptime inputs")})
+            adapter: jet_driver_comptime_inputs_for(request, source_file) ?? return Err(JetEvalComptimeInputError{diagnostic: diagnostic_from_registry("E0956", Val(node.span), "`{builtin}` can't read files here", "this compile has no comptime input host, so it can't read `{path}`", "build the program with `jet build` or `jet run`, which read comptime inputs")})
             return adapter.comptime_input(builtin, path, node.span)
         }
     }

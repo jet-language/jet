@@ -1,35 +1,35 @@
 
-fn source(value: Int) -> Int {
+source: fn(value: Int) -> Int {
     if value == 0 {
         return Err("source failed")
     }
     return value
 }
 
-fn source_flag(value: Int) -> Bool {
+source_flag: fn(value: Int) -> Bool {
     if value == 0 {
         return Err("source failed")
     }
     return value > 1
 }
 
-fn add_one(value: Int) -> Int { value + 1 }
-fn retain_flag(value: Bool) -> Bool { value }
+add_one: fn(value: Int) -> Int { value + 1 }
+retain_flag: fn(value: Bool) -> Bool { value }
 
-fn run() {
-    values :: [1, 2]
-    mapped :: values.map((value: Int) -> add_one(source(value))) ?? []
-    filtered :: values.filter((value: Int) -> retain_flag(source_flag(value))) ?? []
-    mapped_block :: values.map((value: Int) -> {
+run: fn() {
+    values: [1, 2]
+    mapped: values.map((value: Int) -> add_one(source(value))) ?? []
+    filtered: values.filter((value: Int) -> retain_flag(source_flag(value))) ?? []
+    mapped_block: values.map((value: Int) -> {
         add_one(source(value))
     }) ?? []
-    filtered_block :: values.filter((value: Int) -> {
+    filtered_block: values.filter((value: Int) -> {
         retain_flag(source_flag(value))
     }) ?? []
-    mapped_failed :: [0, 1].map((value: Int) -> {
+    mapped_failed: [0, 1].map((value: Int) -> {
         add_one(source(value))
     }) ?? []
-    filtered_failed :: [0, 1].filter((value: Int) -> {
+    filtered_failed: [0, 1].filter((value: Int) -> {
         retain_flag(source_flag(value))
     }) ?? []
     print(mapped[0])

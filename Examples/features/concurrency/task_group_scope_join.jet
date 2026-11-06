@@ -2,22 +2,22 @@
 // completion: the group's scope end joins it before control leaves the
 // block, so the child's output lands between the owner's last line and
 // the line after the group.
-package {
+package: {
     name: "task_group_scope_join"
     authority: { allow: [IO, Mem.Alloc, Time] }
 }
 
-use time :: core.time
+use time: core.time
 
-fn slow(value: Int) -> Int {
+slow: fn(value: Int) -> Int {
     time.sleep(50ms)
     print("slow {value} committed")
     value
 }
 
-fn run() {
+run: fn() {
     task.group owner {
-        pending :: task slow(9)
+        pending: task slow(9)
         print("owner closing")
     }
     print("owner joined")

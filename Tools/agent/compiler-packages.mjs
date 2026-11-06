@@ -44,8 +44,8 @@ export function unblockUses(text) {
     return lines.join('\n');
 }
 
-// A single-line Core import: `use core.x` or `use alias :: core.x`.
-export const CORE_IMPORT_LINE = /^use (?:[A-Za-z_][A-Za-z0-9_]* :: )?core\.[^\[\n]*$/gm;
+// A single-line Core import: `use core.x` or `use alias: core.x`.
+export const CORE_IMPORT_LINE = /^use (?:[A-Za-z_][A-Za-z0-9_]*: )?core\.[^\[\n]*$/gm;
 
 function isProject(directory) {
     return PROJECT_MARKERS.some(marker => existsSync(join(directory, marker)));
@@ -142,8 +142,8 @@ export function compilerSourceIdentity(repo) {
         hash.update(length(Buffer.byteLength(path))).update(path).update(length(bytes.length)).update(bytes);
     }
     const registry = readFileSync(join(root, 'Compiler/JetCli/Source/Cli/Registry.jet'), 'utf8');
-    const name = /^JET_CLI_BINARY :: "([^"]+)"$/m.exec(registry)?.[1];
-    const version = /^JET_CLI_VERSION :: "([^"]+)"$/m.exec(registry)?.[1];
+    const name = /^JET_CLI_BINARY: "([^"]+)"$/m.exec(registry)?.[1];
+    const version = /^JET_CLI_VERSION: "([^"]+)"$/m.exec(registry)?.[1];
     if (!name || !version) throw Error('Compiler/JetCli/Source/Cli/Registry.jet declares no JET_CLI_BINARY or JET_CLI_VERSION');
     return `${name}@${version}#${hash.digest('hex')}`;
 }
@@ -172,7 +172,7 @@ export function isCompilerInput(repo, path, roots = compilerInputRoots(repo)) {
 // `use` line is blanked to spaces (offsets and lines stay those of the source),
 // and a Core import repeated in a later file is blanked too. Files are in
 // package dependency order; a package's own entry (its root `run.jet`, the CLI's
-// `fn run`) stays out, so the fixture supplies the unit's entry.
+// `run: fn`) stays out, so the fixture supplies the unit's entry.
 export function compilerFixtureUnit(repo, entries = [ENTRY_PACKAGE]) {
     const packages = new Map(entries.flatMap(entry => [...compilerPackages(repo, entry)]));
     const names = [...compilerPackages(repo).keys(), ...packages.keys()];

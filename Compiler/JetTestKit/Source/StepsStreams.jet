@@ -1,58 +1,58 @@
 use {
-    strtext :: core.text
-    json :: core.encoding.json
+    strtext: core.text
+    json: core.encoding.json
 }
 
-fn kit_steps_relation_label(reference: String) -> String {
+kit_steps_relation_label: fn(reference: String) -> String {
     if reference.ends_with(".stdout") || reference.ends_with(".stderr") -> return kit_steps_byte_slice(reference, 0, reference.count_bytes() - 7)
     reference.copy()
 }
 
-fn kit_steps_relation_stream(reference: String, fallback: String) -> String {
+kit_steps_relation_stream: fn(reference: String, fallback: String) -> String {
     if reference.ends_with(".stdout") -> return "stdout"
     if reference.ends_with(".stderr") -> return "stderr"
     fallback.copy()
 }
 
-fn kit_steps_known_relation(plan: KitPlan, reference: String, before: Int) -> Bool {
+kit_steps_known_relation: fn(plan: KitPlan, reference: String, before: Int) -> Bool {
     kit_steps_known_label(plan, kit_steps_relation_label(reference), before)
 }
 
-fn kit_steps_subject(selector: String) -> String {
+kit_steps_subject: fn(selector: String) -> String {
     kit_steps_byte_slice(selector, 0, kit_steps_byte_index(selector, ".") ?? selector.count_bytes())
 }
 
-fn kit_steps_subject_transform(selector: String) -> String {
-    dot :: kit_steps_byte_index(selector, ".") ?? return ""
+kit_steps_subject_transform: fn(selector: String) -> String {
+    dot: kit_steps_byte_index(selector, ".") ?? return ""
     kit_steps_byte_slice(selector, dot + 1, selector.count_bytes())
 }
 
-fn kit_steps_subject_valid(selector: String) -> Bool {
-    subject :: kit_steps_subject(selector)
-    known :: kit_expect_named(["stdout", "stderr", "stdout+stderr", "stderr+stdout", "stdout|stderr", "stderr|stdout", "file", "file?", "files", "machine"], subject) || (subject.starts_with("cap:") && subject.len() > 4)
+kit_steps_subject_valid: fn(selector: String) -> Bool {
+    subject: kit_steps_subject(selector)
+    known: kit_expect_named(["stdout", "stderr", "stdout+stderr", "stderr+stdout", "stdout|stderr", "stderr|stdout", "file", "file?", "files", "machine"], subject) || (subject.starts_with("cap:") && subject.len() > 4)
     known && kit_steps_transform_valid(kit_steps_subject_transform(selector))
 }
 
 // Stream assertions expand tokens in their subject transform at run time, so a
 // `{cap:name}` transform argument validates as an integer placeholder.
-fn kit_steps_assertion_subject_valid(selector: String) -> Bool {
+kit_steps_assertion_subject_valid: fn(selector: String) -> Bool {
     kit_steps_subject_valid(kit_steps_json_preview(selector))
 }
 
-fn kit_steps_stream_assertion(key: String, original: String) -> KitAssertion? {
-    value :: kit_steps_body(original)
-    tokens :: kit_steps_tokens(value) ?? return None
-    subject :: kit_steps_subject(key)
-    transform :: kit_steps_subject_transform(key)
+kit_steps_stream_assertion: fn(key: String, original: String) -> KitAssertion? {
+    value: kit_steps_body(original)
+    tokens: kit_steps_tokens(value) ?? return None
+    subject: kit_steps_subject(key)
+    transform: kit_steps_subject_transform(key)
     if !kit_steps_assertion_subject_valid(key) || (transform != "" && !kit_steps_reason(original)) -> return None
-    offset :: if subject == "file" || subject == "file?" -> 1 else -> 0
+    offset: if subject == "file" || subject == "file?" -> 1 else -> 0
     if tokens.len() <= offset -> return None
-    stream :: if offset == 1 -> "file" else -> subject
-    path :: if offset == 1 -> tokens[0].text else -> ""
+    stream: if offset == 1 -> "file" else -> subject
+    path: if offset == 1 -> tokens[0].text else -> ""
     if offset == 1 && !kit_steps_relative_path(path) -> return None
     mode := tokens[offset].text
     if stream == "file" && mode == "first" {
-        inner :: "{kit_steps_byte_slice(original, 0, tokens[offset].start)}{kit_steps_byte_slice(original, tokens[offset].end, original.count_bytes())}"
+        inner: "{kit_steps_byte_slice(original, 0, tokens[offset].start)}{kit_steps_byte_slice(original, tokens[offset].end, original.count_bytes())}"
         assertion := kit_steps_stream_assertion(key, inner) ?? return None
         if assertion.file_first -> return None
         assertion.file_first = true
@@ -63,7 +63,7 @@ fn kit_steps_stream_assertion(key: String, original: String) -> KitAssertion? {
     alternatives := [String]{}
     literal := false
     rhs_transform := ""
-    arity :: tokens.len() - offset
+    arity: tokens.len() - offset
     if mode == "is-f64" || mode == "f64" -> return kit_steps_f64_assertion(stream, path, transform, original, offset)
     if kit_steps_batch_form(mode) -> return kit_steps_batch_assertion(stream, path, transform, original, offset)
     if stream == "file" && mode == "same-as" {
@@ -85,7 +85,7 @@ fn kit_steps_stream_assertion(key: String, original: String) -> KitAssertion? {
         if arity != 3 || !kit_expect_named(["=", ">=", "<=", ">", "<"], tokens[offset + 1].text) -> return None
         extra = tokens[offset + 1].text
         data = tokens[offset + 2].text
-        token_value :: data.starts_with("{{cap:") && data.ends_with("}}")
+        token_value: data.starts_with("{{cap:") && data.ends_with("}}")
         if mode == "mode" || mode == "permissions" {
             if extra != "=" || (!token_value && mode == "mode" && kit_steps_octal(data) == None) -> return None
         } else if mode == "sha256" {
@@ -100,7 +100,7 @@ fn kit_steps_stream_assertion(key: String, original: String) -> KitAssertion? {
         if arity < 2 || !kit_steps_reason(original) -> return None
         if arity == 2 -> data = tokens[offset + 1].text
         else {
-            raw :: kit_steps_byte_slice(value, tokens[offset + 1].start, value.count_bytes()).trim().copy()
+            raw: kit_steps_byte_slice(value, tokens[offset + 1].start, value.count_bytes()).trim().copy()
             if raw.starts_with("\"") || raw.starts_with("'") -> return None
             data = raw
         }
@@ -128,7 +128,7 @@ fn kit_steps_stream_assertion(key: String, original: String) -> KitAssertion? {
         if !kit_steps_count_target_valid(data) -> return None
     } else if mode == "first-line" {
         if arity != 5 || tokens[offset + 1].text != "~" || !kit_steps_reason(original) -> return None
-        comparison :: tokens[offset + 3].text
+        comparison: tokens[offset + 3].text
         if comparison != "=" && comparison != "==" -> return None
         mode = "first-line{comparison}"
         extra = tokens[offset + 2].text
@@ -139,9 +139,9 @@ fn kit_steps_stream_assertion(key: String, original: String) -> KitAssertion? {
         extra = tokens[offset + 2].text
     } else {
         if !kit_expect_named(["=", "==", "!=", "~", "!~", "^=", "~i", "!~i"], mode) -> return None
-        explicit_path :: arity == 3 && tokens[offset + 1].text == "path"
+        explicit_path: arity == 3 && tokens[offset + 1].text == "path"
         if arity != 2 && !explicit_path -> return None
-        rhs :: tokens[offset + if explicit_path -> 2 else -> 1]
+        rhs: tokens[offset + if explicit_path -> 2 else -> 1]
         data = rhs.text
         literal = !explicit_path && (value.bytes()[rhs.start] == (U8{34}) || value.bytes()[rhs.start] == (U8{39}))
         if explicit_path && mode != "=" && mode != "!=" -> return None
@@ -159,40 +159,40 @@ fn kit_steps_stream_assertion(key: String, original: String) -> KitAssertion? {
         optional_file: subject == "file?", transform: transform, alternatives: alternatives, rhs_literal: literal, rhs_transform: rhs_transform})
 }
 
-fn kit_steps_ascii_lower(text: String) -> String {
+kit_steps_ascii_lower: fn(text: String) -> String {
     bytes := text.bytes()
     loop i in 0..<bytes.len() {
-        byte :: Int.from_u8(bytes[i])
+        byte: Int.from_u8(bytes[i])
         if byte >= 65 && byte <= 90 -> bytes[i] = U8{byte + 32}
     }
     String.from_bytes(bytes) ?? panic("ASCII case conversion changed UTF-8")
 }
 
-fn kit_steps_occurrences(text: String, needle: String) -> Int {
+kit_steps_occurrences: fn(text: String, needle: String) -> Int {
     if needle == "" -> return 0
     count := 0
     cursor := 0
     loop cursor <= text.count_bytes() {
-        found :: kit_steps_byte_index(kit_steps_byte_slice(text, cursor, text.count_bytes()), needle) ?? break
+        found: kit_steps_byte_index(kit_steps_byte_slice(text, cursor, text.count_bytes()), needle) ?? break
         count += 1
         cursor += found + needle.count_bytes()
     }
     count
 }
 
-fn kit_steps_line(text: String, prefix: String, substring: String) -> String? {
+kit_steps_line: fn(text: String, prefix: String, substring: String) -> String? {
     kit_steps_line_value(text, prefix, substring, true)
 }
 
 // Like Rust str::lines: LF and CRLF end lines; a final bare CR is data.
-fn kit_steps_line_value(text: String, prefix: String, substring: String, tail: Bool) -> String? {
-    bytes :: text.bytes()
+kit_steps_line_value: fn(text: String, prefix: String, substring: String, tail: Bool) -> String? {
+    bytes: text.bytes()
     start := 0
     loop start < bytes.len() {
         end := start
         loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
-        content_end :: if end < bytes.len() && end > start && bytes[end - 1] == (U8{13}) -> end - 1 else -> end
-        line :: String.from_bytes(bytes.slice(start, content_end)) ?? panic("line span is not UTF-8")
+        content_end: if end < bytes.len() && end > start && bytes[end - 1] == (U8{13}) -> end - 1 else -> end
+        line: String.from_bytes(bytes.slice(start, content_end)) ?? panic("line span is not UTF-8")
         if line.starts_with(prefix) && line.contains(substring) -> return Val(if tail -> kit_steps_byte_slice(line, prefix.count_bytes(), line.count_bytes()) else -> line.copy())
         start = end + 1
     }
@@ -200,25 +200,25 @@ fn kit_steps_line_value(text: String, prefix: String, substring: String, tail: B
 }
 
 
-fn kit_steps_count_target_valid(target: String) -> Bool {
+kit_steps_count_target_valid: fn(target: String) -> Bool {
     if kit_steps_numeric(kit_steps_json_preview(target)) != None -> return true
-    star :: kit_steps_byte_index(target, "*") ?? return false
+    star: kit_steps_byte_index(target, "*") ?? return false
     (Int.parse(kit_steps_byte_slice(target, 0, star)) ?? -1) >= 0 && kit_steps_byte_slice(target, star + 1, target.count_bytes()) != ""
 }
 
-fn kit_steps_count_label(target: String) -> String {
-    star :: kit_steps_byte_index(target, "*") ?? return ""
+kit_steps_count_label: fn(target: String) -> String {
+    star: kit_steps_byte_index(target, "*") ?? return ""
     if kit_steps_numeric(kit_steps_json_preview(target)) != None -> return ""
     kit_steps_byte_slice(target, star + 1, target.count_bytes())
 }
 
-fn kit_steps_lines(text: String) -> Int {
+kit_steps_lines: fn(text: String) -> Int {
     if text == "" -> return 0
-    count :: kit_steps_occurrences(text, "\n")
+    count: kit_steps_occurrences(text, "\n")
     if text.ends_with("\n") -> count else -> count + 1
 }
 
-fn kit_steps_select_stream(stdout: String, stderr: String, subject: String) -> String {
+kit_steps_select_stream: fn(stdout: String, stderr: String, subject: String) -> String {
     if subject == "stderr" -> return stderr.copy()
     if subject == "stdout+stderr" -> return "{stdout}{stderr}"
     if subject == "stderr+stdout" -> return "{stderr}{stdout}"
@@ -226,7 +226,7 @@ fn kit_steps_select_stream(stdout: String, stderr: String, subject: String) -> S
     stdout.copy()
 }
 
-fn kit_steps_bytes_search(bytes: [U8], needle: [U8], start: Int, end: Int, insensitive: Bool) -> Int? {
+kit_steps_bytes_search: fn(bytes: [U8], needle: [U8], start: Int, end: Int, insensitive: Bool) -> Int? {
     cursor := start
     loop cursor + needle.len() <= end {
         matches := true
@@ -249,12 +249,12 @@ fn kit_steps_bytes_search(bytes: [U8], needle: [U8], start: Int, end: Int, insen
 }
 
 // Raw file predicates operate on bytes, not on a lossy or fallible UTF-8 view.
-fn kit_steps_file_predicate(bytes: [U8], mode: String, value: String, extra: String, alternatives: [String]) -> Bool {
+kit_steps_file_predicate: fn(bytes: [U8], mode: String, value: String, extra: String, alternatives: [String]) -> Bool {
     if mode == "empty" || mode == "nonempty" -> return (bytes.len() == 0) == (mode == "empty")
-    needle :: value.bytes()
+    needle: value.bytes()
     if mode == "^=" -> return needle.len() <= bytes.len() && (kit_steps_bytes_search(bytes, needle, 0, needle.len(), false) ?? -1) == 0
     if mode == "~" || mode == "~i" || mode == "!~" || mode == "!~i" {
-        found :: kit_steps_bytes_search(bytes, needle, 0, bytes.len(), mode == "~i" || mode == "!~i")
+        found: kit_steps_bytes_search(bytes, needle, 0, bytes.len(), mode == "~i" || mode == "!~i")
         return (found != None) == (mode == "~" || mode == "~i")
     }
     if mode == "~any" {
@@ -268,31 +268,31 @@ fn kit_steps_file_predicate(bytes: [U8], mode: String, value: String, extra: Str
         count := 0
         cursor := 0
         loop cursor <= bytes.len() {
-            at :: kit_steps_bytes_search(bytes, needle, cursor, bytes.len(), false) ?? break
+            at: kit_steps_bytes_search(bytes, needle, cursor, bytes.len(), false) ?? break
             count += 1
             cursor = at + needle.len()
         }
         return count == (Int.parse(extra) ?? -1)
     }
     if mode == "before" {
-        left :: kit_steps_bytes_search(bytes, needle, 0, bytes.len(), false) ?? return false
-        right :: kit_steps_bytes_search(bytes, extra.bytes(), 0, bytes.len(), false) ?? return false
+        left: kit_steps_bytes_search(bytes, needle, 0, bytes.len(), false) ?? return false
+        right: kit_steps_bytes_search(bytes, extra.bytes(), 0, bytes.len(), false) ?? return false
         return left < right
     }
-    tail :: extra.bytes()
+    tail: extra.bytes()
     start := 0
     loop start < bytes.len() {
         end := start
         loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
-        content_end :: if end < bytes.len() && end > start && bytes[end - 1] == (U8{13}) -> end - 1 else -> end
+        content_end: if end < bytes.len() && end > start && bytes[end - 1] == (U8{13}) -> end - 1 else -> end
         if (kit_steps_bytes_search(bytes, needle, start, content_end, false) ?? -1) == start && kit_steps_bytes_search(bytes, tail, start, content_end, false) != None -> return true
         start = end + 1
     }
     false
 }
 
-fn kit_steps_string_array(text: String) -> [String]? {
-    tree :: json.parse(text) ?? return None
+kit_steps_string_array: fn(text: String) -> [String]? {
+    tree: json.parse(text) ?? return None
     if tree == {
         .Array(items) -> {
             result := [String]{}

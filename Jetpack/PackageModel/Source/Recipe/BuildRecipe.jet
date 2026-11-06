@@ -8,7 +8,7 @@
 
 // One step of a build recipe. Names are internal; the user-facing spellings
 // are the finite `Recipe.build(steps: […])` forms.
-enum BuildStep {
+BuildStep: enum {
     // A locked network fetch. `sha256` must be present; an empty hash is
     // ungranted ambient network (`E1236`).
     Fetch(url: String, sha256: String)
@@ -23,7 +23,7 @@ enum BuildStep {
     InstallTree(src: String, dest: String)
 
     // The authority this step requests.
-    fn capability(self) -> String Never! {
+    capability: fn(self) -> String Never! {
         if self == {
             .Fetch(_, _) -> "net.fetch"
             .Exec(tool, _) -> "exec:{tool}"
@@ -32,7 +32,7 @@ enum BuildStep {
     }
 
     // Frame the step's tag and fields into a recipe identity.
-    fn write_canonical(self, writer: &RecipeCanonicalWriter) Never! {
+    write_canonical: fn(self, writer: &RecipeCanonicalWriter) Never! {
         if self == {
             .Fetch(url, sha256) -> {
                 &writer.push_text("fetch")
@@ -59,11 +59,11 @@ enum BuildStep {
 }
 
 // A build recipe over a staged source tree.
-struct BuildRecipe {
+BuildRecipe: struct {
     steps: [BuildStep]
 
     // A stable content hash of the recipe, used by the trust gate.
-    fn recipe_hash(self) -> String Never! {
+    recipe_hash: fn(self) -> String Never! {
         writer := RecipeCanonicalWriter.new("jet.build-recipe.v2")
         &writer.push_count(self.steps.len())
         loop index in 0..<self.steps.len() {
@@ -76,10 +76,10 @@ struct BuildRecipe {
     // The exact authority requested by this recipe, sorted. It is derived
     // from the finite step graph, never from a host environment or a
     // caller-supplied label.
-    fn declared_capabilities(self) -> [String] Never! {
+    declared_capabilities: fn(self) -> [String] Never! {
         capabilities := [String]{}
         loop step in self.steps {
-            capability :: step.capability()
+            capability: step.capability()
             if !capabilities.contains(capability) -> &capabilities.push(capability)
         }
         &capabilities.sort()
@@ -90,13 +90,13 @@ struct BuildRecipe {
     // result: package, staged source, platform, recipe, and the complete
     // declared capability set. Suitable for both the action-cache key and a
     // reviewed trust grant.
-    fn build_identity(self, package: String, source_digest: String, platform: String) -> String Never! {
+    build_identity: fn(self, package: String, source_digest: String, platform: String) -> String Never! {
         self.build_identity_for_source(package, "", source_digest, platform)
     }
 
     // The identity a provider-backed hook uses: `build_identity` bound to the
     // provider/source label. Production providers use this source-bound form.
-    fn build_identity_for_source(self, package: String, provider_source: String, source_digest: String, platform: String) -> String Never! {
+    build_identity_for_source: fn(self, package: String, provider_source: String, source_digest: String, platform: String) -> String Never! {
         self.build_identity_for_source_with_dependencies(package, provider_source, source_digest, platform, [String]{})
     }
 
@@ -104,7 +104,7 @@ struct BuildRecipe {
     // plan declares. Dependency refs are authority: changing a tool's
     // provider/source invalidates both the cache identity and the exact trust
     // grant even when the recipe bytes stay unchanged. Their order is not.
-    fn build_identity_for_source_with_dependencies(self, package: String, provider_source: String, source_digest: String, platform: String, dependencies: [String]) -> String Never! {
+    build_identity_for_source_with_dependencies: fn(self, package: String, provider_source: String, source_digest: String, platform: String, dependencies: [String]) -> String Never! {
         sorted_dependencies := dependencies
         &sorted_dependencies.sort()
         writer := RecipeCanonicalWriter.new("jet-build-hook.v3")
@@ -121,34 +121,34 @@ struct BuildRecipe {
 
 // Length-frames every field so delimiters, newlines, and empty values cannot
 // make two different declared plans share one identity.
-struct RecipeCanonicalWriter {
+RecipeCanonicalWriter: struct {
     bytes: [U8]
 
-    fn new(domain: String) -> RecipeCanonicalWriter Never! {
+    new: fn(domain: String) -> RecipeCanonicalWriter Never! {
         writer := RecipeCanonicalWriter{bytes: [U8]{}}
         &writer.push_text(domain)
         writer
     }
 
     // A count or index as eight big-endian bytes.
-    fn push_count(&self, value: Int) Never! {
+    push_count: fn(&self, value: Int) Never! {
         shift := 56
         loop shift >= 0 {
-            byte :: ((value >> shift)).bit_and(255)
+            byte: ((value >> shift)).bit_and(255)
             &self.bytes.push(U8{byte})
             shift -= 8
         }
     }
 
     // A UTF-8 string framed by its byte length.
-    fn push_text(&self, value: String) Never! {
-        raw :: value.bytes()
+    push_text: fn(&self, value: String) Never! {
+        raw: value.bytes()
         &self.push_count(raw.len())
         loop byte in raw -> &self.bytes.push(byte)
     }
 
     // A counted list of framed strings.
-    fn push_texts(&self, values: [String]) Never! {
+    push_texts: fn(&self, values: [String]) Never! {
         &self.push_count(values.len())
         loop value in values -> &self.push_text(value)
     }

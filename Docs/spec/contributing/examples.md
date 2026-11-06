@@ -207,7 +207,7 @@ contract.
 
 Crypto UI fixtures inherit the standard library's declared `CryptoError -> Err`
 and `FileCryptoError -> Err` conversions (D-FAIL-CONV2=A, D-CRYPTO-ERRFAM1=A).
-Valid Core crypto calls in `fn run()` therefore do not expect E2402. Keep
+Valid Core crypto calls in `run: fn()` therefore do not expect E2402. Keep
 non-convertible user-error witnesses separate from crypto boundary misuse
 (E2702), and retain type, effect, and authority precedence diagnostics.
 

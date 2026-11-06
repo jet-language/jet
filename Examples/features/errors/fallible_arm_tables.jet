@@ -2,12 +2,12 @@
 // `Ok(...)` or `Err(...)` directly, or gives a plain success value that lifts
 // into the declared carrier; no arm needs `return`.
 #Error
-enum LookupError {
+LookupError: enum {
     Bad
     Wrapped(String)
 }
 
-fn lookup(code: Int) -> Int LookupError! {
+lookup: fn(code: Int) -> Int LookupError! {
     if code == {
         1 -> Ok(10)
         2 -> Ok(20)
@@ -17,21 +17,21 @@ fn lookup(code: Int) -> Int LookupError! {
 }
 
 // A result subject maps its `Ok`/`Err` arms into this function's carrier.
-fn relabel(code: Int) -> Int LookupError! {
+relabel: fn(code: Int) -> Int LookupError! {
     if lookup(code) == {
         .Ok(value) -> Ok(value + 1)
         .Err(_) -> Err(LookupError.Wrapped("mapped"))
     }
 }
 
-enum Step {
+Step: enum {
     First
     Second
 }
 
 impl Step {
     // A non-generic enum's `self` has the same type as a named variant.
-    fn normalized(self) -> Step Never! {
+    normalized: fn(self) -> Step Never! {
         if self == {
             .First -> Step.Second
             else -> self
@@ -40,7 +40,7 @@ impl Step {
 }
 
 // The map's value type is inferred from the argument.
-fn keys<V>(map: [String: V]) -> [String] {
+keys: fn<V>(map: [String: V]) -> [String] {
     out := [String]{}
     loop key in map.keys() {
         &out.push(key)
@@ -48,7 +48,7 @@ fn keys<V>(map: [String: V]) -> [String] {
     out
 }
 
-fn run() {
+run: fn() {
     loop code in [1, 2, 3, 4] {
         print(lookup(code) ?? -1)
     }
@@ -57,8 +57,8 @@ fn run() {
         .Ok(value) -> print(value)
         .Err(_) -> print("relabel failed")
     }
-    first :: Step.First
+    first: Step.First
     print(first.normalized() == Step.Second)
-    counts :: ["a": 1, "b": 2]
+    counts: ["a": 1, "b": 2]
     print(keys(counts).len())
 }

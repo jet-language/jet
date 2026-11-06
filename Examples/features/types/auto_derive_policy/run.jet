@@ -2,24 +2,24 @@
 // Package policy sets the default. Signed type markers opt individual traits
 // in or out. A hand-written implementation wins over both.
 #[Printable, !Debug, !Equatable]
-struct Visible {
+Visible: struct {
     value: Int
 }
 
 #Debug
-struct Diagnostic {
+Diagnostic: struct {
     value: Int
 }
 
-struct Secret {
+Secret: struct {
     value: Int
 }
 
 impl Secret.Debug {
-    fn debug(self) -> String { "[redacted]" }
+    debug: fn(self) -> String { "[redacted]" }
 }
 
-fn run() {
+run: fn() {
     print(Visible{value: 7})
     print(Diagnostic{value: 8}.debug())
     print(Secret{value: 0}.debug())

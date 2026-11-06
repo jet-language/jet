@@ -1,12 +1,12 @@
 // core.http.server: function-first mux with path params.
 use {
-    http_server :: core.http.server
-    net :: core.net
-    tasks :: core.tasks
+    http_server: core.http.server
+    net: core.net
+    tasks: core.tasks
 }
 
-fn run() {
-    mux :: http_server.mux()
+run: fn() {
+    mux: http_server.mux()
     mux.get("/", (req: HTTPRequest) -> Ok(http_server.response(200, "hello from mux")))
     mux.get("/ping", (req: HTTPRequest) -> Ok(http_server.response(200, "pong")))
     mux.post("/echo", (req: HTTPRequest) -> Ok(http_server.response(200, req.body().text(1048576) ?? "invalid body")))

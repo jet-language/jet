@@ -3,12 +3,12 @@
 // Core registry, never a name table.
 use jet_foundation.[CoreMarkerApplication, Diagnostic, Marker, StructureFact, StructureFactKind, Span, SymbolKind, TextEdit, diagnostic_with_edit, symbol_kind_name, type_identity_equal]
 
-struct SemaLifecycleResult {
+SemaLifecycleResult: struct {
     diagnostics: [Diagnostic]
     facts: [StructureFact]
 }
 
-fn sema_lifecycle_marker_string(marker: Marker, label: String, positional: Int) -> String? {
+sema_lifecycle_marker_string: fn(marker: Marker, label: String, positional: Int) -> String? {
     index := positional
     loop (slot, name) in marker.arg_labels {
         if name == .Val(named) && named.name == label {
@@ -17,7 +17,7 @@ fn sema_lifecycle_marker_string(marker: Marker, label: String, positional: Int) 
         }
     }
     if index >= marker.args.len() -> return None
-    argument :: marker.args[index]
+    argument: marker.args[index]
     if argument == .Expr(value) {
         if value == .Str(parts, _, _) {
             text := ""
@@ -33,19 +33,19 @@ fn sema_lifecycle_marker_string(marker: Marker, label: String, positional: Int) 
     None
 }
 
-fn sema_lifecycle_marker(markers: [Marker], name: String) -> CoreMarkerApplication? {
+sema_lifecycle_marker: fn(markers: [Marker], name: String) -> CoreMarkerApplication? {
     loop marker in markers {
         if marker.name != "Deprecated" -> next
-        since :: sema_lifecycle_marker_string(marker, "since", 0) ?? return None
-        replacement :: sema_lifecycle_marker_string(marker, "use", 1) ?? return None
+        since: sema_lifecycle_marker_string(marker, "since", 0) ?? return None
+        replacement: sema_lifecycle_marker_string(marker, "use", 1) ?? return None
         return Val(CoreMarkerApplication{member: name, since: since, replacement: replacement, removed_in: sema_lifecycle_marker_string(marker, "removed_in", 2)})
     }
     None
 }
 
-fn sema_lifecycle_functions(functions: [SemaRegistrationFunction], payloads: &[String:CoreMarkerApplication]) Never! {
+sema_lifecycle_functions: fn(functions: [SemaRegistrationFunction], payloads: &[String:CoreMarkerApplication]) Never! {
     loop function in functions {
-        payload :: sema_lifecycle_marker(function.declaration.markers, function.symbol.name) ?? next
+        payload: sema_lifecycle_marker(function.declaration.markers, function.symbol.name) ?? next
         payloads[function.symbol.id.key] = payload
     }
 }
@@ -54,10 +54,10 @@ fn sema_lifecycle_functions(functions: [SemaRegistrationFunction], payloads: &[S
 // `new`'s: the same generic parameters, and parameters that take the same
 // arguments (name, label, convention, default, type) and the same result
 // and effects.
-fn sema_lifecycle_same_call(old: SemaRegistrationFunction, new: SemaRegistrationFunction) -> Bool Never! {
+sema_lifecycle_same_call: fn(old: SemaRegistrationFunction, new: SemaRegistrationFunction) -> Bool Never! {
     if old.generic_params.len() != new.generic_params.len() || old.parameters.len() != new.parameters.len() -> return false
     loop (index, parameter) in old.parameters {
-        other :: new.parameters[index]
+        other: new.parameters[index]
         if parameter.symbol.name != other.symbol.name || parameter.public_label != other.public_label || parameter.convention != other.convention || parameter.variadic != other.variadic -> return false
         if (parameter.default == None) != (other.default == None) || !type_identity_equal(parameter.ty, other.ty) -> return false
     }
@@ -79,19 +79,19 @@ fn sema_lifecycle_same_call(old: SemaRegistrationFunction, new: SemaRegistration
 // them: some function of that name takes the same call
 // (sema_lifecycle_same_call). A replacement no declared function names
 // (a Core member, a method) has no entry.
-fn sema_lifecycle_renames(graph: SemaRegistrationGraph, payloads: [String:CoreMarkerApplication]) -> [String:Bool] Never! {
+sema_lifecycle_renames: fn(graph: SemaRegistrationGraph, payloads: [String:CoreMarkerApplication]) -> [String:Bool] Never! {
     renames := [String:Bool]{}
     loop module_index in 0..<graph.modules.len() {
         loop function_index in 0..<graph.modules[module_index].functions.len() {
-            old :: graph.modules[module_index].functions[function_index]
-            payload :: payloads.get(old.symbol.id.key) ?? next
-            parts :: payload.replacement.split(".").to_list()
-            leaf :: parts[parts.len() - 1].trim()
+            old: graph.modules[module_index].functions[function_index]
+            payload: payloads.get(old.symbol.id.key) ?? next
+            parts: payload.replacement.split(".").to_list()
+            leaf: parts[parts.len() - 1].trim()
             found := false
             plain := false
             loop other_index in 0..<graph.modules.len() {
                 loop candidate_index in 0..<graph.modules[other_index].functions.len() {
-                    candidate :: graph.modules[other_index].functions[candidate_index]
+                    candidate: graph.modules[other_index].functions[candidate_index]
                     if candidate.symbol.name != leaf -> next
                     found = true
                     if sema_lifecycle_same_call(old, candidate) -> plain = true
@@ -103,23 +103,23 @@ fn sema_lifecycle_renames(graph: SemaRegistrationGraph, payloads: [String:CoreMa
     renames
 }
 
-fn sema_lifecycle_edition_label(label: String) -> Bool Never! {
-    trimmed :: label.trim()
+sema_lifecycle_edition_label: fn(label: String) -> Bool Never! {
+    trimmed: label.trim()
     if trimmed.len() != 4 -> return false
-    zero :: U8{48}
-    nine :: U8{57}
+    zero: U8{48}
+    nine: U8{57}
     loop byte in trimmed.bytes() {
         if byte < zero || byte > nine -> return false
     }
     true
 }
 
-fn sema_lifecycle_edition_year(label: String) -> Int Never! {
-    trimmed :: label.trim()
+sema_lifecycle_edition_year: fn(label: String) -> Int Never! {
+    trimmed: label.trim()
     year := 0
     if trimmed.len() == 0 -> return 2026
-    zero :: U8{48}
-    nine :: U8{57}
+    zero: U8{48}
+    nine: U8{57}
     loop byte in trimmed.bytes() {
         if byte < zero || byte > nine || year > 429496729 -> return 2026
         year = year * 10 + Int{byte - U8{48}}
@@ -128,19 +128,19 @@ fn sema_lifecycle_edition_year(label: String) -> Int Never! {
     year
 }
 
-fn sema_lifecycle_version_phrase(label: String) -> String Never! {
+sema_lifecycle_version_phrase: fn(label: String) -> String Never! {
     if sema_lifecycle_edition_label(label) -> return "edition {label}"
     label.copy()
 }
 
-fn sema_lifecycle_edit(payload: CoreMarkerApplication, span: Span) -> TextEdit? Never! {
-    parts :: payload.replacement.split(".").to_list()
-    leaf :: parts[parts.len() - 1].trim()
+sema_lifecycle_edit: fn(payload: CoreMarkerApplication, span: Span) -> TextEdit? Never! {
+    parts: payload.replacement.split(".").to_list()
+    leaf: parts[parts.len() - 1].trim()
     if leaf.len() == 0 -> return None
-    underscore :: U8{95}
+    underscore: U8{95}
     loop (index, byte) in leaf.bytes() {
-        alpha :: (byte >= U8{65} && byte <= U8{90}) || (byte >= U8{97} && byte <= U8{122})
-        digit :: byte >= U8{48} && byte <= U8{57}
+        alpha: (byte >= U8{65} && byte <= U8{90}) || (byte >= U8{97} && byte <= U8{122})
+        digit: byte >= U8{48} && byte <= U8{57}
         if byte != underscore && !alpha && !(index > 0 && digit) -> return None
     }
     Val(TextEdit{span: span, new_text: leaf})
@@ -151,8 +151,8 @@ fn sema_lifecycle_edit(payload: CoreMarkerApplication, span: Span) -> TextEdit? 
 // this use the replacement's name means a local or parameter, or nothing, so
 // the rename wouldn't call it. A use it can't rename gets no edit, and its Fix
 // says to edit it by hand.
-fn sema_lifecycle_record(payload: CoreMarkerApplication, rename: Bool?, hidden: Bool, source: String, span: Span, edition: String, result: &SemaLifecycleResult, seen: &[String:Bool]) {
-    key :: "{source}|{span.start}|{span.end}|{payload.member}"
+sema_lifecycle_record: fn(payload: CoreMarkerApplication, rename: Bool?, hidden: Bool, source: String, span: Span, edition: String, result: &SemaLifecycleResult, seen: &[String:Bool]) {
+    key: "{source}|{span.start}|{span.end}|{payload.member}"
     if seen.get(key) != None -> return
     seen[key] = true
     // One language edition and no edition-gated behaviour (7bef65ccd4): a
@@ -165,10 +165,10 @@ fn sema_lifecycle_record(payload: CoreMarkerApplication, rename: Bool?, hidden: 
     detail := "since {payload.since}; use `{payload.replacement}`"
     if payload.removed_in == .Val(removed) -> detail = "{detail}; removed in {removed}"
     &result.facts.push(StructureFact{kind: StructureFactKind.Lifecycle, subject: payload.member, source: source, span: span, status: status, detail: detail, gate: None})
-    item :: payload.member
-    since :: sema_lifecycle_version_phrase(payload.since)
-    renamable :: !hidden && (rename ?? true)
-    fix :: if hidden -> "edit this use by hand to use `{payload.replacement}`: here its name doesn't refer to it, so `jet fix` can't rename it." else if !renamable -> "edit this use by hand to use `{payload.replacement}`, which doesn't take the same arguments, so `jet fix` can't rename it." else -> "use `{payload.replacement}` instead, or run `jet fix` to migrate automatically."
+    item: payload.member
+    since: sema_lifecycle_version_phrase(payload.since)
+    renamable: !hidden && (rename ?? true)
+    fix: if hidden -> "edit this use by hand to use `{payload.replacement}`: here its name doesn't refer to it, so `jet fix` can't rename it." else if !renamable -> "edit this use by hand to use `{payload.replacement}`, which doesn't take the same arguments, so `jet fix` can't rename it." else -> "use `{payload.replacement}` instead, or run `jet fix` to migrate automatically."
     diagnostic := if status == "removed" -> sema_error("E2002", span, "`{item}` was removed in {sema_lifecycle_version_phrase(payload.removed_in ?? "this edition")}", "`{item}` was deprecated in {since} and no longer exists in this edition; it has reached the end of its migration window.", fix) else -> {
         why := "`{item}` was deprecated in {since}; it still works for now but should be migrated."
         if payload.removed_in == .Val(removed) -> why = "`{item}` was deprecated in {since} and will be removed in {sema_lifecycle_version_phrase(removed)}; it still works for now but should be migrated."
@@ -180,7 +180,7 @@ fn sema_lifecycle_record(payload: CoreMarkerApplication, rename: Bool?, hidden: 
     &result.diagnostics.push(diagnostic)
 }
 
-fn sema_lifecycle_structure(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], policies: [SemaRegistrationPackagePolicy]) -> SemaLifecycleResult {
+sema_lifecycle_structure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], policies: [SemaRegistrationPackagePolicy]) -> SemaLifecycleResult {
     result := SemaLifecycleResult{diagnostics: [Diagnostic]{}, facts: [StructureFact]{}}
     payloads := [String:CoreMarkerApplication]{}
     editions := [String:String]{}
@@ -199,22 +199,22 @@ fn sema_lifecycle_structure(graph: SemaRegistrationGraph, modules: [SemaGraphMod
                     else -> {}
                 }
             }
-            payload :: sema_lifecycle_marker(markers, graph.modules[graph_module_index].nominals[nominal_index].symbol.name) ?? next
+            payload: sema_lifecycle_marker(markers, graph.modules[graph_module_index].nominals[nominal_index].symbol.name) ?? next
             payloads[graph.modules[graph_module_index].nominals[nominal_index].symbol.id.key] = payload
         }
     }
-    renames :: sema_lifecycle_renames(graph, payloads)
+    renames: sema_lifecycle_renames(graph, payloads)
     seen := [String:Bool]{}
     loop (index, checked) in modules {
         if index >= graph.modules.len() -> break
-        graph_module :: graph.modules[index]
-        edition :: editions.get(graph_module.package_identity) ?? "2026"
-        start :: result.diagnostics.len()
+        graph_module: graph.modules[index]
+        edition: editions.get(graph_module.package_identity) ?? "2026"
+        start: result.diagnostics.len()
         // Only a site written in this module's sources is a use; references
         // inside compiler-generated members have no source location.
-        segments :: graph_module.source_segments
+        segments: graph_module.source_segments
         loop reference in checked.name_references {
-            payload :: payloads.get(reference.symbol.id.key) ?? next
+            payload: payloads.get(reference.symbol.id.key) ?? next
             if segments.len() > 0 && sema_source_location_at(segments, reference.span) == None -> next
             sema_lifecycle_record(payload, renames.get(reference.symbol.id.key), false, graph_module.source_file, reference.span, edition, &result, &seen)
         }
@@ -230,7 +230,7 @@ fn sema_lifecycle_structure(graph: SemaRegistrationGraph, modules: [SemaGraphMod
                 }
             }
             if call.lifecycle != None -> rename = None
-            payload :: call.lifecycle ?? declared ?? next
+            payload: call.lifecycle ?? declared ?? next
             if segments.len() > 0 && sema_source_location_at(segments, call.span) == None -> next
             sema_lifecycle_record(payload, rename, call.replacement_hidden, graph_module.source_file, call.span, edition, &result, &seen)
         }

@@ -2,24 +2,24 @@
 // publication is claimed: these are hostile/valid transport inputs.
 use {
     jet_cli.[jet_cli_live_read_at]
-    cli_sys :: core.sys
-    cli_process :: core.process
-    cli_files :: core.files
-    live_time :: core.time
+    cli_sys: core.sys
+    cli_process: core.process
+    cli_files: core.files
+    live_time: core.time
 }
 
 // The runtime's record layout (JetRuntime ObserveLive.jet): little-endian
 // words; a text is its byte length and its bytes.
-fn live_transport_u64(out: &[U8], value: U64) Never! {
+live_transport_u64: fn(out: &[U8], value: U64) Never! {
     loop index in 0..<8 -> &out.push(U8{Int.from_u64((value >> (index * 8)).bit_and(U64{255}))})
 }
-fn live_transport_text(out: &[U8], text: String) Never! {
+live_transport_text: fn(out: &[U8], text: String) Never! {
     live_transport_u64(&out, U64{text.bytes().len()})
     loop byte in text.bytes() -> &out.push(byte)
 }
 // A writer whose boot-clock start is `boot_ns`, at 100 ticks per second,
 // with no tasks and optionally one event record.
-fn live_transport_fixture(pid: Int, boot_ns: U64, captured: Int, event_sequence: Int?) -> [U8] Never! {
+live_transport_fixture: fn(pid: Int, boot_ns: U64, captured: Int, event_sequence: Int?) -> [U8] Never! {
     out := [U8]{}
     loop word in ([U64]{U64{3550338754064696650}, U64{1}, U64{pid}, U64{captured}, U64{0}, boot_ns, U64{0}, U64{100}, U64{0}, U64{0}, U64{0}, U64{0}, U64{0}, U64{0}}) -> live_transport_u64(&out, word)
     loop text in ([String]{"s", "app.jet", "b", "r", "w"}) -> live_transport_text(&out, text)
@@ -41,7 +41,7 @@ fn live_transport_fixture(pid: Int, boot_ns: U64, captured: Int, event_sequence:
     live_transport_u64(&out, U64{0})
     out
 }
-fn live_transport_rejected(pid: Int, path: String, message: String) {
+live_transport_rejected: fn(pid: Int, path: String, message: String) {
     if jet_cli_live_read_at(pid, path) == {
         .Err(error) -> assert(error.message.contains(message))
         .Ok(_) -> panic("unsafe transport accepted: {message}")
@@ -49,22 +49,22 @@ fn live_transport_rejected(pid: Int, path: String, message: String) {
 }
 #Test("live_transport") {
     // /proc start identity is the Linux/Android transport's actual authority.
-    platform :: cli_sys.name()
+    platform: cli_sys.name()
     if platform != "linux" && platform != "android" -> return
-    pid :: cli_process.current_pid()
-    root :: "{cli_sys.temp_dir()}/jet-live-transport-{pid}"
+    pid: cli_process.current_pid()
+    root: "{cli_sys.temp_dir()}/jet-live-transport-{pid}"
     cli_files.create_dir(root) ?? panic("exclusive transport fixture directory")
-    path :: "{root}/snapshot.json"
-    alias :: "{root}/alias.json"
+    path: "{root}/snapshot.json"
+    alias: "{root}/alias.json"
     // Any process start precedes a writer that started at the latest boot time.
-    latest :: U64{9223372036854775807}
-    now :: max(0, live_time.unix_ns() /% 1000000)
+    latest: U64{9223372036854775807}
+    now: max(0, live_time.unix_ns() /% 1000000)
     cli_files.write_bytes(path, live_transport_fixture(pid, latest, now, None)) ?? panic("snapshot fixture")
     cli_files.set_mode(path, 0o600) ?? panic("private snapshot fixture")
-    actual :: jet_cli_live_read_at(pid, path) ?? panic("actual private retained-descriptor read")
+    actual: jet_cli_live_read_at(pid, path) ?? panic("actual private retained-descriptor read")
     assert(actual.pid == pid && actual.start_id != "" && actual.events == Val("") && actual.runtime.cpu_ns != None)
     cli_files.write_bytes(path, live_transport_fixture(pid, latest, now, Val(1))) ?? panic("event fixture")
-    with_event :: jet_cli_live_read_at(pid, path) ?? panic("event record read")
+    with_event: jet_cli_live_read_at(pid, path) ?? panic("event record read")
     assert(with_event.events == Val("sequence=1 source=Event event=1 owner=1 subscription=1 dispatch=1 lifecycle=Queued queued=0 blocked=0 running=0 capacity=0 overflow=None priority=0 failure=None terminal=None"))
     // The snapshot is never accepted merely because it is a regular file.
     cli_files.set_mode(path, 0o644) ?? panic("hostile snapshot mode")

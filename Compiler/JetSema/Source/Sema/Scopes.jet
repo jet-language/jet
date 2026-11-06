@@ -59,7 +59,7 @@ use jet_foundation.[
     name_rows_set,
 ]
 
-enum SemaKnowledgePlane {
+SemaKnowledgePlane: enum {
     Range
     Exactness
     Unit
@@ -67,7 +67,7 @@ enum SemaKnowledgePlane {
     Classification
 }
 
-enum SemaKnowledgeGate {
+SemaKnowledgeGate: enum {
     BoundedArithmetic
     Approximation
     RoundedConversion
@@ -76,12 +76,12 @@ enum SemaKnowledgeGate {
     ClassificationScrub
 }
 
-struct SemaScopeFrame {
+SemaScopeFrame: struct {
     parent: Int
     owner: String
 }
 
-struct SemaScopeBinding {
+SemaScopeBinding: struct {
     frame: Int
     symbol: Symbol
     mutable: Bool
@@ -89,41 +89,41 @@ struct SemaScopeBinding {
     integer_bounds: TIntegerBounds?
     string_view: Bool
     compiler_builtin: Bool
-    // A `name :: comptime { … }` local reads as this value.
+    // A `name: comptime { … }` local reads as this value.
     prepared: TComptimeValue?{None}
     // The `#Track` origin row for this binding; `None`
     // is the untracked row.
     origin: SemaOriginFact?{None}
-    // This `::` name reads a field or element of a place
+    // This `:` name reads a field or element of a place
     // through a view, is a loop name over a collection a read or write
     // parameter owns, or is a match payload bound from storage this scope
     // does not own. It owns nothing to give away: an exact `^` on it is
     // E0201 (sema_ownership_mark_move_as), as on a borrowed parameter.
     place_alias: Bool{false}
-    // A `::` name bound to a new `Shared` cell keeps its initializer, so a
+    // A `:` name bound to a new `Shared` cell keeps its initializer, so a
     // write into another cell can see the stored value is built in place
     // (SharedCycles.jet).
     fresh_cell: Expr?{None}
-    // L0517: a `::` name bound to `path.normalize().to_string()` holds the
+    // L0517: a `:` name bound to `path.normalize().to_string()` holds the
     // text of a typed normalized Path (sema_stmt_note_normalized_path_text).
     normalized_path_text: Bool{false}
-    // The `::` of a `name :: value` binding: assigning the name replaces it
+    // The `:` of a `name: value` binding: assigning the name replaces it
     // with `:=` as the E0111 machine edit.
     binding_sigil: Span?{None}
 }
 
-struct SemaOriginFact {
+SemaOriginFact: struct {
     source: String
     line: Int?
     column: Int?
 }
 
-struct SemaScopeDeclaration {
+SemaScopeDeclaration: struct {
     symbol_id: SymbolID
     item: Item
 }
 
-struct SemaCallSiteFact {
+SemaCallSiteFact: struct {
     span: Span
     caller_key: String
     callee: SymbolID?
@@ -160,12 +160,12 @@ struct SemaCallSiteFact {
 
 // A raw `extern rust` callee's name and the capability sigil (`&` or `^`)
 // of its first parameter that takes one.
-struct SemaForeignCapability {
+SemaForeignCapability: struct {
     name: String
     sigil: String
 }
 
-struct SemaCallReturnViewFact {
+SemaCallReturnViewFact: struct {
     slot: [String]
     access: AccessConvention
     places: [SemaOwnershipPlace]
@@ -178,25 +178,25 @@ struct SemaCallReturnViewFact {
     span: Span?{None}
 }
 
-struct SemaCallReturnView {
+SemaCallReturnView: struct {
     span: Span
     facts: [SemaCallReturnViewFact]
 }
 
-struct SemaLocalViewProvenance {
+SemaLocalViewProvenance: struct {
     carrier_key: String
     output_path: [String]
     access: AccessConvention
     sources: [ViewSourcePath]
 }
 
-struct SemaNameReferenceFact {
+SemaNameReferenceFact: struct {
     span: Span
     symbol: Symbol
     kind: String
 }
 
-enum SemaLoopValueKind {
+SemaLoopValueKind: enum {
     Effect
     Collecting
     Result
@@ -207,7 +207,7 @@ enum SemaLoopValueKind {
 // binding declared at or above `scope_depth`, still standing where the body
 // reaches its back edge, repeats on the next iteration
 // (sema_ownership_check_loop_move_backedge).
-struct SemaLoopValueFrame {
+SemaLoopValueFrame: struct {
     label: String?
     kind: SemaLoopValueKind
     ty: Type?
@@ -215,37 +215,37 @@ struct SemaLoopValueFrame {
     scope_depth: Int
 }
 
-struct SemaPendingLoopValue {
+SemaPendingLoopValue: struct {
     label: String?
     kind: SemaLoopValueKind
     ty: Type?
 }
 
-struct SemaLoopBreakFlows {
+SemaLoopBreakFlows: struct {
     paths: [SemaOwnershipState]
 }
 
-fn sema_loop_value_kind_effect() -> SemaLoopValueKind Never! {
+sema_loop_value_kind_effect: fn() -> SemaLoopValueKind Never! {
     SemaLoopValueKind.Effect
 }
 
-fn sema_loop_value_kind_collecting() -> SemaLoopValueKind Never! {
+sema_loop_value_kind_collecting: fn() -> SemaLoopValueKind Never! {
     SemaLoopValueKind.Collecting
 }
 
-fn sema_loop_value_kind_result() -> SemaLoopValueKind Never! {
+sema_loop_value_kind_result: fn() -> SemaLoopValueKind Never! {
     SemaLoopValueKind.Result
 }
 
-fn sema_loop_value_set_pending(context: &SemaCheckContext, kind: SemaLoopValueKind, label: String?) Never! {
+sema_loop_value_set_pending: fn(context: &SemaCheckContext, kind: SemaLoopValueKind, label: String?) Never! {
     context.pending_loop_value = Val(SemaPendingLoopValue{kind: kind, label: label, ty: None})
 }
 
-fn sema_loop_value_set_pending_type(context: &SemaCheckContext, kind: SemaLoopValueKind, label: String?, ty: Type?) Never! {
+sema_loop_value_set_pending_type: fn(context: &SemaCheckContext, kind: SemaLoopValueKind, label: String?, ty: Type?) Never! {
     context.pending_loop_value = Val(SemaPendingLoopValue{kind: kind, label: label, ty: ty})
 }
 
-fn sema_loop_value_push_frame(context: &SemaCheckContext, label: String?, entry: SemaOwnershipFork) Never! {
+sema_loop_value_push_frame: fn(context: &SemaCheckContext, label: String?, entry: SemaOwnershipFork) Never! {
     pending := context.pending_loop_value
     context.pending_loop_value = None
     kind := SemaLoopValueKind.Effect
@@ -260,14 +260,14 @@ fn sema_loop_value_push_frame(context: &SemaCheckContext, label: String?, entry:
     &context.loop_break_flows.push(SemaLoopBreakFlows{paths: [SemaOwnershipState]{}})
 }
 
-fn sema_loop_value_pop_frame(context: &SemaCheckContext) Never! {
+sema_loop_value_pop_frame: fn(context: &SemaCheckContext) Never! {
     if context.loop_value_frames.len() == 0 -> return
-    frame :: &context.loop_value_frames.pop() ?? return
+    frame: &context.loop_value_frames.pop() ?? return
     if context.loop_break_flows.len() > 0 -> _ := &context.loop_break_flows.pop()
     if frame.kind == SemaLoopValueKind.Result -> context.last_loop_result_type = frame.ty
 }
 
-fn sema_loop_value_resolve_frame(context: SemaCheckContext, label: String?) -> Int? {
+sema_loop_value_resolve_frame: fn(context: SemaCheckContext, label: String?) -> Int? {
     index := context.loop_value_frames.len() - 1
     if label != None {
         loop index >= 0 {
@@ -280,58 +280,58 @@ fn sema_loop_value_resolve_frame(context: SemaCheckContext, label: String?) -> I
     None
 }
 
-fn sema_loop_value_record_break(context: &SemaCheckContext, frame_index: Int, state: SemaOwnershipState) Never! {
+sema_loop_value_record_break: fn(context: &SemaCheckContext, frame_index: Int, state: SemaOwnershipState) Never! {
     if frame_index < 0 || frame_index >= context.loop_break_flows.len() -> return
     &context.loop_break_flows[frame_index].paths.push(sema_ownership_state_snapshot(state))
 }
 
-fn sema_loop_value_set_result_type(context: &SemaCheckContext, frame_index: Int, ty: Type) Never! {
+sema_loop_value_set_result_type: fn(context: &SemaCheckContext, frame_index: Int, ty: Type) Never! {
     if frame_index < 0 || frame_index >= context.loop_value_frames.len() -> return
     context.loop_value_frames[frame_index].ty = Val(ty)
 }
 
-fn sema_loop_value_result_type(context: SemaCheckContext, frame_index: Int) -> Type? {
+sema_loop_value_result_type: fn(context: SemaCheckContext, frame_index: Int) -> Type? {
     if frame_index < 0 || frame_index >= context.loop_value_frames.len() -> return None
     context.loop_value_frames[frame_index].ty
 }
 
-fn sema_loop_value_break_flows(context: SemaCheckContext, frame_index: Int) -> [SemaOwnershipState] Never! {
+sema_loop_value_break_flows: fn(context: SemaCheckContext, frame_index: Int) -> [SemaOwnershipState] Never! {
     if frame_index < 0 || frame_index >= context.loop_break_flows.len() -> return [SemaOwnershipState]{}
     context.loop_break_flows[frame_index].paths
 }
 
-fn sema_loop_value_push_collecting_type(context: &SemaCheckContext) Never! {
+sema_loop_value_push_collecting_type: fn(context: &SemaCheckContext) Never! {
     &context.collect_item_types.push(None)
 }
 
-fn sema_loop_value_pop_collecting_type(context: &SemaCheckContext) -> Type? {
+sema_loop_value_pop_collecting_type: fn(context: &SemaCheckContext) -> Type? {
     if context.collect_item_types.len() == 0 -> return None
     &context.collect_item_types.pop() ?? None
 }
 
-fn sema_loop_value_collecting_type(context: SemaCheckContext) -> Type? {
+sema_loop_value_collecting_type: fn(context: SemaCheckContext) -> Type? {
     if context.collect_item_types.len() == 0 -> return None
     context.collect_item_types[context.collect_item_types.len() - 1]
 }
 
-fn sema_loop_value_set_collecting_type(context: &SemaCheckContext, ty: Type) Never! {
+sema_loop_value_set_collecting_type: fn(context: &SemaCheckContext, ty: Type) Never! {
     if context.collect_item_types.len() == 0 -> return
     context.collect_item_types[context.collect_item_types.len() - 1] = Val(ty)
 }
 
-fn sema_loop_value_append_collecting_item_type(context: &SemaCheckContext, ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
+sema_loop_value_append_collecting_item_type: fn(context: &SemaCheckContext, ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
     if ty == (Type.Named{name: "Unit"}) {
         &diagnostics.push(sema_error("E0073", span, "this collecting loop path produces no item", "every accepted iteration must contribute one non-unit value unless `next` omits it", "return a value on this path, or remove `->`"))
         return false
     }
-    existing :: sema_loop_value_collecting_type(context)
+    existing: sema_loop_value_collecting_type(context)
     if existing == None {
         sema_loop_value_set_collecting_type(&context, ty)
         return true
     }
-    expected :: existing
+    expected: existing
     if type_identity_equal(expected, ty) -> return true
-    joined :: sema_expr_numeric_join(expected, ty) ?? {
+    joined: sema_expr_numeric_join(expected, ty) ?? {
         &diagnostics.push(sema_error("E0074", span, "this collecting loop produces incompatible item types", "one collecting loop builds one List, but this item is {type_name(ty)} instead of {type_name(expected)}", "convert every item to one type, or split the loops"))
         return false
     }
@@ -339,32 +339,32 @@ fn sema_loop_value_append_collecting_item_type(context: &SemaCheckContext, ty: T
     true
 }
 
-struct SemaScopeLoopLabel {
+SemaScopeLoopLabel: struct {
     name: String
 }
 
 // `last_reads` maps each queried name to the index of the last statement that
 // reads it (-1: none), filled on the first query so later live-after queries
 // are O(1) instead of rewalking the remaining statements.
-struct SemaStatementTailBody {
+SemaStatementTailBody: struct {
     statements: [Stmt]
     last_reads: [String:Int]
 }
 
-struct SemaStatementTailStore {
+SemaStatementTailStore: struct {
     bodies: [SemaStatementTailBody]
 }
 
-struct SemaStatementTailFrame {
+SemaStatementTailFrame: struct {
     body_id: Int
     start_index: Int
 }
 
-fn sema_statement_tail_store_init() -> SemaStatementTailStore Never! {
+sema_statement_tail_store_init: fn() -> SemaStatementTailStore Never! {
     SemaStatementTailStore{bodies: [SemaStatementTailBody]{}}
 }
 
-fn sema_statement_tail_store_add_body(store: &SemaStatementTailStore, statements: [Stmt]) -> Int Never! {
+sema_statement_tail_store_add_body: fn(store: &SemaStatementTailStore, statements: [Stmt]) -> Int Never! {
     body_id := store.bodies.len()
     // copy: the checker's statement lists are read parameters (the program
     // keeps them), and live-after queries outlive this frame's borrow of them.
@@ -372,7 +372,7 @@ fn sema_statement_tail_store_add_body(store: &SemaStatementTailStore, statements
     body_id
 }
 
-struct SemaCheckedTextEvaluation {
+SemaCheckedTextEvaluation: struct {
     module_identity: String
     key: String
     type_name: String
@@ -387,7 +387,7 @@ struct SemaCheckedTextEvaluation {
     span: Span
 }
 
-struct SemaComptimeRequest {
+SemaComptimeRequest: struct {
     callee_key: String
     module_identity: String
     args: [TComptimeValue]
@@ -395,17 +395,17 @@ struct SemaComptimeRequest {
     checked_text: SemaCheckedTextEvaluation?
 }
 
-// A prepared local (`name :: comptime { value }`) visible at a body comptime
+// A prepared local (`name: comptime { value }`) visible at a body comptime
 // site. The staged check declares it again, so the site's code reads its
 // finished value as it does in the owner body.
-struct SemaComptimePreparedLocal {
+SemaComptimePreparedLocal: struct {
     name: String
     ty: Type
     value: TComptimeValue
     span: Span
 }
 
-struct SemaComptimeBodySource {
+SemaComptimeBodySource: struct {
     module_identity: String
     function_key: String
     source_file: String
@@ -421,7 +421,7 @@ struct SemaComptimeBodySource {
     impure: Bool{false}
 }
 
-struct SemaComptimeBodyValue {
+SemaComptimeBodyValue: struct {
     module_identity: String
     key: String
     destination_key: String
@@ -432,7 +432,7 @@ struct SemaComptimeBodyValue {
 // Published ordered prefixes are immutable. The staging owner may append
 // future rows under its guard; contexts retain only the owner and captured
 // visible length, never a copied table or a rebuilt index.
-struct SemaComptimeBodyFacts {
+SemaComptimeBodyFacts: struct {
     values: [SemaComptimeBodyValue]
     modules: [String:Int]
     first_rows: [[String:Int]]
@@ -440,7 +440,7 @@ struct SemaComptimeBodyFacts {
     indexed_rows: Int
 }
 
-struct SemaComptimeBodyValues {
+SemaComptimeBodyValues: struct {
     facts: Shared<SemaComptimeBodyFacts>?{None}
     length: Int{0}
     // Only the staging producer advances this authenticated item frontier.
@@ -451,7 +451,7 @@ struct SemaComptimeBodyValues {
     work: Shared<SemaComptimeBodyWork>?{None}
 }
 
-struct SemaComptimeBodyWork {
+SemaComptimeBodyWork: struct {
     publications: Int{0}
     publication_rows: Int{0}
     index_builds: Int{0}
@@ -468,7 +468,7 @@ struct SemaComptimeBodyWork {
     owned_rows_returned: Int{0}
 }
 
-enum SemaComptimeBodyWorkOperation {
+SemaComptimeBodyWorkOperation: enum {
     FunctionsStarted
     CheckPassStarted
     ContextAttached
@@ -482,7 +482,7 @@ enum SemaComptimeBodyWorkOperation {
 
 // Scope-local facts serve the program-table callers; retained-graph checks
 // also keep their owning graph and its checked-type indexes here.
-struct SemaScopeEnvironment {
+SemaScopeEnvironment: struct {
     registration_graph: SemaRegistrationGraph?{None}
     module_identity: String
     // The registration row of `module_identity` when module entry set it
@@ -525,7 +525,7 @@ struct SemaScopeEnvironment {
 
 // Core's own generic bodies are checked independently of a consumer's target.
 // User bodies consume the selected machine fact, never a host OS guess.
-fn sema_scope_environment_no_os(environment: SemaScopeEnvironment) -> Bool Never! {
+sema_scope_environment_no_os: fn(environment: SemaScopeEnvironment) -> Bool Never! {
     if sema_module_is_core_source(environment.module_identity) -> return false
     if environment.registration_graph == .Val(graph) -> return graph.target_machine.no_os
     false
@@ -539,7 +539,7 @@ fn sema_scope_environment_no_os(environment: SemaScopeEnvironment) -> Bool Never
 // (sema_comptime_graph_apply_values), which type waiting constants and nothing
 // else, so `constants` names the only bindings a rebuilt table could differ
 // in, and where their graph rows live.
-struct SemaScopeProbe {
+SemaScopeProbe: struct {
     module_identity: String
     table: SemaScopeTable
     // sema_registration_apply_graph_module's result and its diagnostics.
@@ -555,20 +555,20 @@ struct SemaScopeProbe {
 
 // A module-scope binding whose symbol is a constant still waiting for its
 // known-time type (sema_comptime_symbol_waits), and its graph row.
-struct SemaScopeProbeConstant {
+SemaScopeProbeConstant: struct {
     binding: Int
     source: SemaScopeProbeSource
 }
 
 // `Namespace`: a package name bound from its declaring member's symbol row
 // (SemaRegistrationModule.namespace_bindings).
-enum SemaScopeProbeSource {
+SemaScopeProbeSource: enum {
     Symbol(position: Int)
     Import(import_index: Int, binding: Int)
     Namespace(module_index: Int, position: Int)
 }
  
-struct SemaCheckContext {
+SemaCheckContext: struct {
     exact_int_reachable: Bool
     unsafe_depth: Int
     borrow_ctx: Bool
@@ -752,7 +752,7 @@ struct SemaCheckContext {
 
  
 
-struct SemaScopeModulePolicy {
+SemaScopeModulePolicy: struct {
     unit_explicit_units: Bool
     copies_explicit: Bool
     // Split the exact span key into scalar indexes, without formatting it.
@@ -760,7 +760,7 @@ struct SemaScopeModulePolicy {
     function_unit_ends: [[Int:Bool]]
 }
 
-struct SemaScopeTable {
+SemaScopeTable: struct {
     frames: [SemaScopeFrame]
     bindings: [SemaScopeBinding]
     // Binding positions per name, ascending: `name_slots` maps a name to its
@@ -823,24 +823,24 @@ struct SemaScopeTable {
 
 // A scope table's handle on the graph's counters. It shows as its name:
 // the counts are not part of the table's facts.
-struct SemaScopeLookupCounters {
+SemaScopeLookupCounters: struct {
     counters: Shared<SemaLookupCounters>
 }
 
 impl SemaScopeLookupCounters.Debug {
-    fn debug(self) -> String {
+    debug: fn(self) -> String {
         "SemaScopeLookupCounters"
     }
 }
 
-struct SemaScopeBindingUndo {
+SemaScopeBindingUndo: struct {
     index: Int
     binding: SemaScopeBinding
 }
 
 // A rollback point: the table's row counts plus a copy of its small fields.
 // `saved` holds no frames, bindings or name rows.
-struct SemaScopeMark {
+SemaScopeMark: struct {
     frames: Int
     bindings: Int
     undo: Int
@@ -848,7 +848,7 @@ struct SemaScopeMark {
 }
 
 // The hardware transfer facts of one path, joined at a control-flow merge.
-struct SemaScopeHardwareFacts {
+SemaScopeHardwareFacts: struct {
     transfers: [SemaHardwareDMATransferFact]
     definite: [SemaHardwareDMATransferFact]
     pending: [SemaHardwareDMATransferFact]
@@ -859,7 +859,7 @@ struct SemaScopeHardwareFacts {
 // pass driver owns it and every checker borrows it; only comptime value
 // landing writes it. The tables own the graph they are given: callers hand
 // over one graph rather than a read value the constructor would copy again.
-struct SemaProgramTables {
+SemaProgramTables: struct {
     registration_graph: SemaRegistrationGraph?
     checked_types: [TTypeDef]
     // Rust `Checker::types` (keyed registry): `checked_types` rows by
@@ -882,7 +882,7 @@ struct SemaProgramTables {
 // The DeclID a direct call to the registered callable `symbol` names (Cutover
 // B L2b). Every direct call target is a registered callable, so a target with
 // no row is a compiler bug, reported rather than lowered to a guessed callee.
-fn sema_call_callee_decl(program: SemaProgramTables, symbol: SymbolID, span: Span, diagnostics: &[Diagnostic]) -> DeclID? Never! {
+sema_call_callee_decl: fn(program: SemaProgramTables, symbol: SymbolID, span: Span, diagnostics: &[Diagnostic]) -> DeclID? Never! {
     if program.registration_graph == .Val(graph) {
         if sema_registration_callable_id(graph, symbol.key) == .Val(id) -> return Val(id)
     }
@@ -892,12 +892,12 @@ fn sema_call_callee_decl(program: SemaProgramTables, symbol: SymbolID, span: Spa
 
 // The key text of the registered declaration `id` (diagnostics, call facts,
 // effect node keys). A DeclID is only minted from a graph's table.
-fn sema_program_decl_key(program: SemaProgramTables, id: DeclID) -> String Never! {
+sema_program_decl_key: fn(program: SemaProgramTables, id: DeclID) -> String Never! {
     if program.registration_graph == .Val(graph) -> return graph.decls.rows[id.row].key.copy()
     panic("a DeclID outlived its registration graph")
 }
 
-fn sema_program_tables_init(graph: ^SemaRegistrationGraph?, checked_types: [TTypeDef]) -> SemaProgramTables Never! {
+sema_program_tables_init: fn(graph: ^SemaRegistrationGraph?, checked_types: [TTypeDef]) -> SemaProgramTables Never! {
     boxed_edges := sema_scope_environment_boxed_edges(graph)
     copy_facts := sema_copy_facts_table(graph)
     sema_program_tables_with(^graph, checked_types, ^boxed_edges, ^copy_facts)
@@ -905,12 +905,12 @@ fn sema_program_tables_init(graph: ^SemaRegistrationGraph?, checked_types: [TTyp
 
 // The tables over `graph` whose boxed edges and copy facts were already
 // computed from it (sema_scope_environment_boxed_edges, sema_copy_facts_table).
-fn sema_program_tables_with(graph: ^SemaRegistrationGraph?, checked_types: [TTypeDef], boxed_edges: ^[String:[String]], copy_facts: ^SemaCopyFactsTable) -> SemaProgramTables Never! {
+sema_program_tables_with: fn(graph: ^SemaRegistrationGraph?, checked_types: [TTypeDef], boxed_edges: ^[String:[String]], copy_facts: ^SemaCopyFactsTable) -> SemaProgramTables Never! {
     rows := [String:Int]{}
     name_slots := [String:Int]{}
     name_rows := [[Int]]{}
     loop (index, definition) in checked_types {
-        key :: "{definition.module_identity}::{definition.name}"
+        key: "{definition.module_identity}::{definition.name}"
         if rows.get(key) == None -> rows[key] = index
         if name_slots.get(definition.name) == .Val(slot) {
             &name_rows[slot].push(index)
@@ -930,7 +930,7 @@ fn sema_program_tables_with(graph: ^SemaRegistrationGraph?, checked_types: [TTyp
     }
 }
 
-fn sema_scope_environment_init(module_identity: String, package_identity: String, module_name: String, source_file: String, source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], declarations: [SemaScopeDeclaration]) -> SemaScopeEnvironment Never! {
+sema_scope_environment_init: fn(module_identity: String, package_identity: String, module_name: String, source_file: String, source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], declarations: [SemaScopeDeclaration]) -> SemaScopeEnvironment Never! {
     SemaScopeEnvironment{
         registration_graph: None,
         module_identity: module_identity,
@@ -951,27 +951,27 @@ fn sema_scope_environment_init(module_identity: String, package_identity: String
 }
 
 // The boxed field edges of `graph`, read in place through the `.Val(…)`
-// pattern on the parameter; binding `value :: graph ?? …` copies the whole
+// pattern on the parameter; binding `value: graph ?? …` copies the whole
 // graph.
-fn sema_scope_environment_boxed_edges(graph: SemaRegistrationGraph?) -> [String:[String]] Never! {
+sema_scope_environment_boxed_edges: fn(graph: SemaRegistrationGraph?) -> [String:[String]] Never! {
     if graph == .Val(value) -> return sema_checked_program_boxed_edges(value)
     [String:[String]]{}
 }
 
 // The first checked declaration of `name` owned by `module_identity`.
-fn sema_scope_checked_type_row(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: String, name: String) -> Int? {
+sema_scope_checked_type_row: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: String, name: String) -> Int? {
     program.checked_type_rows.get("{module_identity}::{name}")
 }
 
 // Every checked declaration row named `name`, in declaration order.
-fn sema_scope_checked_type_name_rows(environment: SemaScopeEnvironment, program: SemaProgramTables, name: String) -> [Int] {
-    slot :: program.checked_type_name_slots.get(name) ?? return [Int]{}
+sema_scope_checked_type_name_rows: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, name: String) -> [Int] {
+    slot: program.checked_type_name_slots.get(name) ?? return [Int]{}
     program.checked_type_name_rows[slot]
 }
 
 // Retarget scope facts while the program tables retain their one graph owner.
 // No field is taken from a borrowed environment or program parameter.
-fn sema_scope_environment_enter_module(environment: &SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, comptime_body_values: ^SemaComptimeBodyValues) Never! {
+sema_scope_environment_enter_module: fn(environment: &SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, comptime_body_values: ^SemaComptimeBodyValues) Never! {
     if program.registration_graph == .Val(graph) {
         environment.module_identity = graph.modules[module_index].module_identity
         environment.module_row = module_index
@@ -994,9 +994,9 @@ fn sema_scope_environment_enter_module(environment: &SemaScopeEnvironment, progr
 // A comptime probe borrows the program graph and replaces only scope facts.
 // Its else-arm/debug-site reset differs from real declaration/body entry.
 // False when the graph has no such module.
-fn sema_scope_environment_enter_probe_module(environment: &SemaScopeEnvironment, program: SemaProgramTables, module_identity: String, comptime_body_values: ^SemaComptimeBodyValues) -> Bool Never! {
+sema_scope_environment_enter_probe_module: fn(environment: &SemaScopeEnvironment, program: SemaProgramTables, module_identity: String, comptime_body_values: ^SemaComptimeBodyValues) -> Bool Never! {
     if program.registration_graph == .Val(graph) {
-        module_index :: sema_registration_module_index(graph, module_identity) ?? return false
+        module_index: sema_registration_module_index(graph, module_identity) ?? return false
         environment.module_identity = graph.modules[module_index].module_identity
         environment.module_row = module_index
         environment.package_identity = graph.modules[module_index].package_identity
@@ -1019,30 +1019,30 @@ fn sema_scope_environment_enter_probe_module(environment: &SemaScopeEnvironment,
 // recorded when `graph` still registers `module_identity` there (one shared
 // buffer compare), else the identity lookup. Callers pass it as the `caller`
 // row of named-type resolution instead of looking the identity up each time.
-fn sema_scope_caller_row(environment: SemaScopeEnvironment, graph: SemaRegistrationGraph) -> Int Never! {
+sema_scope_caller_row: fn(environment: SemaScopeEnvironment, graph: SemaRegistrationGraph) -> Int Never! {
     sema_scope_caller_index(environment, graph) ?? -1
 }
 
 // sema_scope_caller_row as an option: None when no row registers the module.
-fn sema_scope_caller_index(environment: SemaScopeEnvironment, graph: SemaRegistrationGraph) -> Int? Never! {
-    row :: environment.module_row
+sema_scope_caller_index: fn(environment: SemaScopeEnvironment, graph: SemaRegistrationGraph) -> Int? Never! {
+    row: environment.module_row
     if row >= 0 && row < graph.modules.len() && graph.modules[row].module_identity == environment.module_identity -> return Val(row)
     sema_registration_module_index(graph, environment.module_identity)
 }
 
-fn sema_scope_environment_boxed_edge(environment: SemaScopeEnvironment, program: SemaProgramTables, owner: SymbolID, edge: String) -> Bool Never! {
+sema_scope_environment_boxed_edge: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, owner: SymbolID, edge: String) -> Bool Never! {
     if program.registration_graph == .Val(graph) {
-        row :: sema_type_graph_nominal_row(graph, owner.key) ?? return false
-        module_identity :: graph.modules[row.module_index].module_identity
+        row: sema_type_graph_nominal_row(graph, owner.key) ?? return false
+        module_identity: graph.modules[row.module_index].module_identity
         if sema_scope_checked_type_row(environment, program, module_identity, graph.modules[row.module_index].nominals[row.row].symbol.name) == .Val(checked_row) -> return sema_checked_type_has_boxed_edge(program.checked_types[checked_row], edge)
         // Matched in place: a pattern on the indexed path copies the whole item.
-        nominal :: graph.modules[row.module_index].nominals[row.row]
+        nominal: graph.modules[row.module_index].nominals[row.row]
         if nominal.source == .SourceAST(definition) {
             // The declaration's own name resolves to this nominal in its own
             // module, so its edges are the ones keyed by the owner (what
             // sema_checked_boxed_edges looks up after resolving that name).
             if sema_registration_root_name(definition) == nominal.symbol.name {
-                edges :: program.boxed_edges.get(owner.key) ?? return false
+                edges: program.boxed_edges.get(owner.key) ?? return false
                 return edges.contains(edge)
             }
             return sema_checked_boxed_edges(graph, program.boxed_edges, module_identity, definition).contains(edge)
@@ -1051,7 +1051,7 @@ fn sema_scope_environment_boxed_edge(environment: SemaScopeEnvironment, program:
     false
 }
 
-fn sema_loop_break_flows_snapshot(source: [SemaLoopBreakFlows]) -> [SemaLoopBreakFlows] Never! {
+sema_loop_break_flows_snapshot: fn(source: [SemaLoopBreakFlows]) -> [SemaLoopBreakFlows] Never! {
     result := [SemaLoopBreakFlows]{}
     loop frame in source {
         paths := [SemaOwnershipState]{}
@@ -1061,7 +1061,7 @@ fn sema_loop_break_flows_snapshot(source: [SemaLoopBreakFlows]) -> [SemaLoopBrea
     result
 }
 
-fn sema_check_context_init() -> SemaCheckContext Never! {
+sema_check_context_init: fn() -> SemaCheckContext Never! {
     SemaCheckContext{
         exact_int_reachable: false,
         unsafe_depth: 0,
@@ -1121,7 +1121,7 @@ fn sema_check_context_init() -> SemaCheckContext Never! {
 }
  
 
-fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext Never! {
+sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Never! {
     snapshot := SemaCheckContext{
         exact_int_reachable: source.exact_int_reachable,
         unsafe_depth: source.unsafe_depth,
@@ -1217,7 +1217,7 @@ fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext Nev
 // appended-row lists stay empty). As with a snapshot, the probe starts with no
 // `iter_borrowed` rows and no binding initializer open. A new
 // SemaCheckContext field must be added here and in the rollback.
-struct SemaCheckContextMark {
+SemaCheckContextMark: struct {
     call_facts: Int
     call_return_views: Int
     local_view_provenance: Int
@@ -1242,8 +1242,8 @@ struct SemaCheckContextMark {
     saved: SemaCheckContext
 }
 
-fn sema_check_context_mark(context: &SemaCheckContext) -> SemaCheckContextMark Never! {
-    mark :: sema_check_context_save(context)
+sema_check_context_mark: fn(context: &SemaCheckContext) -> SemaCheckContextMark Never! {
+    mark: sema_check_context_save(context)
     context.iter_borrowed = [String]{}
     context.binding_initializer = false
     mark
@@ -1251,7 +1251,7 @@ fn sema_check_context_mark(context: &SemaCheckContext) -> SemaCheckContextMark N
 
 // A rollback point that leaves the context as it is: the check that follows
 // is the real one, rolled back only if its result is discarded.
-fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMark Never! {
+sema_check_context_save: fn(context: SemaCheckContext) -> SemaCheckContextMark Never! {
     SemaCheckContextMark{
         call_facts: context.call_facts.len(),
         call_return_views: context.call_return_views.len(),
@@ -1352,14 +1352,14 @@ fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMark Ne
 
 // Closes `mark` without rolling back: the checks since it are kept. In-place
 // edit rows stay for any enclosing mark.
-fn sema_scope_commit(table: &SemaScopeTable, mark: SemaScopeMark) Never! {
+sema_scope_commit: fn(table: &SemaScopeTable, mark: SemaScopeMark) Never! {
     table.open_marks = mark.saved.open_marks
 }
 
 // Restores `context` to `mark`: appended rows are dropped (a check only appends
 // to these lists; the one in-place row edit, a discarded call fact, stays
 // inside the rows its statement appended) and every other field is restored.
-fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckContextMark) Never! {
+sema_check_context_rollback: fn(context: &SemaCheckContext, mark: SemaCheckContextMark) Never! {
     loop context.call_facts.len() > mark.call_facts -> _ := &context.call_facts.pop()
     loop context.call_return_views.len() > mark.call_return_views -> _ := &context.call_return_views.pop()
     loop context.local_view_provenance.len() > mark.local_view_provenance -> _ := &context.local_view_provenance.pop()
@@ -1384,7 +1384,7 @@ fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckContex
     loop context.failure_union_cases.len() > mark.failure_union_cases -> _ := &context.failure_union_cases.pop()
     loop context.failure_union_edges.len() > mark.failure_union_edges -> _ := &context.failure_union_edges.pop()
     loop context.incomplete_reasons.len() > mark.incomplete_reasons -> _ := &context.incomplete_reasons.pop()
-    saved :: mark.saved
+    saved: mark.saved
     context.exact_int_reachable = saved.exact_int_reachable
     context.unsafe_depth = saved.unsafe_depth
     context.borrow_ctx = saved.borrow_ctx
@@ -1443,7 +1443,7 @@ fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckContex
 
 // Records why the body being checked is incomplete when no diagnostic says so.
 // Every path that marks a body incomplete without a diagnostic calls this.
-fn sema_check_unsupported(context: &SemaCheckContext, reason: String) Never! {
+sema_check_unsupported: fn(context: &SemaCheckContext, reason: String) Never! {
     &context.incomplete_reasons.push(reason)
 }
 
@@ -1451,7 +1451,7 @@ fn sema_check_unsupported(context: &SemaCheckContext, reason: String) Never! {
 // fresh function-local id when that id is generated or already filed (a
 // desugared copy checked again), so no two nodes of the flat body share an
 // id. A value a nested check filed (a grouping, a delegated form) keeps its id.
-fn sema_check_record_expr_id(expr: Expr, value: &TExpr, context: &SemaCheckContext) Never! {
+sema_check_record_expr_id: fn(expr: Expr, value: &TExpr, context: &SemaCheckContext) Never! {
     if value.id != AST_NODE_GENERATED -> return
     id := expr_node_id(expr)
     if id == AST_NODE_GENERATED || context.fresh_expr_ids || context.filed_expr_id_set.get(id) != None {
@@ -1466,7 +1466,7 @@ fn sema_check_record_expr_id(expr: Expr, value: &TExpr, context: &SemaCheckConte
 
 // Hands the source ids a snapshot (sema_check_context_snapshot) filed back to
 // the context it was taken from, with its id count.
-fn sema_check_context_merge_expr_ids(source: SemaCheckContext, target: &SemaCheckContext) Never! {
+sema_check_context_merge_expr_ids: fn(source: SemaCheckContext, target: &SemaCheckContext) Never! {
     loop id in source.filed_expr_ids {
         target.filed_expr_id_set[id] = true
         &target.filed_expr_ids.push(id)
@@ -1476,9 +1476,9 @@ fn sema_check_context_merge_expr_ids(source: SemaCheckContext, target: &SemaChec
 
 // Hands back the source ids a full copy of `target` filed past target's own,
 // with its id count: a check run on a copied context keeps its ids.
-fn sema_check_context_return_expr_ids(copied: SemaCheckContext, target: &SemaCheckContext) Never! {
+sema_check_context_return_expr_ids: fn(copied: SemaCheckContext, target: &SemaCheckContext) Never! {
     loop index in target.filed_expr_ids.len()..<copied.filed_expr_ids.len() {
-        id :: copied.filed_expr_ids[index]
+        id: copied.filed_expr_ids[index]
         target.filed_expr_id_set[id] = true
         &target.filed_expr_ids.push(id)
     }
@@ -1488,10 +1488,10 @@ fn sema_check_context_return_expr_ids(copied: SemaCheckContext, target: &SemaChe
 // Rolls `context` back to `mark` but keeps the source ids filed since it,
 // with the id count: the facts of an erased `#DebugOnly` body stay inside it,
 // while its checked statements stay in the tree and keep their ids.
-fn sema_check_context_rollback_keep_expr_ids(context: &SemaCheckContext, mark: SemaCheckContextMark) Never! {
+sema_check_context_rollback_keep_expr_ids: fn(context: &SemaCheckContext, mark: SemaCheckContextMark) Never! {
     kept := [Int]{}
     loop index in mark.filed_expr_ids..<context.filed_expr_ids.len() -> &kept.push(context.filed_expr_ids[index])
-    next_expr_id :: context.next_expr_id
+    next_expr_id: context.next_expr_id
     sema_check_context_rollback(&context, mark)
     loop id in kept {
         context.filed_expr_id_set[id] = true
@@ -1500,7 +1500,7 @@ fn sema_check_context_rollback_keep_expr_ids(context: &SemaCheckContext, mark: S
     context.next_expr_id = next_expr_id
 }
 
-fn sema_scope_hardware_transfers_snapshot(source: [SemaHardwareDMATransferFact]) -> [SemaHardwareDMATransferFact] Never! {
+sema_scope_hardware_transfers_snapshot: fn(source: [SemaHardwareDMATransferFact]) -> [SemaHardwareDMATransferFact] Never! {
     result := [SemaHardwareDMATransferFact]{}
     loop fact in source -> &result.push(fact)
     result
@@ -1508,7 +1508,7 @@ fn sema_scope_hardware_transfers_snapshot(source: [SemaHardwareDMATransferFact])
 
 // copy: a deferred arm is checked later against the scope table as it is now,
 // while the live table goes on to the sibling arm; the snapshot is that table.
-fn sema_scope_snapshot(source: SemaScopeTable) -> SemaScopeTable Never! {
+sema_scope_snapshot: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
     SemaScopeTable{
         frames: source.frames.copy(),
         bindings: source.bindings.copy(),
@@ -1543,8 +1543,8 @@ fn sema_scope_snapshot(source: SemaScopeTable) -> SemaScopeTable Never! {
 // Opens a rollback point. Control-flow paths and function bodies are checked
 // in place and rolled back, instead of copying the whole table (which holds
 // every module declaration) per path.
-fn sema_scope_mark(table: &SemaScopeTable) -> SemaScopeMark Never! {
-    mark :: SemaScopeMark{
+sema_scope_mark: fn(table: &SemaScopeTable) -> SemaScopeMark Never! {
+    mark: SemaScopeMark{
         frames: table.frames.len(),
         bindings: table.bindings.len(),
         undo: table.binding_undo.len(),
@@ -1579,7 +1579,7 @@ fn sema_scope_mark(table: &SemaScopeTable) -> SemaScopeMark Never! {
 // Restores the table to `mark`: in-place binding edits are undone newest
 // first, rows pushed since the mark are dropped (with their name positions,
 // which are ascending per name), and the small fields are restored.
-fn sema_scope_rollback(table: &SemaScopeTable, mark: SemaScopeMark) Never! {
+sema_scope_rollback: fn(table: &SemaScopeTable, mark: SemaScopeMark) Never! {
     // Newest edit first: each undo row is popped and its saved binding moves
     // back into place.
     loop table.binding_undo.len() > mark.undo {
@@ -1587,12 +1587,12 @@ fn sema_scope_rollback(table: &SemaScopeTable, mark: SemaScopeMark) Never! {
         if undo.index < mark.bindings -> table.bindings[undo.index] = ^undo.binding
     }
     loop table.bindings.len() > mark.bindings {
-        last :: table.bindings.len() - 1
+        last: table.bindings.len() - 1
         if sema_scope_name_slot(table, table.bindings[last].symbol.name) == .Val(slot) -> _ := &table.name_positions[slot].pop()
         _ := &table.bindings.pop()
     }
     loop table.frames.len() > mark.frames -> _ := &table.frames.pop()
-    saved :: mark.saved
+    saved: mark.saved
     table.loop_labels = saved.loop_labels.copy()
     table.hardware_transfers = sema_scope_hardware_transfers_snapshot(saved.hardware_transfers)
     table.hardware_definite_transfers = sema_scope_hardware_transfers_snapshot(saved.hardware_definite_transfers)
@@ -1615,15 +1615,15 @@ fn sema_scope_rollback(table: &SemaScopeTable, mark: SemaScopeMark) Never! {
 
 // Call before editing `table.bindings[index]` in place, so an open rollback
 // point can restore the old row.
-fn sema_scope_note_binding_edit(table: &SemaScopeTable, index: Int) Never! {
+sema_scope_note_binding_edit: fn(table: &SemaScopeTable, index: Int) Never! {
     if table.open_marks == 0 -> return
     // copy: the undo log keeps the binding's old row, and the caller edits the live row in
     // table.bindings right after. A rollback needs both rows.
-    previous :: table.bindings[index].copy()
+    previous: table.bindings[index].copy()
     &table.binding_undo.push(SemaScopeBindingUndo{index: index, binding: previous})
 }
 
-fn sema_scope_hardware_facts(table: SemaScopeTable) -> SemaScopeHardwareFacts Never! {
+sema_scope_hardware_facts: fn(table: SemaScopeTable) -> SemaScopeHardwareFacts Never! {
     SemaScopeHardwareFacts{
         transfers: sema_scope_hardware_transfers_snapshot(table.hardware_transfers),
         definite: sema_scope_hardware_transfers_snapshot(table.hardware_definite_transfers),
@@ -1631,7 +1631,7 @@ fn sema_scope_hardware_facts(table: SemaScopeTable) -> SemaScopeHardwareFacts Ne
     }
 }
 
-fn sema_scope_init(module_name: String) -> SemaScopeTable Never! {
+sema_scope_init: fn(module_name: String) -> SemaScopeTable Never! {
     SemaScopeTable{
         frames: [SemaScopeFrame]{SemaScopeFrame{parent: -1, owner: module_name}},
         bindings: [SemaScopeBinding]{},
@@ -1654,7 +1654,7 @@ fn sema_scope_init(module_name: String) -> SemaScopeTable Never! {
     }
 }
 
-fn sema_scope_function_owner_key(table: SemaScopeTable) -> String Never! {
+sema_scope_function_owner_key: fn(table: SemaScopeTable) -> String Never! {
     if table.current <= 0 -> return ""
     frame := table.current
     loop table.frames[frame].parent > 0 -> frame = table.frames[frame].parent
@@ -1662,7 +1662,7 @@ fn sema_scope_function_owner_key(table: SemaScopeTable) -> String Never! {
 }
 
 // Whether the current scope is lexically inside an `#Impure` block.
-fn sema_scope_inside_impure(table: SemaScopeTable) -> Bool Never! {
+sema_scope_inside_impure: fn(table: SemaScopeTable) -> Bool Never! {
     frame := table.current
     loop frame > 0 {
         if table.frames[frame].owner.starts_with("impure@") -> return true
@@ -1673,27 +1673,27 @@ fn sema_scope_inside_impure(table: SemaScopeTable) -> Bool Never! {
 
 // A local identity is rooted at its enclosing function/lambda and includes
 // every lexical frame owner; frame indices are traversal-order artifacts.
-fn sema_scope_local_owner_key(table: SemaScopeTable) -> String Never! {
+sema_scope_local_owner_key: fn(table: SemaScopeTable) -> String Never! {
     owner := ""
     frame := table.current
     loop frame > 0 {
-        frame_owner :: table.frames[frame].owner
+        frame_owner: table.frames[frame].owner
         owner = if owner == "" -> frame_owner else -> "{frame_owner}/{owner}"
         frame = table.frames[frame].parent
     }
     owner
 }
 
-fn sema_scope_enter(table: &SemaScopeTable, state: &SemaOwnershipState, owner: String) -> Int Never! {
-    parent :: table.current
-    id :: table.frames.len()
+sema_scope_enter: fn(table: &SemaScopeTable, state: &SemaOwnershipState, owner: String) -> Int Never! {
+    parent: table.current
+    id: table.frames.len()
     &table.frames.push(SemaScopeFrame{parent: parent, owner: owner})
     table.current = id
     sema_ownership_enter_scope(&state)
     id
 }
 
-fn sema_scope_leave(table: &SemaScopeTable, state: &SemaOwnershipState) Never! {
+sema_scope_leave: fn(table: &SemaScopeTable, state: &SemaOwnershipState) Never! {
     if table.current <= 0 -> return
     leaving := table.current
     remaining_transfers := [SemaHardwareDMATransferFact]{}
@@ -1714,10 +1714,10 @@ fn sema_scope_leave(table: &SemaScopeTable, state: &SemaOwnershipState) Never! {
     sema_ownership_leave_scope(&state)
     table.current = table.frames[leaving].parent
 }
-fn sema_scope_hardware_fact_equal(left: SemaHardwareDMATransferFact, right: SemaHardwareDMATransferFact) -> Bool Never! {
+sema_scope_hardware_fact_equal: fn(left: SemaHardwareDMATransferFact, right: SemaHardwareDMATransferFact) -> Bool Never! {
     left.transfer_key == right.transfer_key && left.buffer_key == right.buffer_key && left.profile_id == right.profile_id && left.channel == right.channel && left.buffer_name == right.buffer_name && type_identity_equal(left.buffer_type, right.buffer_type)
 }
-fn sema_scope_hardware_intersection(left: [SemaHardwareDMATransferFact], right: [SemaHardwareDMATransferFact]) -> [SemaHardwareDMATransferFact] Never! {
+sema_scope_hardware_intersection: fn(left: [SemaHardwareDMATransferFact], right: [SemaHardwareDMATransferFact]) -> [SemaHardwareDMATransferFact] Never! {
     result := [SemaHardwareDMATransferFact]{}
     loop candidate in left {
         loop other in right {
@@ -1729,7 +1729,7 @@ fn sema_scope_hardware_intersection(left: [SemaHardwareDMATransferFact], right: 
     }
     result
 }
-fn sema_scope_hardware_union(left: [SemaHardwareDMATransferFact], right: [SemaHardwareDMATransferFact]) -> [SemaHardwareDMATransferFact] Never! {
+sema_scope_hardware_union: fn(left: [SemaHardwareDMATransferFact], right: [SemaHardwareDMATransferFact]) -> [SemaHardwareDMATransferFact] Never! {
     result := sema_scope_hardware_transfers_snapshot(left)
     loop candidate in right {
         found := false
@@ -1740,7 +1740,7 @@ fn sema_scope_hardware_union(left: [SemaHardwareDMATransferFact], right: [SemaHa
     }
     result
 }
-fn sema_scope_hardware_join(before: SemaScopeHardwareFacts, then_path: SemaScopeHardwareFacts, else_path: SemaScopeHardwareFacts, has_else: Bool) -> SemaScopeHardwareFacts Never! {
+sema_scope_hardware_join: fn(before: SemaScopeHardwareFacts, then_path: SemaScopeHardwareFacts, else_path: SemaScopeHardwareFacts, has_else: Bool) -> SemaScopeHardwareFacts Never! {
     transfers := sema_scope_hardware_union(before.transfers, then_path.transfers)
     definite := sema_scope_hardware_intersection(before.definite, then_path.definite)
     pending := sema_scope_hardware_union(before.pending, then_path.pending)
@@ -1752,16 +1752,16 @@ fn sema_scope_hardware_join(before: SemaScopeHardwareFacts, then_path: SemaScope
     SemaScopeHardwareFacts{transfers: transfers, definite: definite, pending: pending}
 }
 
-fn sema_scope_join_hardware_paths(table: &SemaScopeTable, before: SemaScopeHardwareFacts, then_path: SemaScopeHardwareFacts, else_path: SemaScopeHardwareFacts, has_else: Bool) Never! {
-    joined :: sema_scope_hardware_join(before, then_path, else_path, has_else)
+sema_scope_join_hardware_paths: fn(table: &SemaScopeTable, before: SemaScopeHardwareFacts, then_path: SemaScopeHardwareFacts, else_path: SemaScopeHardwareFacts, has_else: Bool) Never! {
+    joined: sema_scope_hardware_join(before, then_path, else_path, has_else)
     table.hardware_transfers = sema_scope_hardware_transfers_snapshot(joined.transfers)
     table.hardware_definite_transfers = sema_scope_hardware_transfers_snapshot(joined.definite)
     table.hardware_pending_transfers = sema_scope_hardware_transfers_snapshot(joined.pending)
 }
 
-fn sema_scope_enter_existing(table: &SemaScopeTable, owner: String) -> Bool Never! {
+sema_scope_enter_existing: fn(table: &SemaScopeTable, owner: String) -> Bool Never! {
     if table.frames[table.current].owner == owner -> return true
-    parent :: table.current
+    parent: table.current
     loop (index, frame) in table.frames {
         if frame.parent == parent && frame.owner == owner {
             table.current = index
@@ -1773,10 +1773,10 @@ fn sema_scope_enter_existing(table: &SemaScopeTable, owner: String) -> Bool Neve
 
 // Module declarations share one root namespace. The declaration pass reports
 // E0105 at the source declaration when this returns false.
-fn sema_scope_add_module_symbol(table: &SemaScopeTable, symbol: Symbol) -> Bool Never! {
+sema_scope_add_module_symbol: fn(table: &SemaScopeTable, symbol: Symbol) -> Bool Never! {
     if sema_scope_name_slot(table, symbol.name) == .Val(slot) {
         loop index in table.name_positions[slot] {
-            binding :: table.bindings[index]
+            binding: table.bindings[index]
             if binding.frame == 0 && !binding.compiler_builtin -> return false
         }
     }
@@ -1784,9 +1784,9 @@ fn sema_scope_add_module_symbol(table: &SemaScopeTable, symbol: Symbol) -> Bool 
     true
 }
 
-fn sema_scope_add_compiler_builtin(table: &SemaScopeTable, graph: SemaRegistrationGraph) -> Bool Never! {
-    builtin :: sema_registration_compiler_builtin_row(graph, "Err") ?? return true
-    nominal :: graph.modules[builtin.module_index].nominals[builtin.row]
+sema_scope_add_compiler_builtin: fn(table: &SemaScopeTable, graph: SemaRegistrationGraph) -> Bool Never! {
+    builtin: sema_registration_compiler_builtin_row(graph, "Err") ?? return true
+    nominal: graph.modules[builtin.module_index].nominals[builtin.row]
     loop binding in table.bindings {
         if binding.frame == 0 && binding.compiler_builtin && binding.symbol.id.key == nominal.symbol.id.key -> return true
     }
@@ -1794,7 +1794,7 @@ fn sema_scope_add_compiler_builtin(table: &SemaScopeTable, graph: SemaRegistrati
     true
 }
 
-fn sema_knowledge_plane_name(plane: SemaKnowledgePlane) -> String Never! {
+sema_knowledge_plane_name: fn(plane: SemaKnowledgePlane) -> String Never! {
     if plane == {
         .Range -> "range"
         .Exactness -> "exactness"
@@ -1804,7 +1804,7 @@ fn sema_knowledge_plane_name(plane: SemaKnowledgePlane) -> String Never! {
     }
 }
 
-fn sema_knowledge_gate_spelling(gate: SemaKnowledgeGate) -> String Never! {
+sema_knowledge_gate_spelling: fn(gate: SemaKnowledgeGate) -> String Never! {
     if gate == {
         .BoundedArithmetic -> "wrapping"
         .Approximation -> "approx"
@@ -1815,7 +1815,7 @@ fn sema_knowledge_gate_spelling(gate: SemaKnowledgeGate) -> String Never! {
     }
 }
 
-fn sema_knowledge_gate_allows(plane: SemaKnowledgePlane, gate: SemaKnowledgeGate) -> Bool Never! {
+sema_knowledge_gate_allows: fn(plane: SemaKnowledgePlane, gate: SemaKnowledgeGate) -> Bool Never! {
     if plane == {
         .Range -> if gate == {
             .BoundedArithmetic | .RawProjection -> true
@@ -1841,32 +1841,32 @@ fn sema_knowledge_gate_allows(plane: SemaKnowledgePlane, gate: SemaKnowledgeGate
     }
 }
 
-fn sema_scope_push_knowledge_gate(table: &SemaScopeTable, gate: SemaKnowledgeGate) -> SemaKnowledgeGate? {
+sema_scope_push_knowledge_gate: fn(table: &SemaScopeTable, gate: SemaKnowledgeGate) -> SemaKnowledgeGate? {
     // copy: the caller gets the previous gate back to reinstall it, while the table's field is
     // overwritten with `gate`. Jet has no exchange on a field of the write-borrowed `table`.
-    previous :: table.knowledge_gate.copy()
+    previous: table.knowledge_gate.copy()
     table.knowledge_gate = Val(gate)
     previous
 }
 
-fn sema_scope_pop_knowledge_gate(table: &SemaScopeTable, previous: SemaKnowledgeGate?) Never! {
+sema_scope_pop_knowledge_gate: fn(table: &SemaScopeTable, previous: SemaKnowledgeGate?) Never! {
     table.knowledge_gate = previous
 }
 
-fn sema_scope_knowledge_gate_allows(table: SemaScopeTable, plane: SemaKnowledgePlane, gate: SemaKnowledgeGate) -> Bool Never! {
-    active :: table.knowledge_gate ?? return false
+sema_scope_knowledge_gate_allows: fn(table: SemaScopeTable, plane: SemaKnowledgePlane, gate: SemaKnowledgeGate) -> Bool Never! {
+    active: table.knowledge_gate ?? return false
     sema_knowledge_gate_allows(plane, active)
 }
 
-fn sema_scope_require_knowledge_gate(table: &SemaScopeTable, plane: SemaKnowledgePlane, gate: SemaKnowledgeGate, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+sema_scope_require_knowledge_gate: fn(table: &SemaScopeTable, plane: SemaKnowledgePlane, gate: SemaKnowledgeGate, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     if sema_scope_knowledge_gate_allows(table, plane, gate) -> return true
-    plane_name :: sema_knowledge_plane_name(plane)
-    gate_name :: sema_knowledge_gate_spelling(gate)
+    plane_name: sema_knowledge_plane_name(plane)
+    gate_name: sema_knowledge_gate_spelling(gate)
     &diagnostics.push(sema_error("E0156", span, "This operation would loosen {plane_name}", "Knowledge only tightens silently; loosening {plane_name} must be named with a written gate", "Write `{gate_name}(value)` at this boundary"))
     false
 }
 
-fn sema_scope_module_policy(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: String) -> Int Never! {
+sema_scope_module_policy: fn(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: String) -> Int Never! {
     if table.policy_modules.get(module_identity) == .Val(position) -> return position
     policy := SemaScopeModulePolicy{
         unit_explicit_units: false,
@@ -1875,10 +1875,10 @@ fn sema_scope_module_policy(table: &SemaScopeTable, graph: SemaRegistrationGraph
         function_unit_ends: [[Int:Bool]]{},
     }
     if sema_registration_module_index(graph, module_identity) == .Val(module_index) {
-        package_identity :: graph.modules[module_index].package_identity
+        package_identity: graph.modules[module_index].package_identity
         loop declaration_index in 0..<graph.modules[module_index].program.policy_declarations.len() {
             if graph.modules[module_index].program.policy_declarations[declaration_index].key != PolicyKey.ExplicitUnits || graph.modules[module_index].program.policy_declarations[declaration_index].scope != PolicyScope.Function -> next
-            target :: graph.modules[module_index].program.policy_declarations[declaration_index].target ?? next
+            target: graph.modules[module_index].program.policy_declarations[declaration_index].target ?? next
             slot := policy.function_unit_starts.get(target.start) ?? -1
             if slot < 0 {
                 slot = policy.function_unit_ends.len()
@@ -1896,58 +1896,58 @@ fn sema_scope_module_policy(table: &SemaScopeTable, graph: SemaRegistrationGraph
             }
         }
     }
-    position :: table.policy_rows.len()
+    position: table.policy_rows.len()
     &table.policy_modules.add(module_identity, position).drop("a new policy module has no row")
     &table.policy_rows.push(policy)
     position
 }
 
-fn sema_scope_seed_unit_policy(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: String) Never! {
+sema_scope_seed_unit_policy: fn(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: String) Never! {
     // Module installation is the graph-lifetime boundary, not a function check.
     table.policy_modules = [String:Int]{}
     table.policy_rows = [SemaScopeModulePolicy]{}
-    position :: sema_scope_module_policy(&table, graph, module_identity)
+    position: sema_scope_module_policy(&table, graph, module_identity)
     table.unit_explicit_units = table.policy_rows[position].unit_explicit_units
 }
 
-fn sema_scope_apply_unit_policy_for_function(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: String, function_span: Span) Never! {
-    position :: sema_scope_module_policy(&table, graph, module_identity)
+sema_scope_apply_unit_policy_for_function: fn(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: String, function_span: Span) Never! {
+    position: sema_scope_module_policy(&table, graph, module_identity)
     table.unit_explicit_units = table.policy_rows[position].unit_explicit_units
     if table.policy_rows[position].function_unit_starts.get(function_span.start) == .Val(slot) {
         if table.policy_rows[position].function_unit_ends[slot].get(function_span.end) ?? false -> table.unit_explicit_units = true
     }
 }
 
-fn sema_scope_push_unit_policy(table: &SemaScopeTable, declarations: [PolicyDeclaration]) -> Bool Never! {
-    previous :: table.unit_explicit_units
+sema_scope_push_unit_policy: fn(table: &SemaScopeTable, declarations: [PolicyDeclaration]) -> Bool Never! {
+    previous: table.unit_explicit_units
     loop declaration in declarations {
         if declaration.key == PolicyKey.ExplicitUnits -> table.unit_explicit_units = true
     }
     previous
 }
 
-fn sema_scope_pop_unit_policy(table: &SemaScopeTable, previous: Bool) Never! {
+sema_scope_pop_unit_policy: fn(table: &SemaScopeTable, previous: Bool) Never! {
     table.unit_explicit_units = previous
 }
 
-fn sema_scope_unit_explicit_units(table: SemaScopeTable) -> Bool Never! {
+sema_scope_unit_explicit_units: fn(table: SemaScopeTable) -> Bool Never! {
     table.unit_explicit_units
 }
 
-fn sema_scope_binding_is_compiler_builtin(binding: SemaScopeBinding, name: String) -> Bool Never! {
+sema_scope_binding_is_compiler_builtin: fn(binding: SemaScopeBinding, name: String) -> Bool Never! {
     binding.compiler_builtin && binding.symbol.name == name
 }
 
 // Locals, parameters, and constants share the function-local namespace.
 // Module functions remain resolvable and loop labels use a separate stack.
-fn sema_scope_name_blocks_binding(kind: SymbolKind) -> Bool Never! {
+sema_scope_name_blocks_binding: fn(kind: SymbolKind) -> Bool Never! {
     if kind == {
         .Local | .Parameter | .Constant -> true
         else -> false
     }
 }
 
-fn sema_scope_has_loop_label(table: SemaScopeTable, name: String) -> Bool Never! {
+sema_scope_has_loop_label: fn(table: SemaScopeTable, name: String) -> Bool Never! {
     index := table.loop_labels.len() - 1
     loop index >= 0 {
         if table.loop_labels[index].name == name -> return true
@@ -1956,23 +1956,23 @@ fn sema_scope_has_loop_label(table: SemaScopeTable, name: String) -> Bool Never!
     false
 }
 
-fn sema_scope_push_loop_label(table: &SemaScopeTable, name: String) -> Bool Never! {
+sema_scope_push_loop_label: fn(table: &SemaScopeTable, name: String) -> Bool Never! {
     duplicate := sema_scope_has_loop_label(table, name)
     if sema_scope_resolve_index(table, name) == .Val(binding_index) {
-        binding :: table.bindings[binding_index]
+        binding: table.bindings[binding_index]
         if sema_scope_name_blocks_binding(binding.symbol.kind) -> duplicate = true
     }
     &table.loop_labels.push(SemaScopeLoopLabel{name: name})
     !duplicate
 }
 
-fn sema_scope_pop_loop_label(table: &SemaScopeTable) Never! {
+sema_scope_pop_loop_label: fn(table: &SemaScopeTable) Never! {
     if table.loop_labels.len() > 0 -> _ := &table.loop_labels.pop()
 }
 
 // Appends one binding and records its position under its name.
-fn sema_scope_push_binding(table: &SemaScopeTable, binding: SemaScopeBinding) Never! {
-    position :: table.bindings.len()
+sema_scope_push_binding: fn(table: &SemaScopeTable, binding: SemaScopeBinding) Never! {
+    position: table.bindings.len()
     if sema_scope_name_slot(table, binding.symbol.name) == .Val(slot) {
         &table.name_positions[slot].push(position)
     } else {
@@ -1983,31 +1983,31 @@ fn sema_scope_push_binding(table: &SemaScopeTable, binding: SemaScopeBinding) Ne
 }
 
 // The `name_positions` row of `name`, if any binding ever had that name.
-fn sema_scope_name_slot(table: SemaScopeTable, name: String) -> Int? Never! {
+sema_scope_name_slot: fn(table: SemaScopeTable, name: String) -> Int? Never! {
     name_rows_get_text(table.name_slots, name)
 }
 
 // Counts one resolution that examined `compares` binding rows when the table
 // counts, and returns `found`.
-fn sema_scope_counted(table: SemaScopeTable, compares: Int, found: ^Int?) -> Int? {
+sema_scope_counted: fn(table: SemaScopeTable, compares: Int, found: ^Int?) -> Int? {
     if table.lookup_counters == .Val(handle) {
         counters := handle.counters
-        permit :: counters.guard_edit()
+        permit: counters.guard_edit()
         permit.value.scope_lookups += 1
         permit.value.scope_compares += compares
     }
     found
 }
 
-fn sema_scope_resolve_index(table: SemaScopeTable, name: String) -> Int? {
-    slot :: sema_scope_name_slot(table, name) ?? return sema_scope_counted(table, 0, None)
+sema_scope_resolve_index: fn(table: SemaScopeTable, name: String) -> Int? {
+    slot: sema_scope_name_slot(table, name) ?? return sema_scope_counted(table, 0, None)
     compares := 0
     frame := table.current
     loop frame >= 0 {
         cursor := table.name_positions[slot].len() - 1
         loop cursor >= 0 {
             compares += 1
-            index :: table.name_positions[slot][cursor]
+            index: table.name_positions[slot][cursor]
             if table.bindings[index].frame == frame -> return sema_scope_counted(table, compares, Val(index))
             cursor -= 1
         }
@@ -2018,17 +2018,17 @@ fn sema_scope_resolve_index(table: SemaScopeTable, name: String) -> Int? {
 
 // The visible binding name nearest `name`, for an unknown name's fix: at most
 // a third of its length away (one edit for short names), nearer frames first.
-fn sema_scope_closest_visible_name(table: SemaScopeTable, name: String) -> String? {
-    limit :: if name.count_bytes() /% 3 > 1 -> name.count_bytes() /% 3 else -> 1
+sema_scope_closest_visible_name: fn(table: SemaScopeTable, name: String) -> String? {
+    limit: if name.count_bytes() /% 3 > 1 -> name.count_bytes() /% 3 else -> 1
     best := String?{None}
     best_distance := limit + 1
     frame := table.current
     loop frame >= 0 {
         loop index in 0..<table.bindings.len() {
             if table.bindings[index].frame != frame || table.bindings[index].compiler_builtin -> next
-            candidate :: table.bindings[index].symbol.name
+            candidate: table.bindings[index].symbol.name
             if candidate == name || candidate.starts_with("__") || candidate.starts_with("@") -> next
-            distance :: sema_taint_edit_distance(name, candidate)
+            distance: sema_taint_edit_distance(name, candidate)
             if distance < best_distance {
                 best_distance = distance
                 best = Val(candidate.copy())
@@ -2045,16 +2045,16 @@ fn sema_scope_closest_visible_name(table: SemaScopeTable, name: String) -> Strin
 // items and imports) are visible everywhere in the module, and an imported
 // or staged symbol's span may come from another file, so position never
 // hides them.
-fn sema_scope_resolve_index_at(table: SemaScopeTable, name: String, use_span: Span) -> Int? {
-    slot :: sema_scope_name_slot(table, name) ?? return sema_scope_counted(table, 0, None)
+sema_scope_resolve_index_at: fn(table: SemaScopeTable, name: String, use_span: Span) -> Int? {
+    slot: sema_scope_name_slot(table, name) ?? return sema_scope_counted(table, 0, None)
     compares := 0
     frame := table.current
     loop frame >= 0 {
-        module_frame :: table.frames[frame].parent < 0
+        module_frame: table.frames[frame].parent < 0
         cursor := table.name_positions[slot].len() - 1
         loop cursor >= 0 {
             compares += 1
-            index :: table.name_positions[slot][cursor]
+            index: table.name_positions[slot][cursor]
             // Read the row through its place: binding it copied the whole row
             // (its Symbol's Strings) for every candidate.
             if table.bindings[index].frame == frame && (module_frame || table.position_free || table.bindings[index].symbol.span.start <= use_span.start) -> return sema_scope_counted(table, compares, Val(index))
@@ -2068,8 +2068,8 @@ fn sema_scope_resolve_index_at(table: SemaScopeTable, name: String, use_span: Sp
 // The visible symbol of `name`, for its name, kind, identity and span. On a
 // body thread a module function's symbol holds the empty function type
 // (sema_scope_light_copy): read the signature with sema_scope_binding_type.
-fn sema_scope_resolve(table: SemaScopeTable, name: String) -> Symbol? {
-    index :: sema_scope_resolve_index(table, name) ?? return None
+sema_scope_resolve: fn(table: SemaScopeTable, name: String) -> Symbol? {
+    index: sema_scope_resolve_index(table, name) ?? return None
     Val(table.bindings[index].symbol)
 }
 
@@ -2083,7 +2083,7 @@ fn sema_scope_resolve(table: SemaScopeTable, name: String) -> Symbol? {
 // copy, a view or a guard answers as it would for the real type; a check that
 // reads the signature reads it through the accessors. Body threads never edit
 // a module row's type, so the copy and the source agree for the whole pass.
-fn sema_scope_light_copy(source: SemaScopeTable) -> SemaScopeTable Never! {
+sema_scope_light_copy: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
     bindings := [SemaScopeBinding]{}
     light := [Bool]{}
     loop binding in source.bindings {
@@ -2145,18 +2145,18 @@ fn sema_scope_light_copy(source: SemaScopeTable) -> SemaScopeTable Never! {
 
 // The function type a light row holds in place of its own
 // (sema_scope_light_copy): no parameters, result, effects or metadata.
-fn sema_scope_light_function_type() -> Type Never! {
+sema_scope_light_function_type: fn() -> Type Never! {
     Type.Fn{params: [Type]{}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
 }
 
 // True when row `index` of `table` left its type in the environment's
 // module scope (sema_scope_light_copy).
-fn sema_scope_binding_is_light(table: SemaScopeTable, index: Int) -> Bool Never! {
+sema_scope_binding_is_light: fn(table: SemaScopeTable, index: Int) -> Bool Never! {
     index < table.light_types.len() && table.light_types[index]
 }
 
 // The checked type of row `index`, wherever the row keeps it.
-fn sema_scope_binding_type(environment: SemaScopeEnvironment, table: SemaScopeTable, index: Int) -> Type? {
+sema_scope_binding_type: fn(environment: SemaScopeEnvironment, table: SemaScopeTable, index: Int) -> Type? {
     if sema_scope_binding_is_light(table, index) {
         // The module scope is read in place; only the row's type leaves it.
         if environment.module_scope == .Val(source) -> return source.bindings[index].symbol.ty
@@ -2166,7 +2166,7 @@ fn sema_scope_binding_type(environment: SemaScopeEnvironment, table: SemaScopeTa
 }
 
 // Row `index`'s symbol with its checked type.
-fn sema_scope_binding_symbol(environment: SemaScopeEnvironment, table: SemaScopeTable, index: Int) -> Symbol {
+sema_scope_binding_symbol: fn(environment: SemaScopeEnvironment, table: SemaScopeTable, index: Int) -> Symbol {
     if sema_scope_binding_is_light(table, index) {
         // The module scope is read in place; only the row's symbol leaves it.
         if environment.module_scope == .Val(source) -> return source.bindings[index].symbol
@@ -2176,7 +2176,7 @@ fn sema_scope_binding_symbol(environment: SemaScopeEnvironment, table: SemaScope
 }
 
 // Row `index` with its checked type.
-fn sema_scope_binding_row(environment: SemaScopeEnvironment, table: SemaScopeTable, index: Int) -> SemaScopeBinding {
+sema_scope_binding_row: fn(environment: SemaScopeEnvironment, table: SemaScopeTable, index: Int) -> SemaScopeBinding {
     // copy: the returned row may get its checked type filled in, while `table` is the caller's
     // scope table (a read parameter) and keeps its light row.
     row := table.bindings[index].copy()
@@ -2186,14 +2186,14 @@ fn sema_scope_binding_row(environment: SemaScopeEnvironment, table: SemaScopeTab
 
 // A false return leaves the old binding visible; this prevents a duplicate
 // declaration from silently changing the meaning of later references.
-fn sema_scope_declare_local(table: &SemaScopeTable, symbol: Symbol, mutable: Bool, access: AccessConvention, integer_bounds: TIntegerBounds?, string_view: Bool) -> Bool Never! {
+sema_scope_declare_local: fn(table: &SemaScopeTable, symbol: Symbol, mutable: Bool, access: AccessConvention, integer_bounds: TIntegerBounds?, string_view: Bool) -> Bool Never! {
     if symbol.name == "_" -> return true
     if sema_scope_has_loop_label(table, symbol.name) -> return false
     if sema_scope_resolve_index(table, symbol.name) == .Val(index) {
-        previous :: table.bindings[index].symbol
+        previous: table.bindings[index].symbol
         if sema_scope_name_blocks_binding(previous.kind) -> return false
     }
-    frame :: table.current
+    frame: table.current
     sema_scope_push_binding(&table, SemaScopeBinding{frame: frame, symbol: symbol, mutable: mutable, access: access, integer_bounds: integer_bounds, string_view: string_view, compiler_builtin: false})
     true
 }
@@ -2201,24 +2201,24 @@ fn sema_scope_declare_local(table: &SemaScopeTable, symbol: Symbol, mutable: Boo
 // Marks the binding `name` as a place alias (see SemaScopeBinding.place_alias)
 // after it is declared. A name that did not declare (`_`, a duplicate) has no
 // row to mark.
-fn sema_scope_mark_place_alias(table: &SemaScopeTable, name: String) Never! {
-    index :: sema_scope_resolve_index(table, name) ?? return
+sema_scope_mark_place_alias: fn(table: &SemaScopeTable, name: String) Never! {
+    index: sema_scope_resolve_index(table, name) ?? return
     table.bindings[index].place_alias = true
 }
 
-// Keeps `init` on the `::` binding `name` just declared (see
+// Keeps `init` on the `:` binding `name` just declared (see
 // SemaScopeBinding.fresh_cell).
-fn sema_scope_mark_fresh_cell(table: &SemaScopeTable, name: String, init: Expr) Never! {
-    index :: sema_scope_resolve_index(table, name) ?? return
+sema_scope_mark_fresh_cell: fn(table: &SemaScopeTable, name: String, init: Expr) Never! {
+    index: sema_scope_resolve_index(table, name) ?? return
     sema_scope_note_binding_edit(&table, index)
     // copy: `init` is the binding statement's initializer, which the statement keeps.
     table.bindings[index].fresh_cell = Val(init.copy())
 }
 
-// Keeps the `::` span of the binding `name` just declared (see
+// Keeps the `:` span of the binding `name` just declared (see
 // SemaScopeBinding.binding_sigil).
-fn sema_scope_mark_binding_sigil(table: &SemaScopeTable, name: String, sigil: Span) Never! {
-    index :: sema_scope_resolve_index(table, name) ?? return
+sema_scope_mark_binding_sigil: fn(table: &SemaScopeTable, name: String, sigil: Span) Never! {
+    index: sema_scope_resolve_index(table, name) ?? return
     sema_scope_note_binding_edit(&table, index)
     table.bindings[index].binding_sigil = Val(sigil)
 }
@@ -2226,8 +2226,8 @@ fn sema_scope_mark_binding_sigil(table: &SemaScopeTable, name: String, sigil: Sp
 // A proven payload refines a stable Optional name for the rest
 // of its scope. The refinement shadows the carrier binding on purpose, so it
 // skips the duplicate-name rule that ordinary declarations obey.
-fn sema_scope_refine_local(table: &SemaScopeTable, symbol: Symbol) Never! {
-    frame :: table.current
+sema_scope_refine_local: fn(table: &SemaScopeTable, symbol: Symbol) Never! {
+    frame: table.current
     sema_scope_push_binding(&table, SemaScopeBinding{frame: frame, symbol: symbol, mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
 }
 
@@ -2235,13 +2235,13 @@ fn sema_scope_refine_local(table: &SemaScopeTable, symbol: Symbol) Never! {
 // checker that needs one fact of a declaration reads it at its site through
 // the readers below: copying the item copies a nominal's method bodies and
 // trait implementations on every expression that names it.
-enum SemaScopeDeclarationSite {
+SemaScopeDeclarationSite: enum {
     Function(module_index: Int, row: Int)
     Nominal(module_index: Int, row: Int)
     Local(index: Int)
 }
 
-fn sema_scope_declaration_site(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> SemaScopeDeclarationSite? {
+sema_scope_declaration_site: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> SemaScopeDeclarationSite? {
     if program.registration_graph == .Val(graph) {
         // The first function and nominal rows by key replace the module scan
         // (earlier modules first, functions before nominals in one module).
@@ -2264,8 +2264,8 @@ fn sema_scope_declaration_site(environment: SemaScopeEnvironment, program: SemaP
     None
 }
 
-fn sema_scope_resolve_declaration(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> Item? {
-    site :: sema_scope_declaration_site(environment, program, id) ?? return None
+sema_scope_resolve_declaration: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> Item? {
+    site: sema_scope_declaration_site(environment, program, id) ?? return None
     if site == .Local(index) -> return Val(environment.declarations[index].item)
     if program.registration_graph == .Val(graph) {
         if site == .Function(module_index, row) -> return Val(Item.Func{value: graph.modules[module_index].functions[row].declaration})
@@ -2275,7 +2275,7 @@ fn sema_scope_resolve_declaration(environment: SemaScopeEnvironment, program: Se
 }
 
 // The item variant of sema_scope_resolve_declaration(environment, program, id).
-enum SemaScopeDeclarationKind {
+SemaScopeDeclarationKind: enum {
     Func
     Struct
     Enum
@@ -2283,7 +2283,7 @@ enum SemaScopeDeclarationKind {
     Other
 }
 
-fn sema_scope_item_kind(item: Item) -> SemaScopeDeclarationKind Never! {
+sema_scope_item_kind: fn(item: Item) -> SemaScopeDeclarationKind Never! {
     if item == {
         .Func(_) -> SemaScopeDeclarationKind.Func
         .Struct(_) -> SemaScopeDeclarationKind.Struct
@@ -2293,8 +2293,8 @@ fn sema_scope_item_kind(item: Item) -> SemaScopeDeclarationKind Never! {
     }
 }
 
-fn sema_scope_declaration_kind(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> SemaScopeDeclarationKind? {
-    site :: sema_scope_declaration_site(environment, program, id) ?? return None
+sema_scope_declaration_kind: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> SemaScopeDeclarationKind? {
+    site: sema_scope_declaration_site(environment, program, id) ?? return None
     if site == .Local(index) -> return Val(sema_scope_item_kind(environment.declarations[index].item))
     if site == .Function(_, _) -> return Val(SemaScopeDeclarationKind.Func)
     if site == .Nominal(module_index, row) {
@@ -2305,31 +2305,31 @@ fn sema_scope_declaration_kind(environment: SemaScopeEnvironment, program: SemaP
 
 // The nominal rows below are read through the graph as a read parameter:
 // binding a row copied the whole declaration, methods included.
-fn sema_scope_nominal_kind(graph: SemaRegistrationGraph, module_index: Int, row: Int) -> SemaScopeDeclarationKind? {
+sema_scope_nominal_kind: fn(graph: SemaRegistrationGraph, module_index: Int, row: Int) -> SemaScopeDeclarationKind? {
     if graph.modules[module_index].nominals[row].source == .SourceAST(item) -> return Val(sema_scope_item_kind(item))
     None
 }
 
-fn sema_scope_declaration_is(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID, kind: SemaScopeDeclarationKind) -> Bool {
-    found :: sema_scope_declaration_kind(environment, program, id) ?? return false
+sema_scope_declaration_is: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID, kind: SemaScopeDeclarationKind) -> Bool {
+    found: sema_scope_declaration_kind(environment, program, id) ?? return false
     found == kind
 }
 
 // A struct declaration's type parameters and fields, without its methods.
-struct SemaScopeStructShape {
+SemaScopeStructShape: struct {
     type_params: [TypeParam]
     fields: [Field]
 }
 
-fn sema_scope_item_struct(item: Item) -> SemaScopeStructShape? {
+sema_scope_item_struct: fn(item: Item) -> SemaScopeStructShape? {
     // copy: the shape is the caller's own; the declaration stays in the program.
     if item == .Struct(definition) -> return Val(SemaScopeStructShape{type_params: definition.type_params.copy(), fields: definition.fields.copy()})
     None
 }
 
 // The struct shape when sema_scope_resolve_declaration(environment, id) is a struct.
-fn sema_scope_declaration_struct(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> SemaScopeStructShape? {
-    site :: sema_scope_declaration_site(environment, program, id) ?? return None
+sema_scope_declaration_struct: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> SemaScopeStructShape? {
+    site: sema_scope_declaration_site(environment, program, id) ?? return None
     if site == .Local(index) -> return sema_scope_item_struct(environment.declarations[index].item)
     if site == .Nominal(module_index, row) {
         if program.registration_graph == .Val(graph) -> return sema_scope_nominal_struct(graph, module_index, row)
@@ -2339,7 +2339,7 @@ fn sema_scope_declaration_struct(environment: SemaScopeEnvironment, program: Sem
 
 // The nominal row is read through the graph as a read parameter: binding the
 // row copied the whole declaration, methods included, on every field read.
-fn sema_scope_nominal_struct(graph: SemaRegistrationGraph, module_index: Int, row: Int) -> SemaScopeStructShape? {
+sema_scope_nominal_struct: fn(graph: SemaRegistrationGraph, module_index: Int, row: Int) -> SemaScopeStructShape? {
     if graph.modules[module_index].nominals[row].source == .SourceAST(item) -> return sema_scope_item_struct(item)
     None
 }
@@ -2347,8 +2347,8 @@ fn sema_scope_nominal_struct(graph: SemaRegistrationGraph, module_index: Int, ro
 // The labels of a struct declaration's `state { … }` section (empty when it
 // has none); none when sema_scope_resolve_declaration(environment, id) is not
 // a struct.
-fn sema_scope_declaration_struct_states(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> [String]? {
-    site :: sema_scope_declaration_site(environment, program, id) ?? return None
+sema_scope_declaration_struct_states: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> [String]? {
+    site: sema_scope_declaration_site(environment, program, id) ?? return None
     if site == .Local(index) -> return sema_scope_item_struct_states(environment.declarations[index].item)
     if site == .Nominal(module_index, row) {
         if program.registration_graph == .Val(graph) {
@@ -2358,10 +2358,10 @@ fn sema_scope_declaration_struct_states(environment: SemaScopeEnvironment, progr
     None
 }
 
-fn sema_scope_item_struct_states(item: Item) -> [String]? {
+sema_scope_item_struct_states: fn(item: Item) -> [String]? {
     if item == .Struct(definition) {
-        declared :: definition.state ?? return Val([String]{})
-        labels :: loop member in declared.states -> member.name
+        declared: definition.state ?? return Val([String]{})
+        labels: loop member in declared.states -> member.name
         return Val(labels)
     }
     None
@@ -2369,20 +2369,20 @@ fn sema_scope_item_struct_states(item: Item) -> [String]? {
 
 // An enum declaration's type parameters, variants and variant groups, without
 // its methods.
-struct SemaScopeEnumShape {
+SemaScopeEnumShape: struct {
     type_params: [TypeParam]
     variants: [Variant]
     groups: [EnumGroup]
 }
 
-fn sema_scope_item_enum(item: Item) -> SemaScopeEnumShape? {
+sema_scope_item_enum: fn(item: Item) -> SemaScopeEnumShape? {
     if item == .Enum(definition) -> return Val(SemaScopeEnumShape{type_params: definition.type_params, variants: definition.variants, groups: definition.groups})
     None
 }
 
 // The enum shape when sema_scope_resolve_declaration(environment, id) is an enum.
-fn sema_scope_declaration_enum(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> SemaScopeEnumShape? {
-    site :: sema_scope_declaration_site(environment, program, id) ?? return None
+sema_scope_declaration_enum: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> SemaScopeEnumShape? {
+    site: sema_scope_declaration_site(environment, program, id) ?? return None
     if site == .Local(index) -> return sema_scope_item_enum(environment.declarations[index].item)
     if site == .Nominal(module_index, row) {
         if program.registration_graph == .Val(graph) -> return sema_scope_nominal_enum(graph, module_index, row)
@@ -2390,12 +2390,12 @@ fn sema_scope_declaration_enum(environment: SemaScopeEnvironment, program: SemaP
     None
 }
 
-fn sema_scope_nominal_enum(graph: SemaRegistrationGraph, module_index: Int, row: Int) -> SemaScopeEnumShape? {
+sema_scope_nominal_enum: fn(graph: SemaRegistrationGraph, module_index: Int, row: Int) -> SemaScopeEnumShape? {
     if graph.modules[module_index].nominals[row].source == .SourceAST(item) -> return sema_scope_item_enum(item)
     None
 }
 
-fn sema_scope_item_enum_declares(item: Item, variant: String) -> Bool Never! {
+sema_scope_item_enum_declares: fn(item: Item, variant: String) -> Bool Never! {
     if item == .Enum(definition) {
         loop candidate in definition.variants {
             if candidate.name == variant -> return true
@@ -2405,8 +2405,8 @@ fn sema_scope_item_enum_declares(item: Item, variant: String) -> Bool Never! {
 }
 
 // sema_scope_resolve_declaration(environment, id) is an enum declaring `variant`.
-fn sema_scope_declaration_enum_declares(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID, variant: String) -> Bool {
-    site :: sema_scope_declaration_site(environment, program, id) ?? return false
+sema_scope_declaration_enum_declares: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID, variant: String) -> Bool {
+    site: sema_scope_declaration_site(environment, program, id) ?? return false
     if site == .Local(index) -> return sema_scope_item_enum_declares(environment.declarations[index].item, variant)
     if site == .Nominal(module_index, row) {
         if program.registration_graph == .Val(graph) -> return sema_scope_nominal_enum_declares(graph, module_index, row, variant)
@@ -2414,12 +2414,12 @@ fn sema_scope_declaration_enum_declares(environment: SemaScopeEnvironment, progr
     false
 }
 
-fn sema_scope_nominal_enum_declares(graph: SemaRegistrationGraph, module_index: Int, row: Int, variant: String) -> Bool Never! {
+sema_scope_nominal_enum_declares: fn(graph: SemaRegistrationGraph, module_index: Int, row: Int, variant: String) -> Bool Never! {
     if graph.modules[module_index].nominals[row].source == .SourceAST(item) -> return sema_scope_item_enum_declares(item, variant)
     false
 }
 
-fn sema_scope_item_distinct(item: Item) -> DistinctDef? {
+sema_scope_item_distinct: fn(item: Item) -> DistinctDef? {
     // copy: `definition` is a payload of read parameter `item`, which keeps the original; the Val carrier owns this one
     if item == .Distinct(definition) -> return Val(definition.copy())
     None
@@ -2427,8 +2427,8 @@ fn sema_scope_item_distinct(item: Item) -> DistinctDef? {
 
 // The declaration when sema_scope_resolve_declaration(environment, id) is a
 // distinct type; a distinct declaration has no methods to leave behind.
-fn sema_scope_declaration_distinct(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> DistinctDef? {
-    site :: sema_scope_declaration_site(environment, program, id) ?? return None
+sema_scope_declaration_distinct: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> DistinctDef? {
+    site: sema_scope_declaration_site(environment, program, id) ?? return None
     if site == .Local(index) -> return sema_scope_item_distinct(environment.declarations[index].item)
     if site == .Nominal(module_index, row) {
         if program.registration_graph == .Val(graph) -> return sema_scope_nominal_distinct(graph, module_index, row)
@@ -2436,20 +2436,20 @@ fn sema_scope_declaration_distinct(environment: SemaScopeEnvironment, program: S
     None
 }
 
-fn sema_scope_nominal_distinct(graph: SemaRegistrationGraph, module_index: Int, row: Int) -> DistinctDef? {
+sema_scope_nominal_distinct: fn(graph: SemaRegistrationGraph, module_index: Int, row: Int) -> DistinctDef? {
     if graph.modules[module_index].nominals[row].source == .SourceAST(item) -> return sema_scope_item_distinct(item)
     None
 }
 
-fn sema_scope_item_function_type_params(item: Item) -> [TypeParam] Never! {
+sema_scope_item_function_type_params: fn(item: Item) -> [TypeParam] Never! {
     if item == .Func(func) -> return func.type_params
     [TypeParam]{}
 }
 
 // The type parameters when sema_scope_resolve_declaration(environment, id) is
 // a function, else none; the function's body is never copied.
-fn sema_scope_declaration_function_type_params(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> [TypeParam] {
-    site :: sema_scope_declaration_site(environment, program, id) ?? return [TypeParam]{}
+sema_scope_declaration_function_type_params: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> [TypeParam] {
+    site: sema_scope_declaration_site(environment, program, id) ?? return [TypeParam]{}
     if site == .Local(index) -> return sema_scope_item_function_type_params(environment.declarations[index].item)
     if program.registration_graph == .Val(graph) {
         if site == .Function(module_index, row) -> return graph.modules[module_index].functions[row].declaration.type_params
@@ -2458,7 +2458,7 @@ fn sema_scope_declaration_function_type_params(environment: SemaScopeEnvironment
     [TypeParam]{}
 }
 
-fn sema_scope_nominal_function_type_params(graph: SemaRegistrationGraph, module_index: Int, row: Int) -> [TypeParam] Never! {
+sema_scope_nominal_function_type_params: fn(graph: SemaRegistrationGraph, module_index: Int, row: Int) -> [TypeParam] Never! {
     if graph.modules[module_index].nominals[row].source == .SourceAST(item) -> return sema_scope_item_function_type_params(item)
     [TypeParam]{}
 }
@@ -2466,8 +2466,8 @@ fn sema_scope_nominal_function_type_params(graph: SemaRegistrationGraph, module_
 // The first `&` or `^` parameter when sema_scope_declaration_site(environment,
 // program, id) is a function, else none. Such a function is direct-call-only:
 // a function type has read parameters only.
-fn sema_scope_declaration_function_marked_param(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> Param? {
-    site :: sema_scope_declaration_site(environment, program, id) ?? return None
+sema_scope_declaration_function_marked_param: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> Param? {
+    site: sema_scope_declaration_site(environment, program, id) ?? return None
     if site == .Local(index) {
         if environment.declarations[index].item == .Func(func) -> return sema_scope_first_marked_param(func.params)
         return None
@@ -2478,7 +2478,7 @@ fn sema_scope_declaration_function_marked_param(environment: SemaScopeEnvironmen
     None
 }
 
-fn sema_scope_first_marked_param(params: [Param]) -> Param? Never! {
+sema_scope_first_marked_param: fn(params: [Param]) -> Param? Never! {
     loop param in params {
         if param.convention != AccessConvention.Read -> return Val(param)
     }

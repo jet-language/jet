@@ -1,62 +1,62 @@
-use json :: core.encoding.json
+use json: core.encoding.json
 
-module rules
+rules: module
 
-module filter
+filter: module
 
-module formula
+formula: module
 
-module symbolic
+symbolic: module
 
-COMPTIME_SEED :: comptime { 2 * 3 + 0 }
+COMPTIME_SEED: comptime { 2 * 3 + 0 }
 
-fn run() {
-    rule_source :: "bonus: score >= 5 -> add 3; cap: score >= 20 -> set 20; award: score == 10 -> add 1"
-    rule_set :: rules.parse(rule_source) ?? panic("rules parse")
+run: fn() {
+    rule_source: "bonus: score >= 5 -> add 3; cap: score >= 20 -> set 20; award: score == 10 -> add 1"
+    rule_set: rules.parse(rule_source) ?? panic("rules parse")
     facts := [String:Int]{"score": 7}
-    events :: rules.fire(&facts, rule_set)
+    events: rules.fire(&facts, rule_set)
     assert(events == [String]{"bonus:score=10", "cap:skip", "award:score=11"})
-    score :: facts.get("score") ?? -1
+    score: facts.get("score") ?? -1
     assert(score == 11)
     assert(rules.parse("bad: score >> 5 -> add 1") == .None)
     assert(rules.parse("bad: score >= nope -> add 1") == .None)
     print("rules={events}")
 
-    raw_json :: "{{\"items\":[{{\"price\":3,\"sku\":\"a\"}},{{\"price\":8,\"sku\":\"b\"}},{{\"name\":\"free\"}}]}}"
-    document :: json.parse(raw_json) ?? panic("json parse")
-    query :: ".items[] | select(.price >= 5) | .price"
-    selected :: filter.run(document.copy(), query) ?? panic("filter parse")
+    raw_json: "{{\"items\":[{{\"price\":3,\"sku\":\"a\"}},{{\"price\":8,\"sku\":\"b\"}},{{\"name\":\"free\"}}]}}"
+    document: json.parse(raw_json) ?? panic("json parse")
+    query: ".items[] | select(.price >= 5) | .price"
+    selected: filter.run(document.copy(), query) ?? panic("filter parse")
     assert(selected.len() == 1 && (selected[0].int() ?? -1) == 8)
-    projected :: filter.run(document.copy(), ".items[] | .price") ?? panic("projection parse")
+    projected: filter.run(document.copy(), ".items[] | .price") ?? panic("projection parse")
     assert(projected.len() == 2 && (projected[0].int() ?? -1) == 3 && (projected[1].int() ?? -1) == 8)
     assert(filter.parse(".items[] | price") == .None)
     assert((filter.run(document.copy(), ".missing[]") ?? [Dyn]{}).len() == 0)
     print("filter={selected}")
 
-    first_book :: formula.parse("a = 2\none = 1\nb = a + one\ntotal = b + a\nunrelated = 99") ?? panic("formula parse")
-    first :: formula.recalculate(first_book.copy(), [String:Int]{}, "a", 2) ?? panic("first recalc")
-    first_value :: first.values.get("total") ?? -1
+    first_book: formula.parse("a = 2\none = 1\nb = a + one\ntotal = b + a\nunrelated = 99") ?? panic("formula parse")
+    first: formula.recalculate(first_book.copy(), [String:Int]{}, "a", 2) ?? panic("first recalc")
+    first_value: first.values.get("total") ?? -1
     assert(first_value == 5)
     assert(first.touched == [String]{"a", "b", "total"})
-    second :: formula.recalculate(first_book.copy(), first.values.copy(), "a", 5) ?? panic("second recalc")
-    second_value :: second.values.get("total") ?? -1
+    second: formula.recalculate(first_book.copy(), first.values.copy(), "a", 5) ?? panic("second recalc")
+    second_value: second.values.get("total") ?? -1
     assert(second_value == 11)
     assert(second.touched == [String]{"a", "b", "total"})
     assert(formula.parse("broken = a +") == .None)
-    cycle :: formula.parse("a = b + 1\nb = a + 1") ?? panic("cycle parse")
+    cycle: formula.parse("a = b + 1\nb = a + 1") ?? panic("cycle parse")
     assert(formula.recalculate(cycle, [String:Int]{}, "a", 1) == .None)
-    first_total :: first.values.get("total") ?? -1
-    second_total :: second.values.get("total") ?? -1
+    first_total: first.values.get("total") ?? -1
+    second_total: second.values.get("total") ?? -1
     print("formula=first:{first_total} second:{second_total} touched:{second.touched}")
 
-    expression :: symbolic.parse("2 * x + 0") ?? panic("symbolic parse")
-    simplified :: symbolic.simplify(expression.copy())
-    derivative :: symbolic.simplify(symbolic.differentiate(expression.copy(), "x"))
-    evaluated :: symbolic.evaluate(expression.copy(), [String:Float]{"x": 3.0}) ?? panic("symbolic evaluate")
+    expression: symbolic.parse("2 * x + 0") ?? panic("symbolic parse")
+    simplified: symbolic.simplify(expression.copy())
+    derivative: symbolic.simplify(symbolic.differentiate(expression.copy(), "x"))
+    evaluated: symbolic.evaluate(expression.copy(), [String:Float]{"x": 3.0}) ?? panic("symbolic evaluate")
     assert(symbolic.show(simplified.copy()) == "(2.0 * x)")
     assert(symbolic.show(derivative.copy()) == "2.0")
     assert(evaluated == 6.0)
-    zero_identity :: symbolic.parse("0 * x + x * 1") ?? panic("identity parse")
+    zero_identity: symbolic.parse("0 * x + x * 1") ?? panic("identity parse")
     assert(symbolic.show(symbolic.simplify(zero_identity)) == "x")
     assert(symbolic.parse("x / 2") == .None)
     assert(symbolic.parse("(x + 2") == .None)

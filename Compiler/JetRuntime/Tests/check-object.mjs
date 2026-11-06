@@ -26,13 +26,13 @@ const annotated = [];
 for (const file of readdirSync(sourceDir).filter(name => name.endsWith('.jet')).sort()) {
     const lines = readFileSync(join(sourceDir, file), 'utf8').split('\n').map(line => line.trim());
     lines.forEach((line, index) => {
-        // `#Export(c) fn name(` on one line, or a standalone `#Export(c)`
+        // `#Export(c) name: fn(` on one line, or a standalone `#Export(c)`
         // line followed by the function (other markers and comments may sit
         // between them).
         if (!line.startsWith('#Export(c)')) return;
         const rest = line.slice('#Export(c)'.length).trim();
         const next = rest || lines.slice(index + 1).find(row => row && !row.startsWith('#') && !row.startsWith('//'));
-        const name = /^(?:pub\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/.exec(next ?? '')?.[1];
+        const name = /^(?:pub\s+)?([A-Za-z_][A-Za-z0-9_]*):\s*fn\s*\(/.exec(next ?? '')?.[1];
         if (!name) failures.push(`${file}:${index + 1}: #Export(c) is not followed by a function`);
         else annotated.push(name);
     });

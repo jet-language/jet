@@ -4,7 +4,7 @@
 
 // Opaque receipt for one prepared profile-generation root. Profile producers
 // can commit only the exact incarnation and witness they prepared.
-struct PreparedProfileGenerationRoot {
+PreparedProfileGenerationRoot: struct {
     priv id: RootID
     priv incarnation: Incarnation
     priv witness: RootWitness
@@ -12,40 +12,40 @@ struct PreparedProfileGenerationRoot {
 
 // Opaque receipt for a durable generation owned by a consumer outside the
 // package-generation engines.
-struct PreparedExternalConsumerRoot {
+PreparedExternalConsumerRoot: struct {
     priv id: RootID
     priv incarnation: Incarnation
     priv witness: RootWitness
 }
 
-fn store_profile_generation_root_id(owner: String, profile: String, generation: Int) -> RootID StoreError! {
+store_profile_generation_root_id: fn(owner: String, profile: String, generation: Int) -> RootID StoreError! {
     RootID.new("profile-generation:{owner}:{profile}:{generation}")
 }
 
-fn store_prepare_profile_generation_root(verification: &StoreVerification, roots: HangarRoots, owner: String, profile: String, generation: Int, witness: String, targets: [String], at: Int) -> PreparedProfileGenerationRoot StoreError! {
-    id :: store_profile_generation_root_id(owner, profile, generation)
-    incarnation :: Incarnation.new(1)
-    root_witness :: RootWitness.new(witness)
-    identity :: RootIdentity.new(RootKind.ProfileGeneration, id, ProducerID.new("jetpack-profile-generation"), incarnation, root_witness)
-    _ :: store_lifecycle_prepare(&verification, roots, identity, targets, LifecycleTimestamp.from_unix_seconds(at))
+store_prepare_profile_generation_root: fn(verification: &StoreVerification, roots: HangarRoots, owner: String, profile: String, generation: Int, witness: String, targets: [String], at: Int) -> PreparedProfileGenerationRoot StoreError! {
+    id: store_profile_generation_root_id(owner, profile, generation)
+    incarnation: Incarnation.new(1)
+    root_witness: RootWitness.new(witness)
+    identity: RootIdentity.new(RootKind.ProfileGeneration, id, ProducerID.new("jetpack-profile-generation"), incarnation, root_witness)
+    _: store_lifecycle_prepare(&verification, roots, identity, targets, LifecycleTimestamp.from_unix_seconds(at))
     Ok(PreparedProfileGenerationRoot{id: id, incarnation: incarnation, witness: root_witness})
 }
 
-fn store_commit_profile_generation_root(verification: &StoreVerification, roots: HangarRoots, prepared: PreparedProfileGenerationRoot, at: Int) StoreError! {
-    _ :: store_lifecycle_commit(&verification, roots, prepared.id, prepared.incarnation, prepared.witness, LifecycleTimestamp.from_unix_seconds(at))
+store_commit_profile_generation_root: fn(verification: &StoreVerification, roots: HangarRoots, prepared: PreparedProfileGenerationRoot, at: Int) StoreError! {
+    _: store_lifecycle_commit(&verification, roots, prepared.id, prepared.incarnation, prepared.witness, LifecycleTimestamp.from_unix_seconds(at))
 }
 
 // Check that a package-generation record still owns the exact committed GC
 // root that its completion witness names. Listing and activation use this
 // gate so a missing or rebound lifecycle root cannot look like a live
 // profile.
-fn store_validate_profile_generation_root(verification: &StoreVerification, roots: HangarRoots, owner: String, profile: String, generation: Int, witness: String, targets: [String]) StoreError! {
+store_validate_profile_generation_root: fn(verification: &StoreVerification, roots: HangarRoots, owner: String, profile: String, generation: Int, witness: String, targets: [String]) StoreError! {
     if targets.len() == 0 -> return
-    id :: store_profile_generation_root_id(owner, profile, generation)
-    snapshot :: store_lifecycle_snapshot(&verification, roots)
-    root :: snapshot.roots.get(id.as_str()) ?? return Err(StoreError.NotFound("profile generation lifecycle root is missing"))
+    id: store_profile_generation_root_id(owner, profile, generation)
+    snapshot: store_lifecycle_snapshot(&verification, roots)
+    root: snapshot.roots.get(id.as_str()) ?? return Err(StoreError.NotFound("profile generation lifecycle root is missing"))
     if root.phase != RootPhase.Committed -> return Err(StoreError.Other("profile generation lifecycle root is not committed"))
-    expected :: store_sorted_unique(targets)
+    expected: store_sorted_unique(targets)
     if root.identity.kind != RootKind.ProfileGeneration || root.identity.producer.as_str() != "jetpack-profile-generation" || root.identity.incarnation.get() != 1 || root.identity.witness.as_str() != witness || root.targets != expected || root.protected_targets != expected {
         return Err(StoreError.Other("profile generation lifecycle root disagrees with its record"))
     }
@@ -54,32 +54,32 @@ fn store_validate_profile_generation_root(verification: &StoreVerification, root
 // Prepare or resume one immutable external consumer root. An exact
 // committed retry is already complete and returns `None`; the stable key can
 // never be rebound to another witness or target set.
-fn store_reconcile_external_consumer_root(verification: &StoreVerification, roots: HangarRoots, consumer: String, key: String, witness: String, requested: [String], at: Int) -> PreparedExternalConsumerRoot? StoreError! {
-    targets :: store_sorted_unique(requested)
+store_reconcile_external_consumer_root: fn(verification: &StoreVerification, roots: HangarRoots, consumer: String, key: String, witness: String, requested: [String], at: Int) -> PreparedExternalConsumerRoot? StoreError! {
+    targets: store_sorted_unique(requested)
     if targets.len() == 0 -> return Err(StoreError.Other("external consumer root requires at least one Hangar object"))
-    objects :: files.join(roots.hangar_dir(), STORE_OBJECTS_DIR)
-    objects_metadata :: files.stat(objects)
+    objects: files.join(roots.hangar_dir(), STORE_OBJECTS_DIR)
+    objects_metadata: files.stat(objects)
     if objects_metadata.is_symlink || !objects_metadata.is_dir {
         return Err(StoreError.Other("external consumer target pool is not a real Hangar directory"))
     }
     loop target in targets {
-        canonical_name :: target.starts_with("sha256-") && store_is_lower_hex(target.removeprefix("sha256-"), 64)
-        real_directory :: if files.stat(files.join(objects, target)) == {
+        canonical_name: target.starts_with("sha256-") && store_is_lower_hex(target.removeprefix("sha256-"), 64)
+        real_directory: if files.stat(files.join(objects, target)) == {
             .Ok(metadata) -> metadata.is_dir && !metadata.is_symlink
             .Err(_) -> false
         }
         if !canonical_name || !real_directory -> return Err(StoreError.Other("external consumer target is not a canonical Hangar object"))
     }
-    id :: RootID.new("external-consumer:{consumer}:{store_sha256_hex(key.bytes())}")
-    root_witness :: RootWitness.new(witness)
-    incarnation :: Incarnation.new(1)
-    identity :: RootIdentity.new(RootKind.ExternalConsumer, id, ProducerID.new(consumer), incarnation, root_witness)
-    snapshot :: store_lifecycle_prepare_if_absent(&verification, roots, identity, targets, LifecycleTimestamp.from_unix_seconds(at))
-    root :: snapshot.roots.get(id.as_str()) ?? return Err(StoreError.Other("external consumer root disappeared after prepare"))
+    id: RootID.new("external-consumer:{consumer}:{store_sha256_hex(key.bytes())}")
+    root_witness: RootWitness.new(witness)
+    incarnation: Incarnation.new(1)
+    identity: RootIdentity.new(RootKind.ExternalConsumer, id, ProducerID.new(consumer), incarnation, root_witness)
+    snapshot: store_lifecycle_prepare_if_absent(&verification, roots, identity, targets, LifecycleTimestamp.from_unix_seconds(at))
+    root: snapshot.roots.get(id.as_str()) ?? return Err(StoreError.Other("external consumer root disappeared after prepare"))
     if root.phase == RootPhase.Committed -> return Ok(None)
     Ok(Val(PreparedExternalConsumerRoot{id: id, incarnation: incarnation, witness: root_witness}))
 }
 
-fn store_commit_external_consumer_root(verification: &StoreVerification, roots: HangarRoots, prepared: PreparedExternalConsumerRoot, at: Int) StoreError! {
-    _ :: store_lifecycle_commit(&verification, roots, prepared.id, prepared.incarnation, prepared.witness, LifecycleTimestamp.from_unix_seconds(at))
+store_commit_external_consumer_root: fn(verification: &StoreVerification, roots: HangarRoots, prepared: PreparedExternalConsumerRoot, at: Int) StoreError! {
+    _: store_lifecycle_commit(&verification, roots, prepared.id, prepared.incarnation, prepared.witness, LifecycleTimestamp.from_unix_seconds(at))
 }

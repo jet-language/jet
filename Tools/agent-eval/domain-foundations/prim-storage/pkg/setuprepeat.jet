@@ -1,19 +1,19 @@
-package {
+package: {
     name: "setuprepeat"
     authority: { allow: [FS.Read, FS.Write, IO, Mem.Alloc] }
 }
 
 use {
-    fs :: core.files
-    log :: "log"
+    fs: core.files
+    log: "log"
 }
 
-fn run() {
-    root :: "$JET_STATE_ROOT/dx3/prim-storage/setup"
+run: fn() {
+    root: "$JET_STATE_ROOT/dx3/prim-storage/setup"
     if fs.exists(root) -> fs.remove_all(root) ?? panic("cleanup")
     fs.create_dir_all(root) ?? panic("create")
-    p :: Path.from(root).join("x.log")
-    a :: log.append_record(p.copy(), "a") ?? false
+    p: Path.from(root).join("x.log")
+    a: log.append_record(p.copy(), "a") ?? false
     fs.append_all(p.copy(), "b") ?? panic("b")
     print("{a}")
 }

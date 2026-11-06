@@ -1,15 +1,15 @@
-use unicode :: core.text
+use unicode: core.text
 
 // Retained authority snapshot for convention-routing discovery. The host
 // supplies the complete immediate listing; an empty list is a real empty dir.
-struct AppAuthorizedDirectoryEntry {
+AppAuthorizedDirectoryEntry: struct {
     name: String
     path: String
     is_directory: Bool
     // Rust `_` opt-out applies only to a Unicode basename, never lossy text.
     name_is_unicode: Bool
 }
-struct AppAuthorizedDirectory {
+AppAuthorizedDirectory: struct {
     path: String
     entries: [AppAuthorizedDirectoryEntry]
 }
@@ -18,15 +18,15 @@ struct AppAuthorizedDirectory {
 // against the module's directory in the authorized snapshot: `found` is
 // false when the snapshot holds no such directory, and `files` lists every
 // `.jet` file below it, sorted, relative to the root.
-struct AppRouteRoot {
+AppRouteRoot: struct {
     root: String
     found: Bool
     files: [AppRouteFile]
 }
 
 // One convention file: its root-relative path, and whether it parses to a
-// top-level `fn page`.
-struct AppRouteFile {
+// top-level `page: fn`.
+AppRouteFile: struct {
     path: String
     has_page: Bool
 }
@@ -37,19 +37,19 @@ struct AppRouteFile {
 // `index` or `page` answers its folder's address; a whole `[Name]` part
 // captures one address part as `:name`, the snake_case word key.
 // `bad_part` names a bracket part that is not one whole `[name]`.
-struct AppRouteAddress {
+AppRouteAddress: struct {
     path: String
     bad_part: String?
 }
 
-fn app_route_file_address(relative: String) -> AppRouteAddress {
-    stem :: if relative.ends_with(".jet") -> relative.slice(0, relative.len() - 4) else -> relative
+app_route_file_address: fn(relative: String) -> AppRouteAddress {
+    stem: if relative.ends_with(".jet") -> relative.slice(0, relative.len() - 4) else -> relative
     parts := [String]{}
     loop part in stem.split("/") {
         if part != "" -> &parts.push(part)
     }
     if parts.len() > 0 {
-        last :: app_route_file_words(parts[parts.len() - 1])
+        last: app_route_file_words(parts[parts.len() - 1])
         if last == "index" || last == "page" -> _ := &parts.pop()
     }
     if parts.len() == 0 -> return AppRouteAddress{path: "/", bad_part: None}
@@ -60,7 +60,7 @@ fn app_route_file_address(relative: String) -> AppRouteAddress {
             next
         }
         if !part.starts_with("[") || !part.ends_with("]") || part.len() < 3 -> return AppRouteAddress{path: "", bad_part: Val(part)}
-        name :: part.slice(1, part.len() - 1)
+        name: part.slice(1, part.len() - 1)
         loop scalar in unicode.scalars(name) {
             if !sema_casing_is_alphanumeric(scalar) && scalar != "_" -> return AppRouteAddress{path: "", bad_part: Val(part)}
         }
@@ -74,7 +74,7 @@ fn app_route_file_address(relative: String) -> AppRouteAddress {
 // One path component's words, lowercased and joined by hyphens. Underscores,
 // hyphens and case changes split words; any other character, such as the
 // dot in `sitemap.xml`, stays in place.
-fn app_route_file_words(component: String) -> String {
+app_route_file_words: fn(component: String) -> String {
     out := ""
     run := ""
     loop scalar in unicode.scalars(component) {
@@ -88,7 +88,7 @@ fn app_route_file_words(component: String) -> String {
     "{out}{app_route_file_run_words(run)}"
 }
 
-fn app_route_file_run_words(run: String) -> String {
+app_route_file_run_words: fn(run: String) -> String {
     words := [String]{}
     loop piece in run.split("-") {
         loop word in sema_casing_split_words(piece) -> &words.push(unicode.lower(word))

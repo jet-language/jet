@@ -1,6 +1,6 @@
 use {
     jet_devserver.Canvas.SourceModel.[write_source_if_unchanged, replace_source_if_unchanged_locked, SourceWriteError, open_target, open_parent, open_file_at, read_opened_file, O_RDONLY]
-    fs :: std.fs // GATE #4494
+    fs: std.fs // GATE #4494
     std.os.unix.fs.[symlink]
     std.sync.atomic.[AtomicU64, Ordering]
     std.env.[temp_dir]
@@ -11,58 +11,58 @@ use {
     std.fmt.[format]
 }
 
-fn test_replace_after_final_symlink_swap(path: OSPath, outside: OSPath, candidate: [U8]) Err! {
-    target :: open_target(path)
-    moved :: path.with_file_name("main.jet.canvas-test-held")
+test_replace_after_final_symlink_swap: fn(path: OSPath, outside: OSPath, candidate: [U8]) Err! {
+    target: open_target(path)
+    moved: path.with_file_name("main.jet.canvas-test-held")
     fs.rename(path, moved)
     symlink(outside, path)
     target.replace(candidate, target.current.map((current) -> current.mode))
     .Ok(_)
 }
-fn test_replace_after_ancestor_symlink_swap(path: OSPath, outside: OSPath, candidate: [U8]) Err! {
-    target :: open_target(path)
-    parent :: path.parent().ok_or_else(() -> Error.new(ErrorKind.InvalidInput, "test path has no parent"))
-    moved :: parent.with_file_name("canvas-test-held")
+test_replace_after_ancestor_symlink_swap: fn(path: OSPath, outside: OSPath, candidate: [U8]) Err! {
+    target: open_target(path)
+    parent: path.parent().ok_or_else(() -> Error.new(ErrorKind.InvalidInput, "test path has no parent"))
+    moved: parent.with_file_name("canvas-test-held")
     fs.rename(parent, moved)
     symlink(outside, parent)
     target.replace(candidate, target.current.map((current) -> current.mode))
     .Ok(_)
 }
-fn test_read_after_final_symlink_swap(path: OSPath, outside: OSPath) -> [U8] Err! {
-    (parent, name) :: open_parent(path)
+test_read_after_final_symlink_swap: fn(path: OSPath, outside: OSPath) -> [U8] Err! {
+    (parent, name): open_parent(path)
     file := open_file_at(parent, name, O_RDONLY)
-    moved :: path.with_file_name("main.jet.canvas-test-held")
-    current :: read_opened_file(&file, () -> { fs.rename(path, moved)?; symlink(outside, path) })
+    moved: path.with_file_name("main.jet.canvas-test-held")
+    current: read_opened_file(&file, () -> { fs.rename(path, moved)?; symlink(outside, path) })
     .Ok(current.bytes)
 }
-fn test_remove_after_final_symlink_swap(path: OSPath, outside: OSPath) Err! {
-    target :: open_target(path)
-    moved :: path.with_file_name("main.jet.canvas-test-held")
+test_remove_after_final_symlink_swap: fn(path: OSPath, outside: OSPath) Err! {
+    target: open_target(path)
+    moved: path.with_file_name("main.jet.canvas-test-held")
     fs.rename(path, moved)
     symlink(outside, path)
     target.remove()
 }
-fn test_remove_after_ancestor_symlink_swap(path: OSPath, outside: OSPath) Err! {
-    target :: open_target(path)
-    parent :: path.parent().ok_or_else(() -> Error.new(ErrorKind.InvalidInput, "test path has no parent"))
-    moved :: parent.with_file_name("canvas-test-held")
+test_remove_after_ancestor_symlink_swap: fn(path: OSPath, outside: OSPath) Err! {
+    target: open_target(path)
+    parent: path.parent().ok_or_else(() -> Error.new(ErrorKind.InvalidInput, "test path has no parent"))
+    moved: parent.with_file_name("canvas-test-held")
     fs.rename(parent, moved)
     symlink(outside, parent)
     target.remove()
 }
-TEST_SEQUENCE :: AtomicU64.new(0)
-fn test_path() -> OSPath {
-    root :: temp_dir().join("jet-canvas-source-model-{id()}-{TEST_SEQUENCE.fetch_add(1, Ordering.Relaxed)}")
+TEST_SEQUENCE: AtomicU64.new(0)
+test_path: fn() -> OSPath {
+    root: temp_dir().join("jet-canvas-source-model-{id()}-{TEST_SEQUENCE.fetch_add(1, Ordering.Relaxed)}")
     fs.create_dir_all(root).unwrap()
     root.join("main.jet")
 }
 #Test("compare_and_publish_preserves_source_on_conflict") {
     if selected_os() == "linux".bit_or("android").bit_or("macos").bit_or("ios") {
-        path :: test_path()
+        path: test_path()
         fs.write(path, "before\n").unwrap()
         write_source_if_unchanged(path, "before\n", "after\n").unwrap()
         assert_eq(fs.read_to_string(path).unwrap(), "after\n")
-        error :: write_source_if_unchanged(path, "before\n", "lost\n").unwrap_err()
+        error: write_source_if_unchanged(path, "before\n", "lost\n").unwrap_err()
         assert(error == .Conflict)
         assert_eq(fs.read_to_string(path).unwrap(), "after\n")
         fs.remove_dir_all(path.parent().unwrap()).unwrap()
@@ -70,7 +70,7 @@ fn test_path() -> OSPath {
 }
 #Test("compare_and_publish_preserves_source_permissions") {
     if selected_os() == "linux".bit_or("android").bit_or("macos").bit_or("ios") {
-        path :: test_path()
+        path: test_path()
         fs.write(path, "before\n").unwrap()
         fs.set_permissions(path, fs.Permissions.from_mode(0o640)).unwrap()
         replace_source_if_unchanged_locked(path, .Some("before\n"), .Some("after\n")).unwrap()
@@ -80,7 +80,7 @@ fn test_path() -> OSPath {
 }
 #Test("compare_and_publish_supports_new_and_removed_source") {
     if selected_os() == "linux".bit_or("android").bit_or("macos").bit_or("ios") {
-        path :: test_path()
+        path: test_path()
         replace_source_if_unchanged_locked(path, .None, .Some("new\n")).unwrap()
         assert_eq(fs.read_to_string(path).unwrap(), "new\n")
         replace_source_if_unchanged_locked(path, .Some("new\n"), .None).unwrap()
@@ -90,11 +90,11 @@ fn test_path() -> OSPath {
 }
 #Test("compare_and_publish_rejects_symlinked_source") {
     if selected_os() == "linux".bit_or("android").bit_or("macos").bit_or("ios") {
-        path :: test_path()
-        outside :: path.parent().unwrap().join("outside.jet")
+        path: test_path()
+        outside: path.parent().unwrap().join("outside.jet")
         fs.write(outside, "must survive\n").unwrap()
         symlink(outside, path).unwrap()
-        error :: write_source_if_unchanged(path, "must survive\n", "attacker\n").expect_err("Canvas source writes must not follow symlinks")
+        error: write_source_if_unchanged(path, "must survive\n", "attacker\n").expect_err("Canvas source writes must not follow symlinks")
         assert(error == .Io(_))
         assert_eq(fs.read_to_string(outside).unwrap(), "must survive\n")
         fs.remove_dir_all(path.parent().unwrap()).unwrap()
@@ -102,16 +102,16 @@ fn test_path() -> OSPath {
 }
 #Test("compare_and_publish_rejects_symlinked_parent") {
     if selected_os() == "linux".bit_or("android").bit_or("macos").bit_or("ios") {
-        root_file :: test_path()
-        root :: root_file.parent().unwrap()
-        outside :: root.with_file_name("jet-canvas-source-outside-{id()}")
+        root_file: test_path()
+        root: root_file.parent().unwrap()
+        outside: root.with_file_name("jet-canvas-source-outside-{id()}")
         fs.create_dir_all(outside).unwrap()
-        outside_file :: outside.join("main.jet")
+        outside_file: outside.join("main.jet")
         fs.write(outside_file, "must survive\n").unwrap()
-        linked :: root.join("linked")
+        linked: root.join("linked")
         symlink(outside, linked).unwrap()
-        path :: linked.join("main.jet")
-        error :: write_source_if_unchanged(path, "must survive\n", "attacker\n").expect_err("Canvas source writes must not traverse symlinked parents")
+        path: linked.join("main.jet")
+        error: write_source_if_unchanged(path, "must survive\n", "attacker\n").expect_err("Canvas source writes must not traverse symlinked parents")
         assert(error == .Io(_))
         assert_eq(fs.read_to_string(outside_file).unwrap(), "must survive\n")
         fs.remove_dir_all(root).unwrap()
@@ -120,8 +120,8 @@ fn test_path() -> OSPath {
 }
 #Test("compare_and_publish_keeps_final_swap_inside_pinned_parent") {
     if selected_os() == "linux".bit_or("android").bit_or("macos").bit_or("ios") {
-        path :: test_path()
-        outside :: path.parent().unwrap().join("outside.jet")
+        path: test_path()
+        outside: path.parent().unwrap().join("outside.jet")
         fs.write(path, "before\n").unwrap()
         fs.write(outside, "must survive\n").unwrap()
         test_replace_after_final_symlink_swap(path, outside, "after\n".as_bytes()).unwrap()
@@ -132,11 +132,11 @@ fn test_path() -> OSPath {
 }
 #Test("compare_and_read_stays_on_opened_file_after_final_swap") {
     if selected_os() == "linux".bit_or("android").bit_or("macos").bit_or("ios") {
-        path :: test_path()
-        outside :: path.parent().unwrap().join("outside.jet")
+        path: test_path()
+        outside: path.parent().unwrap().join("outside.jet")
         fs.write(path, "before\n").unwrap()
         fs.write(outside, "must survive\n").unwrap()
-        bytes :: test_read_after_final_symlink_swap(path, outside).unwrap()
+        bytes: test_read_after_final_symlink_swap(path, outside).unwrap()
         assert_eq(bytes, "before\n".as_bytes())
         assert_eq(fs.read_to_string(outside).unwrap(), "must survive\n")
         fs.remove_dir_all(path.parent().unwrap()).unwrap()
@@ -144,15 +144,15 @@ fn test_path() -> OSPath {
 }
 #Test("compare_and_publish_keeps_ancestor_swap_inside_pinned_parent") {
     if selected_os() == "linux".bit_or("android").bit_or("macos").bit_or("ios") {
-        root_file :: test_path()
-        root :: root_file.parent().unwrap()
-        nested :: root.join("nested")
+        root_file: test_path()
+        root: root_file.parent().unwrap()
+        nested: root.join("nested")
         fs.create_dir_all(nested).unwrap()
-        path :: nested.join("main.jet")
+        path: nested.join("main.jet")
         fs.write(path, "before\n").unwrap()
-        outside :: root.with_file_name("{root.file_name().unwrap().to_string_lossy()}-outside")
+        outside: root.with_file_name("{root.file_name().unwrap().to_string_lossy()}-outside")
         fs.create_dir_all(outside).unwrap()
-        outside_file :: outside.join("main.jet")
+        outside_file: outside.join("main.jet")
         fs.write(outside_file, "must survive\n").unwrap()
         test_replace_after_ancestor_symlink_swap(path, outside, "after\n".as_bytes()).unwrap()
         assert_eq(fs.read_to_string(outside_file).unwrap(), "must survive\n")
@@ -163,11 +163,11 @@ fn test_path() -> OSPath {
 }
 #Test("compare_and_remove_keeps_final_swap_inside_pinned_parent") {
     if selected_os() == "linux".bit_or("android").bit_or("macos").bit_or("ios") {
-        path :: test_path()
-        outside :: path.parent().unwrap().join("outside.jet")
+        path: test_path()
+        outside: path.parent().unwrap().join("outside.jet")
         fs.write(path, "before\n").unwrap()
         fs.write(outside, "must survive\n").unwrap()
-        moved :: path.with_file_name("main.jet.canvas-test-held")
+        moved: path.with_file_name("main.jet.canvas-test-held")
         test_remove_after_final_symlink_swap(path, outside).unwrap()
         assert(fs.symlink_metadata(path).is_err())
         assert_eq(fs.read_to_string(moved).unwrap(), "before\n")
@@ -177,15 +177,15 @@ fn test_path() -> OSPath {
 }
 #Test("compare_and_remove_keeps_ancestor_swap_inside_pinned_parent") {
     if selected_os() == "linux".bit_or("android").bit_or("macos").bit_or("ios") {
-        root_file :: test_path()
-        root :: root_file.parent().unwrap()
-        nested :: root.join("nested")
+        root_file: test_path()
+        root: root_file.parent().unwrap()
+        nested: root.join("nested")
         fs.create_dir_all(nested).unwrap()
-        path :: nested.join("main.jet")
+        path: nested.join("main.jet")
         fs.write(path, "before\n").unwrap()
-        outside :: root.with_file_name("{root.file_name().unwrap().to_string_lossy()}-outside")
+        outside: root.with_file_name("{root.file_name().unwrap().to_string_lossy()}-outside")
         fs.create_dir_all(outside).unwrap()
-        outside_file :: outside.join("main.jet")
+        outside_file: outside.join("main.jet")
         fs.write(outside_file, "must survive\n").unwrap()
         test_remove_after_ancestor_symlink_swap(path, outside).unwrap()
         assert(!root.join("canvas-test-held/main.jet").exists())

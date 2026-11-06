@@ -1,10 +1,10 @@
 
 use {
-    server :: core.http.server
-    net :: core.net
+    server: core.http.server
+    net: core.net
 }
 
-fn request_text_default(req: HTTPRequest) -> String Never! {
+request_text_default: fn(req: HTTPRequest) -> String Never! {
     if req.text() == {
         .Ok(text) -> return "default={text}"
         .Err(_) -> return "default=wrong-error"
@@ -12,7 +12,7 @@ fn request_text_default(req: HTTPRequest) -> String Never! {
     }
 }
 
-fn request_text_explicit(req: HTTPRequest) -> String Never! {
+request_text_explicit: fn(req: HTTPRequest) -> String Never! {
     if req.text(5) == {
         .Ok(text) -> return "explicit={text}"
         .Err(error) -> {
@@ -25,7 +25,7 @@ fn request_text_explicit(req: HTTPRequest) -> String Never! {
     }
 }
 
-fn request_text_over(req: HTTPRequest) -> String Never! {
+request_text_over: fn(req: HTTPRequest) -> String Never! {
     if req.text(4) == {
         .Ok(_) -> return "over=accepted"
         .Err(error) -> {
@@ -38,7 +38,7 @@ fn request_text_over(req: HTTPRequest) -> String Never! {
     }
 }
 
-fn request_text_consumed(req: HTTPRequest) -> String Never! {
+request_text_consumed: fn(req: HTTPRequest) -> String Never! {
     if req.text() == {
         .Ok(_) -> {
             if req.text() == {
@@ -57,7 +57,7 @@ fn request_text_consumed(req: HTTPRequest) -> String Never! {
     }
 }
 
-fn request_text_binary(req: HTTPRequest) -> String Never! {
+request_text_binary: fn(req: HTTPRequest) -> String Never! {
     if req.text() == {
         .Ok(_) -> return "binary=accepted"
         .Err(error) -> {
@@ -70,8 +70,8 @@ fn request_text_binary(req: HTTPRequest) -> String Never! {
     }
 }
 
-fn request_text_classify(req: HTTPRequest) -> String Never! {
-    path :: req.path()
+request_text_classify: fn(req: HTTPRequest) -> String Never! {
+    path: req.path()
     if path == "/default" -> return request_text_default(req)
     if path == "/explicit" -> return request_text_explicit(req)
     if path == "/over" -> return request_text_over(req)
@@ -80,19 +80,19 @@ fn request_text_classify(req: HTTPRequest) -> String Never! {
     return "unknown"
 }
 
-fn request_text_handler(req: HTTPRequest) -> HTTPResponse HTTPError! {
+request_text_handler: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
     return Ok(server.response(200, request_text_classify(req)))
 }
 
-fn run() (HTTPError | NetError | TaskFailure)! {
-    listener :: net.tcp_listen("127.0.0.1:__PORT__") ?? panic("listen")
-    mux :: server.mux()
+run: fn() (HTTPError | NetError | TaskFailure)! {
+    listener: net.tcp_listen("127.0.0.1:__PORT__") ?? panic("listen")
+    mux: server.mux()
     mux.post("/default", request_text_handler)
     mux.post("/explicit", request_text_handler)
     mux.post("/over", request_text_handler)
     mux.post("/consumed", request_text_handler)
     mux.post("/binary", request_text_handler)
-    server_task :: task {
+    server_task: task {
         server.serve_once_listener(listener, mux) ?? panic("serve")
         server.serve_once_listener(listener, mux) ?? panic("serve")
         server.serve_once_listener(listener, mux) ?? panic("serve")

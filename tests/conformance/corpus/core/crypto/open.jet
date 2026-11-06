@@ -1,10 +1,10 @@
 // core-conformance: core.crypto.open
-use crypto :: core.crypto
+use crypto: core.crypto
 
-fn run() {
-    recipient :: crypto.X25519SecretKey.new_random() ?? panic("recipient")
-    message :: [U8]{0x61, 0x62, 0x63}
-    box :: crypto.seal([recipient.public_key()], message, []) ?? panic("seal")
-    result :: crypto.open(recipient, box, []) ?? panic("open")
+run: fn() {
+    recipient: crypto.X25519SecretKey.new_random() ?? panic("recipient")
+    message: [U8]{0x61, 0x62, 0x63}
+    box: crypto.seal([recipient.public_key()], message, []) ?? panic("seal")
+    result: crypto.open(recipient, box, []) ?? panic("open")
     print(result == message)
 }

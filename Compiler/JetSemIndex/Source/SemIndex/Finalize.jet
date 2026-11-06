@@ -31,16 +31,16 @@ use {
 
 // The outward caller retains the original-bundle row list. Registration/name
 // indices are joined by identity, never by source position or loaded ordinal.
-fn semindex_loaded_registration_index(registration: SemaRegistrationGraph, source: SemaCompilerModuleSource) -> Int Never! {
+semindex_loaded_registration_index: fn(registration: SemaRegistrationGraph, source: SemaCompilerModuleSource) -> Int Never! {
     sema_registration_module_index(registration, source.module_identity) ?? panic("loaded semantic-index module must be registered")
 }
 
 // Rust module_index/position uses the FIRST display-or-alias loaded module.
 // Values are source-row indices, not registration indices or bundle ordinals.
-fn semindex_loaded_source_rows_by_path(module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) -> [String:Int] Never! {
+semindex_loaded_source_rows_by_path: fn(module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) -> [String:Int] Never! {
     rows := [String:Int]{}
     loop source_index in loaded_module_rows {
-        source :: module_sources[source_index]
+        source: module_sources[source_index]
         if rows.get(source.display) == None -> rows[source.display] = source_index
         if rows.get(source.alias) == None -> rows[source.alias] = source_index
     }
@@ -48,11 +48,11 @@ fn semindex_loaded_source_rows_by_path(module_sources: [SemaCompilerModuleSource
 }
 
 // Checked metadata uses registration paths; locations use loaded displays.
-fn semindex_loaded_source_rows_by_registration_path(registration: SemaRegistrationGraph, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) -> [String:Int] Never! {
+semindex_loaded_source_rows_by_registration_path: fn(registration: SemaRegistrationGraph, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) -> [String:Int] Never! {
     paths := [String:Int]{}
     loop source_index in loaded_module_rows {
-        source :: module_sources[source_index]
-        module_ref :: registration.modules[semindex_loaded_registration_index(registration, source)]
+        source: module_sources[source_index]
+        module_ref: registration.modules[semindex_loaded_registration_index(registration, source)]
         if paths.get(module_ref.module_path) == None -> paths[module_ref.module_path] = source_index
     }
     paths
@@ -61,12 +61,12 @@ fn semindex_loaded_source_rows_by_registration_path(registration: SemaRegistrati
 // Rust build_symbol_db: all modules first, then aliases/state hovers/breadcrumbs,
 // S5 finalization (generated presentation, anchors, definitions and derivations),
 // application-boundary hover refresh, and the S14 checked semantic symbol index.
-fn semindex_build_symbol_db(registration: SemaRegistrationGraph, checked: SemaGraphResult, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int], effect_program: EffectBudgetProgram, effect_summaries: [String:PackageEffectSummary]) -> SymbolDB {
+semindex_build_symbol_db: fn(registration: SemaRegistrationGraph, checked: SemaGraphResult, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int], effect_program: EffectBudgetProgram, effect_summaries: [String:PackageEffectSummary]) -> SymbolDB {
     db := SymbolDB.new()
     loop source_index in loaded_module_rows {
-        source :: module_sources[source_index]
-        module_index :: semindex_loaded_registration_index(registration, source)
-        module_ref :: registration.modules[module_index]
+        source: module_sources[source_index]
+        module_index: semindex_loaded_registration_index(registration, source)
+        module_ref: registration.modules[module_index]
         block_spans := module_ref.program.block_spans.copy()
         &block_spans.sort_by((left: Span, right: Span) -> left.start <=> right.start)
         alias := source.alias.copy()
@@ -87,12 +87,12 @@ fn semindex_build_symbol_db(registration: SemaRegistrationGraph, checked: SemaGr
 }
 
 // One module's scoped declaration name (`outer.inner.run`) in the name ledger.
-struct SemIndexScopedDeclaration {
+SemIndexScopedDeclaration: struct {
     module_index: Int
     name: String
 }
 
-fn semindex_visibility_rank(visibility: NameVisibility) -> Int Never! {
+semindex_visibility_rank: fn(visibility: NameVisibility) -> Int Never! {
     if visibility == {
         .Private -> 0
         .Package -> 1
@@ -103,16 +103,16 @@ fn semindex_visibility_rank(visibility: NameVisibility) -> Int Never! {
 // #6341: LSP export checks read Sema's checked visibility, never source text.
 // A declaration is only as visible as its least visible enclosing declaration
 // in the same module, so a member of a `priv module` is never Public.
-fn semindex_add_declaration_visibility(db: &SymbolDB, registration: SemaRegistrationGraph, names: NameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) Never! {
+semindex_add_declaration_visibility: fn(db: &SymbolDB, registration: SemaRegistrationGraph, names: NameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) Never! {
     sources := [Int:Int]{}
     loop source_index in loaded_module_rows -> sources[semindex_loaded_registration_index(registration, module_sources[source_index])] = source_index
     own := [SemIndexScopedDeclaration:NameVisibility]{}
     loop declaration in names.declarations -> own[SemIndexScopedDeclaration{module_index: declaration.module_index, name: declaration.name.copy()}] = declaration.visibility
     loop declaration in names.declarations {
-        source_index :: sources.get(declaration.module_index) ?? next
+        source_index: sources.get(declaration.module_index) ?? next
         effective := declaration.visibility
         prefix := ""
-        segments :: declaration.name.split(".").to_list()
+        segments: declaration.name.split(".").to_list()
         loop index in 0..<segments.len() - 1 {
             prefix = if index == 0 -> segments[index].copy() else -> "{prefix}.{segments[index]}"
             if own.get(SemIndexScopedDeclaration{module_index: declaration.module_index, name: prefix.copy()}) == .Val(enclosing) {
@@ -127,9 +127,9 @@ fn semindex_add_declaration_visibility(db: &SymbolDB, registration: SemaRegistra
 // Sema marks such a call root with a note-less TryWithContext (explicit `?`
 // is a Try, `?(note)` carries its note); the checked bodies are the source,
 // never a second reading of the AST. A generic body's instances share spans.
-fn semindex_add_propagation_hints(db: &SymbolDB, checked: SemaGraphResult, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) Never! {
+semindex_add_propagation_hints: fn(db: &SymbolDB, checked: SemaGraphResult, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) Never! {
     loop source_index in loaded_module_rows {
-        source :: module_sources[source_index]
+        source: module_sources[source_index]
         seen := [Int:Bool]{}
         loop checked_module in checked.modules {
             if checked_module.module_identity != source.module_identity -> next
@@ -149,7 +149,7 @@ fn semindex_add_propagation_hints(db: &SymbolDB, checked: SemaGraphResult, modul
 
 // Declaration indices retain item/state order without copying the checked AST's
 // state vectors just to look up a registry entry.
-fn semindex_state_declarations(items: [Item]) -> [Int] Never! {
+semindex_state_declarations: fn(items: [Item]) -> [Int] Never! {
     declarations := [Int]{}
     loop index in 0..<items.len() {
         if items[index] == .Struct(definition) {
@@ -162,15 +162,15 @@ fn semindex_state_declarations(items: [Item]) -> [Int] Never! {
 // Consume Foundation's retained checked graph through Sema's registry accessor.
 // Its key is the erased definition.name + ".State", never a display identity.
 // Do not derive AST state/reachability again outside Checks.
-fn semindex_build_state_graphs(registration: SemaRegistrationGraph, checked: SemaGraphResult, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) -> [StateGraphFact] Never! {
+semindex_build_state_graphs: fn(registration: SemaRegistrationGraph, checked: SemaGraphResult, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) -> [StateGraphFact] Never! {
     graphs := [StateGraphFact]{}
     loop source_index in loaded_module_rows {
-        source :: module_sources[source_index]
-        module_ref :: registration.modules[semindex_loaded_registration_index(registration, source)]
+        source: module_sources[source_index]
+        module_ref: registration.modules[semindex_loaded_registration_index(registration, source)]
         loop index in semindex_state_declarations(module_ref.program.items) {
             if module_ref.program.items[index] == .Struct(definition) {
                 if definition.state == .Val(declaration) {
-                    key :: "{definition.name}.State"
+                    key: "{definition.name}.State"
                     if sema_effect_facts_state_graph(checked.effect_facts, key) == .Val(graph) -> &graphs.push(semindex_state_graph_fact(definition.name, declaration.states, source.display, graph))
                 }
             }
@@ -178,7 +178,7 @@ fn semindex_build_state_graphs(registration: SemaRegistrationGraph, checked: Sem
     }
     graphs
 }
-fn semindex_state_graph_fact(owner: String, declarations: [NamedSpan], module_path: String, graph: StateGraph) -> StateGraphFact Never! {
+semindex_state_graph_fact: fn(owner: String, declarations: [NamedSpan], module_path: String, graph: StateGraph) -> StateGraphFact Never! {
     states := [StateNodeFact]{}
     loop node in graph.states {
         span := Span?{None}
@@ -197,20 +197,20 @@ fn semindex_state_graph_fact(owner: String, declarations: [NamedSpan], module_pa
     loop transition in graph.transitions -> &transitions.push(StateTransitionFact{operation: transition.operation, from: transition.from, to: transition.to})
     StateGraphFact{owner: owner, module_path: module_path, states: ^states, transitions: ^transitions}
 }
-fn semindex_add_state_graph_hovers(db: &SymbolDB, registration: SemaRegistrationGraph, facts: SemIndexEffectFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) Never! {
+semindex_add_state_graph_hovers: fn(db: &SymbolDB, registration: SemaRegistrationGraph, facts: SemIndexEffectFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) Never! {
     loop source_index in loaded_module_rows {
-        source :: module_sources[source_index]
-        module_ref :: registration.modules[semindex_loaded_registration_index(registration, source)]
+        source: module_sources[source_index]
+        module_ref: registration.modules[semindex_loaded_registration_index(registration, source)]
         loop index in semindex_state_declarations(module_ref.program.items) {
             if module_ref.program.items[index] == .Struct(definition) {
                 if definition.state == .Val(declaration) {
-                    key :: "{definition.name}.State"
+                    key: "{definition.name}.State"
                     if sema_effect_facts_state_graph(facts, key) == .Val(graph) {
                         loop member in declaration.states {
                             loop node in graph.states {
                                 if node.name != member.name -> next
-                                terminal :: if node.terminal -> "terminal" else -> "nonterminal"
-                                reachability :: if node.reachable == {
+                                terminal: if node.terminal -> "terminal" else -> "nonterminal"
+                                reachability: if node.reachable == {
                                     .Val(reachable) -> if reachable -> "reachable" else -> "unreachable"
                                     else -> "reachability unknown"
                                 }
@@ -227,14 +227,14 @@ fn semindex_add_state_graph_hovers(db: &SymbolDB, registration: SemaRegistration
 
 // Imported alias definitions live ONLY here (Rust1460–1488), never in S10.
 // Sort indices, not cloned alias/name-ledger records.
-fn semindex_add_import_alias_definitions(db: &SymbolDB, registration: SemaRegistrationGraph, names: NameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) Never! {
+semindex_add_import_alias_definitions: fn(db: &SymbolDB, registration: SemaRegistrationGraph, names: NameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) Never! {
     sources := [Int:Int]{}
     loop source_index in loaded_module_rows -> sources[semindex_loaded_registration_index(registration, module_sources[source_index])] = source_index
     order := [Int]{}
     loop index in 0..<names.aliases.len() -> &order.push(index)
     &order.sort_by((left: Int, right: Int) -> (names.aliases[left].module_index <=> names.aliases[right].module_index).then(names.aliases[left].span.start <=> names.aliases[right].span.start).then(names.aliases[left].span.end <=> names.aliases[right].span.end).then(names.aliases[left].name <=> names.aliases[right].name))
     loop index in order {
-        alias :: names.aliases[index]
+        alias: names.aliases[index]
         if alias.span.start >= alias.span.end -> next
         if alias.module_index < 0 || alias.module_index >= names.modules.len() -> next
         if sources.get(alias.module_index) == .Val(source_index) {
@@ -245,7 +245,7 @@ fn semindex_add_import_alias_definitions(db: &SymbolDB, registration: SemaRegist
 
 // Rust1490–1612: inferred rows are keyed by checked canonical module alias and
 // callable identity. Inline CodeModule function spans use a real composite key.
-fn semindex_apply_inferred_effect_rows(db: &SymbolDB, module_index: Int, items: [Item], module_alias: String, module_path: String, facts: SemIndexEffectFacts) Never! {
+semindex_apply_inferred_effect_rows: fn(db: &SymbolDB, module_index: Int, items: [Item], module_alias: String, module_path: String, facts: SemIndexEffectFacts) Never! {
     inline_keys := [SourceSpan:String]{}
     loop item in items {
         if item == .CodeModule(code_module) {
@@ -266,9 +266,9 @@ fn semindex_apply_inferred_effect_rows(db: &SymbolDB, module_index: Int, items: 
             if inline_keys.get(semindex_source_span(db.defs[index].def_span)) == .Val(key) {
                 local_key = key.copy()
             } else if db.defs[index].identity.starts_with("method:") {
-                segments :: db.defs[index].identity.split("::")
+                segments: db.defs[index].identity.split("::")
                 tail := segments[segments.len() - 1] // #4303
-                suffix :: ".{db.defs[index].name}"
+                suffix: ".{db.defs[index].name}"
                 if tail.ends_with(suffix) {
                     owner := tail.slice(0, tail.len() - suffix.len()) // #4303
                     local_key = "{owner}::{db.defs[index].name}"
@@ -277,14 +277,14 @@ fn semindex_apply_inferred_effect_rows(db: &SymbolDB, module_index: Int, items: 
             if facts.solved.get("{alias}::{local_key}") == .Val(row) {
                 inferred := [EffectRowEntry]{}
                 loop name in row -> &inferred.push(EffectRowEntry{name: name, span: db.defs[index].def_span})
-                display_ret :: if failure == {
+                display_ret: if failure == {
                     .Checked(value) -> failure_contract_shown_return(value)
                     .Unavailable(_) -> ret
                 }
-                signature :: semindex_fn_signature(db.defs[index].name, params, contract, variadic, display_ret, failure, Val(inferred), None, db.view_provenance.get(db.defs[index].identity), access, defaults, policies)
+                signature: semindex_fn_signature(db.defs[index].name, params, contract, variadic, display_ret, failure, Val(inferred), None, db.view_provenance.get(db.defs[index].identity), access, defaults, policies)
                 db.defs[index].kind = SymKind.Function{params: params, param_sources: sources, signature_facts_available: available, param_contract: contract, param_variadic: variadic, return_type: ret, failure_contract: failure, foreign_boundary: foreign, effects: Val(^inferred), effect_via: via, param_access: access, param_defaults: defaults, policies: policies, generic_parameters: generics}
                 loop hover_index in 0..<db.hover.len() {
-                    hover :: db.hover[hover_index]
+                    hover: db.hover[hover_index]
                     if hover.module_path != db.defs[index].module_path || hover.span != db.defs[index].def_span -> next
                     db.hover[hover_index].text = "{signature}{semindex_inferred_hover_tail(hover.text)}"
                     break
@@ -296,13 +296,13 @@ fn semindex_apply_inferred_effect_rows(db: &SymbolDB, module_index: Int, items: 
         }
     }
 }
-fn semindex_inferred_hover_tail(text: String) -> String Never! {
+semindex_inferred_hover_tail: fn(text: String) -> String Never! {
     if text.split_once("\n") == .Val(parts) {
         tail := [String]{}
         loop line in parts.after.lines() {
             if !line.starts_with("failure: ") -> &tail.push(line)
         }
-        joined :: tail.join("\n")
+        joined: tail.join("\n")
         if joined != "" -> return "\n{joined}"
     }
     ""
@@ -310,7 +310,7 @@ fn semindex_inferred_hover_tail(text: String) -> String Never! {
 
 // Rust1614–1717: per-module ordered index rows/cursors avoid cloning definitions
 // or rescanning every definition for each root. Only root item nodes qualify.
-fn semindex_build_definition_facts(defs: [SymbolDef], nodes: [StructuralNode], registration: SemaRegistrationGraph, names: NameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) -> [DefinitionFact] Never! {
+semindex_build_definition_facts: fn(defs: [SymbolDef], nodes: [StructuralNode], registration: SemaRegistrationGraph, names: NameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) -> [DefinitionFact] Never! {
     by_module := [String:[Int]]{}
     loop index in 0..<defs.len() {
         if by_module.get(defs[index].module_path) == None -> by_module[defs[index].module_path] = [Int]{}
@@ -318,7 +318,7 @@ fn semindex_build_definition_facts(defs: [SymbolDef], nodes: [StructuralNode], r
     }
     sources := [String:Int]{}
     loop source_index in loaded_module_rows {
-        display :: module_sources[source_index].display
+        display: module_sources[source_index].display
         if sources.get(display) == None -> sources[display] = source_index
         if by_module.get(display) != None -> &by_module[display].sort_by((left: Int, right: Int) -> defs[left].def_span.start <=> defs[right].def_span.start)
     }
@@ -327,14 +327,14 @@ fn semindex_build_definition_facts(defs: [SymbolDef], nodes: [StructuralNode], r
     out := [DefinitionFact]{}
     loop node in nodes {
         if node.parent != None || node.class != "item" -> next
-        source_index :: sources.get(node.module_path) ?? next
+        source_index: sources.get(node.module_path) ?? next
         if by_module.get(node.module_path) == None -> next
         cursor := cursors.get(node.module_path) ?? 0
         loop cursor < by_module[node.module_path].len() && defs[by_module[node.module_path][cursor]].def_span.start < node.span.start -> cursor += 1
         cursors[node.module_path] = cursor
         chosen := Int?{None}
         loop position in cursor..<by_module[node.module_path].len() {
-            index :: by_module[node.module_path][position]
+            index: by_module[node.module_path][position]
             if defs[index].def_span.start > node.span.end -> break
             if defs[index].def_span.end > node.span.end -> next
             if defs[index].kind == {
@@ -345,15 +345,15 @@ fn semindex_build_definition_facts(defs: [SymbolDef], nodes: [StructuralNode], r
             break
         }
         if chosen == .Val(index) {
-            definition :: defs[index]
-            kind :: semindex_definition_kind(definition.kind)
-            structural :: "{kind}|{definition.identity}"
-            signature :: "{kind}|{semindex_definition_signature(definition)}"
+            definition: defs[index]
+            kind: semindex_definition_kind(definition.kind)
+            structural: "{kind}|{definition.identity}"
+            signature: "{kind}|{semindex_definition_signature(definition)}"
             source := ""
             if source_bytes.get(source_index) == None -> source_bytes[source_index] = module_sources[source_index].loaded_source.bytes()
             if node.span.start >= 0 && node.span.end >= node.span.start && node.span.end <= source_bytes[source_index].len() -> source = String.from_bytes(source_bytes[source_index][node.span.start..<node.span.end]) ?? ""
-            identity_hash :: sha256_hex(structural)
-            signature_hash :: sha256_hex(signature)
+            identity_hash: sha256_hex(structural)
+            signature_hash: sha256_hex(signature)
             &out.push(DefinitionFact{
                 stable_id: "def:{identity_hash.slice(0, 16)}",
                 signature_id: "sig:{signature_hash.slice(0, 16)}",
@@ -368,7 +368,7 @@ fn semindex_build_definition_facts(defs: [SymbolDef], nodes: [StructuralNode], r
     out
 }
 
-fn semindex_definition_kind(kind: SemIndexSymbolKind) -> String Never! {
+semindex_definition_kind: fn(kind: SemIndexSymbolKind) -> String Never! {
     if kind == {
         .Module -> "module"
         .Function(_, _, _) -> "function"
@@ -384,7 +384,7 @@ fn semindex_definition_kind(kind: SemIndexSymbolKind) -> String Never! {
         .Param(_) -> "param"
     }
 }
-fn semindex_definition_signature(definition: SymbolDef) -> String Never! {
+semindex_definition_signature: fn(definition: SymbolDef) -> String Never! {
     if definition.kind == {
         .Function(params, contract, ret) -> {
             types := [String]{}

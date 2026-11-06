@@ -2,55 +2,55 @@
 // with i64 integers. Core owns the parser; this boundary validates the narrower
 // protocol domain, as in origin/port/compiler's
 // foundation_parse_protocol_json_with_limit, without a second parser.
-use protocol_json :: core.encoding.json
+use protocol_json: core.encoding.json
 
-FOUNDATION_PROTOCOL_JSON_MAX_BYTES :: 1048576
+FOUNDATION_PROTOCOL_JSON_MAX_BYTES: 1048576
 
 #Error
-struct FoundationJSONError {
+FoundationJSONError: struct {
     message: String
 }
 
 // JSON with the provider-facing error text over the protocol domain: the
 // 1 MiB ceiling, 64 containers and i64 integers.
-fn foundation_json_parse(text: String) -> Dyn FoundationJSONError! {
+foundation_json_parse: fn(text: String) -> Dyn FoundationJSONError! {
     if text.bytes().len() > FOUNDATION_PROTOCOL_JSON_MAX_BYTES -> return Err(FoundationJSONError{message: "JSON input exceeds the 1 MiB limit"})
-    value :: protocol_json.parse(text) ?? return Err(FoundationJSONError{message: err.reason})
+    value: protocol_json.parse(text) ?? return Err(FoundationJSONError{message: err.reason})
     if foundation_protocol_json_integer_error(value) == .Val(message) -> return Err(FoundationJSONError{message: message})
     if !foundation_protocol_json_valid(value, 0) -> return Err(FoundationJSONError{message: "JSON exceeds maximum nesting depth"})
     Ok(value)
 }
 
-fn foundation_parse_protocol_json(text: String) -> Dyn? Never! {
+foundation_parse_protocol_json: fn(text: String) -> Dyn? Never! {
     foundation_parse_protocol_json_with_limit(text, FOUNDATION_PROTOCOL_JSON_MAX_BYTES)
 }
 
 // A caller-selected message ceiling: the debug adapter's 16 MiB frames do not
 // widen the shared 1 MiB default.
-fn foundation_parse_protocol_json_with_limit(text: String, max_bytes: Int) -> Dyn? Never! {
+foundation_parse_protocol_json_with_limit: fn(text: String, max_bytes: Int) -> Dyn? Never! {
     if text.bytes().len() > max_bytes -> return None
-    value :: protocol_json.parse(text) ?? return None
+    value: protocol_json.parse(text) ?? return None
     if !foundation_protocol_json_valid(value, 0) -> return None
     Val(value)
 }
 
 // The first integer outside i64, refused as the protocol parser refuses it.
-fn foundation_protocol_json_integer_error(value: Dyn) -> String? Never! {
+foundation_protocol_json_integer_error: fn(value: Dyn) -> String? Never! {
     if value == {
         .Array(values) -> {
             loop child in values {
-                error :: foundation_protocol_json_integer_error(child)
+                error: foundation_protocol_json_integer_error(child)
                 if error != None -> return error
             }
         }
         .Object(fields) -> {
             loop entry in fields {
-                error :: foundation_protocol_json_integer_error(entry.value)
+                error: foundation_protocol_json_integer_error(entry.value)
                 if error != None -> return error
             }
         }
         else -> {
-            number :: foundation_json_integer(value) ?? return None
+            number: foundation_json_integer(value) ?? return None
             if number < -9223372036854775808 || number > 9223372036854775807 -> return Val("invalid number `{number}`")
         }
     }
@@ -60,19 +60,19 @@ fn foundation_protocol_json_integer_error(value: Dyn) -> String? Never! {
 // An integer JSON number as Rust's parser reads one (`as_i64`): a lexeme with
 // no fraction or exponent, valued through Core's typed decode, or a built
 // `Dyn.Int`. None for a float-spelled number and for every other value.
-fn foundation_json_integer(value: Dyn) -> Int? Never! {
+foundation_json_integer: fn(value: Dyn) -> Int? Never! {
     if value == {
         .Int(number) -> Val(number)
         .Number(lexeme) -> {
             if lexeme.contains(".") || lexeme.contains("e") || lexeme.contains("E") -> return None
-            number :: value.decode<Int>() ?? return None
+            number: value.decode<Int>() ?? return None
             Val(number)
         }
         else -> None
     }
 }
 
-fn foundation_protocol_json_valid(value: Dyn, depth: Int) -> Bool Never! {
+foundation_protocol_json_valid: fn(value: Dyn, depth: Int) -> Bool Never! {
     if value == {
         .Array(values) -> {
             if depth >= 64 -> return false
@@ -89,7 +89,7 @@ fn foundation_protocol_json_valid(value: Dyn, depth: Int) -> Bool Never! {
             true
         }
         else -> {
-            number :: foundation_json_integer(value) ?? return true
+            number: foundation_json_integer(value) ?? return true
             number >= -9223372036854775808 && number <= 9223372036854775807
         }
     }

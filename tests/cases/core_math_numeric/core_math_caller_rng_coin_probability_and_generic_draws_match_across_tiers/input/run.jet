@@ -1,17 +1,17 @@
 
 use {
-    math :: core.math
-    random :: core.math.random
+    math: core.math
+    random: core.math.random
 }
 
-fn draw(stream: &random.RNG) {
+draw: fn(stream: &random.RNG) {
     print(&stream.bool())
     print(&stream.bool(0.25))
-    bytes :: &stream.bytes(6)
+    bytes: &stream.bytes(6)
     loop byte in bytes -> print(byte)
     print(&stream.pick([String]{"a", "b", "c", "d"}) ?? "empty")
     print(&stream.weighted_pick([String]{"a", "b", "c", "d"}, [Float]{math.NAN, -1.0, 0.25, 1.75}) ?? "empty")
-    sample :: &stream.sample([String]{"a", "b", "c", "d", "e"}, 3)
+    sample: &stream.sample([String]{"a", "b", "c", "d", "e"}, 3)
     loop value in sample -> print(value)
     items := [String]{"a", "b", "c", "d", "e"}
     &stream.shuffle(&items)
@@ -23,7 +23,7 @@ fn draw(stream: &random.RNG) {
     print(&stream.bool(math.NAN))
     print(&stream.int(1, 100))
 }
-fn run() {
+run: fn() {
     stream := random.rng(42)
     draw(&stream)
 }

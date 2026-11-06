@@ -1,16 +1,16 @@
-use fs :: core.files
+use fs: core.files
 
 #FX(IO)
-module report {
-    fn show() { print("ok") }
-    fn load() -> String { fs.read("rates.txt") ?? "" }
+report: module {
+    show: fn() { print("ok") }
+    load: fn() -> String { fs.read("rates.txt") ?? "" }
     #FX(!IO)
-    module quiet {
-        fn hush() { print("x") }
+    quiet: module {
+        hush: fn() { print("x") }
     }
 }
 
-fn run() {
+run: fn() {
     report.show()
     print(report.load())
     report.quiet.hush()

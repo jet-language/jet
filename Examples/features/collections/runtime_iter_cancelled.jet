@@ -1,9 +1,9 @@
 // A stopped native map pull must not become a successful short collection.
-package {
+package: {
     name: "runtime_iter_cancelled"
     authority: { allow: [IO, Mem.Alloc, Time.Wait] }
 }
-fn mapped_worker(started: Sender<Int>, blocked: Receiver<Int>) -> [Int] {
+mapped_worker: fn(started: Sender<Int>, blocked: Receiver<Int>) -> [Int] {
     [1, 2, 3].lazy().map(
     n -> {
         if n == 2 {
@@ -16,8 +16,8 @@ fn mapped_worker(started: Sender<Int>, blocked: Receiver<Int>) -> [Int] {
         .to_list()
 }
 
-fn looped_worker(started: Sender<Int>, blocked: Receiver<Int>) -> Int {
-    values :: [1, 2, 3].lazy().map(
+looped_worker: fn(started: Sender<Int>, blocked: Receiver<Int>) -> Int {
+    values: [1, 2, 3].lazy().map(
     n -> {
         if n == 2 {
             started.send(1)
@@ -31,7 +31,7 @@ fn looped_worker(started: Sender<Int>, blocked: Receiver<Int>) -> Int {
     total
 }
 
-fn family_worker(family: Int, started: Sender<Int>, blocked: Receiver<Int>) -> Bool {
+family_worker: fn(family: Int, started: Sender<Int>, blocked: Receiver<Int>) -> Bool {
     if family == 7 {
         return [1, 2, 3, 5].lazy().chunk_while(
         (a: Int, b: Int) -> {
@@ -44,7 +44,7 @@ fn family_worker(family: Int, started: Sender<Int>, blocked: Receiver<Int>) -> B
         )
             .to_list().len() > 0
     }
-    stop :: (n: Int) -> {
+    stop: (n: Int) -> {
         if n == (if family == 0 -> 1 else -> 2) {
             started.send(1)
             blocked.receive() ?? panic("blocking channel closed")
@@ -53,7 +53,7 @@ fn family_worker(family: Int, started: Sender<Int>, blocked: Receiver<Int>) -> B
     }
     if family == 6 -> return [1, 2, 3].lazy().dedup_by(stop).to_list().len() > 0
     if family == 14 -> return [1, 2, 3].map(stop).len() > 0
-    values :: [1, 2, 3].lazy().map(stop)
+    values: [1, 2, 3].lazy().map(stop)
     if family == {
         0 -> {
             loop n in values -> assert(n > 0)
@@ -74,10 +74,10 @@ fn family_worker(family: Int, started: Sender<Int>, blocked: Receiver<Int>) -> B
     true
 }
 
-fn run() {
-    { sender: start_tx, receiver: start_rx } :: channel<Int>(capacity: 1)
-    { sender: block_tx, receiver: block_rx } :: channel<Int>(capacity: 1)
-    worker :: task mapped_worker(start_tx, block_rx)
+run: fn() {
+    { sender: start_tx, receiver: start_rx }: channel<Int>(capacity: 1)
+    { sender: block_tx, receiver: block_rx }: channel<Int>(capacity: 1)
+    worker: task mapped_worker(start_tx, block_rx)
     start_rx.receive() ?? panic("worker did not reach map callback")
     worker.cancel()
     if ^worker.join() == {
@@ -92,9 +92,9 @@ fn run() {
     }
     // Keep the blocking sender live until after cancellation has been joined.
     block_tx.close()
-    { sender: loop_start_tx, receiver: loop_start_rx } :: channel<Int>(capacity: 1)
-    { sender: loop_block_tx, receiver: loop_block_rx } :: channel<Int>(capacity: 1)
-    loop_worker :: task looped_worker(loop_start_tx, loop_block_rx)
+    { sender: loop_start_tx, receiver: loop_start_rx }: channel<Int>(capacity: 1)
+    { sender: loop_block_tx, receiver: loop_block_rx }: channel<Int>(capacity: 1)
+    loop_worker: task looped_worker(loop_start_tx, loop_block_rx)
     loop_start_rx.receive() ?? panic("loop did not reach map callback")
     loop_worker.cancel()
     if ^loop_worker.join() == {
@@ -109,9 +109,9 @@ fn run() {
     }
     loop_block_tx.close()
     loop family in 0..<15 {
-        { sender: family_start_tx, receiver: family_start_rx } :: channel<Int>(capacity: 1)
-        { sender: family_block_tx, receiver: family_block_rx } :: channel<Int>(capacity: 1)
-        family_task :: task family_worker(family, family_start_tx, family_block_rx)
+        { sender: family_start_tx, receiver: family_start_rx }: channel<Int>(capacity: 1)
+        { sender: family_block_tx, receiver: family_block_rx }: channel<Int>(capacity: 1)
+        family_task: task family_worker(family, family_start_tx, family_block_rx)
         family_start_rx.receive() ?? panic("family did not reach callback")
         family_task.cancel()
         if ^family_task.join() == {

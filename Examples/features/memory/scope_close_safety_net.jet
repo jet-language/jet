@@ -4,27 +4,27 @@
 //! `next`. Deferred closes run first, then the automatic closes in reverse
 //! declaration order. A value moved to a new owner is closed by that owner,
 //! never twice.
-struct Resource {
+Resource: struct {
     name: String
 }
 
 impl Resource.Close {
-    fn close(^self) { print("close {self.name}") }
+    close: fn(^self) { print("close {self.name}") }
 }
 
 #Error
-enum StepFail {
+StepFail: enum {
     Bad
 }
 
-fn success() {
-    first :: Resource{name: "success first"}
-    second :: Resource{name: "success second"}
+success: fn() {
+    first: Resource{name: "success first"}
+    second: Resource{name: "success second"}
     print("success body: {first.name}, {second.name}")
 }
 
-fn early(stop: Bool) {
-    guard :: Resource{name: "early"}
+early: fn(stop: Bool) {
+    guard: Resource{name: "early"}
     if stop {
         print("early return")
         return
@@ -32,47 +32,47 @@ fn early(stop: Bool) {
     print("early fallthrough {guard.name}")
 }
 
-fn fallible(fail: Bool) -> Int StepFail! {
-    held :: Resource{name: "error path"}
+fallible: fn(fail: Bool) -> Int StepFail! {
+    held: Resource{name: "error path"}
     if fail -> return Err(StepFail.Bad)
     print("fallible body {held.name}")
     Ok(1)
 }
 
-fn looped() {
+looped: fn() {
     loop n in [0, 1, 2] {
-        item :: Resource{name: "loop {n}"}
+        item: Resource{name: "loop {n}"}
         if n == 0 -> next
         if n == 1 -> break
         print("unreached {item.name}")
     }
 }
 
-fn ordered() {
-    deferred :: Resource{name: "deferred"}
+ordered: fn() {
+    deferred: Resource{name: "deferred"}
     defer close(^deferred)
-    automatic :: Resource{name: "automatic"}
+    automatic: Resource{name: "automatic"}
     print("ordered body {automatic.name}")
 }
 
-fn consume(^resource: Resource) { print("consume {resource.name}") }
+consume: fn(^resource: Resource) { print("consume {resource.name}") }
 
-fn make(name: String) -> Resource {
-    made :: Resource{name: name}
+make: fn(name: String) -> Resource {
+    made: Resource{name: name}
     made
 }
 
-fn moved() {
-    given :: Resource{name: "given"}
+moved: fn() {
+    given: Resource{name: "given"}
     consume(^given)
-    returned :: make("returned")
+    returned: make("returned")
     print("moved body {returned.name}")
-    explicit :: Resource{name: "explicit"}
+    explicit: Resource{name: "explicit"}
     close(^explicit)
     print("moved end")
 }
 
-fn run() {
+run: fn() {
     success()
     early(true)
     early(false)

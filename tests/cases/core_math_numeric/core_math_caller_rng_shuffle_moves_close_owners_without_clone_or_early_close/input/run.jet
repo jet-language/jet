@@ -1,11 +1,11 @@
 
-use random :: core.math.random
+use random: core.math.random
 
-struct Ticket { id: Int, payload: [U8] }
+Ticket: struct { id: Int, payload: [U8] }
 impl Ticket.Close {
-    fn close(^self) { print("close token {self.payload.len()}") }
+    close: fn(^self) { print("close token {self.payload.len()}") }
 }
-fn shuffled() {
+shuffled: fn() {
     stream := random.rng(42)
     owners := [Ticket]{
         Ticket{id: 1, payload: [U8]{11}},
@@ -15,7 +15,7 @@ fn shuffled() {
     &stream.shuffle(&owners)
     loop owner in owners -> print("{owner.id}:{owner.payload[0]}")
 }
-fn run() {
+run: fn() {
     shuffled()
     print("released")
 }

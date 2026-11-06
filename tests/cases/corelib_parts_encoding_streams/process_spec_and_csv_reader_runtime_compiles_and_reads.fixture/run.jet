@@ -1,15 +1,15 @@
 
 use {
-    process :: core.process
-    csv :: core.encoding.csv
-    files :: core.files
+    process: core.process
+    csv: core.encoding.csv
+    files: core.files
 }
-fn run() {
+run: fn() {
     spec := process.cmd([String]{"jet"})
     print(spec.cmd.len())
-    input :: files.open("input.csv") ?? panic("open")
+    input: files.open("input.csv") ?? panic("open")
     reader := csv.reader(^input) ?? panic("reader")
-    first :: &reader.next() ?? panic("first")
+    first: &reader.next() ?? panic("first")
     if first == {
         Val(row) -> {
             print(row.fields[0])
@@ -17,8 +17,8 @@ fn run() {
         }
         None -> panic("missing row")
     }
-    eof :: &reader.next() ?? panic("eof")
+    eof: &reader.next() ?? panic("eof")
     print(eof == None)
-    again :: &reader.next() ?? panic("eof again")
+    again: &reader.next() ?? panic("eof again")
     print(again == None)
 }

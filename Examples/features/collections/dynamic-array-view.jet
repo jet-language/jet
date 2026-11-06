@@ -1,16 +1,16 @@
 // D-SHAPE-PLACE1=A: a bare range place is a checked read window, `&place` is
 // an exclusive write window, and `place.copy()` makes independent owned storage.
-struct Incident {
+Incident: struct {
     severity: Int
 }
 
-struct Counters {
+Counters: struct {
     left: Int
     right: Int
 }
 
-fn run() {
-    incidents :: [Incident]{
+run: fn() {
+    incidents: [Incident]{
         {severity: 1},
         {severity: 2},
         {severity: 3},
@@ -18,42 +18,42 @@ fn run() {
         {severity: 5},
     }
     // Explicit copy: `head` owns its own three `Incident`s.
-    head :: incidents[0..2].copy()
+    head: incidents[0..2].copy()
     print("copy-slice len: {head.len()}")
     // Bare place: `window` reads straight from `incidents`' storage.
-    window :: incidents[0..2]
+    window: incidents[0..2]
     print("view len: {window.len()}")
     print("indexed: {window[0].severity}")
-    sum :: window.fold(0, (a, i) -> a + i.severity)
+    sum: window.fold(0, (a, i) -> a + i.severity)
     print("fold sum: {sum}")
-    doubled :: window.map(i -> i.severity * 2)
+    doubled: window.map(i -> i.severity * 2)
     print("map-to-owned: {doubled.join(",")}")
     loop i in window -> print("iter: {i.severity}")
     numbers := [1, 2, 3, 4]
-    read :: numbers[2..3].copy()
+    read: numbers[2..3].copy()
     if true {
-        edit :: &numbers[0..1]
+        edit: &numbers[0..1]
         edit[0] = 9
-        edited :: edit[0].copy()
+        edited: edit[0].copy()
         print("disjoint windows: {edited},{read[0]}")
     }
     slots := [5, 6, 7]
     if true {
-        first :: &slots[0]
+        first: &slots[0]
         first = 8
     }
     if true {
-        last :: &slots[2]
+        last: &slots[2]
         last = 9
     }
     print("disjoint indexes: {slots[0]},{slots[2]}")
     counters := Counters{left: 1, right: 2}
     if true {
-        left :: &counters.left
+        left: &counters.left
         left = 3
     }
     if true {
-        right :: &counters.right
+        right: &counters.right
         right = 4
     }
     counters.left = 3

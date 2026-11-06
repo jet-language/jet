@@ -3,37 +3,37 @@
 // packages or executing lifecycle commands. `--json` renders one object
 // through Core JSON in the Rust key order.
 
-fn cli_json_texts(values: [String]) -> Dyn Never! {
+cli_json_texts: fn(values: [String]) -> Dyn Never! {
     items := [Dyn]{}
     loop value in values -> &items.push(Dyn.Text(value))
     Dyn.Array(items)
 }
 
-fn cli_json_optional_text(value: String?) -> Dyn Never! {
+cli_json_optional_text: fn(value: String?) -> Dyn Never! {
     if value == {
         .Val(text) -> Dyn.Text(text)
         .None -> Dyn.Null
     }
 }
 
-fn cli_json_render(value: Dyn) -> String Never! {
+cli_json_render: fn(value: Dyn) -> String Never! {
     json.to_string(value) ?? panic("compact JSON rendering of a Dyn is total")
 }
 
 // A map's keys in the Rust `BTreeMap` order.
-fn cli_sorted_keys(map: [String: String]) -> [String] Never! {
+cli_sorted_keys: fn(map: [String: String]) -> [String] Never! {
     keys := map.keys().to_list()
     &keys.sort()
     keys
 }
 
-fn cli_none_or_join(values: [String], separator: String) -> String Never! {
+cli_none_or_join: fn(values: [String], separator: String) -> String Never! {
     if values.len() == 0 -> return "<none>"
     values.join(separator)
 }
 
 // One service's readiness and supervision facts for the human report.
-fn cli_env_info_service_summary(service: DevServicePlan) -> String Never! {
+cli_env_info_service_summary: fn(service: DevServicePlan) -> String Never! {
     facts := [String]{if service.enable -> "enabled" else -> "disabled"}
     if service.ports.len() > 0 {
         ports := [String]{}
@@ -42,7 +42,7 @@ fn cli_env_info_service_summary(service: DevServicePlan) -> String Never! {
     }
     if service.run == .Val(run) -> &facts.push("run={run.join(" ")}")
     if service.shutdown == .Val(shutdown) {
-        value :: if shutdown == {
+        value: if shutdown == {
             .Kill -> "kill"
             .Term(grace_ms) -> "term:{grace_ms}ms"
         }
@@ -51,7 +51,7 @@ fn cli_env_info_service_summary(service: DevServicePlan) -> String Never! {
     if service.data_dir == .Val(data_dir) -> &facts.push("data_dir={data_dir}")
     if service.ready == .Val(ready) -> &facts.push("ready={ready}")
     if service.ready_probe == .Val(probe) {
-        value :: if probe == {
+        value: if probe == {
             .Exec(command) -> "exec:{command}"
             .HTTP(url, status) -> if status == {
                 .Val(code) -> "http:{url}:{code}"
@@ -62,7 +62,7 @@ fn cli_env_info_service_summary(service: DevServicePlan) -> String Never! {
         }
         &facts.push("ready_probe={value}")
     }
-    readiness :: if {
+    readiness: if {
         service.ready != None -> "command"
         service.ready_probe != None -> "probe"
         service.ports.len() > 0 -> "tcp:{service.ports[0]}"
@@ -70,14 +70,14 @@ fn cli_env_info_service_summary(service: DevServicePlan) -> String Never! {
     }
     &facts.push("readiness={readiness}")
     if service.restart == .Val(restart) {
-        value :: if restart == {
+        value: if restart == {
             .Never -> "never"
             .OnFailure(max, backoff_ms, exponential) -> "on_failure:max={max},backoff_ms={backoff_ms},exponential={exponential}"
             .Always(max, backoff_ms, exponential) -> "always:max={max},backoff_ms={backoff_ms},exponential={exponential}"
         }
         &facts.push("restart={value}")
     }
-    lists :: [(label: String, values: [String])]{
+    lists: [(label: String, values: [String])]{
         (label: "watch", values: service.watch),
         (label: "after", values: service.after),
         (label: "before_start", values: service.before_start),
@@ -91,26 +91,26 @@ fn cli_env_info_service_summary(service: DevServicePlan) -> String Never! {
 }
 
 // One service as its `env info --json` object.
-fn cli_env_info_service_json(service: DevServicePlan) -> Dyn Never! {
+cli_env_info_service_json: fn(service: DevServicePlan) -> Dyn Never! {
     ports := [Dyn]{}
     loop port in service.ports -> &ports.push(Dyn.Int(port))
-    run :: if service.run == {
+    run: if service.run == {
         .Val(argv) -> cli_json_texts(argv)
         .None -> Dyn.Null
     }
-    shutdown :: if service.shutdown == {
+    shutdown: if service.shutdown == {
         .None -> Dyn.Null
         .Val(policy) -> if policy == {
             .Kill -> Dyn.Object(["kind": Dyn.Text("kill")])
             .Term(grace_ms) -> Dyn.Object(["kind": Dyn.Text("term"), "grace_ms": Dyn.Int(grace_ms)])
         }
     }
-    ready_probe :: if service.ready_probe == {
+    ready_probe: if service.ready_probe == {
         .None -> Dyn.Null
         .Val(probe) -> if probe == {
             .Exec(command) -> Dyn.Object(["kind": Dyn.Text("exec"), "command": Dyn.Text(command)])
             .HTTP(url, status) -> {
-                code :: if status == {
+                code: if status == {
                     .Val(value) -> Dyn.Int(value)
                     .None -> Dyn.Null
                 }
@@ -120,7 +120,7 @@ fn cli_env_info_service_json(service: DevServicePlan) -> Dyn Never! {
             .TCP(host, port) -> Dyn.Object(["kind": Dyn.Text("tcp"), "host": Dyn.Text(host), "port": Dyn.Int(port)])
         }
     }
-    restart :: if service.restart == {
+    restart: if service.restart == {
         .None -> Dyn.Null
         .Val(policy) -> if policy == {
             .Never -> Dyn.Object(["kind": Dyn.Text("never")])
@@ -130,7 +130,7 @@ fn cli_env_info_service_json(service: DevServicePlan) -> Dyn Never! {
     }
     extra := [Dyn]{}
     loop item in service.extra -> &extra.push(Dyn.Object(["name": Dyn.Text(item.name), "value": Dyn.Text(item.value)]))
-    readiness :: service.ready != None || service.ready_probe != None || service.ports.len() > 0
+    readiness: service.ready != None || service.ready_probe != None || service.ports.len() > 0
     Dyn.Object([
         "name": Dyn.Text(service.name.copy()),
         "enabled": Dyn.Bool(service.enable),
@@ -151,14 +151,14 @@ fn cli_env_info_service_json(service: DevServicePlan) -> Dyn Never! {
 }
 
 // Record `source` for variable `name` once, keeping first-seen order.
-fn cli_add_variable_source(sources: &[String: [String]], name: String, source: String) Never! {
+cli_add_variable_source: fn(sources: &[String: [String]], name: String, source: String) Never! {
     known := sources.get(name) ?? [String]{}
     if !known.contains(source) -> &known.push(source)
     sources[name] = known
 }
 
-fn cli_cmd_env_info(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Time.Wait]> Int Never! {
-    plan :: cli_load_project_plan_with_selections(&cache, theme, parsed.flags.preset, parsed.flags.environment) ?? return cli_exit_for(theme, err)
+cli_cmd_env_info: fn(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Time.Wait]> Int Never! {
+    plan: cli_load_project_plan_with_selections(&cache, theme, parsed.flags.preset, parsed.flags.environment) ?? return cli_exit_for(theme, err)
     cli_validate_integration_facts(plan) ?? {
         theme.error_coded(
             "E1335",
@@ -168,16 +168,16 @@ fn cli_cmd_env_info(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLI
         )
         return EXIT_USAGE
     }
-    facts :: plan.environment
-    preset :: if facts.selected_preset == {
+    facts: plan.environment
+    preset: if facts.selected_preset == {
         .Val(selected) -> selected.name
         .None -> "<none>"
     }
-    selected_presets :: if facts.selected_preset == {
+    selected_presets: if facts.selected_preset == {
         .Val(selected) -> selected.selected_presets
         .None -> [String]{}
     }
-    applied_presets :: if facts.selected_preset == {
+    applied_presets: if facts.selected_preset == {
         .Val(selected) -> selected.applied
         .None -> [String]{}
     }
@@ -187,9 +187,9 @@ fn cli_cmd_env_info(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLI
     // entries plus the jobs lifecycle hooks name); `checks` is what the
     // environment model supplies (`checks:` command hooks). Two headings keep
     // a reader from confusing the two.
-    entry :: cli_find_project_entry(plan.project_root)
+    entry: cli_find_project_entry(plan.project_root)
     jobs := cli_list_project_jobs(entry)
-    lifecycle :: facts.lifecycle
+    lifecycle: facts.lifecycle
     loop hook in lifecycle.on_enter {
         if hook.action == .Task(name) -> &jobs.push(name)
     }
@@ -201,7 +201,7 @@ fn cli_cmd_env_info(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLI
     loop hook in lifecycle.checks {
         if hook.action == .Command(_) -> &check_names.push(hook.name)
     }
-    checks :: cli_sorted_unique(check_names)
+    checks: cli_sorted_unique(check_names)
     variable_sources := [String: [String]]{}
     if facts.selected_preset == .Val(selected) {
         loop name in cli_sorted_keys(selected.variables) -> cli_add_variable_source(&variable_sources, name, "preset")
@@ -217,13 +217,13 @@ fn cli_cmd_env_info(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLI
     loop read in facts.environment_reads -> cli_add_variable_source(&variable_sources, read.name.removeprefix("$"), "environment")
     variable_names := variable_sources.keys().to_list()
     &variable_names.sort()
-    catalog :: LanguagePackCatalog.builtin()
+    catalog: LanguagePackCatalog.builtin()
     if parsed.flags.json {
         print(cli_env_info_json(plan, preset, selected_presets, applied_presets, packages, checks, jobs, variable_sources, variable_names, catalog))
         return EXIT_OK
     }
     theme.status("preset: {preset}")
-    applied :: if facts.selected_preset == {
+    applied: if facts.selected_preset == {
         .Val(selected) -> selected.applied.join(" -> ")
         .None -> "<none>"
     }
@@ -250,7 +250,7 @@ fn cli_cmd_env_info(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLI
     }
     theme.detail("language projections: {cli_none_or_join(expanded, "; ")}")
     theme.detail("packages: {cli_none_or_join(packages, ", ")}")
-    formatter :: if lifecycle.formatter == {
+    formatter: if lifecycle.formatter == {
         .Val(spec) -> spec.package
         .None -> "<none>"
     }
@@ -278,9 +278,9 @@ fn cli_cmd_env_info(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLI
 }
 
 // The `env info --json` object, in the Rust key order.
-fn cli_env_info_json(plan: RunPlan, preset: String, selected_presets: [String], applied_presets: [String], packages: [String], checks: [String], jobs: [String], variable_sources: [String: [String]], variable_names: [String], catalog: LanguagePackCatalog) -> String Never! {
-    facts :: plan.environment
-    lifecycle :: facts.lifecycle
+cli_env_info_json: fn(plan: RunPlan, preset: String, selected_presets: [String], applied_presets: [String], packages: [String], checks: [String], jobs: [String], variable_sources: [String: [String]], variable_names: [String], catalog: LanguagePackCatalog) -> String Never! {
+    facts: plan.environment
+    lifecycle: facts.lifecycle
     preset_names := [String]{}
     loop item in facts.presets -> &preset_names.push(item.name)
     profiles := [Dyn]{}
@@ -297,7 +297,7 @@ fn cli_env_info_json(plan: RunPlan, preset: String, selected_presets: [String], 
     }
     catalog_packs := [Dyn]{}
     loop name in catalog.names() {
-        pack :: catalog.get(name) ?? next
+        pack: catalog.get(name) ?? next
         &catalog_packs.push(Dyn.Object(["name": Dyn.Text(pack.name), "fingerprint": Dyn.Text(pack.fingerprint())]))
     }
     languages := [Dyn]{}
@@ -326,7 +326,7 @@ fn cli_env_info_json(plan: RunPlan, preset: String, selected_presets: [String], 
     }
     projections := [Dyn]{}
     loop projection in facts.language_projections {
-        selection :: projection.selection
+        selection: projection.selection
         &projections.push(Dyn.Object([
             "name": Dyn.Text(selection.name),
             "enable": Dyn.Bool(selection.enable),
@@ -343,7 +343,7 @@ fn cli_env_info_json(plan: RunPlan, preset: String, selected_presets: [String], 
             "changed": cli_json_texts(projection.changed),
         ]))
     }
-    formatter :: if lifecycle.formatter == {
+    formatter: if lifecycle.formatter == {
         .Val(spec) -> Dyn.Text(spec.package)
         .None -> Dyn.Null
     }

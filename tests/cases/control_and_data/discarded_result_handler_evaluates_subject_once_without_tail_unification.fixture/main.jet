@@ -1,5 +1,5 @@
 
-fn classify(ok: Bool) -[IO]> Int {
+classify: fn(ok: Bool) -[IO]> Int {
     print("subject")
     if ok {
         return 5
@@ -7,14 +7,14 @@ fn classify(ok: Bool) -[IO]> Int {
     return Err("bad")
 }
 
-fn handle(ok: Bool) -[IO]> {
+handle: fn(ok: Bool) -[IO]> {
         classify(ok) ? _success -> { print("success") } ! _failure -> {
             print("failure")
             9
         }
 }
 
-fn run() -[IO]> {
+run: fn() -[IO]> {
     #FX(authority: IO) {
         authority.with("IO")
         handle(true)

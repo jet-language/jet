@@ -7,16 +7,16 @@
 // The loop below is also the cost-view proof site:
 // `jet explain --cost Examples/suites/ownership.jet` reports its view
 // materialization with the shared-IR tier label.
-fn run() {
-    source :: "Ada@example.com"
-    domain :: source.after("@")
+run: fn() {
+    source: "Ada@example.com"
+    domain: source.after("@")
 
     // A read view does not consume its owner, so both remain usable.
     print("domain:{domain}")
     print("source:{source}")
 
     // `.copy()` makes the view-to-owned boundary explicit once.
-    owned_domain :: domain.copy()
+    owned_domain: domain.copy()
     print("owned:{owned_domain}")
 
     // Anti-pattern: this repeated owning push is intentionally visible to the

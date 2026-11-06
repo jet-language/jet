@@ -6,7 +6,7 @@
 use jet_sema.[SemaGraphModuleResult, SemaTotalityRow, sema_totality_rows]
 
 // One compiler fault.
-struct JetDriverIceRow {
+JetDriverIceRow: struct {
     // "name [key]" of the faulty function, or "-" when no one function owns
     // the fault (a module-wide stop, the link).
     function: String
@@ -19,13 +19,13 @@ struct JetDriverIceRow {
     message: String
 }
 
-fn jet_driver_ice_record(rows: &[JetDriverIceRow], function: String, pass: String, rule: String, message: String) Never! {
+jet_driver_ice_record: fn(rows: &[JetDriverIceRow], function: String, pass: String, rule: String, message: String) Never! {
     &rows.push(JetDriverIceRow{function: function, pass: pass, rule: rule, message: message})
 }
 
 // The ICE report body: a count, then one line per row in recorded order.
-fn jet_driver_ice_text(rows: [JetDriverIceRow]) -> String Never! {
-    noun :: if rows.len() == 1 -> "fault" else -> "faults"
+jet_driver_ice_text: fn(rows: [JetDriverIceRow]) -> String Never! {
+    noun: if rows.len() == 1 -> "fault" else -> "faults"
     lines := [String]{"{rows.len()} compiler {noun}:"}
     loop row in rows -> &lines.push("  {row.pass} {row.rule}: {row.function}: {row.message}")
     lines.join("\n")
@@ -33,13 +33,13 @@ fn jet_driver_ice_text(rows: [JetDriverIceRow]) -> String Never! {
 
 // The row as one JET_KEEP_GOING census line (jet_driver_keep_going_row's TSV
 // shape: phase, item, code, message, span), with code ICE.
-fn jet_driver_ice_keep_going_row(row: JetDriverIceRow) -> String Never! {
+jet_driver_ice_keep_going_row: fn(row: JetDriverIceRow) -> String Never! {
     "{row.pass}\t{jet_driver_keep_going_field(row.function)}\tICE\t{jet_driver_keep_going_field("{row.rule}: {row.message}")}\t-"
 }
 
 // A totality row's function as an ICE row names it: the function and its
 // module, or the module alone for a module-wide cause.
-fn jet_driver_totality_function(row: SemaTotalityRow) -> String Never! {
+jet_driver_totality_function: fn(row: SemaTotalityRow) -> String Never! {
     if row.function == "-" -> return "module {row.owner}"
     "{row.function} in {row.owner}"
 }
@@ -47,7 +47,7 @@ fn jet_driver_totality_function(row: SemaTotalityRow) -> String Never! {
 // The ICE report of a sema stop that broke totality (sema_totality_rows of
 // `modules`): `summary`, then one `totality` row of `pass` per recorded
 // cause of each incomplete function.
-fn jet_driver_totality_problem(summary: String, pass: String, modules: [SemaGraphModuleResult]) -> String Never! {
+jet_driver_totality_problem: fn(summary: String, pass: String, modules: [SemaGraphModuleResult]) -> String Never! {
     rows := [JetDriverIceRow]{}
     loop row in sema_totality_rows(modules) -> jet_driver_ice_record(&rows, jet_driver_totality_function(row), pass, "totality", row.reason)
     "{summary}: {jet_driver_ice_text(rows)}"

@@ -9,16 +9,16 @@ use jet_foundation.[
 ]
 
 #Test("compiler stages preserve every availability stage in order") {
-    stages :: COMPILER_STAGE_ALL
+    stages: COMPILER_STAGE_ALL
     assert(stages == [CompilerStage]{CompilerStage.Parsed, CompilerStage.Resolved, CompilerStage.Typed, CompilerStage.Prepared, CompilerStage.Emitted})
-    names :: loop stage in stages -> compiler_stage_as_str(stage)
+    names: loop stage in stages -> compiler_stage_as_str(stage)
     assert(names == [String]{"Parsed", "Resolved", "Typed", "Prepared", "Emitted"})
 }
 
 #Test("metadata producer statuses remain three distinct obligations") {
-    statuses :: [MetadataProducerStatus]{MetadataProducerStatus.ContractOnly, MetadataProducerStatus.NotImplemented, MetadataProducerStatus.ExistingCallableProducerNeedsExtension}
+    statuses: [MetadataProducerStatus]{MetadataProducerStatus.ContractOnly, MetadataProducerStatus.NotImplemented, MetadataProducerStatus.ExistingCallableProducerNeedsExtension}
     loop index in 0..<statuses.len() {
-        actual :: if statuses[index] == {
+        actual: if statuses[index] == {
             .ContractOnly -> 0
             .NotImplemented -> 1
             .ExistingCallableProducerNeedsExtension -> 2
@@ -57,12 +57,12 @@ use jet_foundation.[
     assert(classify_identifier("＿name") == IdentifierClass.Ordinary)
 }
 
-fn tool_facts_projection_matches(read: FactRead, member: String?, reflection: String?, detail: String?) -> Bool Never! {
+tool_facts_projection_matches: fn(read: FactRead, member: String?, reflection: String?, detail: String?) -> Bool Never! {
     if member == .Val(source) {
-        expected_read :: Val(read)
+        expected_read: Val(read)
         if fact_read_kind(source) != expected_read -> return false
     }
-    expected_public :: if read == FactRead.Origin -> Val("OriginInfo?") else -> None
+    expected_public: if read == FactRead.Origin -> Val("OriginInfo?") else -> None
     fact_read_source_member(read) == member &&
         fact_read_reflection_kind(read) == reflection &&
         fact_read_detail_field(read) == detail &&
@@ -92,25 +92,25 @@ fn tool_facts_projection_matches(read: FactRead, member: String?, reflection: St
 
 #Test("all build fact read projections exclude public and reflected value carriers") {
     assert(tool_facts_projection_matches(FactRead.BuildProfile, Val("$profile"), None, None))
-    builds :: [FactRead]{FactRead.BuildPackageName, FactRead.BuildPackageVersion, FactRead.BuildOS, FactRead.BuildStampGit, FactRead.BuildStampDirty, FactRead.BuildStampToolchain, FactRead.BuildStampAt}
+    builds: [FactRead]{FactRead.BuildPackageName, FactRead.BuildPackageVersion, FactRead.BuildOS, FactRead.BuildStampGit, FactRead.BuildStampDirty, FactRead.BuildStampToolchain, FactRead.BuildStampAt}
     loop read in builds -> assert(tool_facts_projection_matches(read, None, None, None))
 }
 
 #Test("registered planes and unknown readers preserve dynamic selection") {
-    flow :: Val(FactRead.RegisteredPlane{name: "Flow"})
-    taint :: Val(FactRead.RegisteredPlane{name: "Taint"})
-    duty :: Val(FactRead.RegisteredPlane{name: "Duty"})
+    flow: Val(FactRead.RegisteredPlane{name: "Flow"})
+    taint: Val(FactRead.RegisteredPlane{name: "Taint"})
+    duty: Val(FactRead.RegisteredPlane{name: "Duty"})
     assert(fact_read_kind("$flow") == flow)
     assert(fact_read_kind("$taint") == taint)
     assert(fact_read_kind("$duty") == duty)
-    planes :: [String]{"Flow", "Taint", "Duty"}
+    planes: [String]{"Flow", "Taint", "Duty"}
     loop plane in planes -> assert(tool_facts_projection_matches((FactRead.RegisteredPlane{name: plane}), None, Val(plane), None))
     assert(tool_facts_projection_matches(FactRead.RegisteredPlane{name: "Type.Interval"}, None, Val("Range"), None))
     assert(tool_facts_projection_matches(FactRead.RegisteredPlane{name: "Type.Exactness"}, None, Val("Exactness"), None))
     assert(tool_facts_projection_matches(FactRead.RegisteredPlane{name: "Exactness"}, None, Val("Exactness"), None))
-    unknown :: [String]{"", "unknown", "Build.Profile", "Type.Unknown", "flow"}
+    unknown: [String]{"", "unknown", "Build.Profile", "Type.Unknown", "flow"}
     loop plane in unknown -> assert(tool_facts_projection_matches((FactRead.RegisteredPlane{name: plane}), None, None, None))
-    spellings :: [String]{"", "layout", "$unknown", "$Flow", "$$range", "$build.profile", "$build.package.name", "$build.os", "$build.stamp.git"}
+    spellings: [String]{"", "layout", "$unknown", "$Flow", "$$range", "$build.profile", "$build.package.name", "$build.os", "$build.stamp.git"}
     loop spelling in spellings -> assert(fact_read_kind(spelling) == None)
 }
 
@@ -120,8 +120,8 @@ fn tool_facts_projection_matches(read: FactRead, member: String?, reflection: St
     seen := [String]{}
     loop row in FOUNDATION_FACT_READ_ROWS {
         loop plane in row.planes {
-            member :: row.member ?? panic("registered plane has no source reader")
-            read :: fact_read_kind(member) ?? panic("registered plane has no typed reader")
+            member: row.member ?? panic("registered plane has no source reader")
+            read: fact_read_kind(member) ?? panic("registered plane has no typed reader")
             assert(fact_read_reflection_kind(read) == fact_read_reflection_kind(FactRead.RegisteredPlane{name: plane}))
             found := false
             loop registered in FOUNDATION_FACT_READ_ROWS {
@@ -135,7 +135,7 @@ fn tool_facts_projection_matches(read: FactRead, member: String?, reflection: St
 }
 
 #Test("fact read members retain complete typed build and registered order") {
-    expected :: [String]{"$layout", "$name", "$fields", "$range", "$dimension", "$measure", "$exactness", "$classification", "$obligation", "$states", "$effects", "$sendability", "$movedness", "$attribution", "$origin", "$view_provenance", "$unit_scale_provenance", "$maturity", "$profile", "$flow", "$taint", "$duty"}
+    expected: [String]{"$layout", "$name", "$fields", "$range", "$dimension", "$measure", "$exactness", "$classification", "$obligation", "$states", "$effects", "$sendability", "$movedness", "$attribution", "$origin", "$view_provenance", "$unit_scale_provenance", "$maturity", "$profile", "$flow", "$taint", "$duty"}
     assert(fact_read_members() == expected)
     loop member in fact_read_members() -> assert(fact_read_kind(member) != None)
 }

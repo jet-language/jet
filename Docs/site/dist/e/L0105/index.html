@@ -38,37 +38,37 @@
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>L0105</code>: <code>tests/ui_lint/liveness_unused_import.warn</code>.</p>
 <pre class="diag">Warning [jet.UnusedLocalBinding]: Local binding `dead` is never read.
-  --&gt; liveness_unused_import.jet:14:5
+  --&gt; tests/ui_lint/liveness_unused_import.jet:14:5
     |
- 14 |     dead :: 5
+ 14 |     dead: 5
     |     ^^^^
  Why: A binding that no later expression reads adds dead code and may hide a computed result that should have been used.
  Fix: Remove the binding when its initializer is side-effect free, or rename `dead` to `_dead` when the value must be computed.
 More: jet-lang.dev/e/L0101
 
 Warning [jet.UnusedImport]: Import `files` is never used.
-  --&gt; liveness_unused_import.jet:1:5
+  --&gt; tests/ui_lint/liveness_unused_import.jet:1:5
     |
-  1 | use files :: core.files
+  1 | use files: core.files
     |     ^^^^^
  Why: An unused import adds a name and dependency to the file without contributing to checked code.
  Fix: Remove the import, or rename `files` to `_files` when the import is intentionally kept.
 More: jet-lang.dev/e/L0103
 
 Warning [jet.UnreachableExport]: Package export `package_helper` is unreachable.
-  --&gt; liveness_unused_import.jet:4:8
+  --&gt; tests/ui_lint/liveness_unused_import.jet:4:5
     |
-  4 |     fn package_helper() {
-    |        ^^^^^^^^^^^^^^
+  4 |     package_helper: fn() {
+    |     ^^^^^^^^^^^^^^
  Why: The package&#39;s explicit import graph and application roots contain no consumer for this package-scoped export; a library&#39;s public items remain open to external consumers.
  Fix: Remove the export, or rename `package_helper` to `_package_helper` when it is intentional.
 More: jet-lang.dev/e/L0105
 
 Warning [jet.UnusedPrivateFn]: Private function `unused_helper` is never called or used as a value.
-  --&gt; liveness_unused_import.jet:9:8
+  --&gt; tests/ui_lint/liveness_unused_import.jet:9:5
     |
-  9 |     fn unused_helper() {
-    |        ^^^^^^^^^^^^^
+  9 |     unused_helper: fn() {
+    |     ^^^^^^^^^^^^^
  Why: A private function with no reachable reference is dead code; public functions stay exempt because other modules may use them.
  Fix: Remove the function, or rename `unused_helper` to `_unused_helper` when it is intentional.
 More: jet-lang.dev/e/L0104

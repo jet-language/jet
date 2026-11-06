@@ -6,8 +6,8 @@ use {
     jet_foundation.[DIAGNOSTIC_ERROR]
 }
 
-fn variadic_fixture_reject(file: String, code: String) {
-    checked :: jet_cli_compile_file(file, false, None, JetDriverCompileMode.Program)
+variadic_fixture_reject: fn(file: String, code: String) {
+    checked: jet_cli_compile_file(file, false, None, JetDriverCompileMode.Program)
     if checked == {
         .Refused(refusal) -> {
             if !refusal.stderr.contains(code) -> panic("{file}: refusal lost {code}")
@@ -23,8 +23,8 @@ fn variadic_fixture_reject(file: String, code: String) {
     }
 }
 
-fn variadic_fixture_accept(file: String) {
-    checked :: jet_cli_compile_file(file, false, None, JetDriverCompileMode.Program)
+variadic_fixture_accept: fn(file: String) {
+    checked: jet_cli_compile_file(file, false, None, JetDriverCompileMode.Program)
     if checked == {
         .Refused(refusal) -> panic("{file}: {refusal.stderr}")
         .Compiled(result, snapshot) -> {
@@ -37,14 +37,14 @@ fn variadic_fixture_accept(file: String) {
 }
 
 #Test("variadic_fixtures") {
-    root :: "Compiler/JetSema/Tests/fixtures"
+    root: "Compiler/JetSema/Tests/fixtures"
     variadic_fixture_reject("{root}/VariadicSpreadNonTail.fixture/VariadicSpreadNonTail.jet", "E1312")
     variadic_fixture_reject("{root}/VariadicMoveBorrowed.fixture/VariadicMoveBorrowed.jet", "E0201")
     variadic_fixture_reject("{root}/VariadicMoveReadTail.fixture/VariadicMoveReadTail.jet", "E0203")
     variadic_fixture_reject("{root}/VariadicNonCloneSpread.fixture/VariadicNonCloneSpread.jet", "E0211")
     variadic_fixture_reject("{root}/VariadicSpreadElementMismatch.fixture/VariadicSpreadElementMismatch.jet", "E0112")
-    examples :: "Examples/features/basics"
-    stems :: [String]{"variadics_spread", "variadics_owned_lists", "variadics_borrowed_lists", "variadics_mixed_lists", "variadics_eval_order", "variadics_coercions"}
+    examples: "Examples/features/basics"
+    stems: [String]{"variadics_spread", "variadics_owned_lists", "variadics_borrowed_lists", "variadics_mixed_lists", "variadics_eval_order", "variadics_coercions"}
     loop stem in stems -> variadic_fixture_accept("{examples}/{stem}.jet")
     variadic_fixture_accept("{root}/VariadicSlotCoercions.fixture/VariadicSlotCoercions.jet")
     variadic_fixture_accept("{root}/VariadicTimeReordered.fixture/VariadicTimeReordered.jet")

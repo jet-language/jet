@@ -1,26 +1,26 @@
 use {
-    fs :: core.files
-    csv :: core.encoding.csv
-    browser :: core.web.browser
+    fs: core.files
+    csv: core.encoding.csv
+    browser: core.web.browser
 }
 
 #CLI
-struct WorkloadArgs {
+WorkloadArgs: struct {
     input: String
 }
 
-fn run(args: WorkloadArgs) {
-    input :: args.input
-    text :: fs.read(input) ?? panic("cannot read input")
-    rows :: csv.rows(
+run: fn(args: WorkloadArgs) {
+    input: args.input
+    text: fs.read(input) ?? panic("cannot read input")
+    rows: csv.rows(
         text, delimiter: "\t", header: true, skip_blank: true
     ) ?? panic("cannot parse input")
     loop row in rows {
-        fields :: row.fields
-        line_number :: row.line
+        fields: row.fields
+        line_number: row.line
         if fields.len() != 2 -> panic("bad browser row {line_number}")
-        op :: fields.get(0) ?? panic("missing operation")
-        value :: fields.get(1) ?? panic("missing value")
+        op: fields.get(0) ?? panic("missing operation")
+        value: fields.get(1) ?? panic("missing value")
         if {
             op == "profile" -> {
                 if {
@@ -44,8 +44,8 @@ fn run(args: WorkloadArgs) {
                 }
             }
             op == "connect" -> {
-                profile :: browser.profile("bidi-2025.5") ?? panic("profile setup failed")
-                timeout :: browser.timeout(10) ?? panic("timeout setup failed")
+                profile: browser.profile("bidi-2025.5") ?? panic("profile setup failed")
+                timeout: browser.timeout(10) ?? panic("timeout setup failed")
                 if {
                     browser.connect_profile(value, profile, timeout) == .Ok(_) -> {
                         print("connect|{value}|accepted")

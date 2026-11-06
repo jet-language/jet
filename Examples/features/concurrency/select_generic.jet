@@ -1,15 +1,15 @@
 // D-CONC-CHAN1=A: generic channel endpoints are nameable in signatures.
-package {
+package: {
     name: "select_generic"
     authority: { allow: [IO, Time.Wait] }
 }
 
-fn send_generic(tx: Sender<String>) { tx.send("generic") }
+send_generic: fn(tx: Sender<String>) { tx.send("generic") }
 
-fn receive_generic(rx: ^Receiver<String>) -> Receiver<String> { return rx }
+receive_generic: fn(rx: ^Receiver<String>) -> Receiver<String> { return rx }
 
-fn run() {
-    (sender, receiver) :: channel<String>()
+run: fn() {
+    (sender, receiver): channel<String>()
     send_generic(sender)
     if {
         value, receive_generic(^receiver) -> { print(value) }

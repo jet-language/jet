@@ -1,6 +1,6 @@
-use compute :: core.compute
+use compute: core.compute
 
-fn cell(values: Tensor, row_labels: [String], col_labels: [String], row: String, column: String) -> Float {
+cell: fn(values: Tensor, row_labels: [String], col_labels: [String], row: String, column: String) -> Float {
     ri := 0
     ci := 0
     loop label in row_labels {
@@ -14,13 +14,13 @@ fn cell(values: Tensor, row_labels: [String], col_labels: [String], row: String,
     return compute.get(values, [ri, ci]) ?? 0.0
 }
 
-fn run() {
-    source :: compute.from_list([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]) ?? panic("tensor")
-    values :: compute.reshape(source, [2, 3]) ?? panic("reshape")
-    rows :: [String]{"north", "south"}
-    columns :: [String]{"sales", "cost", "margin"}
-    row_name :: "south"
-    column_name :: "margin"
+run: fn() {
+    source: compute.from_list([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]) ?? panic("tensor")
+    values: compute.reshape(source, [2, 3]) ?? panic("reshape")
+    rows: [String]{"north", "south"}
+    columns: [String]{"sales", "cost", "margin"}
+    row_name: "south"
+    column_name: "margin"
     print("south/margin={cell(values, rows, columns, row_name, column_name)}")
     print("shape={compute.shape(values)}")
 }

@@ -1,9 +1,9 @@
 
-use process :: core.process
-tag PII { deny: [Exec] }
+use process: core.process
+PII: tag { deny: [Exec] }
 #Scrub(PII)
-fn redact(value: #PII String) -> String { value }
-fn run() {
+redact: fn(value: #PII String) -> String { value }
+run: fn() {
     value := redact(#PII #Input "secret")
     process.run(["echo", value]) ?? return Err("test")
 }

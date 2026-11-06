@@ -64,13 +64,13 @@ The bounded method exercise uses the existing native JSON shape through the
 default `jet run` path with a fresh binary:
 
 ```jet
-use json :: core.encoding.json
+use json: core.encoding.json
 
 #Codable
-struct Settings { port: Int }
+Settings: struct { port: Int }
 
-fn run() ![FieldError] {
-    cfg :: json.decode<Settings>("{{\"port\":8080}}")
+run: fn() ![FieldError] {
+    cfg: json.decode<Settings>("{{\"port\":8080}}")
     print(cfg.port)
 }
 ```

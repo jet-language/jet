@@ -1,22 +1,22 @@
-use files :: core.files
+use files: core.files
 
 #CLI
-struct Args {
+Args: struct {
     path: String
 }
 
-fn run(args: Args) Err! {
-    r :: Reader.over(files.read_bytes(args.path) ?? return)
+run: fn(args: Args) Err! {
+    r: Reader.over(files.read_bytes(args.path) ?? return)
     r.take_pattern([U8]{"JGB1"}) ?? return
-    n :: Int.from_u32(r.read_u32_le() ?? return)
+    n: Int.from_u32(r.read_u32_le() ?? return)
     sum7 := Float{0.0}
     hash := U64{14695981039346656037}
     loop _ in 0..<n {
-        i :: r.read_u32_le() ?? return
-        v :: r.read_f64_le() ?? return
-        l :: r.read_u16_le() ?? return
+        i: r.read_u32_le() ?? return
+        v: r.read_f64_le() ?? return
+        l: r.read_u16_le() ?? return
         if i % 7 == 0 -> sum7 += v
-        name :: &r.take(l) ?? return
+        name: &r.take(l) ?? return
         loop b in name {
             hash = ((hash).bit_xor(U64.from_u8(b))).wrapping_mul(U64{1099511628211})
         }

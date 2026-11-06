@@ -1,17 +1,17 @@
 Error [jet.LabelOnlyPassedByPosition]: `force` is a label-only parameter of `action`
-  --> tests/ui/fn_type_zone_call.jet:3:68
+  --> tests/ui/fn_type_zone_call.jet:3:69
     |
-  3 | fn apply(action: fn(*, force: Bool) -> Int) -> Int { return action(true) }
-    |                                                                    ^^^^
+  3 | apply: fn(action: fn(*, force: Bool) -> Int) -> Int { return action(true) }
+    |                                                                     ^^^^
  Why: The `*` in the declaration requires the label, so the call says what the value means
  Fix: Write `force: …` for this argument
 More: jet-lang.dev/e/E0769
 
 Error [jet.FunctionValueLabelMismatch]: This needs fn(*, force: Bool) -> Int, but the function value is fn(Bool) -> Int
-  --> tests/ui/fn_type_zone_call.jet:5:23
+  --> tests/ui/fn_type_zone_call.jet:5:22
     |
-  5 | fn run() { _ :: apply(save) }
-    |                       ^^^^
+  5 | run: fn() { _: apply(save) }
+    |                      ^^^^
  Why: Public labels and parameter zones are part of a function's callable type
  Fix: Use `fn(*, force: Bool) -> Int` here
 More: jet-lang.dev/e/E0771

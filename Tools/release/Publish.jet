@@ -7,65 +7,65 @@
 // restaged directory moves into the audit trail first.
 
 use {
-    files :: core.files
-    json :: core.encoding.json
-    process :: core.process
-    time :: core.time
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+    time: core.time
 }
 
-AUDIT_DIR :: "audit"
-STAGE_DIR :: "release"
+AUDIT_DIR: "audit"
+STAGE_DIR: "release"
 // The release-asset prefix of a C toolchain pack (jet's CC_PACK_ASSETS).
-CC_PACK_PREFIX :: "jet-cc-pack-"
-RECEIPTS_DIR :: "receipts"
+CC_PACK_PREFIX: "jet-cc-pack-"
+RECEIPTS_DIR: "receipts"
 
 // The key that signs a candidate and the public key publish trusts.
-struct Signer {
+Signer: struct {
     seed_path: String
     public_key: String
 }
 
 // The external programs a run uses, as argv prefixes.
-struct Programs {
+Programs: struct {
     gh: [String]
     jet: [String]
 }
 
-struct Outcome {
+Outcome: struct {
     verdict: String
     problems: [Problem]
     audit: String
     report: [String]
 }
 
-struct Ran {
+Ran: struct {
     code: Int
     output: String
     errors: String
 }
 
-fn run_argv(argv: [String], cwd: String) -[Exec, Time.Wait]> Ran Never! {
-    receipt :: process.cmd(argv).cwd(cwd).output_limit(268435456).run() ?? return Ran{code: 127, output: "", errors: "{argv[0]}: {err}"}
-    code :: if receipt.signal == .Val(_) -> 128 else -> receipt.code
+run_argv: fn(argv: [String], cwd: String) -[Exec, Time.Wait]> Ran Never! {
+    receipt: process.cmd(argv).cwd(cwd).output_limit(268435456).run() ?? return Ran{code: 127, output: "", errors: "{argv[0]}: {err}"}
+    code: if receipt.signal == .Val(_) -> 128 else -> receipt.code
     Ran{code: code, output: receipt.output.copy(), errors: receipt.errors.copy()}
 }
 
-fn with_args(prefix: [String], args: [String]) -> [String] Never! {
+with_args: fn(prefix: [String], args: [String]) -> [String] Never! {
     argv := prefix.copy()
     &argv.extend(args)
     argv
 }
 
-fn audit_number(dir: String) -[FS]> Int Never! {
+audit_number: fn(dir: String) -[FS]> Int Never! {
     highest := 0
-    entries :: files.list_dir(files.join(dir, AUDIT_DIR)) ?? return 1
+    entries: files.list_dir(files.join(dir, AUDIT_DIR)) ?? return 1
     loop entry in entries {
-        name :: entry.name
+        name: entry.name
         if name.len() < 4 || name.slice(3..<4) != "-" -> next
         value := 0
         digits := true
         loop byte in name.slice(0..<3).bytes() {
-            code :: Int.from_u8(byte)
+            code: Int.from_u8(byte)
             if code < 48 || code > 57 -> digits = false
             value = value * 10 + code - 48
         }
@@ -74,7 +74,7 @@ fn audit_number(dir: String) -[FS]> Int Never! {
     highest + 1
 }
 
-fn padded(number: Int) -> String Never! {
+padded: fn(number: Int) -> String Never! {
     if {
         number < 10 -> "00{number}"
         number < 100 -> "0{number}"
@@ -84,15 +84,15 @@ fn padded(number: Int) -> String Never! {
 
 // Moves DIR/name into the audit trail as NNN-name, so a rerun never
 // overwrites what an earlier run left.
-fn retire(dir: String, name: String, number: Int) Problem! -[FS]> {
-    path :: files.join(dir, name)
+retire: fn(dir: String, name: String, number: Int) Problem! -[FS]> {
+    path: files.join(dir, name)
     if !files.exists(path) -> return Ok(())
-    kept :: files.join(files.join(dir, AUDIT_DIR), "{padded(number)}-{name}")
+    kept: files.join(files.join(dir, AUDIT_DIR), "{padded(number)}-{name}")
     files.rename(path, kept) ?? return Err(problem(INPUT, "cannot keep {path} as {kept}: {err}"))
     Ok(())
 }
 
-fn problems_dyn(problems: [Problem]) -> Dyn Never! {
+problems_dyn: fn(problems: [Problem]) -> Dyn Never! {
     out := [Dyn]{}
     loop found in problems -> &out.push(Dyn.Object([String: Dyn]{"class": Dyn.Text(found.class.copy()), "text": Dyn.Text(found.text.copy())}))
     Dyn.Array(out)
@@ -101,9 +101,9 @@ fn problems_dyn(problems: [Problem]) -> Dyn Never! {
 // Writes DIR/audit/NNN-<step>.json and returns its path; an existing entry
 // is never replaced. Evidence comes first: a step that cannot write its
 // entry does not go on.
-fn write_audit(dir: String, number: Int, step: String, verdict: String, problems: [Problem], details: [String: Dyn]) -[FS, Time]> String Problem! {
-    audit :: files.join(dir, AUDIT_DIR)
-    path :: files.join(audit, "{padded(number)}-{step}.json")
+write_audit: fn(dir: String, number: Int, step: String, verdict: String, problems: [Problem], details: [String: Dyn]) -[FS, Time]> String Problem! {
+    audit: files.join(dir, AUDIT_DIR)
+    path: files.join(audit, "{padded(number)}-{step}.json")
     files.create_dir_all(audit) ?? return Err(problem(INPUT, "the audit entry {path} was not written: {err}"))
     if files.exists(path) -> return Err(problem(INPUT, "the audit entry {path} already exists, so this run's entry was not written"))
     entry := details.copy()
@@ -111,17 +111,17 @@ fn write_audit(dir: String, number: Int, step: String, verdict: String, problems
     entry["verdict"] = Dyn.Text(verdict.copy())
     entry["at"] = Dyn.Text(time.isoformat(time.now()))
     entry["problems"] = problems_dyn(problems)
-    text :: json.canonical(Dyn.Object(entry)) ?? return Err(problem(INPUT, "the audit entry {path} was not written: {err}"))
+    text: json.canonical(Dyn.Object(entry)) ?? return Err(problem(INPUT, "the audit entry {path} was not written: {err}"))
     files.write(path, "{text}\n") ?? return Err(problem(INPUT, "the audit entry {path} was not written: {err}"))
     Ok(path)
 }
 
 // Whether DIR/audit holds the `candidate` entry that sealed `digest`.
-fn candidate_audited(dir: String, digest: String) -[FS]> Bool Never! {
-    entries :: files.list_dir(files.join(dir, AUDIT_DIR)) ?? return false
+candidate_audited: fn(dir: String, digest: String) -[FS]> Bool Never! {
+    entries: files.list_dir(files.join(dir, AUDIT_DIR)) ?? return false
     loop entry in entries {
         if !entry.name.ends_with("-candidate.json") -> next
-        tree :: read_json(files.join(files.join(dir, AUDIT_DIR), entry.name)) ?? next
+        tree: read_json(files.join(files.join(dir, AUDIT_DIR), entry.name)) ?? next
         if text_field(tree, "verdict") == "CANDIDATE" && text_field(tree, "content_digest") == digest -> return true
     }
     false
@@ -131,30 +131,30 @@ fn candidate_audited(dir: String, digest: String) -[FS]> Bool Never! {
 // names, owners and times fixed so the same inputs give the same bytes. The
 // combined archive (`with_packs`) also carries the C toolchain packs, which
 // stay outside SHA256SUMS because jet checks them against its own hash.
-fn pack_archive(dir: String, out: String, with_packs: Bool{false}) -[FS, Exec, Time.Wait]> Problem? Never! {
+pack_archive: fn(dir: String, out: String, with_packs: Bool{false}) -[FS, Exec, Time.Wait]> Problem? Never! {
     argv := [String]{"tar", "--sort=name", "--owner=0", "--group=0", "--numeric-owner", "--mtime=@0", "--use-compress-program=gzip -n", "-cf", out.copy()}
     loop name in SEED_FILES {
         if files.exists(files.join(dir, name)) -> &argv.push(name.copy())
     }
     &argv.push("SHA256SUMS")
     if with_packs -> &argv.extend(cc_pack_names(dir))
-    ran :: run_argv(argv, dir)
+    ran: run_argv(argv, dir)
     if ran.code != 0 -> return Val(problem(INPUT, "packing {files.basename(out)} failed (exit {ran.code}): {ran.errors.trim()}"))
     None
 }
 
 // Packs the archive again and compares the bytes with `staged`.
-fn repack_problems(dir: String, staged: String, number: Int) -[FS, Exec, Time.Wait]> [Problem] Never! {
-    again :: files.join(files.join(dir, AUDIT_DIR), "{padded(number)}-repack")
+repack_problems: fn(dir: String, staged: String, number: Int) -[FS, Exec, Time.Wait]> [Problem] Never! {
+    again: files.join(files.join(dir, AUDIT_DIR), "{padded(number)}-repack")
     files.create_dir_all(again) ?? return [Problem]{problem(INPUT, "cannot create {again}: {err}")}
-    second :: files.join(again, files.basename(staged))
+    second: files.join(again, files.basename(staged))
     if pack_archive(dir, second) == .Val(failed) -> return [Problem]{failed}
-    first :: files.read_bytes(staged) ?? return [Problem]{problem(STALE, "the staged archive {files.basename(staged)} is missing: {err}")}
-    bytes :: files.read_bytes(second) ?? return [Problem]{problem(NONDETERMINISM, "the second pack is unreadable: {err}")}
+    first: files.read_bytes(staged) ?? return [Problem]{problem(STALE, "the staged archive {files.basename(staged)} is missing: {err}")}
+    bytes: files.read_bytes(second) ?? return [Problem]{problem(NONDETERMINISM, "the second pack is unreadable: {err}")}
     archive_problems(first, bytes, files.basename(staged))
 }
 
-fn archive_problems(first: [U8], second: [U8], name: String) -> [Problem] Never! {
+archive_problems: fn(first: [U8], second: [U8], name: String) -> [Problem] Never! {
     if first == second -> return [Problem]{}
     [Problem]{problem(NONDETERMINISM, "packing {name} twice gave different bytes ({sha256_hex(first)} then {sha256_hex(second)}): the archive is not reproducible")}
 }
@@ -163,13 +163,13 @@ fn archive_problems(first: [U8], second: [U8], name: String) -> [Problem] Never!
 // email or mounts (the rules of Tools/agent/LaneCheck.jet's personal-information
 // guard, `--patterns`) or one of `literals`. Binary files are searched too: a
 // path baked into jet is a leak.
-fn personal_problems(root: String, dir: String, paths: [String], literals: [String], programs: Programs) -[FS, Exec, Time.Wait]> [Problem] Never! {
-    rules :: run_argv(with_args(programs.jet, [String]{files.join(root, "Tools/agent/LaneCheck.jet"), "--patterns"}), dir)
+personal_problems: fn(root: String, dir: String, paths: [String], literals: [String], programs: Programs) -[FS, Exec, Time.Wait]> [Problem] Never! {
+    rules: run_argv(with_args(programs.jet, [String]{files.join(root, "Tools/agent/LaneCheck.jet"), "--patterns"}), dir)
     if rules.code != 0 -> return [Problem]{problem(PERSONAL, "cannot read the personal-information rules: {rules.errors.trim()}")}
     path_args := [String]{}
     word_args := [String]{}
     loop line in rules.output.split("\n").to_list() {
-        cells :: line.split("\t").to_list()
+        cells: line.split("\t").to_list()
         if cells.len() != 2 || cells[1] == "" -> next
         if {
             cells[0] == "path" -> &path_args.extend([String]{"-e", cells[1].copy()})
@@ -181,7 +181,7 @@ fn personal_problems(root: String, dir: String, paths: [String], literals: [Stri
         if literal.len() > 1 -> &literal_args.extend([String]{"-e", literal.copy()})
     }
     problems := [Problem]{}
-    passes :: [(flags: [String], args: [String])]{(flags: [String]{"-P"}, args: path_args), (flags: [String]{"-i", "-P"}, args: word_args), (flags: [String]{"-F"}, args: literal_args)}
+    passes: [(flags: [String], args: [String])]{(flags: [String]{"-P"}, args: path_args), (flags: [String]{"-i", "-P"}, args: word_args), (flags: [String]{"-F"}, args: literal_args)}
     loop pass in passes {
         if pass.args.len() == 0 -> next
         argv := [String]{"git", "grep", "--no-index", "-a", "-l"}
@@ -189,7 +189,7 @@ fn personal_problems(root: String, dir: String, paths: [String], literals: [Stri
         &argv.extend(pass.args)
         &argv.push("--")
         &argv.extend(paths)
-        found :: run_argv(argv, dir)
+        found: run_argv(argv, dir)
         if found.code > 1 {
             &problems.push(problem(PERSONAL, "git grep failed (exit {found.code}): {found.errors.trim()}"))
             next
@@ -201,7 +201,7 @@ fn personal_problems(root: String, dir: String, paths: [String], literals: [Stri
     problems
 }
 
-fn shipped_names(dir: String) -[FS]> [String] Never! {
+shipped_names: fn(dir: String) -[FS]> [String] Never! {
     names := [String]{}
     loop name in SEED_FILES {
         if files.exists(files.join(dir, name)) -> &names.push(name.copy())
@@ -211,9 +211,9 @@ fn shipped_names(dir: String) -[FS]> [String] Never! {
 
 // The C toolchain packs in `dir`: release-compiler.mjs puts this host's
 // `jet-cc-pack-<system>.tar.zst` beside jet, where jet looks for it first.
-fn cc_pack_names(dir: String) -[FS]> [String] Never! {
+cc_pack_names: fn(dir: String) -[FS]> [String] Never! {
     names := [String]{}
-    entries :: files.list_dir(dir) ?? return names
+    entries: files.list_dir(dir) ?? return names
     loop entry in entries {
         if entry.name.starts_with(CC_PACK_PREFIX) && entry.name.ends_with(".tar.zst") -> &names.push(entry.name.copy())
     }
@@ -223,23 +223,23 @@ fn cc_pack_names(dir: String) -[FS]> [String] Never! {
 
 // The combined jet+pack archive beside seed asset `asset`
 // (`jet-a0_NNN-linux-x64.tar.gz` gives `jet-a0_NNN-linux-x64-cc.tar.gz`).
-fn combined_asset_name(asset: String) -> String Never! {
+combined_asset_name: fn(asset: String) -> String Never! {
     "{asset.removesuffix(".tar.gz")}-cc.tar.gz"
 }
 
 // The staged assets in upload order, as they are on disk now: the seed
 // archive, its .sha256, jet, IDENTITY and SHA256SUMS, then the combined
 // archive and the packs when the seed carries a pack.
-fn staged_artifacts(stage: String, asset: String) -[FS]> [Artifact] Problem! {
+staged_artifacts: fn(stage: String, asset: String) -[FS]> [Artifact] Problem! {
     out := [Artifact]{}
     names := [String]{asset, "{asset}.sha256", "jet", "IDENTITY", "SHA256SUMS"}
-    packs :: cc_pack_names(stage)
+    packs: cc_pack_names(stage)
     if packs.len() > 0 {
         &names.push(combined_asset_name(asset))
         &names.extend(packs)
     }
     loop name in names {
-        found :: file_artifact(files.join(stage, name), name) ?? return Err(problem(STALE, "the staged asset {name} is missing: {err.text}"))
+        found: file_artifact(files.join(stage, name), name) ?? return Err(problem(STALE, "the staged asset {name} is missing: {err.text}"))
         &out.push(found)
     }
     Ok(out)
@@ -248,20 +248,20 @@ fn staged_artifacts(stage: String, asset: String) -[FS]> [Artifact] Problem! {
 // Stages DIR/release/: the seed archive and its .sha256, jet, IDENTITY, and
 // when the seed carries a C toolchain pack, the pack and the combined archive
 // of jet and the pack; SHA256SUMS of those, and NOTES.md.
-fn stage_assets(dir: String, asset: String) -[FS, Exec, Time.Wait]> Problem? Never! {
-    stage :: files.join(dir, STAGE_DIR)
+stage_assets: fn(dir: String, asset: String) -[FS, Exec, Time.Wait]> Problem? Never! {
+    stage: files.join(dir, STAGE_DIR)
     files.create_dir_all(stage) ?? return Val(problem(INPUT, "cannot create {stage}: {err}"))
-    archive :: files.join(stage, asset)
+    archive: files.join(stage, asset)
     if pack_archive(dir, archive) == .Val(failed) -> return Val(failed)
-    bytes :: files.read_bytes(archive) ?? return Val(problem(INPUT, "cannot read {archive}: {err}"))
+    bytes: files.read_bytes(archive) ?? return Val(problem(INPUT, "cannot read {archive}: {err}"))
     files.write(files.join(stage, "{asset}.sha256"), "{sha256_hex(bytes)}  {asset}\n") ?? return Val(problem(INPUT, "cannot write {asset}.sha256: {err}"))
     files.copy(files.join(dir, "jet"), files.join(stage, "jet")) ?? return Val(problem(INPUT, "cannot copy jet: {err}"))
     files.set_mode(files.join(stage, "jet"), 493) ?? return Val(problem(INPUT, "cannot make the staged jet executable: {err}"))
     files.copy(files.join(dir, "IDENTITY"), files.join(stage, "IDENTITY")) ?? return Val(problem(INPUT, "cannot copy IDENTITY: {err}"))
     summed := [String]{asset, "jet", "IDENTITY"}
-    packs :: cc_pack_names(dir)
+    packs: cc_pack_names(dir)
     if packs.len() > 0 {
-        combined :: combined_asset_name(asset)
+        combined: combined_asset_name(asset)
         if pack_archive(dir, files.join(stage, combined), with_packs: true) == .Val(failed) -> return Val(failed)
         loop name in packs {
             files.copy(files.join(dir, name), files.join(stage, name)) ?? return Val(problem(INPUT, "cannot copy {name}: {err}"))
@@ -271,7 +271,7 @@ fn stage_assets(dir: String, asset: String) -[FS, Exec, Time.Wait]> Problem? Nev
     }
     sums := [Artifact]{}
     loop name in summed {
-        found :: file_artifact(files.join(stage, name), name) ?? return Val(err)
+        found: file_artifact(files.join(stage, name), name) ?? return Val(err)
         &sums.push(found)
     }
     files.write(files.join(stage, "SHA256SUMS"), sums_text(sums)) ?? return Val(problem(INPUT, "cannot write the staged SHA256SUMS: {err}"))
@@ -280,17 +280,17 @@ fn stage_assets(dir: String, asset: String) -[FS, Exec, Time.Wait]> Problem? Nev
 
 // The receipts of a build: each EVDIR/verify-full.json, copied into
 // DIR/receipts/ so the record can name them relative to DIR.
-fn copy_receipts(dir: String, evidence: [String]) -[FS]> [Receipt] Never! {
+copy_receipts: fn(dir: String, evidence: [String]) -[FS]> [Receipt] Never! {
     receipts := [Receipt]{}
-    target :: files.join(dir, RECEIPTS_DIR)
+    target: files.join(dir, RECEIPTS_DIR)
     if files.create_dir_all(target) == .Err(failed) {
         receipt := empty_receipt("verify-full", RECEIPTS_DIR, [U8]{})
         &receipt.problems.push(problem(INPUT, "cannot create {target}: {failed}"))
         return [Receipt]{receipt}
     }
     loop (index, source) in evidence {
-        file :: "{RECEIPTS_DIR}/{padded(index + 1)}-verify-full.json"
-        bytes :: files.read_bytes(files.join(source, "verify-full.json")) ?? {
+        file: "{RECEIPTS_DIR}/{padded(index + 1)}-verify-full.json"
+        bytes: files.read_bytes(files.join(source, "verify-full.json")) ?? {
             receipt := empty_receipt("verify-full", file, [U8]{})
             &receipt.problems.push(problem(MISSING_RUNNER, "{source}/verify-full.json does not exist: that runner never reported"))
             &receipts.push(receipt)
@@ -304,10 +304,10 @@ fn copy_receipts(dir: String, evidence: [String]) -[FS]> [Receipt] Never! {
 }
 
 // The receipts the record names, read back from DIR.
-fn stored_receipts(dir: String, release: Release) -[FS]> [Receipt] Never! {
+stored_receipts: fn(dir: String, release: Release) -[FS]> [Receipt] Never! {
     if release.kind == "admitted" -> return [Receipt]{read_receipt(dir, "RELEASE.json", "release-compiler")}
     names := [String]{}
-    entries :: files.list_dir(files.join(dir, RECEIPTS_DIR)) ?? return [Receipt]{}
+    entries: files.list_dir(files.join(dir, RECEIPTS_DIR)) ?? return [Receipt]{}
     loop entry in entries -> &names.push(entry.name.copy())
     &names.sort_by((left: String, right: String) -> left <=> right)
     receipts := [Receipt]{}
@@ -315,28 +315,28 @@ fn stored_receipts(dir: String, release: Release) -[FS]> [Receipt] Never! {
     receipts
 }
 
-fn read_matrix(root: String) -[FS]> [MatrixRow] Problem! {
-    text :: files.read(files.join(root, SUPPORT_MATRIX_PATH)) ?? return Err(problem(MATRIX, "cannot read {SUPPORT_MATRIX_PATH}: {err}"))
-    rows :: parse_matrix(text) ?? return Err(err)
+read_matrix: fn(root: String) -[FS]> [MatrixRow] Problem! {
+    text: files.read(files.join(root, SUPPORT_MATRIX_PATH)) ?? return Err(problem(MATRIX, "cannot read {SUPPORT_MATRIX_PATH}: {err}"))
+    rows: parse_matrix(text) ?? return Err(err)
     Ok(rows)
 }
 
-fn blocked_report(command: String, problems: [Problem]) -> [String] Never! {
+blocked_report: fn(command: String, problems: [Problem]) -> [String] Never! {
     lines := [String]{"BLOCKED: {command} found {problems.len()} problem(s):"}
     loop found in problems -> &lines.push("  [{found.class}] {found.text}")
     lines
 }
 
 // `candidate DIR`: stage, gate, and on a clean gate sign the record.
-fn candidate_step(dir: String, root: String, evidence: [String], signer: Signer, remote: Remote, programs: Programs) -[FS, Env, Exec, Time, Time.Wait]> Outcome Never! {
-    number :: audit_number(dir)
+candidate_step: fn(dir: String, root: String, evidence: [String], signer: Signer, remote: Remote, programs: Programs) -[FS, Env, Exec, Time, Time.Wait]> Outcome Never! {
+    number: audit_number(dir)
     problems := [Problem]{}
     if files.create_dir_all(files.join(dir, AUDIT_DIR)) == .Err(failed) -> &problems.push(problem(INPUT, "cannot create {dir}/{AUDIT_DIR}: {failed}"))
-    retired :: [String]{STAGE_DIR, RECEIPTS_DIR, CANDIDATE_FILE, SIGNATURE_FILE}
+    retired: [String]{STAGE_DIR, RECEIPTS_DIR, CANDIDATE_FILE, SIGNATURE_FILE}
     loop name in retired {
         if retire(dir, name, number) == .Err(failed) -> &problems.push(failed)
     }
-    release :: read_release(dir)
+    release: read_release(dir)
     &problems.extend(release.problems)
     matrix := [MatrixRow]{}
     if read_matrix(root) == {
@@ -353,10 +353,10 @@ fn candidate_step(dir: String, root: String, evidence: [String], signer: Signer,
     names := remote.local_tags.copy()
     loop known in remote.origin_tags -> &names.push(known.name.copy())
     &names.extend(remote.released)
-    name :: if release.kind == "admitted" -> release.name.copy() else -> next_release_name(names)
+    name: if release.kind == "admitted" -> release.name.copy() else -> next_release_name(names)
     if contains_text(remote.released, name) -> &problems.push(problem(REMOTE, "{name} is already a GitHub release"))
-    asset :: seed_asset_name(name, release.target)
-    stage :: files.join(dir, STAGE_DIR)
+    asset: seed_asset_name(name, release.target)
+    stage: files.join(dir, STAGE_DIR)
     staged := [Artifact]{}
     if release.problems.len() == 0 {
         if stage_assets(dir, asset) == {
@@ -371,7 +371,7 @@ fn candidate_step(dir: String, root: String, evidence: [String], signer: Signer,
         }
     }
     candidate := Candidate{name: name, release: release.copy(), receipts: receipts, matrix: matrix, remote: remote.copy(), staged: staged, notes_sha256: "", signer: signer.public_key.copy()}
-    notes :: release_notes(candidate, gate_text(release, receipts))
+    notes: release_notes(candidate, gate_text(release, receipts))
     candidate.notes_sha256 = sha256_hex(notes.bytes())
     if files.exists(stage) {
         files.write(files.join(stage, NOTES_FILE), notes) ?? &problems.push(problem(INPUT, "cannot write {NOTES_FILE}: {err}"))
@@ -383,14 +383,14 @@ fn candidate_step(dir: String, root: String, evidence: [String], signer: Signer,
         &problems.extend(personal_problems(root, dir, shipped_names(dir), [String]{root, dir}, programs))
         if files.exists(stage) -> &problems.extend(personal_problems(root, stage, [String]{"."}, [String]{root, dir}, programs))
     }
-    record :: record_of(candidate)
+    record: record_of(candidate)
     if signer.public_key == "" -> &problems.push(problem(SIGNING, "no public key for the signer: create one with `jet registry keygen --registry jet-release`"))
-    digest :: content_digest(record) ?? ""
+    digest: content_digest(record) ?? ""
     if problems.len() == 0 {
         if sign_digest(signer.seed_path, signer.public_key, digest) == {
             .Ok(signature) -> {
-                sealed :: sealed_record(record) ?? ""
-                writes :: [(path: String, text: String)]{
+                sealed: sealed_record(record) ?? ""
+                writes: [(path: String, text: String)]{
                     (path: files.join(dir, CANDIDATE_FILE), text: sealed),
                     (path: files.join(stage, CANDIDATE_FILE), text: sealed),
                     (path: files.join(dir, SIGNATURE_FILE), text: "{signature}\n"),
@@ -405,7 +405,7 @@ fn candidate_step(dir: String, root: String, evidence: [String], signer: Signer,
     }
     // publish requires this entry (candidate_audited), so a record whose
     // audit entry could not be written can never be published.
-    sealed :: problems.len() == 0
+    sealed: problems.len() == 0
     audit := ""
     if write_audit(dir, number, "candidate", if sealed -> "CANDIDATE" else -> "BLOCKED", problems, [String: Dyn]{"name": Dyn.Text(name.copy()), "content_digest": Dyn.Text(digest.copy()), "record": record.copy()}) == {
         .Ok(path) -> audit = path.copy()
@@ -414,7 +414,7 @@ fn candidate_step(dir: String, root: String, evidence: [String], signer: Signer,
             &problems.push(failed)
         }
     }
-    verdict :: if problems.len() == 0 -> "CANDIDATE" else -> "BLOCKED"
+    verdict: if problems.len() == 0 -> "CANDIDATE" else -> "BLOCKED"
     report := [String]{}
     if {
         problems.len() == 0 -> &report.extend([String]{"CANDIDATE {name}: {dir}/{CANDIDATE_FILE} ({digest}), signed by {signer.public_key}.", "Audit: {audit}", "Next: jet run Tools/release/Main.jet -- publish {dir} --dry-run"})
@@ -428,17 +428,17 @@ fn candidate_step(dir: String, root: String, evidence: [String], signer: Signer,
 
 // What GitHub holds of release `name`: asset name and size, or None when
 // there is no such release.
-fn uploaded_assets(name: String, slug: String, programs: Programs, cwd: String) -[Exec, Time.Wait]> [Artifact]? Never! {
-    ran :: run_argv(with_args(programs.gh, [String]{"release", "view", name, "-R", slug, "--json", "assets"}), cwd)
+uploaded_assets: fn(name: String, slug: String, programs: Programs, cwd: String) -[Exec, Time.Wait]> [Artifact]? Never! {
+    ran: run_argv(with_args(programs.gh, [String]{"release", "view", name, "-R", slug, "--json", "assets"}), cwd)
     if ran.code != 0 -> return None
-    tree :: json.parse(ran.output) ?? return None
+    tree: json.parse(ran.output) ?? return None
     out := [Artifact]{}
     loop item in array_field(tree, "assets") -> &out.push(Artifact{path: text_field(item, "name"), sha256: "", size: int_field(item, "size") ?? -1})
     Val(out)
 }
 
 // The assets GitHub lacks or holds with another size.
-fn partial_problems(name: String, expected: [Artifact], uploaded: [Artifact]) -> [Problem] Never! {
+partial_problems: fn(name: String, expected: [Artifact], uploaded: [Artifact]) -> [Problem] Never! {
     problems := [Problem]{}
     missing := [String]{}
     loop artifact in expected {
@@ -455,20 +455,20 @@ fn partial_problems(name: String, expected: [Artifact], uploaded: [Artifact]) ->
     problems
 }
 
-fn record_assets(dir: String, record: Dyn) -[FS]> [Artifact] Never! {
+record_assets: fn(dir: String, record: Dyn) -[FS]> [Artifact] Never! {
     out := [Artifact]{}
-    stage :: files.join(dir, STAGE_DIR)
+    stage: files.join(dir, STAGE_DIR)
     loop item in array_field(field(record, "metadata"), "assets") {
-        name :: if item == .Text(value) -> value.copy() else -> ""
+        name: if item == .Text(value) -> value.copy() else -> ""
         if file_artifact(files.join(stage, name), name) == .Ok(found) -> &out.push(found)
     }
     out
 }
 
-fn quoted(word: String) -> String Never! {
+quoted: fn(word: String) -> String Never! {
     plain := true
     loop byte in word.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if !((code >= 48 && code <= 58) || (code >= 64 && code <= 90) || (code >= 97 && code <= 122) || code == 37 || code == 43 || code == 44 || code == 45 || code == 46 || code == 47 || code == 61 || code == 95) -> plain = false
     }
     if plain && word != "" -> return word.copy()
@@ -478,8 +478,8 @@ fn quoted(word: String) -> String Never! {
 // `publish DIR`: check the stored record against a fresh derivation and
 // every gate; then run `gh release create` (or print it, with dry_run) and
 // confirm GitHub holds every asset.
-fn publish_step(dir: String, root: String, trusted: String, remote: Remote, programs: Programs, dry_run: Bool{false}) -[FS, Env, Exec, Time, Time.Wait]> Outcome Never! {
-    number :: audit_number(dir)
+publish_step: fn(dir: String, root: String, trusted: String, remote: Remote, programs: Programs, dry_run: Bool{false}) -[FS, Env, Exec, Time, Time.Wait]> Outcome Never! {
+    number: audit_number(dir)
     problems := [Problem]{}
     stored := Dyn.Null
     if files.read(files.join(dir, CANDIDATE_FILE)) == {
@@ -489,10 +489,10 @@ fn publish_step(dir: String, root: String, trusted: String, remote: Remote, prog
         }
         .Err(_) -> &problems.push(problem(INPUT, "{dir} has no {CANDIDATE_FILE}: run `candidate` first"))
     }
-    signature :: (read_text(files.join(dir, SIGNATURE_FILE)) ?? "").trim().copy()
-    name :: text_field(stored, "name")
-    recorded :: text_field(stored, "content_digest")
-    digest :: content_digest(stored) ?? ""
+    signature: (read_text(files.join(dir, SIGNATURE_FILE)) ?? "").trim().copy()
+    name: text_field(stored, "name")
+    recorded: text_field(stored, "content_digest")
+    digest: content_digest(stored) ?? ""
     if is_object(stored) {
         if text_field(stored, "schema") != CANDIDATE_SCHEMA -> &problems.push(problem(MISMATCH, "{CANDIDATE_FILE} schema is {text_field(stored, "schema")}, not {CANDIDATE_SCHEMA}"))
         if recorded != digest -> &problems.push(problem(MISMATCH, "{CANDIDATE_FILE} was changed after it was sealed: its content digest is {digest}, not the recorded {recorded}"))
@@ -504,25 +504,25 @@ fn publish_step(dir: String, root: String, trusted: String, remote: Remote, prog
         }
         if recorded == digest && !candidate_audited(dir, recorded) -> &problems.push(problem(MISMATCH, "{dir}/{AUDIT_DIR} holds no candidate entry that sealed {recorded}: run candidate again"))
     }
-    release :: read_release(dir)
+    release: read_release(dir)
     &problems.extend(release.problems)
     matrix := [MatrixRow]{}
     if read_matrix(root) == {
         .Ok(rows) -> matrix = rows
         .Err(failed) -> &problems.push(failed)
     }
-    receipts :: stored_receipts(dir, release)
-    asset :: seed_asset_name(name, release.target)
-    stage :: files.join(dir, STAGE_DIR)
+    receipts: stored_receipts(dir, release)
+    asset: seed_asset_name(name, release.target)
+    stage: files.join(dir, STAGE_DIR)
     staged := [Artifact]{}
     if staged_artifacts(stage, asset) == {
         .Ok(found) -> staged = found
         .Err(failed) -> &problems.push(failed)
     }
-    notes :: files.read(files.join(stage, NOTES_FILE)) ?? ""
+    notes: files.read(files.join(stage, NOTES_FILE)) ?? ""
     candidate := Candidate{name: name.copy(), release: release.copy(), receipts: receipts, matrix: matrix, remote: remote.copy(), staged: staged, notes_sha256: sha256_hex(notes.bytes()), signer: trusted.copy()}
     if notes != release_notes(candidate, gate_text(release, receipts)) -> &problems.push(problem(STALE, "the staged {NOTES_FILE} is not the notes of this release"))
-    sealed_files :: [String]{CANDIDATE_FILE, SIGNATURE_FILE}
+    sealed_files: [String]{CANDIDATE_FILE, SIGNATURE_FILE}
     loop sealed in sealed_files {
         if (read_text(files.join(stage, sealed)) ?? "") != (read_text(files.join(dir, sealed)) ?? "") -> &problems.push(problem(STALE, "the staged {sealed} is not {dir}/{sealed}"))
     }
@@ -534,14 +534,14 @@ fn publish_step(dir: String, root: String, trusted: String, remote: Remote, prog
         &problems.extend(repack_problems(dir, files.join(stage, asset), number))
         &problems.extend(personal_problems(root, stage, [String]{"."}, [String]{root, dir}, programs))
     }
-    expected :: record_assets(dir, stored)
-    already :: contains_text(remote.released, name)
+    expected: record_assets(dir, stored)
+    already: contains_text(remote.released, name)
     if already && problems.len() == 0 {
         // A rerun after GitHub took the release: complete is done, partial blocks.
-        held :: uploaded_assets(name, remote.slug, programs, stage) ?? [Artifact]{}
-        gaps :: partial_problems(name, expected, held)
-        verdict :: if gaps.len() == 0 -> "PUBLISHED" else -> "PARTIAL"
-        audit :: write_audit(dir, number, "publish", verdict, gaps, [String: Dyn]{"name": Dyn.Text(name.copy()), "content_digest": Dyn.Text(recorded.copy()), "uploaded": artifacts_dyn(held)}) ?? err.text.copy()
+        held: uploaded_assets(name, remote.slug, programs, stage) ?? [Artifact]{}
+        gaps: partial_problems(name, expected, held)
+        verdict: if gaps.len() == 0 -> "PUBLISHED" else -> "PARTIAL"
+        audit: write_audit(dir, number, "publish", verdict, gaps, [String: Dyn]{"name": Dyn.Text(name.copy()), "content_digest": Dyn.Text(recorded.copy()), "uploaded": artifacts_dyn(held)}) ?? err.text.copy()
         if gaps.len() == 0 -> return Outcome{verdict: verdict, problems: gaps, audit: audit, report: [String]{"PUBLISHED {name} was already on {remote.slug} with every recorded asset.", "Audit: {audit}"}}
         report := blocked_report("publish", gaps)
         &report.push("Upload the missing assets from {stage} with `gh release upload {name} -R {remote.slug} <asset>...`, then run publish again.")
@@ -555,15 +555,15 @@ fn publish_step(dir: String, root: String, trusted: String, remote: Remote, prog
     loop artifact in expected -> &args.push(artifact.path.copy())
     shown := [String]{"gh"}
     loop word in args -> &shown.push(quoted(word))
-    details :: [String: Dyn]{"name": Dyn.Text(name.copy()), "content_digest": Dyn.Text(recorded.copy()), "command": Dyn.Text(shown.join(" "))}
+    details: [String: Dyn]{"name": Dyn.Text(name.copy()), "content_digest": Dyn.Text(recorded.copy()), "command": Dyn.Text(shown.join(" "))}
     if problems.len() > 0 {
-        audit :: write_audit(dir, number, "publish", "BLOCKED", problems, details) ?? err.text.copy()
+        audit: write_audit(dir, number, "publish", "BLOCKED", problems, details) ?? err.text.copy()
         report := blocked_report("publish", problems)
         &report.push("Audit: {audit}")
         return Outcome{verdict: "BLOCKED", problems: problems, audit: audit, report: report}
     }
     if dry_run {
-        audit :: write_audit(dir, number, "publish", "DRY-RUN", problems, details) ?? err.text.copy()
+        audit: write_audit(dir, number, "publish", "DRY-RUN", problems, details) ?? err.text.copy()
         return Outcome{verdict: "DRY-RUN", problems: problems, audit: audit, report: [String]{"DRY RUN: {name} matches its signed record ({recorded}). To publish, run from {stage}:", "  {shown.join(" ")}", "or rerun without --dry-run.", "Audit: {audit}"}}
     }
     // The attempt is on disk before the one step that cannot be undone.
@@ -571,20 +571,20 @@ fn publish_step(dir: String, root: String, trusted: String, remote: Remote, prog
         .Ok(_) -> {}
         .Err(failed) -> return Outcome{verdict: "BLOCKED", problems: [Problem]{failed.copy()}, audit: failed.text.copy(), report: blocked_report("publish", [Problem]{failed.copy()})}
     }
-    created :: run_argv(with_args(programs.gh, args), stage)
+    created: run_argv(with_args(programs.gh, args), stage)
     outcome := [Problem]{}
     if created.code != 0 -> &outcome.push(problem(PARTIAL, "gh release create exited {created.code}: {created.errors.trim()}"))
-    held :: uploaded_assets(name, remote.slug, programs, stage)
+    held: uploaded_assets(name, remote.slug, programs, stage)
     if {
         held == .Val(found) -> &outcome.extend(partial_problems(name, expected, found))
         created.code == 0 -> &outcome.push(problem(PARTIAL, "gh release create succeeded, but GitHub shows no release {name}"))
     }
-    verdict :: if {
+    verdict: if {
         outcome.len() == 0 -> "PUBLISHED"
         held == None -> "FAILED"
         else -> "PARTIAL"
     }
-    audit :: write_audit(dir, number, "publish", verdict, outcome, details) ?? err.text.copy()
+    audit: write_audit(dir, number, "publish", verdict, outcome, details) ?? err.text.copy()
     if outcome.len() == 0 -> return Outcome{verdict: verdict, problems: outcome, audit: audit, report: [String]{"PUBLISHED {name} on {remote.slug} at {release.commit}. Fetch the tag with: git fetch origin tag {name}", "Audit: {audit}"}}
     report := blocked_report("publish", outcome)
     &report.push("{stage} and the audit are kept.")

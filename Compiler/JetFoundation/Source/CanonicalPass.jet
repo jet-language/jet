@@ -1,20 +1,20 @@
 // Opt-in, invocation-owned pass-boundary availability. No process-global journal.
-struct CanonicalPassOptions {
+CanonicalPassOptions: struct {
     adapter_mode: String{""}
     operation_ids: [String]{[String]{}}
 }
-fn canonical_pass_enabled(options: CanonicalPassOptions) -> Bool Never! {
+canonical_pass_enabled: fn(options: CanonicalPassOptions) -> Bool Never! {
     options.adapter_mode.len() > 0 && options.operation_ids.len() > 0
 }
 // Availability is not evidence: these rows are never execution records.
 // Normalization availability is distinct from source-language behavior.
 // Only an exercised feature probe can establish folded versus missing meaning.
-struct CanonicalPassBoundaryGap {
+CanonicalPassBoundaryGap: struct {
     operation_id: String
     status: String
 }
 // No Jet pass records a canonical boundary, so every selected operation is a gap.
-fn canonical_pass_boundary_gaps(options: CanonicalPassOptions) -> [CanonicalPassBoundaryGap] Never! {
+canonical_pass_boundary_gaps: fn(options: CanonicalPassOptions) -> [CanonicalPassBoundaryGap] Never! {
     rows := [CanonicalPassBoundaryGap]{}
     if !canonical_pass_enabled(options) -> return rows
     loop operation in options.operation_ids -> &rows.push(CanonicalPassBoundaryGap{operation_id: operation.copy(), status: "no Jet pass"})

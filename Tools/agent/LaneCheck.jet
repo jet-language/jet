@@ -46,16 +46,16 @@
 // exits 0 when clean, 65 with the offending files when not, 64 when it cannot
 // run.
 use {
-    files :: core.files
-    process :: core.process
-    sys :: core.sys
-    term :: core.term
-    time :: core.time
+    files: core.files
+    process: core.process
+    sys: core.sys
+    term: core.term
+    time: core.time
 }
 
-fn run() {
-    args :: process.args()
-    repo :: repo_root()
+run: fn() {
+    args: process.args()
+    repo: repo_root()
     if args.len() > 0 && args[0] == "--personal-info" {
         if args.len() > 2 -> usage("jet Tools/agent/LaneCheck.jet --personal-info [DIR]")
         process.exit(personal_info_guard(if args.len() == 2 -> args[1] else -> repo))
@@ -69,7 +69,7 @@ fn run() {
         print("CHECK FAILED — personal or machine information in the checkout (see above)")
         process.exit(1)
     }
-    assembly :: process.cmd([String]{"node", "Jetpack/Bootstrap/assemble.mjs", "check"}).cwd(repo).env("JETPACK_WORKER", "lanecheck").run() ?? return assembly_refused("node Jetpack/Bootstrap/assemble.mjs could not start: {err}")
+    assembly: process.cmd([String]{"node", "Jetpack/Bootstrap/assemble.mjs", "check"}).cwd(repo).env("JETPACK_WORKER", "lanecheck").run() ?? return assembly_refused("node Jetpack/Bootstrap/assemble.mjs could not start: {err}")
     if assembly.code != 0 || assembly.signal != None -> return assembly_refused(process.combined_output(assembly).trim_end())
     if args.len() > 0 && args[0] == "--runtime-generators" {
         if args.len() != 1 -> usage("jet Tools/agent/LaneCheck.jet --runtime-generators")
@@ -79,31 +79,31 @@ fn run() {
     process.exit(compiler_check(repo, args))
 }
 
-fn assembly_refused(output: String) -[Exec, IO]> () {
+assembly_refused: fn(output: String) -[Exec, IO]> () {
     print(output)
     print("CHECK FAILED — the Jetpack assembly check refused the sources (unlisted file or compiler-slice drift, see above)")
     process.exit(1)
 }
 
-fn usage(text: String) -[Exec, IO]> Never {
+usage: fn(text: String) -[Exec, IO]> Never {
     term.eprint("usage: {text}")
     process.exit(64)
 }
 
 // An environment value, or `fallback` when it is unset or empty.
-fn env_or(name: String, fallback: String) -[Env]> String Never! {
-    value :: process.env_get(name) ?? return fallback.copy()
+env_or: fn(name: String, fallback: String) -[Env]> String Never! {
+    value: process.env_get(name) ?? return fallback.copy()
     if value == "" -> return fallback.copy()
     value
 }
 
 // The checkout holding this tool, else the nearest directory at or above the
 // working directory that holds it.
-fn repo_root() -[Env, Exec, FS, IO]> String Never! {
-    tool :: "/Tools/agent/LaneCheck.jet"
-    script :: sys.executable()
+repo_root: fn() -[Env, Exec, FS, IO]> String Never! {
+    tool: "/Tools/agent/LaneCheck.jet"
+    script: sys.executable()
     if script.ends_with(tool) -> return script.removesuffix(tool)
-    start :: files.cwd() ?? "/"
+    start: files.cwd() ?? "/"
     dir := start.copy()
     loop !files.exists("{dir}{tool}") {
         if dir == "/" || dir == "" {
@@ -115,16 +115,16 @@ fn repo_root() -[Env, Exec, FS, IO]> String Never! {
     dir
 }
 
-fn user_cache() -[Env]> String Never! { "{env_or("XDG_CACHE_HOME", "{env_or("HOME", "")}/.cache")}/jet" }
+user_cache: fn() -[Env]> String Never! { "{env_or("XDG_CACHE_HOME", "{env_or("HOME", "")}/.cache")}/jet" }
 
 // --- runtime generators -----------------------------------------------------
 
 // Runtime-only freshness gate (no compiler under test): the runtime's
 // generated tables against their sources. It runs with $JET, else the `jet`
 // on PATH.
-fn runtime_generators(repo: String) -[Env, Exec, FS, IO, Time.Wait]> Int Never! {
-    jet :: env_or("JET", process.which("jet") ?? "jet")
-    receipt :: process.cmd([String]{jet, "Tools/agent/RuntimeGenerators.jet", "--check"}).cwd(repo).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? {
+runtime_generators: fn(repo: String) -[Env, Exec, FS, IO, Time.Wait]> Int Never! {
+    jet: env_or("JET", process.which("jet") ?? "jet")
+    receipt: process.cmd([String]{jet, "Tools/agent/RuntimeGenerators.jet", "--check"}).cwd(repo).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? {
         print("CHECK FAILED — {jet} could not run Tools/agent/RuntimeGenerators.jet: {err}")
         return 1
     }
@@ -138,8 +138,8 @@ fn runtime_generators(repo: String) -[Env, Exec, FS, IO, Time.Wait]> Int Never! 
 
 // --- compiler check ---------------------------------------------------------
 
-fn compiler_check(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
-    jet :: env_or("JET", "")
+compiler_check: fn(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
+    jet: env_or("JET", "")
     if jet == "" || !files.is_file(jet) {
         term.eprint("lane-check: JET must name the admitted native jet compiler binary")
         return 64
@@ -147,13 +147,13 @@ fn compiler_check(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.
     // Scratch, the assembled unit and logs stay on disk, never on a RAM-backed
     // /tmp: JET_TEST_SCRATCH, else <JET_SCRATCH_ROOT>/lane-check, else Jet's
     // user cache.
-    scratch :: env_or("JET_TEST_SCRATCH", if env_or("JET_SCRATCH_ROOT", "") != "" -> "{env_or("JET_SCRATCH_ROOT", "")}/lane-check" else -> "{user_cache()}/lane-check")
+    scratch: env_or("JET_TEST_SCRATCH", if env_or("JET_SCRATCH_ROOT", "") != "" -> "{env_or("JET_SCRATCH_ROOT", "")}/lane-check" else -> "{user_cache()}/lane-check")
     files.create_dir_all(scratch) ?? {
         term.eprint("lane-check: cannot create {scratch}: {err}")
         return 1
     }
-    log :: "{scratch}/jet-lane-check.{sys.pid()}{time.unix_ns() % 1000000}"
-    target :: if args.len() == 1 -> files.realpath(args[0]) ?? args[0] else -> "{repo}/Compiler"
+    log: "{scratch}/jet-lane-check.{sys.pid()}{time.unix_ns() % 1000000}"
+    target: if args.len() == 1 -> files.realpath(args[0]) ?? args[0] else -> "{repo}/Compiler"
 
     // A memory floor alone is not enough: concurrent callers can read "plenty
     // free" in the same instant and then all start together, so at most
@@ -161,21 +161,21 @@ fn compiler_check(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.
     // runs in its own memory-capped user scope (JET_CHECK_MEM, default 20G:
     // the whole-compiler check measured 15.4G). A host without a systemd user
     // session (hosted CI) sets JET_CHECK_MEM=off and relies on its own VM limit.
-    slots :: int_or(env_or("JET_CHECK_SLOTS", "2"), 2)
-    lockdir :: "{user_cache()}/lane-check-slots"
+    slots: int_or(env_or("JET_CHECK_SLOTS", "2"), 2)
+    lockdir: "{user_cache()}/lane-check-slots"
     files.create_dir_all(lockdir) ?? {
         term.eprint("lane-check: cannot create {lockdir}: {err}")
         return 1
     }
     held := [FileLock]{}
     loop slot in 1..<(if slots < 1 -> 2 else -> slots + 1) {
-        lock :: files.try_lock("{lockdir}/{slot}") ?? next
+        lock: files.try_lock("{lockdir}/{slot}") ?? next
         &held.push(lock)
         break
     }
     if held.len() == 0 {
         // Every slot is busy: wait on slot 1 rather than spin.
-        lock :: files.lock("{lockdir}/1") ?? {
+        lock: files.lock("{lockdir}/1") ?? {
             term.eprint("lane-check: cannot lock {lockdir}/1: {err}")
             return 1
         }
@@ -184,7 +184,7 @@ fn compiler_check(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.
     // The log exists from the start and its .rc only once the check ends, so a
     // killed check leaves a log without a status: incomplete, never success.
     files.write(log, "") ?? term.eprint("lane-check: cannot write {log}: {err}")
-    ran :: run_check(repo, jet, target, scratch)
+    ran: run_check(repo, jet, target, scratch)
     &held.clear()
     files.write(log, ran.text) ?? term.eprint("lane-check: cannot write {log}: {err}")
     files.write("{log}.rc", "{ran.code}\n") ?? term.eprint("lane-check: cannot write {log}.rc: {err}")
@@ -193,47 +193,47 @@ fn compiler_check(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.
     ran.code
 }
 
-fn int_or(text: String, fallback: Int) -> Int Never! {
+int_or: fn(text: String, fallback: Int) -> Int Never! {
     if text == "" -> return fallback
     value := 0
     loop byte in text.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if code < 48 || code > 57 -> return fallback
         value = value * 10 + code - 48
     }
     value
 }
 
-struct Ran {
+Ran: struct {
     code: Int
     text: String
 }
 
-fn mem_available_mb() -[FS]> Int Never! {
-    text :: files.read("/proc/meminfo") ?? return 0
+mem_available_mb: fn() -[FS]> Int Never! {
+    text: files.read("/proc/meminfo") ?? return 0
     loop line in text.lines() {
         if line.starts_with("MemAvailable:") -> return int_or(line.removeprefix("MemAvailable:").trim().partition(" ").head, 0) /% 1024
     }
     0
 }
 
-fn run_check(repo: String, jet: String, target: String, scratch: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Never! {
-    floor_mb :: int_or(env_or("JET_MIN_FREE_MB", "8000"), 8000)
+run_check: fn(repo: String, jet: String, target: String, scratch: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Never! {
+    floor_mb: int_or(env_or("JET_MIN_FREE_MB", "8000"), 8000)
     loop _ in 0..<90 {
-        available :: mem_available_mb()
+        available: mem_available_mb()
         if available >= floor_mb -> break
         term.eprint("lane-check: waiting for memory ({available}MB < {floor_mb}MB floor)")
         time.sleep(10s)
     }
-    memory :: env_or("JET_CHECK_MEM", "20G")
+    memory: env_or("JET_CHECK_MEM", "20G")
     argv := if memory == "off" -> [String]{} else -> [String]{"systemd-run", "--user", "--scope", "-q", "-p", "MemoryMax={memory}", "-p", "MemorySwapMax=0"}
     &argv.extend([String]{jet, "check", target})
-    spec :: process.cmd(argv).cwd(repo).env("JET_KEEP_GOING", "1").env("TMPDIR", scratch).env("TMP", scratch).env("TEMP", scratch)
+    spec: process.cmd(argv).cwd(repo).env("JET_KEEP_GOING", "1").env("TMPDIR", scratch).env("TMP", scratch).env("TEMP", scratch)
         .env("JET_TOOLCHAIN_ROOT", env_or("JET_TOOLCHAIN_ROOT", repo)).timeout(1800s).output_limit(1073741824)
-    results :: process.run_all([ProcessSpec]{spec}, 1) ?? return Ran{code: 127, text: "lane-check: {argv[0]} could not start: {err}\n"}
+    results: process.run_all([ProcessSpec]{spec}, 1) ?? return Ran{code: 127, text: "lane-check: {argv[0]} could not start: {err}\n"}
     if results[0] == {
         .Ok(receipt) -> {
-            code :: if receipt.timed_out -> 124 else -> if receipt.signal == .Val(number) -> 128 + number else -> receipt.code
+            code: if receipt.timed_out -> 124 else -> if receipt.signal == .Val(number) -> 128 + number else -> receipt.code
             Ran{code: code, text: "{receipt.output}{receipt.errors}"}
         }
         .Err(error) -> Ran{code: 127, text: "lane-check: {argv[0]} could not start: {error}\n"}
@@ -241,27 +241,27 @@ fn run_check(repo: String, jet: String, target: String, scratch: String) -[Env, 
 }
 
 // A compiler diagnostic's first line: `error[...]`, `error:` or `Error [...]`.
-fn diagnostic_head(line: String) -> Bool Never! {
+diagnostic_head: fn(line: String) -> Bool Never! {
     line.starts_with("error[") || line.starts_with("error:") || line.starts_with("Error [")
 }
 
-struct Located {
+Located: struct {
     head: String
     location: String
 }
 
 // `CHECK OK`, or `CHECK FAILED` with every diagnostic grouped by file and then
 // the complete compiler output.
-fn report(text: String, code: Int) -> String Never! {
-    lines :: text.split("\n").to_list()
+report: fn(text: String, code: Int) -> String Never! {
+    lines: text.split("\n").to_list()
     found := [Located]{}
     loop index in 0..<lines.len() {
         if !diagnostic_head(lines[index]) -> next
         location := ""
-        stop :: if index + 6 < lines.len() -> index + 6 else -> lines.len()
+        stop: if index + 6 < lines.len() -> index + 6 else -> lines.len()
         loop next_index in index + 1..<stop {
             if diagnostic_head(lines[next_index]) -> break
-            marker :: lines[next_index].trim_start()
+            marker: lines[next_index].trim_start()
             if marker.starts_with("-->") {
                 location = marker.removeprefix("-->").trim().partition(" ").head
                 break
@@ -284,8 +284,8 @@ fn report(text: String, code: Int) -> String Never! {
         out = "{out}\n{key}\n"
         loop index in 0..<found.len() {
             if keys[index] != key -> next
-            entry :: found[index]
-            shown :: if entry.location == "" -> entry.head.copy() else -> "{entry.location}: {entry.head}"
+            entry: found[index]
+            shown: if entry.location == "" -> entry.head.copy() else -> "{entry.location}: {entry.head}"
             out = "{out}  {shown}\n"
         }
     }
@@ -293,8 +293,8 @@ fn report(text: String, code: Int) -> String Never! {
 }
 
 // `path:line:col` without its `:line:col`.
-fn file_of(location: String) -> String Never! {
-    parts :: location.split(":").to_list()
+file_of: fn(location: String) -> String Never! {
+    parts: location.split(":").to_list()
     if parts.len() >= 3 && int_or(parts[parts.len() - 1], -1) >= 0 && int_or(parts[parts.len() - 2], -1) >= 0 {
         return parts[0..<parts.len() - 2].join(":")
     }
@@ -303,7 +303,7 @@ fn file_of(location: String) -> String Never! {
 
 // --- personal-information guard ---------------------------------------------
 
-struct Identity {
+Identity: struct {
     home: String
     user: String
     host: String
@@ -313,16 +313,16 @@ struct Identity {
     name: String
 }
 
-struct Rule {
+Rule: struct {
     kind: String
     find: String
     source: String
 }
 
 // Names too common to be personal; a machine using one is not flagged by it.
-GENERIC_NAMES :: [String]{"admin", "arch", "build", "builder", "ci", "debian", "dev", "devhost", "fedora", "localhost", "nixos", "owner", "root", "runner", "test", "tester", "ubuntu", "user", "users"}
+GENERIC_NAMES: [String]{"admin", "arch", "build", "builder", "ci", "debian", "dev", "devhost", "fedora", "localhost", "nixos", "owner", "root", "runner", "test", "tester", "ubuntu", "user", "users"}
 
-fn escape_pcre(text: String) -> String Never! {
+escape_pcre: fn(text: String) -> String Never! {
     out := ""
     loop ch in text.chars() {
         if "\\^$.*+?()[]{{}}|/".contains("{ch}") -> out = "{out}\\"
@@ -331,17 +331,17 @@ fn escape_pcre(text: String) -> String Never! {
     out
 }
 
-fn within(path: String, root: String) -> Bool Never! { path == root || path.starts_with("{root}/") }
+within: fn(path: String, root: String) -> Bool Never! { path == root || path.starts_with("{root}/") }
 
-fn trim_slashes(text: String) -> String Never! {
+trim_slashes: fn(text: String) -> String Never! {
     out := text
     loop out.ends_with("/") -> out = out.removesuffix("/")
     out
 }
 
 // /proc/mounts escapes space, tab, newline and backslash as octal \NNN.
-fn unescape_mount(text: String) -> String Never! {
-    bytes :: text.bytes()
+unescape_mount: fn(text: String) -> String Never! {
+    bytes: text.bytes()
     out := [U8]{}
     index := 0
     loop index < bytes.len() {
@@ -356,36 +356,36 @@ fn unescape_mount(text: String) -> String Never! {
     String.from_bytes_lossy(out)
 }
 
-fn octal3(bytes: [U8], at: Int) -> Int Never! {
+octal3: fn(bytes: [U8], at: Int) -> Int Never! {
     if at + 3 > bytes.len() -> return -1
     value := 0
     loop index in at..<at + 3 {
-        code :: Int.from_u8(bytes[index])
+        code: Int.from_u8(bytes[index])
         if code < 48 || code > 55 -> return -1
         value = value * 8 + code - 48
     }
     value
 }
 
-fn machine_mounts() -[FS]> [String] Never! {
+machine_mounts: fn() -[FS]> [String] Never! {
     out := [String]{}
-    text :: files.read("/proc/mounts") ?? return out
+    text: files.read("/proc/mounts") ?? return out
     loop line in text.lines() {
-        fields :: line.split(" ").to_list()
+        fields: line.split(" ").to_list()
         if fields.len() < 2 -> next
-        mount :: unescape_mount(fields[1])
+        mount: unescape_mount(fields[1])
         if (mount.starts_with("/mnt/") && mount.len() > 5) || (mount.starts_with("/media/") && mount.len() > 7) || (mount.starts_with("/run/media/") && mount.len() > 11) -> &out.push(mount)
     }
     out
 }
 
-fn git_config(key: String, dir: String) -[Exec, Time.Wait]> String Never! {
-    receipt :: process.cmd([String]{"git", "config", "--get", key}).cwd(dir).run() ?? return ""
+git_config: fn(key: String, dir: String) -[Exec, Time.Wait]> String Never! {
+    receipt: process.cmd([String]{"git", "config", "--get", key}).cwd(dir).run() ?? return ""
     if receipt.code != 0 -> return ""
     receipt.output.trim()
 }
 
-fn machine_identity(dir: String) -[Env, Exec, FS, Time.Wait]> Identity Never! {
+machine_identity: fn(dir: String) -[Env, Exec, FS, Time.Wait]> Identity Never! {
     Identity{
         home: env_or("HOME", ""),
         user: env_or("USER", env_or("LOGNAME", "")),
@@ -397,43 +397,43 @@ fn machine_identity(dir: String) -[Env, Exec, FS, Time.Wait]> Identity Never! {
     }
 }
 
-struct RuleSet {
+RuleSet: struct {
     rules: [Rule]
     seen: [String]
 }
 
-fn add_path(set: &RuleSet, raw: String) Never! {
-    find :: trim_slashes(raw)
+add_path: fn(set: &RuleSet, raw: String) Never! {
+    find: trim_slashes(raw)
     if find.len() < 2 || set.seen.contains(find) -> return
     &set.seen.push(find.copy())
     &set.rules.push(Rule{kind: "path", find: find.copy(), source: "{escape_pcre(find)}(?![\\w-])"})
 }
 
-fn add_word(set: &RuleSet, raw: String) Never! {
-    find :: raw.trim()
-    lower :: find.lower()
+add_word: fn(set: &RuleSet, raw: String) Never! {
+    find: raw.trim()
+    lower: find.lower()
     if find.len() < 3 || GENERIC_NAMES.contains(lower) || set.seen.contains(lower) -> return
     &set.seen.push(lower)
     &set.rules.push(Rule{kind: "word", find: find.copy(), source: "\\b{escape_pcre(find)}\\b"})
 }
 
 // The GitHub handle in a `<digits>+<handle>@users.noreply.github.com` address.
-fn noreply_handle(email: String) -> String Never! {
-    suffix :: "@users.noreply.github.com"
+noreply_handle: fn(email: String) -> String Never! {
+    suffix: "@users.noreply.github.com"
     if !email.lower().ends_with(suffix) -> return ""
-    local :: email[0..<email.len() - suffix.len()]
-    parts :: local.partition("+")
+    local: email[0..<email.len() - suffix.len()]
+    parts: local.partition("+")
     if parts.sep == "" || int_or(parts.head, -1) < 0 || parts.tail == "" || parts.tail.contains("@") -> return ""
     parts.tail
 }
 
 // Path rules match a literal path that does not continue into a longer name;
 // word rules match a whole word in any letter case.
-fn personal_info_rules(identity: Identity) -> [Rule] Never! {
+personal_info_rules: fn(identity: Identity) -> [Rule] Never! {
     set := RuleSet{rules: [Rule]{}, seen: [String]{}}
-    home :: identity.home
-    login :: if identity.user != "root" -> identity.user else -> ""
-    scratch :: if identity.scratch_root != "" && !within(identity.scratch_root, home) && !within(identity.scratch_root, "/tmp") -> trim_slashes(identity.scratch_root) else -> ""
+    home: identity.home
+    login: if identity.user != "root" -> identity.user else -> ""
+    scratch: if identity.scratch_root != "" && !within(identity.scratch_root, home) && !within(identity.scratch_root, "/tmp") -> trim_slashes(identity.scratch_root) else -> ""
     if login != "" -> add_path(&set, "/etc/profiles/per-user/{login}")
     if scratch != "" -> add_path(&set, scratch)
     loop mount in identity.mounts -> add_path(&set, mount)
@@ -444,14 +444,14 @@ fn personal_info_rules(identity: Identity) -> [Rule] Never! {
     }
     if identity.email != "" -> add_path(&set, identity.email)
     if identity.name != "" -> add_word(&set, identity.name)
-    handle :: noreply_handle(identity.email)
+    handle: noreply_handle(identity.email)
     if handle != "" -> add_word(&set, handle)
     if login != "" -> add_word(&set, login)
     if identity.host != "" -> add_word(&set, identity.host)
     // Every spelling of the state root, the machine's home first, then the
     // bare cache-relative form. Both roots are joined from parts so this file
     // does not match its own rules.
-    state_root :: [String]{".cache", "jet-dev"}.join("/")
+    state_root: [String]{".cache", "jet-dev"}.join("/")
     prefixes := [String]{}
     if home != "" && home != "/" -> &prefixes.push(home.copy())
     if login != "" {
@@ -461,19 +461,19 @@ fn personal_info_rules(identity: Identity) -> [Rule] Never! {
     &prefixes.extend([String]{"${{HOME}}", "$HOME", "~"})
     forms := [String]{}
     loop prefix in prefixes {
-        form :: "{prefix}/{state_root}"
+        form: "{prefix}/{state_root}"
         if !forms.contains(form) -> &forms.push(form)
     }
     &forms.push(state_root.copy())
     escaped := [String]{}
     loop form in forms -> &escaped.push(escape_pcre(form))
     &set.rules.push(Rule{kind: "path", find: forms[0].copy(), source: "(?:{escaped.join("|")})(?![\\w-])"})
-    run_root :: [String]{"", "tmp", "tdev"}.join("/")
+    run_root: [String]{"", "tmp", "tdev"}.join("/")
     &set.rules.push(Rule{kind: "path", find: run_root.copy(), source: "(?:{escape_pcre(run_root)})(?![\\w-])"})
     set.rules
 }
 
-fn grep_args(rules: [Rule], kind: String) -> [String] Never! {
+grep_args: fn(rules: [Rule], kind: String) -> [String] Never! {
     out := [String]{}
     loop rule in rules {
         if rule.kind == kind -> &out.extend([String]{"-e", rule.source.copy()})
@@ -481,10 +481,10 @@ fn grep_args(rules: [Rule], kind: String) -> [String] Never! {
     out
 }
 
-GREP_EXCLUDES :: [String]{"--", ".", ":!.git", ":!.chain", ":!.chain-base", ":!.chain-lock"}
+GREP_EXCLUDES: [String]{"--", ".", ":!.git", ":!.chain", ":!.chain-base", ":!.chain-lock"}
 
 // Refuse personal or machine information anywhere in `dir` (#6564 c5).
-fn personal_info_guard(dir: String) -[Env, Exec, FS, IO, Time.Wait]> Int Never! {
+personal_info_guard: fn(dir: String) -[Env, Exec, FS, IO, Time.Wait]> Int Never! {
     if !files.is_dir(dir) {
         term.eprint("personal-info-guard: {dir} is not a directory")
         return 64
@@ -493,18 +493,18 @@ fn personal_info_guard(dir: String) -[Env, Exec, FS, IO, Time.Wait]> Int Never! 
         term.eprint("personal-info-guard: git is required")
         return 64
     }
-    rules :: personal_info_rules(machine_identity(dir))
-    path_args :: grep_args(rules, "path")
-    word_args :: grep_args(rules, "word")
+    rules: personal_info_rules(machine_identity(dir))
+    path_args: grep_args(rules, "path")
+    word_args: grep_args(rules, "word")
     found := [String]{}
-    passes :: [(flags: [String], args: [String])]{(flags: [String]{"-l"}, args: path_args), (flags: [String]{"-l", "-i"}, args: word_args)}
+    passes: [(flags: [String], args: [String])]{(flags: [String]{"-l"}, args: path_args), (flags: [String]{"-l", "-i"}, args: word_args)}
     loop pass in passes {
         if pass.args.len() == 0 -> next
         argv := [String]{"git", "grep", "--no-index", "--exclude-standard", "-I", "-P"}
         &argv.extend(pass.flags)
         &argv.extend(pass.args)
         &argv.extend(GREP_EXCLUDES)
-        receipt :: process.cmd(argv).cwd(dir).output_limit(268435456).run() ?? {
+        receipt: process.cmd(argv).cwd(dir).output_limit(268435456).run() ?? {
             term.eprint("personal-info-guard: git grep could not start: {err}")
             return 64
         }
@@ -530,25 +530,25 @@ fn personal_info_guard(dir: String) -[Env, Exec, FS, IO, Time.Wait]> Int Never! 
     65
 }
 
-fn first_hit(dir: String, file: String, args: [String], flags: [String]) -[Exec, Time.Wait]> String Never! {
+first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec, Time.Wait]> String Never! {
     if args.len() == 0 -> return ""
     argv := [String]{"git", "grep", "--no-index", "-I", "-P", "-n", "-m", "1"}
     &argv.extend(flags)
     &argv.extend(args)
     &argv.extend([String]{"--", file})
-    receipt :: process.cmd(argv).cwd(dir).output_limit(268435456).run() ?? return ""
+    receipt: process.cmd(argv).cwd(dir).output_limit(268435456).run() ?? return ""
     receipt.output.partition("\n").head
 }
 
 #Test("the report passes a clean run and groups every diagnostic by file") {
     assert_eq(report("Finished fixture check\n", 0), "CHECK OK")
-    failed :: report("beginning\nend\n", 17)
+    failed: report("beginning\nend\n", 17)
     assert(failed.starts_with("CHECK FAILED — jet check exited 17 without a compiler diagnostic\n"))
     assert(failed.contains("beginning\nend\n"))
     text := ""
     loop n in 1..<9 -> text = "{text}error[E0308]: independent error {n}\n  --> src/shared.jet:{n}:1\n"
     text = "{text}Error [jet.StrayCharacter]: bad escape\n  --> other.jet:3:7\n    |\ncomplete diagnostic tail retained\n"
-    grouped :: report(text, 101)
+    grouped: report(text, 101)
     assert(grouped.starts_with("CHECK FAILED — 9 error(s) in 2 file(s)\n"))
     loop n in 1..<9 -> assert(grouped.contains("src/shared.jet:{n}:1: error[E0308]: independent error {n}"))
     assert(grouped.contains("\nother.jet\n  other.jet:3:7: Error [jet.StrayCharacter]: bad escape\n"))
@@ -556,8 +556,8 @@ fn first_hit(dir: String, file: String, args: [String], flags: [String]) -[Exec,
 }
 
 #Test("personal-information rules follow the machine's identity") {
-    identity :: Identity{home: "/home/ada", user: "ada", host: "lovelace", scratch_root: "/mnt/big", mounts: [String]{"/mnt/big", "/media/usb"}, email: "12+adagh@users.noreply.github.com", name: "Ada King"}
-    rules :: personal_info_rules(identity)
+    identity: Identity{home: "/home/ada", user: "ada", host: "lovelace", scratch_root: "/mnt/big", mounts: [String]{"/mnt/big", "/media/usb"}, email: "12+adagh@users.noreply.github.com", name: "Ada King"}
+    rules: personal_info_rules(identity)
     finds := [String]{}
     loop rule in rules -> &finds.push("{rule.kind}:{rule.find}")
     assert(finds.contains("path:/etc/profiles/per-user/ada"))
@@ -570,7 +570,7 @@ fn first_hit(dir: String, file: String, args: [String], flags: [String]) -[Exec,
     assert(finds.contains("word:ada"))
     assert(finds.contains("word:lovelace"))
     assert_eq(rules[0].source, "\\/etc\\/profiles\\/per-user\\/ada(?![\\w-])")
-    generic :: personal_info_rules(Identity{home: "/root", user: "root", host: "runner", scratch_root: "", mounts: [String]{}, email: "", name: ""})
+    generic: personal_info_rules(Identity{home: "/root", user: "root", host: "runner", scratch_root: "", mounts: [String]{}, email: "", name: ""})
     loop rule in generic -> assert(rule.kind == "path")
     assert_eq(unescape_mount("/mnt/my\\040disk"), "/mnt/my disk")
     assert_eq(noreply_handle("someone@example.com"), "")

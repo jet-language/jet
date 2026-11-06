@@ -4,22 +4,22 @@
 // from each parameter's type, runs the body across many cases, and — on the
 // first failing case — automatically shrinks the input to a minimal
 // counterexample. A `#Test("name") { … }` block (no params) stays a unit test.
-fn reverse(xs: [Int]) -> [Int] {
+reverse: fn(xs: [Int]) -> [Int] {
     out := [Int]{}
     loop x in xs -> &out.insert(0, x)
     return out
 }
 
-fn run() { print("{reverse([1, 2, 3])}") }
+run: fn() { print("{reverse([1, 2, 3])}") }
 
 // Reversing a list twice gives the original back — for every list the runner
 // generates.
-#Test fn reverse_twice_is_identity(xs: [Int]) {
+#Test reverse_twice_is_identity: fn(xs: [Int]) {
     assert_eq(reverse(reverse(xs)), xs)
 }
 
 // Reversing never changes the length — for every list.
-#Test fn reverse_keeps_length(xs: [Int]) {
+#Test reverse_keeps_length: fn(xs: [Int]) {
     assert_eq(reverse(xs).len(), xs.len())
 }
 

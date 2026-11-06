@@ -33,38 +33,38 @@ use {
     ]
 }
 
-struct SemaPluginInterfaceExport {
+SemaPluginInterfaceExport: struct {
     name: String
     signature: String
     params: [SemaPluginExportParam]
     return_type: Type?
 }
 
-struct SemaPluginExportParam {
+SemaPluginExportParam: struct {
     convention: AccessConvention
     ty: Type
 }
 
-struct SemaPluginInterface {
+SemaPluginInterface: struct {
     artifact: String
     identity: String
     digest: String
     exports: [SemaPluginInterfaceExport]
 }
 
-struct SemaPluginArtifactAlias {
+SemaPluginArtifactAlias: struct {
     artifact: String
     identity: String
 }
 
-struct SemaPluginInterfaceFacts {
+SemaPluginInterfaceFacts: struct {
     interfaces: [SemaPluginInterface]
     artifacts: [SemaPluginArtifactAlias]
     digest: String
     complete: Bool
 }
 
-fn sema_plugin_put_export(exports: &[SemaPluginInterfaceExport], export: SemaPluginInterfaceExport) Never! {
+sema_plugin_put_export: fn(exports: &[SemaPluginInterfaceExport], export: SemaPluginInterfaceExport) Never! {
     loop index in 0..<exports.len() {
         if exports[index].name == export.name {
             exports[index] = export
@@ -74,11 +74,11 @@ fn sema_plugin_put_export(exports: &[SemaPluginInterfaceExport], export: SemaPlu
     &exports.push(export)
 }
 
-fn sema_plugin_export_after(left: SemaPluginInterfaceExport, right: SemaPluginInterfaceExport) -> Bool Never! {
+sema_plugin_export_after: fn(left: SemaPluginInterfaceExport, right: SemaPluginInterfaceExport) -> Bool Never! {
     left.name > right.name
 }
 
-fn sema_plugin_sort_exports(exports: &[SemaPluginInterfaceExport]) Never! {
+sema_plugin_sort_exports: fn(exports: &[SemaPluginInterfaceExport]) Never! {
     loop index in 1..<exports.len() {
         item := exports[index]
         cursor := index
@@ -90,11 +90,11 @@ fn sema_plugin_sort_exports(exports: &[SemaPluginInterfaceExport]) Never! {
     }
 }
 
-fn sema_plugin_interface_after(left: SemaPluginInterface, right: SemaPluginInterface) -> Bool Never! {
+sema_plugin_interface_after: fn(left: SemaPluginInterface, right: SemaPluginInterface) -> Bool Never! {
     left.identity > right.identity
 }
 
-fn sema_plugin_sort_interfaces(interfaces: &[SemaPluginInterface]) Never! {
+sema_plugin_sort_interfaces: fn(interfaces: &[SemaPluginInterface]) Never! {
     loop index in 1..<interfaces.len() {
         item := interfaces[index]
         cursor := index
@@ -106,7 +106,7 @@ fn sema_plugin_sort_interfaces(interfaces: &[SemaPluginInterface]) Never! {
     }
 }
 
-fn sema_plugin_put_interface(interfaces: &[SemaPluginInterface], interface: SemaPluginInterface) Never! {
+sema_plugin_put_interface: fn(interfaces: &[SemaPluginInterface], interface: SemaPluginInterface) Never! {
     loop index in 0..<interfaces.len() {
         if interfaces[index].identity == interface.identity {
             interfaces[index] = interface
@@ -116,7 +116,7 @@ fn sema_plugin_put_interface(interfaces: &[SemaPluginInterface], interface: Sema
     &interfaces.push(interface)
 }
 
-fn sema_plugin_normalize_artifact(raw: String) -> String? {
+sema_plugin_normalize_artifact: fn(raw: String) -> String? {
     bytes := raw.trim().bytes()
     loop bytes.len() > 0 && bytes[bytes.len() - 1] == (U8{47}) -> _ := &bytes.pop()
     if bytes.len() == 0 -> return None
@@ -124,19 +124,19 @@ fn sema_plugin_normalize_artifact(raw: String) -> String? {
     loop index in 0..<bytes.len() {
         if bytes[index] == (U8{47}) -> start = index + 1
     }
-    name :: String.from_bytes(bytes.slice(start, bytes.len())) ?? return None
+    name: String.from_bytes(bytes.slice(start, bytes.len())) ?? return None
     name_bytes := name.bytes()
     dot := -1
     loop index in 0..<name_bytes.len() {
         if name_bytes[index] == (U8{46}) -> dot = index
     }
-    stem :: if dot > 0 -> String.from_bytes(name_bytes.slice(0, dot)) ?? name else -> name
+    stem: if dot > 0 -> String.from_bytes(name_bytes.slice(0, dot)) ?? name else -> name
     if stem == "" -> return None
     Val(stem)
 }
 
-fn sema_plugin_put_alias(aliases: &[SemaPluginArtifactAlias], artifact: String, identity: String) Never! {
-    normalized :: sema_plugin_normalize_artifact(artifact) ?? return
+sema_plugin_put_alias: fn(aliases: &[SemaPluginArtifactAlias], artifact: String, identity: String) Never! {
+    normalized: sema_plugin_normalize_artifact(artifact) ?? return
     loop alias in aliases {
         if alias.artifact == normalized {
             return
@@ -145,13 +145,13 @@ fn sema_plugin_put_alias(aliases: &[SemaPluginArtifactAlias], artifact: String, 
     &aliases.push(SemaPluginArtifactAlias{artifact: normalized, identity: identity})
 }
 
-fn sema_plugin_identity(artifact: String, digest: String) -> String Never! {
+sema_plugin_identity: fn(artifact: String, digest: String) -> String Never! {
     bytes := artifact.bytes()
     output := ""
     index := 0
     loop index < bytes.len() {
-        first :: Int.from_u8(bytes[index])
-        width :: if {
+        first: Int.from_u8(bytes[index])
+        width: if {
             first < 128 -> 1
             first < 224 -> 2
             first < 240 -> 3
@@ -169,7 +169,7 @@ fn sema_plugin_identity(artifact: String, digest: String) -> String Never! {
     }
     "PluginInterface__{output}__{digest}"
 }
-fn sema_plugin_unit_ratio(value: UnitRatio) -> String Never! {
+sema_plugin_unit_ratio: fn(value: UnitRatio) -> String Never! {
     if value.denominator == 1 {
         return "{value.numerator}"
     }
@@ -180,8 +180,8 @@ fn sema_plugin_unit_ratio(value: UnitRatio) -> String Never! {
 // failure contract (the failure-set solve may already have turned a written `->
 // T` into a span-less `T Never!` carrier). Optional and `Never` carriers have
 // no success value to publish and keep their written type.
-fn sema_plugin_export_boundary_return_type(function: Func) -> Type? {
-    written :: function.return_type ?? return None
+sema_plugin_export_boundary_return_type: fn(function: Func) -> Type? {
+    written: function.return_type ?? return None
     if failure_contract_of_function(function.return_type, function.return_type_span) == {
         .Default(success, _) | .Explicit(success, _) | .Inferred(success, _) -> Val(success)
         .Converted(success, _, _) -> Val(success)
@@ -190,13 +190,13 @@ fn sema_plugin_export_boundary_return_type(function: Func) -> Type? {
     }
 }
 
-fn sema_plugin_sha256(text: String) -> String Never! {
+sema_plugin_sha256: fn(text: String) -> String Never! {
     sha256_hex_bytes(text.bytes())
 }
 
-fn sema_plugin_snapshot_signature_source(signature: String) -> String? {
+sema_plugin_snapshot_signature_source: fn(signature: String) -> String? {
     effect_parts := signature.split(" -[").to_list()
-    before_effects :: effect_parts[0]
+    before_effects: effect_parts[0]
     metadata_parts := before_effects.split(" ;").to_list()
     canonical := metadata_parts[0].trim()
     bytes := canonical.bytes()
@@ -221,13 +221,13 @@ fn sema_plugin_snapshot_signature_source(signature: String) -> String? {
         }
     }
     if close < 0 -> return None
-    prefix :: String.from_bytes(bytes.slice(0, close + 1)) ?? return None
-    result :: String.from_bytes(bytes.slice(close + 1, bytes.len())) ?? return None
+    prefix: String.from_bytes(bytes.slice(0, close + 1)) ?? return None
+    result: String.from_bytes(bytes.slice(close + 1, bytes.len())) ?? return None
     if result.trim() == "" -> return Val("{prefix} {{}}")
     Val("{prefix} -> {result.trim()} {{}}")
 }
 
-fn sema_plugin_strip_prefix(value: String, prefix: String) -> String {
+sema_plugin_strip_prefix: fn(value: String, prefix: String) -> String {
     bytes := value.bytes()
     prefix_bytes := prefix.bytes()
     if bytes.len() < prefix_bytes.len() -> return value.copy()
@@ -235,9 +235,9 @@ fn sema_plugin_strip_prefix(value: String, prefix: String) -> String {
     String.from_bytes(bytes.slice(prefix_bytes.len(), bytes.len())) ?? value
 }
 
-fn sema_plugin_interface_by_artifact(facts: SemaPluginInterfaceFacts, artifact: String) -> SemaPluginInterface? {
-    normalized :: sema_plugin_normalize_artifact(artifact) ?? return None
-    found :: loop alias in facts.artifacts {
+sema_plugin_interface_by_artifact: fn(facts: SemaPluginInterfaceFacts, artifact: String) -> SemaPluginInterface? {
+    normalized: sema_plugin_normalize_artifact(artifact) ?? return None
+    found: loop alias in facts.artifacts {
         if alias.artifact == normalized {
             break alias.identity
         }
@@ -250,7 +250,7 @@ fn sema_plugin_interface_by_artifact(facts: SemaPluginInterfaceFacts, artifact: 
     None
 }
 
-fn sema_plugin_interface_by_identity(facts: SemaPluginInterfaceFacts, identity: String) -> SemaPluginInterface? {
+sema_plugin_interface_by_identity: fn(facts: SemaPluginInterfaceFacts, identity: String) -> SemaPluginInterface? {
     loop interface in facts.interfaces {
         if interface.identity == identity {
             return Val(interface)
@@ -261,7 +261,7 @@ fn sema_plugin_interface_by_identity(facts: SemaPluginInterfaceFacts, identity: 
 
 // One `.jet/cache/api/plugin__<stem>.api` snapshot as the driver read it:
 // `stem` is the artifact stem (`mathkit`), `text` the file's exact bytes.
-struct SemaPluginSnapshot {
+SemaPluginSnapshot: struct {
     stem: String
     text: String
 }
@@ -269,22 +269,22 @@ struct SemaPluginSnapshot {
 // The frozen interfaces of a project's plugin snapshots. Each snapshot names
 // its artifact by stem (`plugin__mathkit` for `…/mathkit.wasm`); its identity
 // pins the snapshot bytes, so a changed interface is a different type. An
-// export line is `fn name(a: T, …) R [-[effects]>]`. A line that does not
+// export line is `name: fn(a: T, …) R [-[effects]>]`. A line that does not
 // parse leaves the facts incomplete instead of guessing a signature.
-fn sema_plugin_interface_facts(snapshots: [SemaPluginSnapshot]) -> SemaPluginInterfaceFacts Never! {
+sema_plugin_interface_facts: fn(snapshots: [SemaPluginSnapshot]) -> SemaPluginInterfaceFacts Never! {
     interfaces := [SemaPluginInterface]{}
     aliases := [SemaPluginArtifactAlias]{}
     complete := true
     digests := ""
     loop snapshot in snapshots {
-        stem :: snapshot.stem
-        digest :: sema_plugin_sha256(snapshot.text)
-        identity :: sema_plugin_identity(stem, digest)
+        stem: snapshot.stem
+        digest: sema_plugin_sha256(snapshot.text)
+        identity: sema_plugin_identity(stem, digest)
         exports := [SemaPluginInterfaceExport]{}
         loop raw in snapshot.text.split("\n") {
-            line :: raw.trim()
-            if !line.starts_with("fn ") && !line.contains(": fn") -> next
-            export :: sema_plugin_snapshot_export(line) ?? {
+            line: raw.trim()
+            if !line.contains(": fn") -> next
+            export: sema_plugin_snapshot_export(line) ?? {
                 complete = false
                 next
             }
@@ -299,14 +299,14 @@ fn sema_plugin_interface_facts(snapshots: [SemaPluginSnapshot]) -> SemaPluginInt
     SemaPluginInterfaceFacts{interfaces: interfaces, artifacts: aliases, digest: sema_plugin_sha256(digests), complete: complete}
 }
 
-fn sema_plugin_snapshot_export(line: String) -> SemaPluginInterfaceExport? {
-    source :: sema_plugin_snapshot_signature_source(line) ?? return None
-    parsed :: parse_source(source.bytes())
+sema_plugin_snapshot_export: fn(line: String) -> SemaPluginInterfaceExport? {
+    source: sema_plugin_snapshot_signature_source(line) ?? return None
+    parsed: parse_source(source.bytes())
     if parsed.diagnostics.len() != 0 || parsed.program.items.len() != 1 -> return None
     if parsed.program.items[0] == {
         .Func(function) -> {
-            params :: loop parameter in function.params -> SemaPluginExportParam{convention: parameter.convention, ty: parameter.ty}
-            signature :: line.split(" -[").to_list()[0].trim()
+            params: loop parameter in function.params -> SemaPluginExportParam{convention: parameter.convention, ty: parameter.ty}
+            signature: line.split(" -[").to_list()[0].trim()
             return Val(SemaPluginInterfaceExport{name: function.name, signature: signature, params: params, return_type: sema_plugin_export_boundary_return_type(function)})
         }
         else -> return None

@@ -7,7 +7,7 @@
 
 // TrustRoot's one error carrier; `message()` is the Rust `Display` text.
 #Error
-enum TrustRootError {
+TrustRootError: enum {
     BootstrapPinMismatch(expected: String, actual: String)
     BootstrapMissing
     SignatureStripped(role: MetadataRole)
@@ -32,7 +32,7 @@ enum TrustRootError {
     CacheBuilderRevoked(builder: String)
     IO(detail: String)
 
-    fn message(self) -> String Never! {
+    message: fn(self) -> String Never! {
         if self == {
             .BootstrapPinMismatch(expected, actual) -> "trusted-root bootstrap pin mismatch: expected {expected}, got {actual}"
             .BootstrapMissing -> "trusted-root bootstrap pin is missing"
@@ -64,13 +64,13 @@ enum TrustRootError {
 impl IOError -> TrustRootError { return TrustRootError.IO{detail: "{self}"} }
 
 // Separate trust-domain identities.
-enum IdentityKind {
+IdentityKind: enum {
     Publisher
     Registry
     CacheBuilder
     RemoteExecutor
 
-    fn label(self) -> String Never! {
+    label: fn(self) -> String Never! {
         if self == {
             .Publisher -> "publisher"
             .Registry -> "registry"
@@ -84,12 +84,12 @@ enum IdentityKind {
 // identity bundle against a pinned transparency checkpoint, or an offline
 // Ed25519/KMS/HSM publisher signature. Author signatures are a
 // different, opt-in surface.
-enum PublisherIdentity {
+PublisherIdentity: enum {
     Sigstore(identity: String, issuer: String, checkpoint_digest: String, bundle_digest: String)
     OfflineEd25519(public_key_hex: String, key_id: String)
     KMSHSM(key_uri: String, public_key_hex: String, key_id: String)
 
-    fn kind_label(self) -> String Never! {
+    kind_label: fn(self) -> String Never! {
         if self == {
             .Sigstore(_, _, _, _) -> "sigstore"
             .OfflineEd25519(_, _) -> "ed25519"
@@ -97,7 +97,7 @@ enum PublisherIdentity {
         }
     }
 
-    fn validate(self) TrustRootError! {
+    validate: fn(self) TrustRootError! {
         if self == {
             .Sigstore(identity, issuer, checkpoint_digest, bundle_digest) -> {
                 trust_root_require_nonempty("sigstore.identity", identity)
@@ -121,33 +121,33 @@ enum PublisherIdentity {
     }
 }
 
-struct BoundIdentity {
+BoundIdentity: struct {
     kind: IdentityKind
     name: String
     // The hybrid publisher proof; non-publisher identities must leave it absent.
     proof: PublisherIdentity?
 
-    fn registry(name: String) -> BoundIdentity Never! {
+    registry: fn(name: String) -> BoundIdentity Never! {
         BoundIdentity{kind: IdentityKind.Registry, name, proof: None}
     }
 
-    fn publisher(name: String, proof: PublisherIdentity) -> BoundIdentity Never! {
+    publisher: fn(name: String, proof: PublisherIdentity) -> BoundIdentity Never! {
         BoundIdentity{kind: IdentityKind.Publisher, name, proof: Val(proof)}
     }
 
-    fn cache_builder(name: String) -> BoundIdentity Never! {
+    cache_builder: fn(name: String) -> BoundIdentity Never! {
         BoundIdentity{kind: IdentityKind.CacheBuilder, name, proof: None}
     }
 
-    fn remote_executor(name: String) -> BoundIdentity Never! {
+    remote_executor: fn(name: String) -> BoundIdentity Never! {
         BoundIdentity{kind: IdentityKind.RemoteExecutor, name, proof: None}
     }
 
     // Only publisher identities carry, and must carry, a hybrid proof.
-    fn validate(self) TrustRootError! {
+    validate: fn(self) TrustRootError! {
         trust_root_require_nonempty("identity.name", self.name)
         if self.kind == IdentityKind.Publisher {
-            proof :: self.proof ?? return Err(TrustRootError.InvalidPublisher{detail: "publisher identity requires a hybrid proof"})
+            proof: self.proof ?? return Err(TrustRootError.InvalidPublisher{detail: "publisher identity requires a hybrid proof"})
             proof.validate()
             return
         }
@@ -155,25 +155,25 @@ struct BoundIdentity {
     }
 }
 
-fn trust_root_require_nonempty(field: String, value: String) TrustRootError! {
+trust_root_require_nonempty: fn(field: String, value: String) TrustRootError! {
     if value.trim() == "" -> return Err(TrustRootError.InvalidPublisher{detail: "{field} must be non-empty"})
 }
 
-fn trust_root_require_sha256_hex(field: String, value: String) TrustRootError! {
+trust_root_require_sha256_hex: fn(field: String, value: String) TrustRootError! {
     if !trust_root_is_hex64(value) -> return Err(TrustRootError.InvalidPublisher{detail: "{field} must be 64-char sha256 hex"})
 }
 
-fn trust_root_require_ed25519_pub_hex(field: String, value: String) TrustRootError! {
+trust_root_require_ed25519_pub_hex: fn(field: String, value: String) TrustRootError! {
     if !trust_root_is_hex64(value) -> return Err(TrustRootError.InvalidPublisher{detail: "{field} must be 32-byte ed25519 public key hex"})
 }
 
 // Exactly 64 ASCII hex digits (either case).
-fn trust_root_is_hex64(value: String) -> Bool Never! {
-    raw :: value.bytes()
+trust_root_is_hex64: fn(value: String) -> Bool Never! {
+    raw: value.bytes()
     if raw.len() != 64 -> return false
     loop byte in raw {
-        code :: Int.from_u8(byte)
-        hex :: (code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102)
+        code: Int.from_u8(byte)
+        hex: (code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102)
         if !hex -> return false
     }
     true

@@ -9,21 +9,21 @@
 // contract, so no compiler-owned trait goes unchecked.
 
 // How an owned trait's method takes its receiver.
-enum OwnedReceiver {
-    // No receiver: `fn zero() -> Self`.
+OwnedReceiver: enum {
+    // No receiver: `zero: fn() -> Self`.
     Static
     // `self` with whatever access the impl writes; the trait fixes none.
     Any
     Fixed(access: AccessConvention)
 }
 
-struct OwnedParam {
+OwnedParam: struct {
     name: String
     ty: Type
 }
 
 // `Self` and the trait's associated type names resolve per impl.
-struct OwnedMethod {
+OwnedMethod: struct {
     name: String
     receiver: OwnedReceiver
     params: [OwnedParam]
@@ -31,7 +31,7 @@ struct OwnedMethod {
     returns: Type?
 }
 
-enum OwnedContract {
+OwnedContract: enum {
     // Fixed methods and associated types. `shares` names the trait whose
     // impl on the same type binds the associated names these methods use
     // (`IndexMut` reads `Index`'s `Key` and `Value`).
@@ -39,9 +39,9 @@ enum OwnedContract {
     // `fn {hook}(self, rhs: Rhs) -> {result}`; no result admits any declared
     // one (the arithmetic hooks, whose right-hand type may be written).
     Operator(hook: String, result: Type?)
-    // `fn encode(self) -> Dyn` or the static `fn decode(tree: Dyn) -> T [FieldError]!`.
+    // `encode: fn(self) -> Dyn` or the static `decode: fn(tree: Dyn) -> T [FieldError]!`.
     Codec(verb: String)
-    // `comptime fn from_literal(value: Source) -> T` on the literal's source.
+    // `comptime from_literal: fn(value: Source) -> T` on the literal's source.
     Literal(source: Type)
     // A `distinct String` type's pure checker and hole encoder; the prelude
     // spells the same declaration for readers.
@@ -51,7 +51,7 @@ enum OwnedContract {
     Derived
 }
 
-struct OwnedTrait {
+OwnedTrait: struct {
     name: String
     // The orphan rule counts the trait as declared by every program (E0902).
     local: Bool
@@ -79,7 +79,7 @@ struct OwnedTrait {
     through_elements: Bool
 }
 
-fn owned_trait(name: String) -> OwnedTrait? Never! {
+owned_trait: fn(name: String) -> OwnedTrait? Never! {
     loop owned in OWNED_TRAITS {
         if owned.name == name -> return Val(owned)
     }
@@ -87,7 +87,7 @@ fn owned_trait(name: String) -> OwnedTrait? Never! {
 }
 
 // Whether the owned trait declares a method of this name.
-fn owned_trait_declares(owned: OwnedTrait, method: String) -> Bool Never! {
+owned_trait_declares: fn(owned: OwnedTrait, method: String) -> Bool Never! {
     if owned.contract == {
         .Methods(methods, _, _) -> loop declared in methods {
             if declared.name == method -> break true
@@ -101,18 +101,18 @@ fn owned_trait_declares(owned: OwnedTrait, method: String) -> Bool Never! {
 }
 
 // The operator hook method an operator trait declares: `add` for `Add`.
-fn owned_trait_operator_hook(trait_name: String) -> String? Never! {
-    owned :: owned_trait(trait_name) ?? return None
+owned_trait_operator_hook: fn(trait_name: String) -> String? Never! {
+    owned: owned_trait(trait_name) ?? return None
     if owned.contract == .Operator(hook, _) -> return Val(hook)
     None
 }
 
-fn owned_trait_is_operator(trait_name: String) -> Bool Never! {
+owned_trait_is_operator: fn(trait_name: String) -> Bool Never! {
     owned_trait_operator_hook(trait_name) != None
 }
 
 // The operator trait whose hook is `method`: `Add` for `add`.
-fn owned_trait_for_operator_hook(method: String) -> String? Never! {
+owned_trait_for_operator_hook: fn(method: String) -> String? Never! {
     loop owned in OWNED_TRAITS {
         if owned.contract == .Operator(hook, _) && hook == method -> return Val(owned.name)
     }
@@ -121,15 +121,15 @@ fn owned_trait_for_operator_hook(method: String) -> String? Never! {
 
 // An operator hook that admits any declared result and a written right-hand
 // type: `+`, `-`, `*`, `/`.
-fn owned_trait_arithmetic(trait_name: String) -> Bool Never! {
-    owned :: owned_trait(trait_name) ?? return false
+owned_trait_arithmetic: fn(trait_name: String) -> Bool Never! {
+    owned: owned_trait(trait_name) ?? return false
     if owned.contract == .Operator(_, result) -> return result == None
     false
 }
 
 // The arithmetic operator traits for a reader, in table order:
 // "Add, Sub, Mul, and Div".
-fn owned_trait_arithmetic_listed() -> String Never! {
+owned_trait_arithmetic_listed: fn() -> String Never! {
     names := [String]{}
     loop owned in OWNED_TRAITS {
         if owned_trait_arithmetic(owned.name) -> &names.push(owned.name.copy())
@@ -139,33 +139,33 @@ fn owned_trait_arithmetic_listed() -> String Never! {
 
 // The traits `trait_name` requires, for a reader: "Add, Sub, Mul, and
 // Comparable" for `Numeric`.
-fn owned_trait_requires_listed(trait_name: String) -> String Never! {
-    owned :: owned_trait(trait_name) ?? return ""
+owned_trait_requires_listed: fn(trait_name: String) -> String Never! {
+    owned: owned_trait(trait_name) ?? return ""
     owned_trait_listed(owned.requires)
 }
 
-fn owned_trait_listed(names: [String]) -> String Never! {
-    joined :: names.join(", ")
-    last :: joined.rpartition(", ")
+owned_trait_listed: fn(names: [String]) -> String Never! {
+    joined: names.join(", ")
+    last: joined.rpartition(", ")
     if last.sep == "" -> return joined
     "{last.head}, and {last.tail}"
 }
 
 // An operator trait whose typed impl `#Commutative` may mark: `Add`, `Mul`.
-fn owned_trait_commutative(trait_name: String) -> Bool Never! {
-    owned :: owned_trait(trait_name) ?? return false
+owned_trait_commutative: fn(trait_name: String) -> Bool Never! {
+    owned: owned_trait(trait_name) ?? return false
     owned.commutative
 }
 
 // An operator hook with a fixed result: `==` and ordering.
-fn owned_trait_structural(trait_name: String) -> Bool Never! {
-    owned :: owned_trait(trait_name) ?? return false
+owned_trait_structural: fn(trait_name: String) -> Bool Never! {
+    owned: owned_trait(trait_name) ?? return false
     if owned.contract == .Operator(_, result) -> return result != None
     false
 }
 
 // The structural traits in table order: `Equatable`, `Comparable`.
-fn owned_trait_structural_names() -> [String] Never! {
+owned_trait_structural_names: fn() -> [String] Never! {
     names := [String]{}
     loop owned in OWNED_TRAITS {
         if owned_trait_structural(owned.name) -> &names.push(owned.name.copy())
@@ -174,14 +174,14 @@ fn owned_trait_structural_names() -> [String] Never! {
 }
 
 // A codec trait: `Encode`, `Decode`.
-fn owned_trait_codec(trait_name: String) -> Bool Never! {
-    owned :: owned_trait(trait_name) ?? return false
+owned_trait_codec: fn(trait_name: String) -> Bool Never! {
+    owned: owned_trait(trait_name) ?? return false
     if owned.contract == .Codec(_) -> return true
     false
 }
 
 // The codec traits in table order: `Encode`, `Decode`.
-fn owned_trait_codec_names() -> [String] Never! {
+owned_trait_codec_names: fn() -> [String] Never! {
     names := [String]{}
     loop owned in OWNED_TRAITS {
         if owned_trait_codec(owned.name) -> &names.push(owned.name.copy())
@@ -190,14 +190,14 @@ fn owned_trait_codec_names() -> [String] Never! {
 }
 
 // A literal capability: `Literal.Int`, `Literal.Float`.
-fn owned_trait_literal(trait_name: String) -> Bool Never! {
-    owned :: owned_trait(trait_name) ?? return false
+owned_trait_literal: fn(trait_name: String) -> Bool Never! {
+    owned: owned_trait(trait_name) ?? return false
     if owned.contract == .Literal(_) -> return true
     false
 }
 
 // The operator trait a source operator calls: `Equatable` for `!=`.
-fn owned_trait_for_operator(symbol: String) -> OwnedTrait? Never! {
+owned_trait_for_operator: fn(symbol: String) -> OwnedTrait? Never! {
     loop owned in OWNED_TRAITS {
         if owned.operators.contains(symbol) -> return Val(owned)
     }
@@ -206,19 +206,19 @@ fn owned_trait_for_operator(symbol: String) -> OwnedTrait? Never! {
 
 // Whether a type with `trait_name` also has `other`: the trait itself or one
 // it requires (`Numeric` requires `Add`).
-fn owned_trait_implies(trait_name: String, other: String) -> Bool Never! {
+owned_trait_implies: fn(trait_name: String, other: String) -> Bool Never! {
     if trait_name == other -> return true
-    owned :: owned_trait(trait_name) ?? return false
+    owned: owned_trait(trait_name) ?? return false
     owned.requires.contains(other)
 }
 
 // The traits a family marker derives (`auto_derive_family`, `Codable`) or
 // bundles (`bundle_family`, `CodableAsBase`), in table order; empty when
 // `marker` names no such family.
-fn owned_trait_family(marker: String, bundle: Bool) -> [String] Never! {
+owned_trait_family: fn(marker: String, bundle: Bool) -> [String] Never! {
     members := [String]{}
     loop owned in OWNED_TRAITS {
-        family :: if bundle -> owned.bundle_family else -> owned.auto_derive_family
+        family: if bundle -> owned.bundle_family else -> owned.auto_derive_family
         if family == .Val(name) && name == marker -> &members.push(owned.name.copy())
     }
     members
@@ -226,22 +226,22 @@ fn owned_trait_family(marker: String, bundle: Bool) -> [String] Never! {
 
 // Whether `#{marker}` on a struct or enum is a structural auto-derive
 // control: a trait it derives, or a family of them. `!{marker}` refuses it.
-fn owned_trait_auto_derive_marker(marker: String) -> Bool Never! {
+owned_trait_auto_derive_marker: fn(marker: String) -> Bool Never! {
     if owned_trait(marker) == .Val(owned) && owned.auto_derive -> return true
     owned_trait_family(marker, false).len() > 0
 }
 
 // The traits `#{marker}` on a distinct type re-exposes from its base type:
 // the trait itself when it bundles, or the members of a bundle family.
-fn owned_trait_bundle(marker: String) -> [String] Never! {
+owned_trait_bundle: fn(marker: String) -> [String] Never! {
     if owned_trait(marker) == .Val(owned) && owned.bundle -> return [String]{marker.copy()}
     owned_trait_family(marker, true)
 }
 
 // The distinct-type marker that grants `trait_name`: the trait itself when
 // it bundles, else its bundle family (`CodableAsBase` for `Encode`).
-fn owned_trait_bundle_marker(trait_name: String) -> String? Never! {
-    owned :: owned_trait(trait_name) ?? return None
+owned_trait_bundle_marker: fn(trait_name: String) -> String? Never! {
+    owned: owned_trait(trait_name) ?? return None
     if owned.bundle -> return Val(owned.name.copy())
     if owned.bundle_family == .Val(family) -> return Val(family.copy())
     None
@@ -249,7 +249,7 @@ fn owned_trait_bundle_marker(trait_name: String) -> String? Never! {
 
 // Whether the derive or marker `marker` gives a type a codec: a codec trait
 // or a family whose members are codec traits (`Codable`, `Encode`).
-fn owned_trait_codec_marker(marker: String) -> Bool Never! {
+owned_trait_codec_marker: fn(marker: String) -> Bool Never! {
     names := owned_trait_family(marker, false)
     if names.len() == 0 -> return owned_trait_codec(marker)
     loop name in names {
@@ -259,7 +259,7 @@ fn owned_trait_codec_marker(marker: String) -> Bool Never! {
 }
 
 // Whether a list, map, option or union has `trait_name` when its elements do.
-fn owned_trait_through_elements(trait_name: String) -> Bool Never! {
-    owned :: owned_trait(trait_name) ?? return false
+owned_trait_through_elements: fn(trait_name: String) -> Bool Never! {
+    owned: owned_trait(trait_name) ?? return false
     owned.through_elements
 }

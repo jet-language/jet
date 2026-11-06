@@ -1,6 +1,6 @@
 use {
-    net_fetch_error_test_files :: core.files
-    net_fetch_error_test_sys :: core.sys
+    net_fetch_error_test_files: core.files
+    net_fetch_error_test_sys: core.sys
     jetpack_foundation.[
         FoundationFetchError, FoundationFetchErrorKind, foundation_fetch_classify_http_error,
         foundation_fetch_host_from_url, foundation_fetch_http_error, foundation_fetch_resolve_redirect,
@@ -10,7 +10,7 @@ use {
 
 // Pure policy claims from jet-net. Actual handshake/unsupported fetch execution
 // belongs to JP-NET-STREAM (#3595); the checked-in PEMs remain dependency evidence.
-fn foundation_fetch_test_fields(error: FoundationFetchError, url: String, code: String, what: String, why: String, fix: String, display: String) {
+foundation_fetch_test_fields: fn(error: FoundationFetchError, url: String, code: String, what: String, why: String, fix: String, display: String) {
     assert_eq(error.diagnostic_code(), code)
     assert_eq(error.diagnostic_what(url), what)
     assert_eq(error.diagnostic_why(url), why)
@@ -18,8 +18,8 @@ fn foundation_fetch_test_fields(error: FoundationFetchError, url: String, code: 
     assert_eq(error.to_string(), display)
 }
 
-fn foundation_fetch_test_redirect_error(current: String, location: String, detail: String) {
-    error :: if foundation_fetch_resolve_redirect(current, location) == {
+foundation_fetch_test_redirect_error: fn(current: String, location: String, detail: String) {
+    error: if foundation_fetch_resolve_redirect(current, location) == {
         .Ok(value) -> panic("redirect must fail, got {value}")
         .Err(error) -> error
     }
@@ -35,9 +35,9 @@ fn foundation_fetch_test_redirect_error(current: String, location: String, detai
 }
 
 #Test("tls_error_classifier_names_certificate_failures") {
-    url :: "https://api.example.test/data"
-    detail :: "Connection Failed: invalid peer certificate: UnknownIssuer"
-    error :: foundation_fetch_http_error(url, detail)
+    url: "https://api.example.test/data"
+    detail: "Connection Failed: invalid peer certificate: UnknownIssuer"
+    error: foundation_fetch_http_error(url, detail)
     foundation_fetch_test_fields(error, url, "E4202",
         "TLS certificate for `api.example.test` could not be trusted",
         "`https://api.example.test/data` presented a certificate Jet could not verify for that host",
@@ -53,8 +53,8 @@ fn foundation_fetch_test_redirect_error(current: String, location: String, detai
 }
 
 #Test("tls_error_classifier_names_missing_trust_roots") {
-    url :: "https://api.example.test/data"
-    error :: foundation_fetch_http_error(url, "no valid certificates loaded by rustls-native-certs")
+    url: "https://api.example.test/data"
+    error: foundation_fetch_http_error(url, "no valid certificates loaded by rustls-native-certs")
     foundation_fetch_test_fields(error, url, "E4203",
         "HTTPS could not find system certificate roots",
         "Jet uses rustls with the system trust store for default HTTPS, but no usable roots were available",
@@ -65,8 +65,8 @@ fn foundation_fetch_test_redirect_error(current: String, location: String, detai
 #Test("HTTPS plain-response handshake classification policy") {
     // The Rust https_default_build_has_tls_backend server proof is owed by
     // transport, not replaced by this classification of its TLS failure detail.
-    url :: "https://localhost:443/data"
-    error :: foundation_fetch_http_error(url, "Connection Failed: TLS handshake: received corrupt message")
+    url: "https://localhost:443/data"
+    error: foundation_fetch_http_error(url, "Connection Failed: TLS handshake: received corrupt message")
     foundation_fetch_test_fields(error, url, "E4201",
         "TLS handshake with `localhost:443` failed",
         "`https://localhost:443/data` reached the server, but the connection did not complete a secure HTTPS handshake",
@@ -75,9 +75,9 @@ fn foundation_fetch_test_redirect_error(current: String, location: String, detai
 }
 
 #Test("all General IO and Scheme diagnostic fields preserve detail") {
-    detail :: "raw detail: café\nserver refused"
-    url :: "http://api.example.test/data"
-    errors :: [FoundationFetchError]{
+    detail: "raw detail: café\nserver refused"
+    url: "http://api.example.test/data"
+    errors: [FoundationFetchError]{
         FoundationFetchError.IO(detail),
         foundation_fetch_http_error(url, detail),
         FoundationFetchError.Scheme(detail),
@@ -92,7 +92,7 @@ fn foundation_fetch_test_redirect_error(current: String, location: String, detai
 }
 
 #Test("classifier every substring branch ASCII folding and precedence") {
-    url :: "https://api.example.test/data"
+    url: "https://api.example.test/data"
     loop detail in ([String]{"NO VALID CERTIFICATES LOADED", "No Root Cert", "NO ROOTS", "EMPTY ROOT", "Trust Store"}) {
         assert_eq(foundation_fetch_classify_http_error(url, detail), FoundationFetchErrorKind.TLSTrustRoots)
     }
@@ -116,8 +116,8 @@ fn foundation_fetch_test_redirect_error(current: String, location: String, detai
 }
 
 #Test("HTTP TLS-looking errors stay General with raw display") {
-    detail :: "TLS handshake failed: expired certificate, no roots"
-    error :: foundation_fetch_http_error("http://host/path", detail)
+    detail: "TLS handshake failed: expired certificate, no roots"
+    error: foundation_fetch_http_error("http://host/path", detail)
     foundation_fetch_test_fields(error, "http://host/path", "E3414", "fetch failed: {detail}",
         "could not retrieve `http://host/path`",
         "check the URL is reachable and the network is available; use `file://` for a local path inside the compile-time source directory", detail)
@@ -134,7 +134,7 @@ fn foundation_fetch_test_redirect_error(current: String, location: String, detai
     assert_eq(foundation_fetch_host_from_url("https://"), "")
     assert_eq(foundation_fetch_host_from_url("/path"), "")
     assert_eq(foundation_fetch_host_from_url(""), "")
-    error :: foundation_fetch_http_error("https:///path", "certificate")
+    error: foundation_fetch_http_error("https:///path", "certificate")
     assert_eq(error.diagnostic_what("https:///path"), "TLS certificate for `` could not be trusted")
 }
 
@@ -172,7 +172,7 @@ fn foundation_fetch_test_redirect_error(current: String, location: String, detai
 #Test("unsupported_scheme_names_allowed_schemes error construction") {
     // Rust unsupported_scheme_names_allowed_schemes exercises fetch; this slice
     // ports its shared Scheme construction only. Fetch refusal is transport's row.
-    error :: foundation_fetch_scheme_error("ftp://example.invalid/data")
+    error: foundation_fetch_scheme_error("ftp://example.invalid/data")
     assert_eq(error.to_string(), "unsupported URL scheme `ftp`; expected `file://`, `http://`, or `https://`")
     assert_eq(error.diagnostic_code(), "E3414")
     assert_eq(foundation_fetch_scheme_error("noscheme").to_string(), "unsupported URL scheme `noscheme`; expected `file://`, `http://`, or `https://`")
@@ -183,9 +183,9 @@ fn foundation_fetch_test_redirect_error(current: String, location: String, detai
     // Read the repository fixtures in place; do not embed/copy the private key.
     // Claims run inside an assembled scratch project, so the repository is
     // named by JET_TOOLCHAIN_ROOT, never the working directory.
-    root :: net_fetch_error_test_sys.get("JET_TOOLCHAIN_ROOT") ?? panic("JET_TOOLCHAIN_ROOT must name the Jet repository whose committed fixtures the claims read")
-    cert :: net_fetch_error_test_files.read(net_fetch_error_test_files.join(root, "tests/fixtures/tls/localhost.cert.pem")) ?? panic("certificate fixture missing")
-    key :: net_fetch_error_test_files.read(net_fetch_error_test_files.join(root, "tests/fixtures/tls/localhost.key.pem")) ?? panic("key fixture missing")
+    root: net_fetch_error_test_sys.get("JET_TOOLCHAIN_ROOT") ?? panic("JET_TOOLCHAIN_ROOT must name the Jet repository whose committed fixtures the claims read")
+    cert: net_fetch_error_test_files.read(net_fetch_error_test_files.join(root, "tests/fixtures/tls/localhost.cert.pem")) ?? panic("certificate fixture missing")
+    key: net_fetch_error_test_files.read(net_fetch_error_test_files.join(root, "tests/fixtures/tls/localhost.key.pem")) ?? panic("key fixture missing")
     assert(cert.contains("BEGIN CERTIFICATE"))
     assert(cert.contains("DNS:localhost") || cert.contains("MIID"))
     assert(key.contains("BEGIN PRIVATE KEY"))

@@ -5,21 +5,21 @@
 // Public-manifest encoding uses the existing InvalidPublisher error channel;
 // a serialization failure never hands partial JSON to the publisher.
 use {
-    hex :: core.encoding.hex
-    crypto :: core.crypto
-    files :: core.files
-    base64 :: core.encoding.base64
-    json :: core.encoding.json
+    hex: core.encoding.hex
+    crypto: core.crypto
+    files: core.files
+    base64: core.encoding.base64
+    json: core.encoding.json
 }
 
 
-enum MetadataRole {
+MetadataRole: enum {
     Root
     Targets
     Snapshot
     Timestamp
 
-    fn label(self) -> String Never! {
+    label: fn(self) -> String Never! {
         if self == {
             .Root -> "root"
             .Targets -> "targets"
@@ -29,16 +29,16 @@ enum MetadataRole {
     }
 
     // Declaration order, the order Rust's derived `Ord` walks role maps.
-    fn all() -> [MetadataRole] Never! {
+    all: fn() -> [MetadataRole] Never! {
         [MetadataRole]{MetadataRole.Root, MetadataRole.Targets, MetadataRole.Snapshot, MetadataRole.Timestamp}
     }
 }
 
-struct RoleKeys {
+RoleKeys: struct {
     key_ids: [String]
     threshold: Int
 
-    fn new(key_ids: [String], threshold: Int) -> RoleKeys TrustRootError! {
+    new: fn(key_ids: [String], threshold: Int) -> RoleKeys TrustRootError! {
         if threshold == 0 -> return Err(TrustRootError.InvalidThreshold{detail: "threshold must be >= 1"})
         if threshold > key_ids.len() -> return Err(TrustRootError.InvalidThreshold{detail: "threshold {threshold} exceeds key count {key_ids.len()}"})
         seen := [String]{}
@@ -50,14 +50,14 @@ struct RoleKeys {
     }
 }
 
-struct Delegation {
+Delegation: struct {
     name: String
     role: RoleKeys
     // Path prefixes this delegation may sign (TUF path bounds).
     path_prefixes: [String]
     terminating: Bool
 
-    fn allows_path(self, path: String) -> Bool Never! {
+    allows_path: fn(self, path: String) -> Bool Never! {
         loop prefix in self.path_prefixes {
             if path.starts_with(prefix) -> return true
         }
@@ -67,7 +67,7 @@ struct Delegation {
 
 // Root metadata. `roles` is keyed by role label; `public_key_ids` maps each
 // public key id to its algorithm (secret material stays offline).
-struct TUFRootMetadata {
+TUFRootMetadata: struct {
     version: Int
     expires_unix: Int
     consistent_snapshot: Bool
@@ -75,80 +75,80 @@ struct TUFRootMetadata {
     delegations: [Delegation]
     public_key_ids: [String: String]
 
-    fn role(self, role: MetadataRole) -> RoleKeys? Never! {
+    role: fn(self, role: MetadataRole) -> RoleKeys? Never! {
         self.roles.get(role.label())
     }
 }
 
-struct TargetMeta {
+TargetMeta: struct {
     length: Int
     hashes: [String: String]
     custom: [String: String]
 }
 
-struct TargetsMetadata {
+TargetsMetadata: struct {
     version: Int
     expires_unix: Int
     targets: [String: TargetMeta]
 }
 
-struct SnapshotMetaEntry {
+SnapshotMetaEntry: struct {
     version: Int
     length: Int
     hashes: [String: String]
 }
 
-struct SnapshotMetadata {
+SnapshotMetadata: struct {
     version: Int
     expires_unix: Int
     // role name -> version, length, and hashes of that role's signed bytes.
     meta: [String: SnapshotMetaEntry]
 }
 
-struct TimestampMetadata {
+TimestampMetadata: struct {
     version: Int
     expires_unix: Int
     snapshot: SnapshotMetaEntry
 }
 
-struct SignedMetadata<T> {
+SignedMetadata: struct<T> {
     signed: T
     signatures: [TrustSignature]
 }
 
-struct TrustRootPolicy {
+TrustRootPolicy: struct {
     max_metadata_bytes: Int
     max_clock_skew_secs: Int
     // When set, the local clock must stay within skew of this trusted time.
     trusted_unix: Int?
 
-    fn default() -> TrustRootPolicy Never! {
+    default: fn() -> TrustRootPolicy Never! {
         TrustRootPolicy{max_metadata_bytes: TRUST_DEFAULT_MAX_METADATA_BYTES, max_clock_skew_secs: TRUST_DEFAULT_MAX_CLOCK_SKEW_SECS, trusted_unix: None}
     }
 }
 
 // Offline keyring for role signing and verification (never a helper).
-struct Keyring {
+Keyring: struct {
     priv keys: [String: TrustKey]
 
-    fn empty() -> Keyring Never! {
+    empty: fn() -> Keyring Never! {
         Keyring{keys: [String: TrustKey]{}}
     }
 
-    fn insert(&self, key: TrustKey) Never! {
+    insert: fn(&self, key: TrustKey) Never! {
         self.keys[key.key_id] = key
     }
 
-    fn get(self, key_id: String) -> TrustKey? Never! {
+    get: fn(self, key_id: String) -> TrustKey? Never! {
         self.keys.get(key_id)
     }
 
-    fn verify(self, key_id: String, message: [U8], signature: TrustSignature) TrustRootError! {
-        key :: self.keys.get(key_id) ?? return Err(TrustRootError.UnknownKey{key_id: key_id})
+    verify: fn(self, key_id: String, message: [U8], signature: TrustSignature) TrustRootError! {
+        key: self.keys.get(key_id) ?? return Err(TrustRootError.UnknownKey{key_id: key_id})
         if signature.algorithm != TRUST_ALG_HMAC_SHA256 && signature.algorithm != key.algorithm {
             return Err(TrustRootError.SignatureInvalid{role: MetadataRole.Root, detail: "unsupported algorithm `{signature.algorithm}`"})
         }
-        expected :: hex.encode(crypto.hmac_sha256(key.secret, message))
+        expected: hex.encode(crypto.hmac_sha256(key.secret, message))
         if !crypto.constant_time_equal_bytes(expected.bytes(), signature.sig_hex.bytes()) {
             return Err(TrustRootError.SignatureInvalid{role: MetadataRole.Root, detail: "signature for key `{key_id}` does not verify"})
         }
@@ -156,24 +156,24 @@ struct Keyring {
 }
 
 // The persistent trusted-root bootstrap pin under a Jetpack root.
-struct RootBootstrap {
+RootBootstrap: struct {
     pin_digest: String
     root_version: Int
     consistent_snapshot: Bool
 
-    fn path(roots_dir: String) -> String Never! {
+    path: fn(roots_dir: String) -> String Never! {
         files.join(files.join(roots_dir, "trust"), "root.bootstrap")
     }
 
-    fn write(self, roots_dir: String) TrustRootError! -[FS]> {
+    write: fn(self, roots_dir: String) TrustRootError! -[FS]> {
         trust_ensure_trust_dir(roots_dir)
-        body :: "digest={self.pin_digest}\nversion={self.root_version}\nconsistent_snapshot={self.consistent_snapshot}\n"
+        body: "digest={self.pin_digest}\nversion={self.root_version}\nconsistent_snapshot={self.consistent_snapshot}\n"
         trust_atomic_write(RootBootstrap.path(roots_dir), body.bytes())
     }
 
-    fn load(roots_dir: String) -[FS]> RootBootstrap TrustRootError! {
-        path :: RootBootstrap.path(roots_dir)
-        metadata :: if files.stat(path) == {
+    load: fn(roots_dir: String) -[FS]> RootBootstrap TrustRootError! {
+        path: RootBootstrap.path(roots_dir)
+        metadata: if files.stat(path) == {
             .Ok(found) -> found
             .Err(error) -> {
                 if error == {
@@ -195,39 +195,39 @@ struct RootBootstrap {
                 else -> {}
             }
         }
-        pin_digest :: digest ?? return Err(TrustRootError.BootstrapMissing)
+        pin_digest: digest ?? return Err(TrustRootError.BootstrapMissing)
         if !trust_root_is_hex64(pin_digest) -> return Err(TrustRootError.BootstrapMissing)
-        root_version :: version ?? return Err(TrustRootError.BootstrapMissing)
-        consistent_snapshot :: consistent ?? return Err(TrustRootError.BootstrapMissing)
+        root_version: version ?? return Err(TrustRootError.BootstrapMissing)
+        consistent_snapshot: consistent ?? return Err(TrustRootError.BootstrapMissing)
         Ok(RootBootstrap{pin_digest, root_version, consistent_snapshot})
     }
 }
 
 // A public endpoint key in the exact NixIndex trust-file format. Distinct
 // from `TrustKey`, which holds an HMAC secret and is never published.
-struct PublicTrustKey {
+PublicTrustKey: struct {
     role: String
     key_id: String
     algorithm: String
     public_key: String
 
     // One `key-id:base64-public-key` line; the key decodes to 32 bytes.
-    fn from_nix_line(role: String, value: String) -> PublicTrustKey TrustRootError! {
-        known :: [String]{"index", "cache", "toolchain"}
+    from_nix_line: fn(role: String, value: String) -> PublicTrustKey TrustRootError! {
+        known: [String]{"index", "cache", "toolchain"}
         if !known.contains(role) -> return Err(TrustRootError.InvalidKey{detail: "unknown public trust role `{role}`"})
-        parts :: value.trim().split_once(":") ?? return Err(TrustRootError.InvalidKey{detail: "public trust key must be key-id:base64-public-key"})
-        key_id :: parts.before
-        encoded :: parts.after
+        parts: value.trim().split_once(":") ?? return Err(TrustRootError.InvalidKey{detail: "public trust key must be key-id:base64-public-key"})
+        key_id: parts.before
+        encoded: parts.after
         if key_id == "" || encoded == "" || trust_has_control(key_id) || trust_has_control(encoded) || trust_has_inner_space(encoded) {
             return Err(TrustRootError.InvalidKey{detail: "public trust key has invalid key id or encoding"})
         }
         if trust_is_test_public_key_id(key_id) -> return Err(TrustRootError.InvalidKey{detail: "test public trust key `{key_id}` cannot be published"})
-        decoded :: base64.decode(encoded) ?? return Err(TrustRootError.InvalidKey{detail: "public trust key is not padded base64"})
+        decoded: base64.decode(encoded) ?? return Err(TrustRootError.InvalidKey{detail: "public trust key is not padded base64"})
         if decoded.len() != 32 -> return Err(TrustRootError.InvalidKey{detail: "public trust key must decode to 32 bytes"})
         Ok(PublicTrustKey{role, key_id, algorithm: "ed25519", public_key: encoded})
     }
 
-    fn path_for_publication(self) -> String Never! {
+    path_for_publication: fn(self) -> String Never! {
         if self.role == {
             "index" -> "nix-index-v1.ed25519.pub"
             "cache" -> "nix-cache-v1.ed25519.pub"
@@ -238,14 +238,14 @@ struct PublicTrustKey {
 }
 
 // Any Unicode whitespace scalar within the text.
-fn trust_has_inner_space(value: String) -> Bool Never! {
+trust_has_inner_space: fn(value: String) -> Bool Never! {
     loop scalar in value.chars() {
         if "{scalar}".trim() == "" -> return true
     }
     false
 }
 
-fn trust_is_test_public_key_id(key_id: String) -> Bool Never! {
+trust_is_test_public_key_id: fn(key_id: String) -> Bool Never! {
     key_id == "jet-test-index-v1" || key_id == "repo-dogfood-index-v1" || key_id.starts_with("test-") || key_id.ends_with("-test")
 }
 
@@ -254,15 +254,15 @@ fn trust_is_test_public_key_id(key_id: String) -> Bool Never! {
 // list is intentional while the production key ceremony is pending. Objects
 // are built with `Dyn.object()` so the wire keeps the declared field order;
 // a `[String: Dyn]` map would iterate its keys sorted.
-fn trust_public_trust_manifest(domain: String, bootstrap: RootBootstrap?, keys: [PublicTrustKey]) -> String TrustRootError! {
+trust_public_trust_manifest: fn(domain: String, bootstrap: RootBootstrap?, keys: [PublicTrustKey]) -> String TrustRootError! {
     if domain == "" || trust_has_control(domain) || trust_has_inner_space(domain) -> return Err(TrustRootError.InvalidKey{detail: "public trust manifest domain is empty or contains whitespace"})
     sorted := keys
     &sorted.sort_by(key -> key.role)
     loop index in 1..<sorted.len() {
         if sorted[index - 1].role == sorted[index].role -> return Err(TrustRootError.InvalidKey{detail: "public trust role `{sorted[index].role}` is duplicated"})
     }
-    status :: if sorted.len() == 0 -> "awaiting-key-ceremony" else -> "prepared"
-    root :: if bootstrap == {
+    status: if sorted.len() == 0 -> "awaiting-key-ceremony" else -> "prepared"
+    root: if bootstrap == {
         .Val(pin) -> {
             fields := Dyn.object()
             fields["protocol"] = Dyn.Text("jet-tuf-root-v1")
@@ -290,17 +290,17 @@ fn trust_public_trust_manifest(domain: String, bootstrap: RootBootstrap?, keys: 
     manifest["root"] = root
     manifest["keys"] = Dyn.Array(rendered)
     manifest["rotation"] = Dyn.Text("offline threshold root rotation; publish a new manifest only after the old root verifies the new root")
-    text :: json.to_string(manifest) ?? return Err(TrustRootError.InvalidPublisher{detail: err.reason})
+    text: json.to_string(manifest) ?? return Err(TrustRootError.InvalidPublisher{detail: err.reason})
     Ok("{text}\n")
 }
 
 // Rust `str::parse::<u64>`: ASCII digits only, no sign.
-fn trust_parse_u64(text: String) -> Int? Never! {
-    raw :: text.bytes()
+trust_parse_u64: fn(text: String) -> Int? Never! {
+    raw: text.bytes()
     if raw.len() == 0 -> return None
     value := 0
     loop byte in raw {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if code < 48 || code > 57 -> return None
         value = value * 10 + (code - 48)
     }

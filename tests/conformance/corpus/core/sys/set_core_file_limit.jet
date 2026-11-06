@@ -1,9 +1,9 @@
 // core-conformance: core.sys.set_core_file_limit
-use os :: core.sys
+use os: core.sys
 
-fn run() {
-    limit :: os.core_file_limit() ?? panic("core_file_limit")
+run: fn() {
+    limit: os.core_file_limit() ?? panic("core_file_limit")
     os.set_core_file_limit(0, limit.hard) ?? panic("set_core_file_limit")
-    after :: os.core_file_limit() ?? panic("core_file_limit after")
+    after: os.core_file_limit() ?? panic("core_file_limit after")
     print(after.soft == Val(0) && after.hard == limit.hard)
 }

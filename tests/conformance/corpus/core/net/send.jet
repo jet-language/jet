@@ -1,11 +1,11 @@
 // core-conformance: core.net.send
-use api :: core.net
+use api: core.net
 
-fn run() {
-    listener :: api.tcp_listen("127.0.0.1:0") ?? panic("listen")
-    address :: api.socket_to_string(api.listener_local_socket_addr(listener) ?? panic("address"))
-    client :: api.tcp_connect(address) ?? panic("connect")
-    server :: api.tcp_accept(listener) ?? panic("accept")
+run: fn() {
+    listener: api.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address: api.socket_to_string(api.listener_local_socket_addr(listener) ?? panic("address"))
+    client: api.tcp_connect(address) ?? panic("connect")
+    server: api.tcp_accept(listener) ?? panic("accept")
     print(api.send(client, "jet") ?? panic("send"))
     print(server.read_text(3) ?? panic("read"))
 }

@@ -1,25 +1,25 @@
 // E2-M7: streaming I/O with RAII handles.
 // Files close automatically on every exit path, including `?` early returns.
-package {
+package: {
     name: "stream"
     authority: { allow: [FS.Read, FS.Write, IO, Mem.Alloc, Time.Wait] }
 }
 
 use {
-    fs :: core.files
-    files :: core.files
+    fs: core.files
+    files: core.files
 }
 
-fn count_lines(src: String) -> Int IOError! {
-    handle :: files.open(src.copy())
+count_lines: fn(src: String) -> Int IOError! {
+    handle: files.open(src.copy())
     n := 0
     loop line in handle.lines() -> n += 1
     return Ok(n)
 }
 
-fn copy_upper(src: String, dst: String) -> Int IOError! {
-    input :: files.open(src.copy())
-    output :: files.create(dst.copy())
+copy_upper: fn(src: String, dst: String) -> Int IOError! {
+    input: files.open(src.copy())
+    output: files.create(dst.copy())
     n := 0
     loop line in input.lines() {
         &output.write_line(line.to_upper())
@@ -28,18 +28,18 @@ fn copy_upper(src: String, dst: String) -> Int IOError! {
     return Ok(n)
 }
 
-fn run() {
-    src :: Path.from("/tmp").join("jet_m7_src.txt").to_string()
-    dst :: Path.from("/tmp").join("jet_m7_dst.txt").to_string()
+run: fn() {
+    src: Path.from("/tmp").join("jet_m7_src.txt").to_string()
+    dst: Path.from("/tmp").join("jet_m7_dst.txt").to_string()
     // Write test data via whole-file helper (D-IO3: kept as sugar).
-    wrote :: fs.write(src, "alpha\nbeta\ngamma")
+    wrote: fs.write(src, "alpha\nbeta\ngamma")
     // Stream-copy with uppercase transform — bounded memory.
-    copied :: copy_upper(src, dst)
+    copied: copy_upper(src, dst)
     // Verify: read destination and print.
-    result :: fs.read(dst)
+    result: fs.read(dst)
     print(result)
     // Count lines streaming.
-    n :: count_lines(src)
+    n: count_lines(src)
     print("lines: {n}")
     // std.path helpers.
     print(Path.from("/home/user/file.txt").parent())

@@ -1,25 +1,25 @@
 // #4433: a method's own type parameter is in scope in its signature and in
 // its body, as a free function's is.
-struct Box {
+Box: struct {
     n: Int
 }
 
 impl Box {
-    fn apply<U>(self, f: fn(Int) -> U) -> U {
-        held :: [U]{f(self.n)}
+    apply: fn<U>(self, f: fn(Int) -> U) -> U {
+        held: [U]{f(self.n)}
         return held[0]
     }
 
-    fn pair<A, B>(self, first: A, second: B) -> [B] {
-        firsts :: [A]{first}
-        out :: [B]{second}
+    pair: fn<A, B>(self, first: A, second: B) -> [B] {
+        firsts: [A]{first}
+        out: [B]{second}
         print("{firsts.len()} {self.n}")
         return out
     }
 }
 
-fn run() {
-    b :: Box{ n: 3 }
+run: fn() {
+    b: Box{ n: 3 }
     print(b.apply((x: Int) -> x * 2))
     print(b.apply((x: Int) -> "n={x}"))
     print(b.pair("label", 4.5).len())

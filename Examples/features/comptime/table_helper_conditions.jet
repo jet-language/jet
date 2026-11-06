@@ -2,14 +2,14 @@
 // combines comparisons with a plain-return (`Bool Never!`) helper through `&&`
 // and `||`. The compile-time evaluator reads that helper's result as the same
 // `Bool` the compiled program branches on.
-fn one_of(value: String, choices: [String]) -> Bool Never! {
+one_of: fn(value: String, choices: [String]) -> Bool Never! {
     loop choice in choices {
         if value == choice -> return true
     }
     false
 }
 
-fn leaf_for(module_name: String, member: String) -> String? {
+leaf_for: fn(module_name: String, member: String) -> String? {
     if {
         module_name == "core.time" && one_of(member, [String]{"sleep", "sleep_until"}) -> Val("Time.Wait")
         (module_name == "core.http" && one_of(member, [String]{"get", "post"})) || module_name == "core.net" -> Val("Net")
@@ -18,7 +18,7 @@ fn leaf_for(module_name: String, member: String) -> String? {
     }
 }
 
-LEAVES :: comptime { [String]{
+LEAVES: comptime { [String]{
     leaf_for("core.time", "sleep") ?? "none",
     leaf_for("core.time", "now") ?? "none",
     leaf_for("core.http", "post") ?? "none",
@@ -26,6 +26,6 @@ LEAVES :: comptime { [String]{
     leaf_for("core.files", "scope") ?? "none"
 } }
 
-fn run() {
+run: fn() {
     loop leaf in LEAVES -> print(leaf)
 }

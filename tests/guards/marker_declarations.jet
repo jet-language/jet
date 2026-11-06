@@ -1,4 +1,4 @@
-use s3_marker_files :: core.files
+use s3_marker_files: core.files
 
 // Port of tests/marker_declarations.rs:62-149. The full source scan remains;
 // no textual predicate is replaced with a smaller sample. A marker is a struct
@@ -7,30 +7,30 @@ use s3_marker_files :: core.files
 // the rejection fixtures: the UI snapshot pair, the `jet fix` case's input and
 // the parser tests that assert E0381 on the retired forms. Decision history
 // and dated evidence (retirement_ratchet.jet) record the forms as they were.
-fn s3_guard_retired_marker_forms() {
-    allowed :: [String]{"Docs/spec/syntax-decisions.md", "tests/ui/marker_decl_rejected_forms.jet", "tests/ui/marker_decl_rejected_forms.stderr", "tests/cases/marker_declarations/retired_declarations_are_rewritten_by_jet_fix.fixture/retired.jet", "Compiler/JetParser/Tests/Parser/Declarations.jet"}
-    ignored :: [String]{".git", ".claude", ".opencode", ".tmp", ".jet", ".tower", ".agent-worktrees", "node_modules", "target", "build", ".cache", "cache", "dist", "result"}
-    marker_head :: "mark"
-    marker_tail :: "er "
-    marker_word :: "{marker_head}{marker_tail}"
-    on_clause :: " on ["
-    second_list :: ")("
-    checked_head :: "checked"
-    checked_tail :: "_text_head_decl"
-    checked_text_node :: "{checked_head}{checked_tail}"
-    frozen :: "dogfood/tower/tests/parity/fixtures"
+s3_guard_retired_marker_forms: fn() {
+    allowed: [String]{"Docs/spec/syntax-decisions.md", "tests/ui/marker_decl_rejected_forms.jet", "tests/ui/marker_decl_rejected_forms.stderr", "tests/cases/marker_declarations/retired_declarations_are_rewritten_by_jet_fix.fixture/retired.jet", "Compiler/JetParser/Tests/Parser/Declarations.jet"}
+    ignored: [String]{".git", ".claude", ".opencode", ".tmp", ".jet", ".tower", ".agent-worktrees", "node_modules", "target", "build", ".cache", "cache", "dist", "result"}
+    marker_head: "mark"
+    marker_tail: "er "
+    marker_word: "{marker_head}{marker_tail}"
+    on_clause: " on ["
+    second_list: ")("
+    checked_head: "checked"
+    checked_tail: "_text_head_decl"
+    checked_text_node: "{checked_head}{checked_tail}"
+    frozen: "dogfood/tower/tests/parity/fixtures"
     pending := [String]{""}
     offenders := [String]{}
     loop {
-        relative_dir :: &pending.pop() ?? break
+        relative_dir: &pending.pop() ?? break
         directory := "."
         if relative_dir != "" -> directory = "./{relative_dir}"
-        entries :: s3_marker_files.list_dir(directory) ?? next
+        entries: s3_marker_files.list_dir(directory) ?? next
         loop entry in entries {
             relative := entry.name.copy()
             if relative_dir != "" -> relative = "{relative_dir}/{entry.name}"
             if relative == frozen || relative.starts_with("{frozen}/") -> next
-            metadata :: s3_marker_files.stat(entry.path) ?? next
+            metadata: s3_marker_files.stat(entry.path) ?? next
             if metadata.is_symlink -> next
             if metadata.is_dir {
                 skip := false
@@ -47,15 +47,15 @@ fn s3_guard_retired_marker_forms() {
                 if relative == path -> skip = true
             }
             if skip || guards_dated_evidence(relative) -> next
-            source :: s3_marker_files.read(entry.path) ?? next
+            source: s3_marker_files.read(entry.path) ?? next
             line_number := 0
-            jet_source :: relative.ends_with(".jet")
+            jet_source: relative.ends_with(".jet")
             loop line in source.lines() {
                 line_number += 1
-                trimmed :: line.trim()
-                words :: trimmed.removeprefix("pub ").removeprefix("priv ").split(" ").to_list()
-                // `marker Name…` declares; `marker :: value` is an ordinary binding.
-                declaration :: jet_source && words.len() > 1 && words[0] == marker_word.trim() && words[1] != words[1].to_lower() && (trimmed.contains("(") || trimmed.contains(" = #["))
+                trimmed: line.trim()
+                words: trimmed.removeprefix("pub ").removeprefix("priv ").split(" ").to_list()
+                // `marker Name…` declares; `marker: value` is an ordinary binding.
+                declaration: jet_source && words.len() > 1 && words[0] == marker_word.trim() && words[1] != words[1].to_lower() && (trimmed.contains("(") || trimmed.contains(" = #["))
                 if declaration || (line.contains(marker_word) && (line.contains(on_clause) || line.contains(second_list))) || line.contains(checked_text_node) {
                     &offenders.push("{relative}:{line_number}: {line}")
                 }

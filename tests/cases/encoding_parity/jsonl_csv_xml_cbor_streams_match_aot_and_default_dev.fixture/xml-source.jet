@@ -1,12 +1,12 @@
 
 use {
-    encoding :: core.encoding
-    fmt :: core.encoding.xml
-    files :: core.files
+    encoding: core.encoding
+    fmt: core.encoding.xml
+    files: core.files
 }
 
 
-fn xml_name(local: String) -[]> Dyn {
+xml_name: fn(local: String) -[]> Dyn {
     return Dyn.Object([
         "raw": Dyn.Text(local.copy()),
         "prefix": Dyn.Null,
@@ -15,9 +15,9 @@ fn xml_name(local: String) -[]> Dyn {
     ])
 }
 
-fn run() {
+run: fn() {
     path := "{work}/doc.xml"
-    output :: files.create(path) ?? panic("create")
+    output: files.create(path) ?? panic("create")
     writer := fmt.writer(^output, encoding.EncodingLimits.safe()) ?? panic("writer")
     &writer.write(Dyn.Object([
         "$xml_event": Dyn.Text("document_start"),
@@ -43,9 +43,9 @@ fn run() {
     ])) ?? panic("root")
     &writer.write(Dyn.Object(["$xml_event": Dyn.Text("document_end")])) ?? panic("end")
     &writer.finish() ?? panic("finish")
-    input :: files.open(path) ?? panic("open")
+    input: files.open(path) ?? panic("open")
     reader := fmt.reader(^input) ?? panic("reader")
-    first :: &reader.next()
+    first: &reader.next()
     if first == {
         .Val(_) -> print(true)
         .None -> print(false)
