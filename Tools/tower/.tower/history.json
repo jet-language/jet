@@ -578785,6 +578785,67 @@
       "completedAt": "2026-11-03T02:31:56.126Z",
       "questions": [],
       "retiredAt": "2026-11-06T02:33:26.105Z"
+    },
+    {
+      "id": "c0itgivw",
+      "num": 6514,
+      "title": "gauntlet web-app: built with --target=web, the runner fails on a web DOM-runtime gap",
+      "body": "GoldC-3 2026-10-31 (#6482 sweep, GoldC-60): with the explicit --target=web build line, the web-app gauntlet cell builds but its runner fails, which GoldC-3 traced to a missing web DOM-runtime piece. 94/102 gauntlet cells pass; embedded-data is #6491. Reproduce with the gauntlet runner on the web-app cell, name the missing DOM runtime surface, and implement it in the shared runtime (I9) with an example golden.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-01",
+          "by": "Main",
+          "text": "wave 22 landed as dev 163d4852ad (wave s2 FIXED_POINT; goldens 1203=1203 0 lost; ui +1 0 lost; cases 2335 -> 2458, 1 lost = blocks_shared_by_two_tasks_are_freed_once E2105 build-write error under suite load, PASS alone via suite.sh --filter on the same s2). Criterion 1 met by GoldC-62. Still open: the card asks for an example golden; GoldC-62 added a testkit case, not an Examples/ golden."
+        },
+        {
+          "at": "2026-11-01",
+          "by": "Main",
+          "text": "Landed on dev at undefined in GoldC-62: tests/cases/web_build/web_scene_counter_mounts_into_jet_app_and_clicks_repaint: PASS on this tree (new); gauntlet web-app/jet build none/basic/full + runner PASS (gt-62.log; base: runner `document.getElementById(\"jet-app\")` null, gt-62b.log)"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A --target=web build mounts core.ui into #jet-app from the shared runtime and routes clicks; the gauntlet web-app cell builds and its runner passes.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "GoldC-62: UiBackends.jet jet_ui_web_attach records each ui_paint as a scene; Host.jet's DOM runtime mounts it into #jet-app. tests/cases/web_build/web_scene_counter_mounts_into_jet_app_and_clicks_repaint PASS in wave-22 cases on the landed tree (dev 163d4852ad). Gauntlet web-app build none/basic/full + runner PASS (gt-62.log; base: #jet-app null).",
+          "at": "2026-11-01T08:51:54.955Z"
+        },
+        {
+          "n": 2,
+          "text": "An Examples/ program shows the web mount with a golden-tested output (I5), as the card asks.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Main-17 landed as dev f78a639715: Examples/features/web/ui_web_mount.jet (reactive core.ui counter, #Target(Web)) with web golden Examples/features/expected/web/ui_web_mount.web.out. tests/cases/web_build/web_scene_counter_mounts_into_jet_app_and_clicks_repaint now builds that example with --target web and compares the node DOM harness stdout to the golden: PASS on base 2ba0d540c4 via suite.sh cases --filter; a deliberately broken golden (count 3 -> 4) FAILS the case, so the comparison is live. Golden suite --filter ui_web_mount PASS 3/3 (o0/o1/o2 build, run: none like ui_web_click). Listed in Docs/spec/reference/web-backend-wasm.md; lane-check CHECK OK on the example.",
+          "at": "2026-11-03T03:52:19.949Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-01T01:00:52.195Z",
+      "updated": "2026-11-03T03:52:25.556Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-03T03:52:25.556Z",
+      "questions": [],
+      "retiredAt": "2026-11-06T03:58:23.215Z"
     }
   ],
   "events": [

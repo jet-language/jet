@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6589,
-    "rev": 92850,
+    "nextNum": 6590,
+    "rev": 92875,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -37745,6 +37745,11 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "7cb9c8825a (JetpackEngine): prepush jet check fixes. RefSpec tests bind their lists before the loop head. Jetpack/Environment E0624 came from the 4 starter components (since dffc9af603) each declaring fn run: starters moved to Source/Components/Starters, views became methods, UiNode->UINode; this unmasked ~500 sema errors (16 files missing imports, 2 E0957 test embeds), all fixed. jet check Jetpack/PackageModel and Jetpack/Environment: 0 problems."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "c9 ruling (Main): ratified D-JPK-SCRIPTDEP1=A (inline use pkg#version, zero ceremony, cache lock + optional sidecar) outranks spec.md:4831-4835's local-only resolution prose, which describes the earlier implementation. On a miss, jet run resolves through the configured package registry using the one fetch path (pkg_fetch_registry_plan, same verify+lock as jet fetch --lock, writes stats.jet.lock + store copy); the second run is offline from the lock. Proof uses a file:// registry test double. Spec text and E1253's Why are corrected in the same commit. No new surface beyond the ratified decision."
         },
         {
@@ -39882,7 +39887,7 @@
       "parentId": "c0v95zs3",
       "needsAcceptance": false,
       "created": "2026-09-27T23:27:03.232Z",
-      "updated": "2026-11-06T02:33:25.952Z",
+      "updated": "2026-11-06T03:03:24.544Z",
       "updatedBy": "Main",
       "goals": [
         "G2"
@@ -54346,11 +54351,11 @@
         {
           "n": 7,
           "text": "(was #3690) [retarget] Every semantic Core group in the inventory has its Jet owner in Core/*.jet, and no row in Compiler/JetFoundation/Source/Registry, no handle route in Compiler/JetCodegen/Source/Codegen/HandleMethods.jet, no Compiler/JetEval route and no Rust JIT shim re-implements it; the remaining Rust is emission, compiler host, jet-rt, or a declared provider leaf.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T04:39:08.126Z"
+          "evidence": "dev a505a90bcb + 799a336728 (CoreOwnership): all 16 unowned rows settled. crypto.wipe, game.run, testing.world, reactive.signal, ui.button and ui.text_input are Core-owned; args.decode, ui.mount, web.form and ui.reactive_render are sema-owned calls with no row; args.merge (phantom) deleted; process.argv is an adapter leaf of process.args()/#CLI; compute gradient/value_and_gradient/vjp/jvp recorded as emission in Tools/hardening/special-routes.tsv (TExprKind.MathBuiltin); plugin.load stays a compiler-host row (literal-artifact interface resolution plus per-artifact guest entry ir_plugin_guest). A/B vs HEAD-only f310cc004e, both chain FIXED_POINT: 0 changed rows (ui 2256 plus 216 ui/reactive/compute/web/testing cases).",
+          "at": "2026-11-06T03:37:51.953Z"
         },
         {
           "n": 8,
@@ -54455,11 +54460,11 @@
         {
           "n": 19,
           "text": "(was #3690) (was #3667) [#3093] Golden crypto/password_auth: correct login succeeds, a wrong login is rejected without leaking the password, hash, key or token, and the Argon2 path is identified. Examples state nonce and key ownership, with no deterministic sample nonce.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T04:39:24.440Z"
+          "evidence": "dev 7e0eb40623 (CoreOwnership): golden Examples/features/crypto/password_auth.jet passes on o0/o1/o2 (golden crypto/ 54 PASS 0 FAIL). Output: argon2id v=19 m=65536,t=3,p=1 hash; the right password grants a 43-character token; wrong password and unknown user both get 'invalid user name or password', and a check that the rejection contains no password, hash, key or token prints false; the example states the server owns its X25519 key and seal draws a fresh nonce per call (two seals differ), with no sample nonce.",
+          "at": "2026-11-06T04:22:00.551Z"
         },
         {
           "n": 20,
@@ -54527,29 +54532,29 @@
         {
           "n": 27,
           "text": "(was #3690) (was #3669) [#3308] Golden io/db_contracts covers typed rows, prepared values, rollback, pool timeout and lease release, cancellation and use-after-close on the selected engines (D-FOUND-COREAPI1 pool). A new driver goes to an owner ballot.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T04:39:35.018Z"
+          "evidence": "dev e545fcbbca (CoreOwnership): golden io/db_contracts on SQLite covers typed rows, prepared values, rollback, pool timeout, lease release, cancellation of a waiter in DBPool.acquire, and use after close; golden db filter 43 PASS. The cancellation proof found and fixed a real bug: a waiter cancelled inside DBPool.acquire left its FIFO ticket at the queue head so every later acquire timed out (fixed with a Close guard). Statement-level cancel has no API; core-library.md documents the gap (a new surface needs an owner ballot).",
+          "at": "2026-11-06T04:23:49.203Z"
         },
         {
           "n": 28,
           "text": "(was #3690) (was #3669) [#3228] One CSV contract with declared results for quoted delimiters and newlines, header mapping, malformed or ragged rows (no silent padding) and type errors. Bounded streaming shares limits and errors with the eager path.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T04:39:36.587Z"
+          "evidence": "dev 9277e9f134 (CoreOwnership): eager rows, dict_rows, decode and the data loader share the streaming reader's record and error contract (probe: identical rows and errors on 7 inputs across header/skip_blank); ragged rows are errors wherever cells map to a header, with no silent padding; the eager path has no limits per ratified encoding-decisions.md and shares the streaming errors. Proof: chain FIXED_POINT at b624b510be + patch; golden serde 219 PASS; csv cases 16 PASS (2 fail identically without the patch).",
+          "at": "2026-11-06T03:49:24.255Z"
         },
         {
           "n": 29,
           "text": "(was #3690) (was #3669) [#3270] An independent ETF JSON-view and typed codec (D-CORE-EETF1, D-CORE-ETF-CODEC1) uses the version-131 count-map fixture, keeps atom/string/binary distinctions and bounds, and documents conversion loss.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T04:39:38.174Z"
+          "evidence": "dev 71ec88cbf8 (CoreOwnership): core.encoding.eetf JSON view and typed codec (D-CORE-EETF1=A, D-CORE-ETF-CODEC1=A) over the version-131 count-map fixture; COUNT-ETF-131 golden matches on a chain FIXED_POINT build at 9730019b38 + patch; golden serde 222 PASS 0 FAIL; 3 conformance witnesses run. Keeps atom/string/binary distinctions (variants UTF8Binary/UTF8ByteList; layout type TermLayout because core.compiler.lang.Layout exists); documented loss: encode writes every object key as an atom.",
+          "at": "2026-11-06T04:21:28.083Z"
         },
         {
           "n": 30,
@@ -55276,7 +55281,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-06T10:08:37.412Z",
-      "updated": "2026-11-06T01:34:45.205Z",
+      "updated": "2026-11-06T04:23:49.204Z",
       "updatedBy": "Main",
       "goals": [
         "G14",
@@ -71918,11 +71923,20 @@
         {
           "n": 65,
           "text": "D-TEST-INVOKE1=A: every jet test flag is also a TestProfile field and a method on the fn test Test value with the same name, all three generated from one registry row; layering is profile, then fn test, then flag (the --optimize E2104 refusal becomes an override); new shard, list, results (shared evidence writer) and compiler choices; a sharded run never writes the baseline; release-compiler, goldens-census, compiler-registries and suite.sh call jet test and the Tools/testkit CLI is deleted",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T01:32:48.586Z"
+          "evidence": "dev 4ff44796a5 (Recover3): JET_TEST_SETTINGS (JetFoundation Registry/TestSettings.jet) gives each setting's jet test flag, TestProfile field and Test-value method from one row; layering profile, fn test, flag (TestSettingLayers.jet); --optimize overrides instead of E2104; new shard (never writes the baseline), list, results, compiler and more. release-compiler.mjs, goldens-census.mjs and suite.sh call jet test (CompilerRegistries already did); Tools/testkit/run.jet, package.jet and Tools/agent/suite/tk-build.sh deleted (ls-tree confirms). Proof: chain full FIXED_POINT (jet 1a7a15fba3f9b747); lane check CHECK OK; A/B vs 8e6182c320 ui 0 LOST/2406, golden 0 LOST/4727 (+3 GAIN), tests/cases/cli 0 LOST (+1 GAIN); release-compiler.test.mjs 9/9. Receipt: $JET_STATE_ROOT/../jetscratch lanes/Main/land/6035-c65.receipt.md.",
+          "at": "2026-11-06T03:31:21.783Z"
+        },
+        {
+          "n": 66,
+          "text": "jet test settings follow-ups from c65 (4ff44796a5): the results document's jet field names the --compiler under test; --optimize appears once in jet help test; jobs, memory, allow_shrink and diagnostic_coverage act on code-suite runs too or are refused there; a setting call after t.run() is refused; a code-suite child reports its real counts; a multi-level non-profile results run writes one document",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 110dabe112 (Recover3): closes the six c65 gaps (results jet field names --compiler; --optimize once in help; jobs/memory/allow_shrink/diagnostic_coverage act on or are refused for code-suite runs; a setting after t.run() is refused; code-suite child reports real counts; one results document per multi-level run) plus jet test --jobs=<n> parsing (suite.sh SUITE_JOBS). New case cli_parts_runtime/test_setting_flags_each_parse_as_listed passes and FAILs on the base jet. Chain FIXED_POINT s2==s3 236604f33fe4bb4b; lane check CHECK OK; A/B 0 LOST: ui 2406, tests/cases/cli 572 (+1 GAIN), golden 4733.",
+          "at": "2026-11-06T04:26:18.446Z"
         }
       ],
       "refs": [
@@ -71938,7 +71952,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-06T01:56:23.175Z",
+      "updated": "2026-11-06T04:26:18.446Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
@@ -86067,6 +86081,26 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "c50 part A landed: 62a6e9f614 + 9730019b38 (GoldenRoots3). A runtime WebSocket hub (server connections join on upgrade and leave on drop; per-topic latest replayed on join; hub lock plus per-connection write lock) and the core.web.__live_publish row, route and registry entry; s1 and pack build OK. Main checked 62a6e9f614^..9730019b38: only the 12 part-A paths changed. Part B (the Web.jet publish call, docs, 2 expected outputs, new case db_scope_live_invalidation_reaches_ws_clients_and_reconnect_replays_latest) waits for the next seed rotation; with it the db_policy cases pass on o0-o2 except the pre-existing sqlite_blob row."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "be271dbf74 (GoldenRoots3): root fix for the d77cf5ea53 Effect break. Registration/QualifiedTypes.jet canonicalizes imported bare type names in declared signatures, so a callee's imported type never resolves in the caller's scope. New case modules/imported_type_in_a_callee_signature_resolves_in_its_declaring_module FAILs on HEAD (E0112), PASSes with the fix; ui A/B identical; modules/multi_file/unit_family/inline_package/package_outputs cases have no new fails. c50 lands in two parts: the runtime hub, route and registry rows now; the Web.jet publish call and its case after the next seed rotation (Web.jet is in the compiler build's closure through core.db, so the seed must know core.web.__live_publish)."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Crypto rows (GoldenRoots3 on dev d77cf5ea53). c23 and c32 name Rust artifacts retired in the Rust exit (Docs/audits/rust-exit-parity/r7b-deleted.tsv:2075, :2085). The Jet replacement is Compiler/JetRuntime/Source/CryptoEntropy.jet (rt_crypto_entropy_fill to Linux getrandom; on any non-EINTR failure it wipes the buffer and returns 1, with no fallback branch), tested in JetRuntime/Tests/Fragments.fixture/CryptoEntropyTests.jet. Both stay open for an owner retarget or close. c24/c33: tests/cases/crypto_entropy has 7 Jet cases (10 Rust unit/source-scan tests retired at r7b-deleted.tsv:2074-2089); 6 PASS and entropy_unavailable_propagates_through_every_consumer_on_all_tiers (seccomp-blocked getrandom; asserts no output and the fail-closed error on every tier) was SKIP-HOST without cc; rerun with a local cc pending."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c50 partial (0fca5db665 + d77cf5ea53): the typed Query path, DBScope.live and the AOT tier consumers are proven on o0/o1/o2. Missing: publishing matching write-set invalidations through a serialized core.ws writer with latest-topic replay. Core/Net/Ws.jet has only connect/upgrade and Web.jet notes no WebSocket transport feeds the registry, although #4957 is done; that gap is in scope here under D-LIVEQUERY1=A."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "c41 partial (8384472730 + d96a0ce1b3): the ratified options run through the one CSV engine and are tier-proven by the two audit cases and golden serde 219/219; the workload-corpus hand-framing clause is not audited yet."
         },
         {
@@ -86304,11 +86338,11 @@
         {
           "n": 21,
           "text": "(was #303) corelib audit: core.db — driver breadth, typed rows, migrations [precut audit: failing on 9c7ddf1359: C:db_policy/typed_sql_canonical_scope_example_has_aot_default_and_interpreter_parity KNOWN-FAILING #6419 unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E0102): exit 1; expected 0 (known-failing #6419: unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E0102))]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:39:04.673Z"
+          "evidence": "dev 0fca5db665 + d77cf5ea53 (GoldenRoots3): DBScope.live restored in Core/Db (policy-aware rerunner bound to core.web Live/state; per-table write-set and rollback invalidation), listed in core-library.md core.db. The audit case db_policy/typed_sql_canonical_scope_example and both db_scope_enforces_policy_*_live cases match expected output on o0, o1 and o2 and left known-failing; new case db_scope_live_reruns_on_matching_writes_and_rollback_across_tiers passes with identical o0/o1/o2 output; golden db, web, app and live 180/180.",
+          "at": "2026-11-06T03:21:37.020Z"
         },
         {
           "n": 22,
@@ -86331,20 +86365,20 @@
         {
           "n": 24,
           "text": "(was #620 c2) The real bridge fixture compiles and runs, preserving live entropy, zeroization, retry, bounds, and fail-closed assertions; all 13 crypto_entropy tests pass [precut audit: failing on 9c7ddf1359: C:crypto_entropy/uuid_entropy_shared_seam_is_live_and_fail_closed KNOWN-FAILING #6419 unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E0102): exit 1; expected 0 (known-failing #6419: unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E0102))]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:39:06.917Z"
+          "evidence": "GoldenRoots3 on dev d96a0ce1b3 (+32fd056cd3) s1, under nix shell nixpkgs#gcc (gcc-wrapper-15.3.0): one testkit cases --filter crypto_entropy run gave PASS 7/7 with no FAIL, SKIP or KNOWN-FAILING. These 7 Jet cases replace the 13 Rust tests; the other 10 were Rust-runtime unit tests or source scans retired at Docs/audits/rust-exit-parity/r7b-deleted.tsv:2074-2089.",
+          "at": "2026-11-06T03:23:10.973Z"
         },
         {
           "n": 25,
           "text": "(was #620 c3) No product, syntax, diagnostic, dependency, unsafe, or owner decision changes [precut audit: failing on 9c7ddf1359: C:crypto_entropy/uuid_entropy_shared_seam_is_live_and_fail_closed KNOWN-FAILING #6419 unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E0102): exit 1; expected 0 (known-failing #6419: unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E0102))]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:39:07.554Z"
+          "evidence": "dev ea3bcca66f (GoldenRoots3): the crypto_entropy fix touched only Tools/testkit/known-failing.tsv (-3 rows) and three tests/cases/crypto_entropy/*/run.jet fixtures; no product, syntax, diagnostic, dependency, unsafe or owner-decision change.",
+          "at": "2026-11-06T03:22:41.125Z"
         },
         {
           "n": 26,
@@ -86412,38 +86446,38 @@
         {
           "n": 33,
           "text": "(was #1774 c3) the test still asserts no predictable fallback exists in the real CSPRNG path (not weakened) [precut audit: failing on 9c7ddf1359: C:crypto_entropy/live_provider_obeys_bounds_zero_and_concurrency KNOWN-FAILING #6419 unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E0102): exit 1; expected 0 (known-failing #6419: unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E0102))]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:39:12.901Z"
+          "evidence": "same run (dev d96a0ce1b3 s1, 7/7 crypto_entropy): entropy_unavailable_propagates_through_every_consumer_on_all_tiers blocks getrandom with seccomp; on every bytes and uuid step, AOT and default, stdout never contains 'drew' and the program reports a typed failure or exits nonzero with 'could not provide cryptographic randomness'. Code: Compiler/JetRuntime/Source/CryptoEntropy.jet wipes the buffer and returns 1 on any non-EINTR failure, with no fallback branch.",
+          "at": "2026-11-06T03:23:11.812Z"
         },
         {
           "n": 34,
           "text": "(was #1834 c2) Focused query_one parity proof covers AOT, resident-JIT, default jet run, and forced interpreter; present and absent rows assert the same result, and resident JIT proves no deopt or fallback [precut audit: failing on 9c7ddf1359: C:corelib/core_db_implements_driver_trait KNOWN-FAILING #6419 unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E0102): exit 1; expected 0 (known-failing #6419: unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E0102))]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:39:13.576Z"
+          "evidence": "dev dd88a19f08 + 765ec580a9 (GoldenRoots3), read under today's tiers (no resident JIT or interpreter exists, I9): Driver is bare-bound with self receivers and a type parameter bounded by an owned trait resolves the trait row's methods (sema Calls/Resolution+Methods, IR ir_method_key); DBScope's methods move into impl DBScope.Driver. Case corelib/core_db_query_one_first_row_matches_all_execution_tiers runs jet run (O0), jet build (O1) and jet build --release (O2) against one .out with present and absent rows; corelib/core_db_implements_driver_trait left known-failing; cases core_db 2/2 PASS on s1 of e545fcbbca + dd88a19f08; A/B ui and cases corelib/db_policy/generic/bounds/trait no new FAILs; golden db_contracts 3/3.",
+          "at": "2026-11-06T04:30:26.777Z"
         },
         {
           "n": 35,
           "text": "(was #2171 c1) Default `Int` stays exact, and fixed-width arithmetic traps on overflow outside an explicit selected policy [precut audit: failing on 9c7ddf1359: C:reflect/arithmetic_policy_is_visible_in_function_reflection KNOWN-FAILING #6419 unbuilt: Build reflection has no `program.functions` (E0302 on `b.program.functions`); the verbatim original source also draws L0530 (redund (known-failing #6419: unbuilt: Build reflection has no…]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:39:14.174Z"
+          "evidence": "GoldenRoots3 on dev 32fd056cd3: golden lowlevel/fixed_overflow_modes passes o0/o1/o2; cases operators_and_runtime/nested_checked_arithmetic_policy_still_traps, non_arithmetic_checks_remain_checked_inside_wrapping_policy, lexical_arithmetic_policy_covers_fixed_width_operations_on_every_tier and marker_rule_signatures/arithmetic_policy_accepts_only_declared_sites_and_modes PASS",
+          "at": "2026-11-06T03:02:49.511Z"
         },
         {
           "n": 36,
           "text": "(was #2171 c9) The Jet algorithm body is no longer longer than the selected C body after comments, tests, and harness code are excluded [precut audit: failing on 9c7ddf1359: C:reflect/arithmetic_policy_is_visible_in_function_reflection KNOWN-FAILING #6419 unbuilt: Build reflection has no `program.functions` (E0302 on `b.program.functions`); the verbatim original source also draws L0530 (redund (known-failing #6419: unbuilt: Build reflection has no…]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:39:14.797Z"
+          "evidence": "GoldenRoots3 on dev 32fd056cd3: murmur3_x86_32 port, run.jet hash body 38 non-blank non-comment lines vs 43 for the selected C scope (rotl32, fmix32, MurmurHash3_x86_32 in corpus/murmur3_x86_32.c); golden ports/murmur3_x86_32 passes o0/o1/o2 and case murmur3_port_matches_golden_on_default_release_and_interpreter PASS",
+          "at": "2026-11-06T03:02:50.197Z"
         },
         {
           "n": 37,
@@ -86511,29 +86545,29 @@
         {
           "n": 44,
           "text": "(was #2399 c1) The strict three-tier conformance gate passes conformance/core/auth/magic_link_consume with identical stdout, stderr, and exit code on default JIT, forced interpreter, and AOT release [precut audit: failing on 9c7ddf1359: C:crypto_entropy/auth_tokens_are_opaque_and_fail_closed_without_entropy KNOWN-FAILING #6419 unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E0107): exit 1; expected 0 (known-failing #6419: unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E0107))]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:39:20.166Z"
+          "evidence": "dev f310cc004e (GoldenRoots3), read under today's tiers (no JIT or interpreter exists, I9): conformance/core/auth/magic_link_consume gives byte-identical stdout (alice@example.com), empty stderr and exit 0 on o0 jet run, o1 jet build and o2 jet build --release. Fix: 11 auth witnesses now allow DB (every auth store call is -[DB]>); all 13 auth witnesses match across the three tiers; the two oauth witnesses fail closed identically (no provider configured).",
+          "at": "2026-11-06T03:08:30.970Z"
         },
         {
           "n": 45,
           "text": "(was #2399 c2) auth.register_user has one implementation: the JIT host arm and the interpreter ambient both marshal into the same Prelude symbol, and neither re-encodes credential policy, hashing choice, or store behavior [precut audit: failing on 9c7ddf1359: C:crypto_entropy/auth_tokens_are_opaque_and_fail_closed_without_entropy KNOWN-FAILING #6419 unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E0107): exit 1; expected 0 (known-failing #6419: unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E0107))]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:39:20.875Z"
+          "evidence": "dev f310cc004e: auth.register_user has one implementation, Core/Auth/Auth.jet:332-345 (validation, duplicate check, record encode, CAS through __store_load/__store_replace), owned by Compiler/Prelude/Core.jet source_module core.auth and CoreSourceOwned.jet (runtime: false). The only host path is the opaque byte cell: Prelude/Core.jet jet_auth_store_load/replace -> JetRuntime/Source/RouteACore.jet byte_cell_load/replace on auth_store_root, routed by JetIR/Source/RuntimeRoutes.jet. No host or codegen path re-encodes credential policy, hashing or the store; other compiler mentions are classification only (Taint.jet DB effect, CheckProgram.jet wasm.browser list).",
+          "at": "2026-11-06T03:08:31.700Z"
         },
         {
           "n": 46,
           "text": "(was #2399 c3) A neighboring auth surface (session issue or consume) proves the same shared route with no program-name special case [precut audit: failing on 9c7ddf1359: C:crypto_entropy/auth_tokens_are_opaque_and_fail_closed_without_entropy KNOWN-FAILING #6419 unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E0107): exit 1; expected 0 (known-failing #6419: unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E0107))]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:39:21.535Z"
+          "evidence": "dev ea3bcca66f (GoldenRoots3): case crypto_entropy/auth_tokens_are_opaque_and_fail_closed_without_entropy PASS and left known-failing: register then password_login twice gives distinct sess- ids, magic_link_issue then magic_link_consume issues a session, all through core.auth with no program-name special case. Also live_provider_obeys_bounds_zero_and_concurrency and uuid_entropy_shared_seam_is_live_and_fail_closed PASS. The cause was port debt (core.auth.* without use; assert_ne undefined), not missing Core.",
+          "at": "2026-11-06T03:05:51.797Z"
         },
         {
           "n": 47,
@@ -86599,7 +86633,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T01:12:20.739Z",
-      "updated": "2026-11-06T03:00:14.629Z",
+      "updated": "2026-11-06T04:30:26.777Z",
       "updatedBy": "Main"
     },
     {
@@ -89116,65 +89150,6 @@
       "created": "2026-11-01T00:50:41.628Z",
       "updated": "2026-11-04T18:10:06.235Z",
       "updatedBy": "Main"
-    },
-    {
-      "id": "c0itgivw",
-      "num": 6514,
-      "title": "gauntlet web-app: built with --target=web, the runner fails on a web DOM-runtime gap",
-      "body": "GoldC-3 2026-10-31 (#6482 sweep, GoldC-60): with the explicit --target=web build line, the web-app gauntlet cell builds but its runner fails, which GoldC-3 traced to a missing web DOM-runtime piece. 94/102 gauntlet cells pass; embedded-data is #6491. Reproduce with the gauntlet runner on the web-app cell, name the missing DOM runtime surface, and implement it in the shared runtime (I9) with an example golden.",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e14",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-01",
-          "by": "Main",
-          "text": "wave 22 landed as dev 163d4852ad (wave s2 FIXED_POINT; goldens 1203=1203 0 lost; ui +1 0 lost; cases 2335 -> 2458, 1 lost = blocks_shared_by_two_tasks_are_freed_once E2105 build-write error under suite load, PASS alone via suite.sh --filter on the same s2). Criterion 1 met by GoldC-62. Still open: the card asks for an example golden; GoldC-62 added a testkit case, not an Examples/ golden."
-        },
-        {
-          "at": "2026-11-01",
-          "by": "Main",
-          "text": "Landed on dev at undefined in GoldC-62: tests/cases/web_build/web_scene_counter_mounts_into_jet_app_and_clicks_repaint: PASS on this tree (new); gauntlet web-app/jet build none/basic/full + runner PASS (gt-62.log; base: runner `document.getElementById(\"jet-app\")` null, gt-62b.log)"
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "A --target=web build mounts core.ui into #jet-app from the shared runtime and routes clicks; the gauntlet web-app cell builds and its runner passes.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "GoldC-62: UiBackends.jet jet_ui_web_attach records each ui_paint as a scene; Host.jet's DOM runtime mounts it into #jet-app. tests/cases/web_build/web_scene_counter_mounts_into_jet_app_and_clicks_repaint PASS in wave-22 cases on the landed tree (dev 163d4852ad). Gauntlet web-app build none/basic/full + runner PASS (gt-62.log; base: #jet-app null).",
-          "at": "2026-11-01T08:51:54.955Z"
-        },
-        {
-          "n": 2,
-          "text": "An Examples/ program shows the web mount with a golden-tested output (I5), as the card asks.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Main-17 landed as dev f78a639715: Examples/features/web/ui_web_mount.jet (reactive core.ui counter, #Target(Web)) with web golden Examples/features/expected/web/ui_web_mount.web.out. tests/cases/web_build/web_scene_counter_mounts_into_jet_app_and_clicks_repaint now builds that example with --target web and compares the node DOM harness stdout to the golden: PASS on base 2ba0d540c4 via suite.sh cases --filter; a deliberately broken golden (count 3 -> 4) FAILS the case, so the comparison is live. Golden suite --filter ui_web_mount PASS 3/3 (o0/o1/o2 build, run: none like ui_web_click). Listed in Docs/spec/reference/web-backend-wasm.md; lane-check CHECK OK on the example.",
-          "at": "2026-11-03T03:52:19.949Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-01T01:00:52.195Z",
-      "updated": "2026-11-03T03:52:25.556Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-03T03:52:25.556Z"
     },
     {
       "id": "c03jg20v",
@@ -93017,7 +92992,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -93081,8 +93056,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-05T21:56:11.026Z",
-      "updated": "2026-11-06T02:03:37.746Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-06T03:38:34.151Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-06T03:38:34.151Z"
     },
     {
       "id": "c0zyuv5p",
@@ -93582,6 +93558,36 @@
       "needsAcceptance": false,
       "created": "2026-11-06T02:33:27.897Z",
       "updated": "2026-11-06T02:33:27.897Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c06l2xid",
+      "num": 6589,
+      "title": "fn build locals spliced into b.generate templates expand under an empty comptime scope",
+      "body": "Found by GoldenRoots3 on dev 32fd056cd3. Case reflect/arithmetic_policy_is_visible_in_function_reflection stays known-failing: its hand-port splices fn build locals ($operation) into b.generate, and sema expands the template under an empty comptime scope (the Rust lower_build_generate behaved the same). Needs build-time template binding: a b.generate template sees the fn build locals it names, on every tier.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G6"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T03:02:51.022Z",
+      "updated": "2026-11-06T03:02:51.022Z",
       "updatedBy": "Main"
     }
   ],
@@ -176681,6 +176687,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-06T04:30:26.777Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c081c9o8",
+      "note": "#34"
+    },
+    {
+      "at": "2026-11-06T04:26:18.446Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pgowhn",
+      "note": "#66"
+    },
+    {
+      "at": "2026-11-06T04:23:49.204Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0rqi33c",
+      "note": "#27"
+    },
+    {
+      "at": "2026-11-06T04:22:00.551Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0rqi33c",
+      "note": "#19"
+    },
+    {
+      "at": "2026-11-06T04:21:28.083Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0rqi33c",
+      "note": "#29"
+    },
+    {
+      "at": "2026-11-06T04:03:09.103Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c081c9o8",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T03:58:23.068Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c081c9o8",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T03:49:24.255Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0rqi33c",
+      "note": "#28"
+    },
+    {
+      "at": "2026-11-06T03:38:34.151Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ca4l7i",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-06T03:37:51.953Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0rqi33c",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-06T03:31:22.510Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pgowhn",
+      "note": "#66 jet test settings follow-ups from c65 (4ff44796a5): the resu"
+    },
+    {
+      "at": "2026-11-06T03:31:21.783Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pgowhn",
+      "note": "#65"
+    },
+    {
+      "at": "2026-11-06T03:23:11.812Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c081c9o8",
+      "note": "#33"
+    },
+    {
+      "at": "2026-11-06T03:23:10.973Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c081c9o8",
+      "note": "#24"
+    },
+    {
+      "at": "2026-11-06T03:22:41.878Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c081c9o8",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T03:22:41.125Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c081c9o8",
+      "note": "#25"
+    },
+    {
+      "at": "2026-11-06T03:21:37.735Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c081c9o8",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T03:21:37.021Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c081c9o8",
+      "note": "#21"
+    },
+    {
+      "at": "2026-11-06T03:08:31.700Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c081c9o8",
+      "note": "#45"
+    },
+    {
+      "at": "2026-11-06T03:08:30.970Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c081c9o8",
+      "note": "#44"
+    },
+    {
+      "at": "2026-11-06T03:05:51.797Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c081c9o8",
+      "note": "#46"
+    },
+    {
+      "at": "2026-11-06T03:03:24.545Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0uwol3w",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T03:02:51.022Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c06l2xid",
+      "note": "fn build locals spliced into b.generate templates expand under an empty comptime scope"
+    },
+    {
+      "at": "2026-11-06T03:02:50.197Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c081c9o8",
+      "note": "#36"
+    },
+    {
+      "at": "2026-11-06T03:02:49.511Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c081c9o8",
+      "note": "#35"
+    },
     {
       "at": "2026-11-06T03:00:14.629Z",
       "by": "Main",
