@@ -25,6 +25,8 @@ use {
     sys :: core.sys
     core.db.[SQL, DBValue]
     sql_kernel :: core.db.sql
+    time :: core.time
+    core.time.[DateTime]
 }
 module arrow
 
@@ -880,6 +882,162 @@ fn __stream_remaining<T>(stream: DataStream<T>) -> Int Never! {
         else -> {}
     }
     remaining
+}
+
+// Event-time windows over a `Stream<T>` (D-STREAM-EVENTTIME1). Each step is a
+// lazy stage over the one source generator: `stream.with_event_time(f)`
+// stamps every element, `.key_by(f)` keys it, and
+// `.window(width, watermark: lateness, late: .Drop)` groups the keyed events
+// into tumbling windows. The watermark is the largest event time seen minus
+// the allowed lateness and never moves back; an event older than the
+// watermark is late and `.Drop` discards it. After each event every pending
+// window whose end is at or before the watermark is emitted, ordered by the
+// order its key was first seen, then by start; the windows still pending at
+// the end of the input are emitted in the same order.
+
+#Equatable
+enum LateEventDisposition {
+    Drop
+}
+
+struct StreamEvent<T> {
+    value: T
+    event_time: DateTime
+}
+
+struct StreamEventTime<T> {
+    events: Stream<StreamEvent<T>>
+}
+
+struct KeyedStream<K, T> {
+    events: Stream<__KeyedEvent<K, T>>
+}
+
+struct Window<K, T> {
+    key: K
+    start: DateTime
+    end: DateTime
+    events: [StreamEvent<T>]
+}
+
+struct __KeyedEvent<K, T> {
+    key: K
+    event: StreamEvent<T>
+}
+
+struct __PendingWindow<T> {
+    key_index: Int
+    start_ns: Int
+    events: [StreamEvent<T>]
+}
+
+// `stream.with_event_time(f)` with an `Int` result: Unix seconds.
+fn __stream_with_event_time<T>(^stream: Stream<T>, event_time: ^fn(T) -> Int Never!) -> StreamEventTime<T> Never! {
+    StreamEventTime<T>{events: __stream_stamp_seconds<T>(^stream, ^event_time)}
+}
+
+// `stream.with_event_time(f)` with a `DateTime` result.
+fn __stream_with_event_datetime<T>(^stream: Stream<T>, event_time: ^fn(T) -> DateTime Never!) -> StreamEventTime<T> Never! {
+    StreamEventTime<T>{events: __stream_stamp_datetime<T>(^stream, ^event_time)}
+}
+
+fn __stream_stamp_seconds<T>(^stream: Stream<T>, event_time: ^fn(T) -> Int Never!) -> Stream<StreamEvent<T>> {
+    loop value in stream {
+        at :: time.from_unix_seconds(event_time(value))
+        yield StreamEvent<T>{value: value, event_time: at}
+    }
+}
+
+fn __stream_stamp_datetime<T>(^stream: Stream<T>, event_time: ^fn(T) -> DateTime Never!) -> Stream<StreamEvent<T>> {
+    loop value in stream {
+        at :: event_time(value)
+        yield StreamEvent<T>{value: value, event_time: at}
+    }
+}
+
+fn __stream_key_by<K, T>(^source: StreamEventTime<T>, key: ^fn(T) -> K Never!) -> KeyedStream<K, T> Never! {
+    KeyedStream<K, T>{events: __stream_keyed<K, T>(^source.events, ^key)}
+}
+
+fn __stream_keyed<K, T>(^stream: Stream<StreamEvent<T>>, key: ^fn(T) -> K Never!) -> Stream<__KeyedEvent<K, T>> {
+    loop event in stream {
+        yield __KeyedEvent<K, T>{key: key(event.value), event: event}
+    }
+}
+
+// A `Stream<T>` function is a generator that yields only from its own body,
+// so `.window()` is this generator itself, with the generator's default
+// failure carrier.
+fn __stream_window<K: Equatable, T>(^source: KeyedStream<K, T>, width: time.Duration, watermark: time.Duration, late: LateEventDisposition) -> Stream<Window<K, T>> {
+    width_ns :: width.ns
+    lateness_ns :: watermark.ns
+    if width_ns <= 0 -> panic("stream window duration must be positive, got {width_ns}ns")
+    if lateness_ns < 0 -> panic("stream allowed lateness must be nonnegative, got {lateness_ns}ns")
+    keys := [K]{}
+    pending := [__PendingWindow<T>]{}
+    mark := 0
+    has_mark := false
+    stream := ^source.events
+    loop keyed in stream {
+        event_ns :: __stream_event_ns(keyed.event.event_time)
+        // `.Drop` is the one late-event disposition: a late event joins no window.
+        was_late :: has_mark && event_ns < mark && late == LateEventDisposition.Drop
+        candidate :: event_ns - lateness_ns
+        if !has_mark || candidate > mark {
+            mark = candidate
+            has_mark = true
+        }
+        if !was_late {
+            key_index := keys.len()
+            loop (index, known) in keys {
+                if known == keyed.key {
+                    key_index = index
+                    break
+                }
+            }
+            if key_index == keys.len() -> &keys.push(keyed.key)
+            start_ns :: event_ns /% width_ns * width_ns
+            position := pending.len()
+            joined := false
+            loop (index, open) in pending {
+                if open.key_index == key_index && open.start_ns == start_ns {
+                    position = index
+                    joined = true
+                    break
+                }
+                if open.key_index > key_index || (open.key_index == key_index && open.start_ns > start_ns) {
+                    position = index
+                    break
+                }
+            }
+            if joined {
+                &pending[position].events.push(keyed.event)
+            } else {
+                &pending.insert(position, __PendingWindow<T>{key_index: key_index, start_ns: start_ns, events: [StreamEvent<T>]{keyed.event}})
+            }
+        }
+        loop ready in __stream_windows_ready<K, T>(keys, &pending, width_ns, mark, false) -> yield ready
+    }
+    loop ready in __stream_windows_ready<K, T>(keys, &pending, width_ns, mark, true) -> yield ready
+}
+
+// Event time as Unix nanoseconds; the window arithmetic is exact `Int`.
+fn __stream_event_ns(at: DateTime) -> Int Never! {
+    at.to_unix_ns() ?? panic("stream event time {at} is outside the Unix nanosecond range")
+}
+
+fn __stream_windows_ready<K, T>(keys: [K], pending: &[__PendingWindow<T>], width_ns: Int, watermark_ns: Int, flush: Bool) -> [Window<K, T>] Never! {
+    ready := [Window<K, T>]{}
+    kept := [__PendingWindow<T>]{}
+    loop open in pending {
+        if flush || open.start_ns + width_ns <= watermark_ns {
+            &ready.push(Window<K, T>{key: keys[open.key_index], start: time.from_unix_nanoseconds(open.start_ns), end: time.from_unix_nanoseconds(open.start_ns + width_ns), events: open.events})
+        } else {
+            &kept.push(open)
+        }
+    }
+    pending = kept
+    ready
 }
 
 // `data.query(tracked)` and `tracked.query()`: a reusable scan of the

@@ -47,7 +47,6 @@ extern bool jet_rt_handle_eq_##N(int64_t *,int64_t *);
 ENUM_DECL(jet_failure_policy)
 ENUM_DECL(jet_dispatch_state)
 ENUM_DECL(jet_event_config_error)
-ENUM_DECL(jet_late_event_disposition)
 static struct { void *pointer; int64_t size,align; unsigned frees; } watched[32];
 static size_t count;
 static unsigned intercepted;
@@ -147,6 +146,5 @@ int main(void) {
     enum_cases(4,jet_rt_handle_clone_jet_failure_policy,jet_rt_handle_drop_jet_failure_policy,jet_rt_handle_eq_jet_failure_policy);
     enum_cases(7,jet_rt_handle_clone_jet_dispatch_state,jet_rt_handle_drop_jet_dispatch_state,jet_rt_handle_eq_jet_dispatch_state);
     enum_cases(1,jet_rt_handle_clone_jet_event_config_error,jet_rt_handle_drop_jet_event_config_error,jet_rt_handle_eq_jet_event_config_error);
-    enum_cases(2,jet_rt_handle_clone_jet_late_event_disposition,jet_rt_handle_drop_jet_late_event_disposition,jet_rt_handle_eq_jet_late_event_disposition);
     assert(intercepted>0);puts("Jet byte/policy/enum glue: ok");return 0;
 }

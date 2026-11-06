@@ -2852,18 +2852,6 @@ fn jet_driver_check_reserved_import(declaration: ImportDecl, diagnostics: &[Diag
     true
 }
 
-// Rust Syntax `is_ring_module`: ring module names that resolve as
-// compiler-known modules.
-fn jet_driver_is_ring_module(name: String) -> Bool Never! {
-    name == "log" || name == "crypto" || name == "http" || name == "regex" || name == "reactive" || name == "archive" || name == "raylib" || name == "db" || name == "time" || name == "plugin"
-}
-
-// Rust Syntax `canonical_ring_module`: the Core home of an old ring spelling.
-fn jet_driver_canonical_ring_module(name: String) -> String Never! {
-    if name == "raylib" -> return "core.game.raylib"
-    "core.{name}"
-}
-
 // The one leading `package { … }` carrier of a source
 // (Rust `Package::extract_inline_package`). Offsets index the original text;
 // `error` is the E1360/E1361/E1362 structure failure.
@@ -3288,6 +3276,10 @@ struct JetDriverCoreIdentifierDemand {
     // a bare `expect(…)` call (`expect(value).snapshot()`) the `core.testing.snap`
     // one, so core.testing loads.
     test_suite: Bool{false}
+    // A `.with_event_time(…)` receiver call (`stream.with_event_time(f)`,
+    // D-STREAM-EVENTTIME1) and the `.key_by`/`.window` stages after it run
+    // their `Core/Data/Data.jet` source stages, so core.data loads.
+    stream_event_time: Bool{false}
     // A `#UnitFamily` declaration: its explicit conversions lower to their
     // `Core/Math/Math.jet` exact-conversion helpers, so core.math loads.
     unit_family: Bool{false}
@@ -3338,6 +3330,7 @@ struct JetDriverCoreDemandNames {
     pattern_match_name: Int
     test_suite_name: Int
     expect_name: Int
+    event_time_name: Int
     unit_family_name: Int
     decode_name: Int
     field_error_name: Int
@@ -3383,7 +3376,7 @@ fn jet_driver_core_demand_names(tables: TokenTables) -> JetDriverCoreDemandNames
             if id >= 0 && !core_segments.contains(id) -> &core_segments.push(id)
         }
     }
-    JetDriverCoreDemandNames{or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), regex_name: jet_driver_core_demand_name(tables, "Regex"), pattern_matches_name: jet_driver_core_demand_name(tables, "matches"), pattern_match_name: jet_driver_core_demand_name(tables, "match"), test_suite_name: jet_driver_core_demand_name(tables, "suite"), expect_name: jet_driver_core_demand_name(tables, "expect"), unit_family_name: jet_driver_core_demand_name(tables, "UnitFamily"), decode_name: jet_driver_core_demand_name(tables, "decode"), field_error_name: jet_driver_core_demand_name(tables, "FieldError"), field_error_under_name: jet_driver_core_demand_name(tables, "under"), bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments}
+    JetDriverCoreDemandNames{or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), regex_name: jet_driver_core_demand_name(tables, "Regex"), pattern_matches_name: jet_driver_core_demand_name(tables, "matches"), pattern_match_name: jet_driver_core_demand_name(tables, "match"), test_suite_name: jet_driver_core_demand_name(tables, "suite"), expect_name: jet_driver_core_demand_name(tables, "expect"), event_time_name: jet_driver_core_demand_name(tables, "with_event_time"), unit_family_name: jet_driver_core_demand_name(tables, "UnitFamily"), decode_name: jet_driver_core_demand_name(tables, "decode"), field_error_name: jet_driver_core_demand_name(tables, "FieldError"), field_error_under_name: jet_driver_core_demand_name(tables, "under"), bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments}
 }
 
 fn jet_driver_core_demand_bare_row(rows: &[Int], id: Int, at: Int) Never! {
@@ -3419,6 +3412,7 @@ fn jet_driver_collect_core_identifier_demand_ids(tokens: [Token], tables: TokenT
             if (name == names.pattern_matches_name || name == names.pattern_match_name) && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN -> demand.regex_source = true
             if name == names.test_suite_name && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN -> demand.test_suite = true
             if name == names.expect_name && (index == from || tokens[index - 1].kind != TOKEN_DOT) && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN -> demand.test_suite = true
+            if name == names.event_time_name && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN -> demand.stream_event_time = true
             if index + 4 < to && tokens[index + 1].kind == TOKEN_DOT && tokens[index + 2].kind == TOKEN_IDENT && tokens[index + 3].kind == TOKEN_DOT && tokens[index + 4].kind == TOKEN_IDENT && (index == from || tokens[index - 1].kind != TOKEN_DOT) && names.core_segments.contains(name_index(tokens[index + 2].decoded)) {
                 path :: "{token_decoded(tables, tokens[index])}.{token_decoded(tables, tokens[index + 2])}"
                 if !demand.core_paths.contains(path) -> &demand.core_paths.push(path)
@@ -3522,6 +3516,7 @@ fn jet_driver_collect_core_identifier_demand_threads(input: ^Lexed, runs: [Int],
         if output.regex_source -> demand.regex_source = true
         if output.format_selector -> demand.format_selector = true
         if output.test_suite -> demand.test_suite = true
+        if output.stream_event_time -> demand.stream_event_time = true
         if output.codec_decode -> demand.codec_decode = true
         if output.unit_family -> demand.unit_family = true
         loop bare in output.bare_names {
@@ -4658,6 +4653,20 @@ fn jet_driver_load_reach(request: JetDriverCompileRequest, use_driven: Bool) -> 
             jet_driver_reach_open(&reach, "core.testing")
             testing_index :: jet_driver_core_unit(&source_units, &queued, &pending, &generated_records, request.core_sources, "core.testing", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, &diagnostics)
             if testing_index == .Val(index) {
+                if !queued[index] {
+                    queued[index] = true
+                    &pending.push(index)
+                }
+            }
+        }
+        // `stream.with_event_time(…)` and its `.key_by`/`.window` stages run
+        // their core.data source stages, even when the caller has no explicit
+        // core.data import.
+        if demand.stream_event_time {
+            if !bare_modules.contains("core.data") -> &bare_modules.push("core.data")
+            jet_driver_reach_open(&reach, "core.data")
+            data_index :: jet_driver_core_unit(&source_units, &queued, &pending, &generated_records, request.core_sources, "core.data", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, &diagnostics)
+            if data_index == .Val(index) {
                 if !queued[index] {
                     queued[index] = true
                     &pending.push(index)

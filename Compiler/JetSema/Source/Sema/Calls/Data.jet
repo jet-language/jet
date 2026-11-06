@@ -7,6 +7,7 @@ use jet_foundation.[
     Diagnostic,
     Expr,
     EffectRowEntry,
+    EnumLitArg,
     FunctionDefaultRef,
     NodeKind,
     ParamZone,
@@ -568,6 +569,141 @@ fn sema_data_try_query_method(receiver: Expr, receiver_value: TExpr, name: Strin
     SemaMethodSpecialCheck{handled: true, value: value}
 }
 
+// The event-time Stream stages (D-STREAM-EVENTTIME1):
+// `stream.with_event_time(f)` is `StreamEventTime<T>`, `.key_by(f)` is
+// `KeyedStream<K, T>`, and `.window(width, watermark: lateness, late: .Drop)`
+// is `Stream<Window<K, T>>`. Each stage moves its receiver into its core.data
+// source stage. The stream calls the callbacks once per element as it is
+// pulled, so they take the element and carry no effects.
+fn sema_data_event_time_receiver(name: String, parameters: [Type], method: String) -> String Never! {
+    if name == "Stream" && parameters.len() == 1 && method == "with_event_time" -> return "Stream"
+    if sema_data_nominal_is(name, "StreamEventTime") && parameters.len() == 1 && method == "key_by" -> return "StreamEventTime"
+    if sema_data_nominal_is(name, "KeyedStream") && parameters.len() == 2 && method == "window" -> return "KeyedStream"
+    ""
+}
+
+fn sema_data_event_time_callback(method: String, element: Type, argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDataQueryCallback {
+    required :: Type.Fn{params: [Type]{element}, ret: None, effect_bound: Val([EffectRowEntry]{}), param_contract: None, call_metadata: None, return_view_provenance: None}
+    checked :: sema_expression_lambda_collection_callback(argument.expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDataQueryCallback{value: None, result: None}
+    if checked.ty == {
+        .Fn(params, ret, _, _, _, _) -> {
+            if params.len() == 1 && params[0] == element && sema_data_fn_has_empty_effect_bound(checked.ty) -> return SemaDataQueryCallback{value: Val(checked), result: ret}
+        }
+        else -> {}
+    }
+    &diagnostics.push(sema_error("E0112", expr_span(argument.expr), "`{method}` wants a callback `fn({sema_type_show(element)}) -> …` without effects, but this is {sema_type_show(checked.ty)}", "the stream calls it once for each element as the stream is pulled", "pass a lambda over one element, such as `(event: {sema_type_show(element)}) -> event.timestamp`"))
+    SemaDataQueryCallback{value: None, result: None}
+}
+
+fn sema_data_event_time_is_datetime(ty: Type) -> Bool Never! {
+    if ty == {
+        .Named(name) -> return name == "DateTime" || (core_identity_in_module(name, "core.time") && name.ends_with("::DateTime"))
+        else -> return false
+    }
+}
+
+// `window`'s first argument is positional; the lateness and the late-event
+// policy are named so the two durations cannot be swapped.
+fn sema_data_event_time_labels(method: String, args: [CallArg], diagnostics: &[Diagnostic]) -> Bool {
+    names :: if method == "window" -> [String]{"", "watermark", "late"} else -> [String]{""}
+    valid := true
+    loop (index, argument) in args {
+        want :: names[index]
+        if argument.label == {
+            .Val(label) -> {
+                if want == "" {
+                    &diagnostics.push(sema_error("E0767", label.span, "argument {index + 1} of `.{method}()` is positional, so it takes no label `{label.name}:`", "the first argument of an event-time stage is its subject and has no name", "drop `{label.name}:`"))
+                    valid = false
+                } else if label.name != want {
+                    &diagnostics.push(sema_error("E0764", label.span, "`.{method}()` has no parameter labelled `{label.name}`", "a label binds an argument to the parameter of that name", "write `{want}:` for argument {index + 1}"))
+                    valid = false
+                }
+            }
+            else -> {
+                if want != "" {
+                    &diagnostics.push(sema_error("E0769", expr_span(argument.expr), "argument {index + 1} of `.{method}()` needs the label `{want}:`", "the window's lateness and late-event policy are named so the two durations cannot be swapped", "write `{want}: ` before argument {index + 1}"))
+                    valid = false
+                }
+            }
+        }
+    }
+    valid
+}
+
+fn sema_data_try_event_time_method(receiver: Expr, receiver_value: TExpr, name: String, parameters: [Type], method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    receiver_type :: sema_data_event_time_receiver(name, parameters, method)
+    if receiver_type == "" -> return SemaMethodSpecialCheck{handled: false, value: None}
+    least :: if method == "window" -> 2 else -> 1
+    most :: if method == "window" -> 3 else -> 1
+    if type_args.len() != 0 || args.len() < least || args.len() > most {
+        if type_args.len() != 0 -> sema_data_check_explicit_type_args("{receiver_type}.{method}", type_args, 0, span, &diagnostics)
+        if args.len() < least -> &diagnostics.push(sema_wrong_core_arity(method, least, args.len(), span))
+        if args.len() > most -> &diagnostics.push(sema_wrong_core_arity(method, most, args.len(), span))
+        sema_data_check_discarded_arguments(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    complete := sema_data_event_time_labels(method, args, &diagnostics)
+    element :: parameters[parameters.len() - 1]
+    source_args := [CallArg]{CallArg{convention: AccessConvention.Move, expr: receiver, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}}
+    argument_types := [Type]{receiver_value.ty}
+    typed := [TExpr]{receiver_value}
+    call_type_args := [Type]{element}
+    result_type := Type.Named{name: "Unit"}
+    target := String?{None}
+    if method == "with_event_time" {
+        callback :: sema_data_event_time_callback(method, element, args[0], environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        if !sema_data_query_push_argument(args[0], callback.value, &source_args, &argument_types, &typed) -> complete = false
+        if callback.result == .Val(stamp) {
+            if sema_data_event_time_is_datetime(stamp) {
+                target = Val("core.data.__stream_with_event_datetime")
+            } else if stamp != Type.Int {
+                &diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`with_event_time` wants the callback to return `Int` Unix seconds or a `DateTime`, but it returns {sema_type_show(stamp)}", "the result is the element's event time", "return the element's timestamp as Unix seconds or a `DateTime`"))
+                complete = false
+            }
+        }
+        result_type = Type.Apply{name: sema_data_source_type_name(environment, program, "StreamEventTime"), args: [Type]{element}}
+    }
+    if method == "key_by" {
+        callback :: sema_data_event_time_callback(method, element, args[0], environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        if !sema_data_query_push_argument(args[0], callback.value, &source_args, &argument_types, &typed) -> complete = false
+        key := Type.Named{name: "Unit"}
+        if callback.result == .Val(found) {
+            key = found
+            if !sema_type_equatable(environment, program, found) {
+                &diagnostics.push(sema_error("E0312", expr_span(args[0].expr), "`key_by` keys must support `==`, but `{sema_type_show(found)}` doesn't", "a window groups the events whose keys are equal", "return an Equatable key such as a String or Int field, or add `#Equatable` to `{sema_type_show(found)}`"))
+                complete = false
+            }
+        }
+        call_type_args = [Type]{key, element}
+        result_type = Type.Apply{name: sema_data_source_type_name(environment, program, "KeyedStream"), args: [Type]{key, element}}
+    }
+    if method == "window" {
+        duration :: Type.Named{name: "Duration"}
+        loop index in 0..<2 {
+            value :: sema_data_expect_core_arg("window", index, duration, args[index], environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            if !sema_data_query_push_argument(args[index], value, &source_args, &argument_types, &typed) -> complete = false
+        }
+        disposition :: sema_data_source_type_name(environment, program, "LateEventDisposition")
+        // `late:` defaults to `.Drop`.
+        late :: if args.len() == 3 -> args[2] else -> CallArg{convention: AccessConvention.Read, expr: Expr.EnumLit{type_name: disposition, variant: "Drop", variant_span: None, args: [EnumLitArg]{}, leading_dot: false, span: span, id: AST_NODE_GENERATED}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+        value :: sema_data_expect_core_arg("window", 2, Type.Named{name: disposition}, late, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        if !sema_data_query_push_argument(late, value, &source_args, &argument_types, &typed) -> complete = false
+        call_type_args = [Type]{parameters[0], element}
+        // The window stage is a core.data generator: its declared `Stream<T>`
+        // carries the default `Err` failure.
+        windows :: Type.Apply{name: "Stream", args: [Type]{Type.Apply{name: sema_data_source_type_name(environment, program, "Window"), args: [Type]{parameters[0], element}}}}
+        result_type = Type.Result{ok: windows, err: Type.Named{name: "Err"}}
+    }
+    if !complete -> return SemaMethodSpecialCheck{handled: true, value: None}
+    record := core_receiver_method(receiver_type, method) ?? {
+        &diagnostics.push(sema_error("E0003", span, "event-time method `{method}` has no canonical receiver Core row", "every event-time stage lowers onto its receiver Core row", "repair the Core registry receiver rows"))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    if target == .Val(found) -> record.source_target = Val(found)
+    value :: sema_data_core_emit(record, "{receiver_type}.{method}", source_args, argument_types, typed, call_type_args, result_type, span, expected, environment, program, &scopes, &state, &context, &diagnostics)
+    SemaMethodSpecialCheck{handled: true, value: value}
+}
+
 fn sema_data_group_sum_target(value: Type) -> String Never! {
     if value == {
         .Float -> "__group_sum_float"
@@ -611,6 +747,8 @@ fn sema_call_try_data_method(receiver: Expr, receiver_value: TExpr, method: Stri
     if resolved_ty == .Apply(name, parameters) {
         query :: sema_data_try_query_method(receiver, receiver_value, name, parameters, method, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if query.handled -> return query
+        stage :: sema_data_try_event_time_method(receiver, receiver_value, name, parameters, method, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        if stage.handled -> return stage
     }
     if method == "query" && resolved_ty == .List(row) -> return sema_data_check_list_query(receiver, receiver_value, row, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if method == "encode" && !sema_expr_declares_inherent_method(environment, program, receiver_value.ty, "encode") -> return sema_data_check_encode(receiver, receiver_value, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)

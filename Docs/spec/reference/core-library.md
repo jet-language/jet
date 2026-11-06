@@ -1804,7 +1804,7 @@ fn run() {
 | `home_dir()` / `temp_dir()` | `?String -[Env]>` / `String -[Env]>` | Return platform home or temporary-directory values. |
 | `name()` / `family()` / `arch()` | `String -[Env]>` | Return OS name, OS family, and CPU architecture. |
 | `platform()` / `is_windows()` / `is_unix()` / `is_linux()` / `is_macos()` | platform values `-[Env]>` | Query the environment-derived platform facts. |
-| `executable()` / `username()` | `String -[Env]>` | Return process facts. `executable()` is the running program's path: the built binary, or the script's absolute path under `jet run`; launching it runs the program again on either tier. |
+| `executable()` / `username()` | `String -[Env]>` | Return process facts. `executable()` is the running program's path: the built binary, or the script's absolute path under `jet run`; launching it runs the program again on either tier, and every later command word reaches the program as an argument (under `jet run` the relaunch places them after `--`). |
 | `hostname()` | `String -[Env, FS]>` | Return the host name. |
 | `release()` / `version()` | `String -[Env, FS, Exec, Time.Wait]>` | Read operating-system facts; macOS queries run `uname` or `sw_vers`. |
 | `pid()` / `getpid()` / `getppid()` / `cpu_count()` | `Int -[Env]>` | Return process IDs or a logical CPU count of at least one. |
@@ -3248,6 +3248,31 @@ stream is terminal and does not resume iteration.
 | `stream.skip(stream, n)` | `Unit` | Consume up to `n` rows. |
 | `stream.take_n(stream, n)` | `[T] !DataError` | Consume at most `n` rows. |
 | `stream.len(stream)` / `is_empty(stream)` | `Int` / `Bool` | Inspect remaining rows without changing row ownership. |
+
+### Event-time windows over `Stream<T>`
+
+Three receiver stages on the builtin pull stream group events into tumbling
+event-time windows. They are `core.data` source stages
+([`Core/Data/Data.jet`](../../../Core/Data/Data.jet)). Each stage consumes
+its receiver and stays lazy: the stream runs the callbacks once per element as
+it is pulled. The callbacks take one element and carry no effects.
+
+| Stage | Returns | Description |
+| --- | --- | --- |
+| `stream.with_event_time(event -> time)` | `StreamEventTime<T>` | Stamp each element with its event time: `Int` Unix seconds or a `DateTime`. |
+| `stamped.key_by(event -> key)` | `KeyedStream<K, T>` | Key each stamped element. `K` must be `Equatable`. |
+| `keyed.window(width, watermark: lateness, late: .Drop)` | `Stream<Window<K, T>>` | Group elements into tumbling windows of `width`. `late:` defaults to `.Drop`. |
+
+`Window<K, T>` has `key`, `start` and `end` (`DateTime`), and `events`, a list
+of `StreamEvent<T>` (`value` plus `event_time`) in arrival order. A window
+starts at a multiple of `width` since the Unix epoch. The watermark is the
+largest event time seen so far minus `lateness`, and it never moves back. An
+element older than the watermark is late, and `LateEventDisposition.Drop`
+discards it. A window is emitted once the watermark reaches its end. When the
+source ends, the remaining windows are emitted. Windows that become ready at
+the same time come out in the order their keys were first seen, then by start.
+`width` must be positive and `lateness` must not be negative; anything else
+panics when the stream is first pulled.
 
 ### `core.data.plot` — deterministic data plots
 
