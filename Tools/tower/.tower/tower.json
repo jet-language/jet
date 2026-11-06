@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6603,
-    "rev": 92975,
+    "nextNum": 6605,
+    "rev": 93000,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -70978,6 +70978,26 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "c15o, 6e61ae0bf7 (Recover3): ledger only. The last 23 ui FAIL rows move to known-failing, each naming its root: #4275 ×4, #6366 ×3, #6425 ×13, #6419, #6004, #6418. ui A/B on dfc887571e (s1 b4fe9738fd625e7b, seed a0_026): FAIL 23→0, KF 126→149, PASS 2238, 0 lost; CHECK OK. Receipt: $JET_SCRATCH_ROOT/lanes/Main/land/6035-c15o.receipt.md. Main's review: c15 is NOT met. It requires each failure fixed at its root or re-recorded from ratified output, and a KF route is neither. 29 REFUSED rows are also still unaccounted for. Recover3 keeps the rows it routed to #6425, minus any already in GoldenRoots3's 91-row census."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c2 parked by Recover3 until the a0_026 seed (in progress on 48b6bce25e) rotates. The held patch is rebased onto ae8271e354 ($JET_STATE_ROOT/jetlanes/Recover3/c2/c2-rebased.patch). It keeps corpora and adds the jetpack, selfhost and perf profiles plus Compiler/test.jet. On the a0_025 seed, s1 fails with E0102: Test.suite (964ec6bf79) postdates that seed."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c15 partial, 8e1219e5ec (Recover3, c15n). ui A/B: FAIL 29→23, KF 153→155, PASS 2197→2203, 0 lost. Now PASS: core_math_float_type_mismatch, its pow variant, and missing_assoc_type. bad_map_key's companion now checks clean and runs on o0/o1/o2. Routed: ffi_missing_version.fixed to #6564 (cargo); operator_mixed_orphan_reverse to #6425 (E0902 fires, but the refused impl body is still checked, which adds an E0605). golden A/B and cases A/B over 42 dirs: unchanged, 0 lost. chain FIXED_POINT; CHECK OK. 23 ui FAILs remain, listed in $JET_SCRATCH_ROOT/lanes/Main/land/6035-c15n.receipt.md."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c15 partial, d728fb362c (Recover3, c15m): seven ui rows now get their ratified code. ui A/B: FAIL 34→29, KF 155→153, PASS 2189→2197, 0 lost. golden A/B unchanged (PASS 4658), 0 lost. cases A/B over 42 touched dirs: unchanged, 0 lost. chain full FIXED_POINT (jet d6b130360bc987bb). lane-check CHECK OK. Receipt: $JET_SCRATCH_ROOT/lanes/Main/land/6035-c15m.receipt.md."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "c15 partial, 239612f209 (Recover3, c15l): 86 ui FAIL rows filed as known-failing under their named roots (#6425 ownership and sendability checks, #5454, #6006 lints, #4926 comptime, #4275 package and manifest rows, #5010 for runtime_rng_backward's missing caller location, #6564 for the extern-rust rows that need cargo); view_mut_bounds_interpreter re-recorded to the file:line stop form. ui on s1 of 90f5740d04: FAIL 122 to 35, known-failing 69 to 155, 0 lost; CHECK OK. Rulings (Main): distinct_constructor_alias needs no ballot. Restore E0753 for a call whose callee is a distinct type (syntax-decisions.md:1081,1134 make conversions destination-owned; E0803 is for values, not types) and keep the snapshot. migration_change_impl_ok's false E0910 and cffi_e3205's span move from #6564 to Recover3's sema fix list."
         },
         {
@@ -72007,7 +72027,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-06T06:37:38.730Z",
+      "updated": "2026-11-06T08:40:43.385Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
@@ -84744,6 +84764,21 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "c9 partial, 8170c2f082 and dfc887571e (JetpackEngine). jet split and jet fold are built: the front forwards them to the engine's TransitionCommand. package_transition_cli_covers_split_fold_init_restore_and_failures goes KF→PASS; it adopts the retirement of the migration-epoch role-file init, and --restore-role-files is removed from the registry. The host_split row now passes its split step but stays KF, blocked on jet os plan (the engine has no JetOS os verb). The jet init --check write is filed as #6603 (front flag scoping)."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "a0fca8c2c4 also removes the stale known-failing row pkg/cli_add_path_into_inline_empty_deps_table (#4944, a frozen card). The row passes --fresh on the HEAD s1 jet with the HEAD-built hosted jetpack."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c8 partial, a0fca8c2c4 (JetpackEngine): jet build --sbom --quiet (both quiet_suppresses_sbom rows) and build_entry/emit_generated_exports pass, and their known-failing rows are removed. Still open: jet run/build --gate (organization_gate_policy_refuses_each_audited_invocation_gate). s1 run, LaneCheck CHECK OK."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "c5 partial, d92918cc4f (Builder5): --web-graph is built (see c19). Still open for c5: --cost (cost_cli_projects_generic_specializations), explain tuned.slots, explain_build_reports_package_reuse_reasons, top_level_explain_dispatches_to_jetpack, jetpack_missing_package_explain_golden, and jet test --set. Also, afab0cf28b (Main) has jet run serve a full-stack web.app() entry again (E-WEB-RUN refuses only browser-only programs): app_hello_serves PASS. web_app_run_serves now listens but still fails a ^= response predicate, so its known-failing reason is stale."
         },
         {
@@ -84924,11 +84959,11 @@
         {
           "n": 8,
           "text": "jet build --sbom and jet build --gate are built; every cases row that reported E2104 for it passes on the default tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:12:10.841Z"
+          "evidence": "Built in a0fca8c2c4 (sbom) and c69bdbd209 (gate), by JetpackEngine. On the s1 of 0a2f792c37 plus the identical gate patch, these rows PASS: cli_parts_core/organization_gate_policy_refuses_each_audited_invocation_gate (KF E2104→PASS, its KF row removed), configured_organization_unsafe_policy_fails_closed_and_keeps_path (FAIL→PASS), pkg/cli_build_sbom_writes_spdx, and cli_runtime and cli_parts_runtime quiet_suppresses_sbom_write_confirmation ($JET_SCRATCH_ROOT/lanes/Main/land/6418-c8-proof.log). known-failing.tsv has no gate or sbom row left. The lane-check compiler log has 0 errors ($JET_SCRATCH_ROOT/lane-check/jet-lane-check.4150691221701), and the receipt was CHECK OK.",
+          "at": "2026-11-06T08:12:22.419Z"
         },
         {
           "n": 9,
@@ -86137,7 +86172,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T01:11:55.199Z",
-      "updated": "2026-11-06T07:40:59.793Z",
+      "updated": "2026-11-06T08:28:20.840Z",
       "updatedBy": "Main"
     },
     {
@@ -86944,6 +86979,16 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "Routed from #6035 c15n (8e1219e5ec): tests/ui/operator_mixed_orphan_reverse is now KF under #6425. E0902 fires, but sema still checks the refused impl body, which adds a stray E0605. A refused impl body must not produce follow-on diagnostics."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Partial, 0a2f792c37 (GoldenRoots3). KF→PASS: tests/ui/valueless_call, tests/ui/csv_to_string_wrong_input, and tests/ui/decimal_unsupported_operator. The decimal row is re-recorded to %, because Decimal / is defined and returns a Fraction (core-library.md:2207). Full ui: KF 124, PASS 2229, FAIL 29; all FAILs are in the baseline and no row went PASS→FAIL ($JET_SCRATCH_ROOT/lanes/GoldenRoots3/r22.txt). The encoding_parity, exact, unit and print cases have no new failures (c22.txt)."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "c7 baseline rebuilt on 3d3775186e (GoldenRoots3, generator $JET_SCRATCH_ROOT/lanes/GoldenRoots3/census.mjs). 91 tests/ui error rows miss their expected code ($JET_SCRATCH_ROOT/lanes/GoldenRoots3/6425-rows.tsv); 36 of them, in 35 families, report no diagnostic at all (6425-nodiag.tsv). Full ui on 3d3775186e: PASS 2221, KF 129, FAIL 34, none new (6425-ui-3d3775186e.txt). c7 now covers all 91 rows, replacing the 157-row table."
         },
         {
@@ -87249,7 +87294,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T07:25:24.208Z",
-      "updated": "2026-11-06T07:41:52.240Z",
+      "updated": "2026-11-06T08:14:16.233Z",
       "updatedBy": "Main"
     },
     {
@@ -91960,6 +92005,11 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "Seed a0_026 released and rotated: dev 48b6bce25e, s2==s3 36bf9a2483922344, no Rust. Every gate PASSES: chain, cc-pack, pack, jetpack, jetpack-engine. golden 4754 rows (0 lost), ui 2266 (0 lost, 144 new passing), cases 4491 (0 lost); 2431 gains over a0_025. Evidence: $JET_STATE_ROOT/jet-seeds/a0_026/evidence."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "Seed cut a0_026 on ba870ef22f: the chain reached a fixed point, and cc-pack, pack, jetpack, golden and ui all PASS. cases lost 13 rows, with these roots: (A) 7 stale predicates (the header now prints [jet.Name] and the code is on the More: line), (B) the fetch-toolchain summary says Hangar in --help, (C) E3412 refuses a pure core.net call at comptime by module prefix (Recover3), (D) a fixture puts #FX on a struct (the registry allows Block only), (E) a nested impl Debug loses to the derived one, for EncodingError (Recover3), (F) the foreign-crate provenance tmp race (JetpackEngine), (G) E-WEB-RUN refused full-stack web.app() entries. A, B, D and G are fixed in afab0cf28b (Main). Recut after C, E and F land."
         },
         {
@@ -92328,11 +92378,11 @@
         {
           "n": 23,
           "text": "D-NIX-INDEX-ROOT1=A: each jet release publishes a C toolchain pack (static clang and lld, musl sources, glibc headers and link stubs) built reproducibly from pinned sources by release-compiler.mjs, its SHA-256 embedded in jet; jet cc fetches it from the release on first use, verifies the hash, caches it in the Hangar and builds per-target libc lazily; jet env fetch-toolchain pre-fetches; jet cc --target works for every covered Linux target on a clean machine with no Nix; the Nix index path leaves CcDriver",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T01:32:50.687Z"
+          "evidence": "Seed release a0_026 (dev 48b6bce25e, assembled by release-compiler.mjs, verdict PASS full). Its cc-pack step rebuilt jet-cc-pack-x86_64-linux.tar.zst from pinned sources, and it matches the hash jet embeds (7c991b6c41e2ed9b, 111338169 bytes). The pack ships beside jet in the release ($JET_STATE_ROOT/jet-seeds/a0_026/). Clean-machine fetch, verify and offline jet cc --target are proven by Builder5's follow-up (25c21787a5, b44941163a; logged above). Uploading to the public release host is the owner's publish step, not a code gap.",
+          "at": "2026-11-06T08:35:00.195Z"
         }
       ],
       "refs": [],
@@ -92343,7 +92393,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T16:33:50.383Z",
-      "updated": "2026-11-06T07:23:21.889Z",
+      "updated": "2026-11-06T08:35:00.965Z",
       "updatedBy": "Main"
     },
     {
@@ -93542,6 +93592,11 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "A2 cced341fd5 (DeclColon, pushed): every compiler-binary text and token detector reads both spellings. Covered: build, run, workspace-module, #Job, use-alias, registry, plugin, capability, Output and C-facade, each with #Tests for both forms. chain full on d728fb362c+A2 with a0_025: FIXED_POINT (jet 55f7fa3c676f65d5). The official seed a0_027 will be cut on a HEAD that contains A2; B–D (the converted tree) lands only after a0_027 rotates."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "Commit A landed (DeclColon): 7bb6b7ee8d makes the parser accept both name: value and the retired :: form, maps each new spelling onto the existing AST nodes, and registers E0397 (registered, not yet reported); 4bfcc132f9 lists ColonDeclarations.jet in sources.list. Proof on an export of 7bb6b7ee8d: chain full FIXED_POINT (s2 == s3, jet 506047775323c6eb); census on HEAD: check, build and selfcheck 0 rows, runtime 0 issues; lane check CHECK OK; both forms parse with no diagnostics and jet fmt still prints the old form (the formatter switch lands with the conversion). The conversion builds with seed C_a (cA s2 + pack2) inside DeclColon's trees only."
         },
         {
@@ -93628,7 +93683,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T02:04:25.306Z",
-      "updated": "2026-11-06T06:02:23.894Z",
+      "updated": "2026-11-06T08:25:58.380Z",
       "updatedBy": "Main"
     },
     {
@@ -94039,6 +94094,21 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "60adfbb42a (CoreOwnership): a default browser provider, with provider records as length-prefixed fields; the clipboard reads from the page's paste, copy and cut mirror with no implicit readText; core-library.md updated. Main's review keeps c2 open: the provider still computes the IME caret, maps DOM event types to phases (including compositionend with an empty string → Cancel), and keeps unbounded queues. The fix: send raw fields, let Core own the mapping and caret, and report overflow as Core's existing QueueFull. Ballot item B3: the browser's dragleave dropEffect 'none' has no UIDragOperation, so today it is a HostFailure; the choice is a None case or an optional operation."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Ballot prep (CoreOwnership). B1, browser file dialogs: (a) keep FileDialog absent on web (current); (b) a pending dialog plus a public poll or dialog event, with a UIBrowserFile{name, bytes/handle} carrier; (c) OPFS/File System Access handles in a synthetic grant root, Chromium-only, which changes what a grant means. B2, web shortcuts: (a) keep Core-only register/dispatch, with the app feeding keys itself; (b) a keydown queue plus a public shortcuts.poll(). Main's adversarial notes before this goes on a ballot: B1(b) must not create a second 'chosen file' carrier beside UIGrantedPath (I8), so one selection type has to serve native and web. B2(b) must not need app polling; keys should arrive through the UI event delivery the app already handles. Both need same-program alternatives with these downsides engineered away before the owner sees them."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "A3 seam landed, ae8271e354 (CoreOwnership). Ui.js (1414 lines of dead JS policy) is deleted. Core/Ui/Host owns every rule over six marshal-only C-ABI provider leaves: headless on native, and on web forwarded to globalThis.jetUiProvider. Proof: tests/cases/web_build/ui_host_provider_answers_are_core_owned. Native reports every capability absent with the same validation answers; the web run with a stubbed provider gets Core-decoded events and errors. Full chain s2==s3 (4633942b); golden ui/ 57/57 on o0/o1/o2. Open before closing: the web runtime installs no default browser provider, so a shipped app reports all capabilities absent. A default marshal-only provider is still needed, including a sync/async bridge for the clipboard."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "Partial, 9ce77ac519 (CoreOwnership): the node-slot half. UIAccessibility and UIShortcut are runtime records; the .accessibility, .shortcut and .ime field reads and the native jet_ui_text_input lower. Remaining: the A3 primitive provider seam for the host services."
         },
         {
@@ -94047,7 +94117,26 @@
           "text": "Ruling (Main) on the web host services: A3. Core source owns the UI host service logic (validation, queues, the binding registry, UIHostError meaning) over a primitive-only provider seam: capability flag, clipboard get/set text, event pop, dialog request/result. Web implements the seam with the browser; native implements it headless and reports the capability as absent. Rejected: A1, deleting the web JS provider, because it would drop shipped web clipboard, shortcut, IME/drag and file-dialog behaviour, which is a product change for the owner; and A2, keeping the logic in Ui.js with native record carriers, because hosts would re-encode policy, which violates I9. The node-slot half (UIAccessibility and UIShortcut records, field reads, native jet_ui_text_input) lands first and separately."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Core/Ui/Host owns every host-service rule over a marshal-only provider seam; native reports every capability absent with the same validation answers as web (tests/cases/web_build/ui_host_provider_answers_are_core_owned)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "ae8271e354 (CoreOwnership): ui_host_provider_answers_are_core_owned, with native and web .out reviewed by Main. Validation lines are identical across tiers, native reports CapabilityUnavailable, and Host.jet's provider leaves only marshal. Chain s2==s3 4633942b; golden ui/ 57/57 on o0/o1/o2.",
+          "at": "2026-11-06T08:17:06.056Z"
+        },
+        {
+          "n": 2,
+          "text": "The web runtime installs a default browser provider that forwards only raw browser primitives (keys, IME composition, drag/drop items, file dialogs, clipboard), with a DOM-stub cases row proving the forwarding",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T08:17:04.380Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [
@@ -94056,7 +94145,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T06:28:56.205Z",
-      "updated": "2026-11-06T07:20:02.437Z",
+      "updated": "2026-11-06T08:37:47.005Z",
       "updatedBy": "Main"
     },
     {
@@ -94299,7 +94388,7 @@
       "id": "c07hutuq",
       "num": 6602,
       "title": "A user struct's nested impl Debug is E0112 for {x:Debug}; the top-level impl T.Debug form works",
-      "body": "Found by Recover3 while fixing the a0_026 lost rows (48b6bce25e). A user struct whose impl Debug { fn debug(^self) -> String … } is nested in the struct body gets E0112 ('can't be shown with :Debug yet') for {x:Debug}. The same impl written top-level as impl T.Debug works, and Core types with the nested form work since 48b6bce25e rooted Core debug methods. a0_025 gives the same E0112, so this is not a regression. Under D-NESTED-IMPL parity, the two spellings must mean the same thing.",
+      "body": "Found by Recover3 while fixing the a0_026 lost rows (48b6bce25e). A user struct whose impl Debug { fn debug(^self) -> String … } is nested in the struct body gets E0112 ('can't be shown with :Debug yet') for {x:Debug}. The same impl written top-level as impl T.Debug works, and Core types with the nested form work since 48b6bce25e rooted Core debug methods. a0_025 gives the same E0112, so this is not a regression. The nested and top-level spellings of an impl must mean the same thing.",
       "kind": "bug",
       "track": "sidequest",
       "epoch": null,
@@ -94313,7 +94402,17 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A user struct's nested impl Debug renders {x:Debug} with the user's debug() on every tier, matching the top-level impl T.Debug; a ui or cases row proves both spellings",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T07:46:34.271Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [
@@ -94322,7 +94421,87 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T07:46:26.985Z",
-      "updated": "2026-11-06T07:46:26.985Z",
+      "updated": "2026-11-06T07:46:34.271Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c0lm9h4f",
+      "num": 6603,
+      "title": "jet front accepts any registered flag on any command: jet init --check silently writes",
+      "body": "Found by JetpackEngine (#6418 c9). The CLI registry scopes --check to fmt (\"With fmt:\"), but the JetCli front accepts any registered flag on any command. So jet init --check ignores the flag and writes package.jet. A flag outside a command's registry scope must be a usage error that names the commands which do take it. Silently ignoring a flag that promises no writes is a safety bug.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every jet command refuses a registered flag outside its registry scope with a usage error naming the commands that take it; jet init --check writes nothing; a cases row covers init --check and one other mis-scoped flag",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T08:28:19.891Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G2"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T08:28:11.139Z",
+      "updated": "2026-11-06T08:28:19.891Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c018jg16",
+      "num": 6604,
+      "title": "jet os engine verbs (plan and the rest of the jetos dispatcher) are not built in the Jet engine",
+      "body": "jet os is ratified CLI surface (CLICommands.jet: os, with push/bridge/services/config actions, plus the jetos dispatcher's own verbs check/build/switch/plan/vm). The Jet Jetpack engine has no os verb, so jet os plan exits 2. Found by JetpackEngine under #6418 c9: tests/cases/jetpack_engine/package_host_split_preserves_system_projection_and_reaches_jetos now passes its split step and stops at jet os plan. Scope: census the jetos verbs the CLI registry and cases rows reach, then build them in the engine (or route the frozen jetos-feature cards).",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A census lists every jet os verb the CLI registry, docs and cases rows reach, with its built/unbuilt state; jet os plan is built, and package_host_split_preserves_system_projection_and_reaches_jetos passes on the default tier",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T08:44:20.982Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G2"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T08:44:12.044Z",
+      "updated": "2026-11-06T08:44:20.982Z",
       "updatedBy": "Main"
     }
   ],
@@ -177422,6 +177601,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-06T08:44:20.982Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c018jg16",
+      "note": "#1 A census lists every jet os verb the CLI registry, docs and "
+    },
+    {
+      "at": "2026-11-06T08:44:12.044Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c018jg16",
+      "note": "jet os engine verbs (plan and the rest of the jetos dispatcher) are not built in the Jet engine"
+    },
+    {
+      "at": "2026-11-06T08:40:43.385Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T08:37:47.005Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0o3di45",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T08:35:00.965Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rdxo6y",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T08:35:00.195Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0rdxo6y",
+      "note": "#23"
+    },
+    {
+      "at": "2026-11-06T08:33:19.624Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0o3di45",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T08:28:20.840Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0hn7w1n",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T08:28:19.891Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0lm9h4f",
+      "note": "#1 Every jet command refuses a registered flag outside its regi"
+    },
+    {
+      "at": "2026-11-06T08:28:11.140Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0lm9h4f",
+      "note": "jet front accepts any registered flag on any command: jet init --check silently writes"
+    },
+    {
+      "at": "2026-11-06T08:25:58.381Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ofw8u4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T08:18:43.799Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T08:17:06.057Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0o3di45",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-06T08:17:04.380Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0o3di45",
+      "note": "#2 The web runtime installs a default browser provider that for"
+    },
+    {
+      "at": "2026-11-06T08:17:02.499Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0o3di45",
+      "note": "#1 Core/Ui/Host owns every host-service rule over a marshal-onl"
+    },
+    {
+      "at": "2026-11-06T08:16:56.432Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0o3di45",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T08:14:16.233Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01oyhqk",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T08:14:15.293Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T08:12:22.419Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0hn7w1n",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-06T08:02:53.284Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01oyhqk",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T07:50:00.269Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T07:46:53.910Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0hn7w1n",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T07:46:47.468Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0hn7w1n",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T07:46:34.271Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c07hutuq",
+      "note": "#1 A user struct's nested impl Debug renders {x:Debug} with the"
+    },
+    {
+      "at": "2026-11-06T07:46:33.587Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c07hutuq",
+      "note": "body"
+    },
     {
       "at": "2026-11-06T07:46:26.985Z",
       "by": "Main",
