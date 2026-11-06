@@ -34,17 +34,20 @@ runtime pack rebuilds byte for byte, runs the Jetpack census and the golden, ui
 and cases suites against `current`, and reports every result. A row `current`
 passes and the candidate loses needs a line in `--dispositions` naming its card.
 It releases only with at least `--min-gains` (default 10) gained rows. On a pass
-it writes the next a0_NNN and prints the commands; Main runs them: `jet-use
-a0_NNN`, `git merge --no-ff -F a0_NNN/MERGE_MSG` on `master`, the annotated tag,
-the push, then `jet run Tools/release/Main.jet -- candidate <seeds>/a0_NNN` and
-`jet run Tools/release/Main.jet -- publish <seeds>/a0_NNN`, the one route to a
-GitHub release (jet, IDENTITY, checksums, the seed archive and the signed
-candidate record). `candidate` signs with the `jet-release` key
-(`jet registry keygen --registry jet-release` once); `publish` refuses any
-release that no longer matches that record.
-The tool never moves `current`, merges, tags, pushes or publishes. `jet-use`
-also rolls back, but only to a release whose evidence passed; `jet-which` names
-the current one.
+it assembles the next a0_NNN and publishes it, stopping at the first failure:
+the commit must be on `origin/dev`, then the annotated tag (`TAG_MSG`) on it,
+`git push origin a0_NNN`, `jet run Tools/release/Main.jet -- candidate
+<seeds>/a0_NNN` and `jet run Tools/release/Main.jet -- publish <seeds>/a0_NNN`,
+the one route to a GitHub release (jet, IDENTITY, checksums, the seed archive
+and the signed candidate record). `candidate` signs with the `jet-release` key
+(`jet registry keygen --registry jet-release` once; the run does not start
+without it); `publish` refuses any release that no longer matches that record.
+Only a published release gets its `current.env` and PASS; a failed step leaves
+it unadmitted and prints the steps left. Main then runs the printed commands:
+`jet-use a0_NNN`, `git merge --no-ff -F a0_NNN/MERGE_MSG` on `master` and the
+push of `master`. The tool never moves `current`, merges or pushes `master`.
+`jet-use` also rolls back, but only to a release whose evidence passed;
+`jet-which` names the current one.
 
 ## Card loop
 
