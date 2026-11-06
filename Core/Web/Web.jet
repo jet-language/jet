@@ -11,7 +11,8 @@ package {
 
 use {
     core :: core
-    core.http.[HTTPRequest, HTTPResponse]
+    core.http.[HTTPRequest, HTTPResponse, HTTPRouter]
+    web_http :: core.http
     core.http.server.[HTTPMux]
     http_server :: core.http.server
     live_json :: core.encoding.json
@@ -749,10 +750,9 @@ fn on(path: String, title: String, handler: fn(WebEvent)) Never! -[Browser]> {
 }
 
 // `web.openapi(mux)` checks as `__openapi_mux(mux)` below (sema
-// sema_call_http_web_openapi_mux); a router argument stays here.
+// sema_call_http_web_openapi_mux); a router renders its route table the same way.
 fn openapi(router: HTTPRouter) -> String Never! {
-    inputs :: core.web.__openapi_inputs(router) ?? core.web.__contract_stop(err)
-    core.web.__openapi_render(^inputs, ^"Jet HTTP Router", ^"1", ^[OpenApiServer]{}) ?? core.web.__contract_stop(err)
+    __openapi_mux(web_http.__router_mux(router))
 }
 
 // D-WEBOPENAPI1=A for an HTTPMux (`JetHTTPRouteSource for JetHTTPMux` and

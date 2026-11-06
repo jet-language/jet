@@ -602,7 +602,6 @@ enum BodyHandleOp {
     ChannelDelayMs
     ChannelClose
     SenderSend
-    HTTPRouterRegister(verb: HTTPRouteMethod, handler: Int, file: String, line: Int, handler_param_names: [String], contract_json: String)
     MathMethod(type_name: String, method: String)
     ReactiveGet
     ReactiveSet
@@ -1495,9 +1494,8 @@ fn body_each_node_kind_child(tree: BodyTree, value: NodeKind, visit: fn(Int) -[M
             visit(f3)
             visit(f4)
         }
-        .HandleMethod(f0, f1, f2) -> {
+        .HandleMethod(f0, _, f2) -> {
             visit(f0)
-            body_each_handle_op_child(tree, f1, visit)
             loop item in f2 {
                 visit(item)
             }
@@ -1677,15 +1675,6 @@ fn body_each_fn_value_kind_child(tree: BodyTree, value: BodyFnValueKind, visit: 
         }
         .Send(f0) -> {
             visit(f0)
-        }
-        else -> {}
-    }
-}
-
-fn body_each_handle_op_child(tree: BodyTree, value: BodyHandleOp, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
-    if value == {
-        .HTTPRouterRegister(_, f1, _, _, _, _) -> {
-            visit(f1)
         }
         else -> {}
     }

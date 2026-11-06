@@ -15,6 +15,8 @@ use {
     http_url :: core.net.url
     json_codec :: core.encoding.json
     core.files.[FileWriter]
+    routes :: core.http.server
+    core.http.server.[HTTPMux]
 }
 C_MAX_BODY_BYTES :: 1048576
 C_MAX_HEADER_BYTES :: 32768
@@ -558,10 +560,30 @@ fn headers_set_raw(h: Headers, name: String, value: String) -> Headers Never! {
     Headers{fields: fields}
 }
 
-// Shared router/request carriers keep their native callback/body ownership.
-// Public operations enter source before crossing the reserved host boundary.
+/// A checked route table answered in process: `router.get(pattern, handler)`
+/// and its sibling verbs register typed handlers, `dispatch` answers a
+/// request without a listener, and `web.openapi(router)` renders the same
+/// routes. Copies share the one route table; routing is the mux's.
+struct HTTPRouter {
+    __mux: HTTPMux
+}
+
+impl HTTPRouter {
+    // `router.get(pattern, handler)` and its sibling verbs land here with the
+    // route's checked contract (sema sema_call_try_http_router), as a mux
+    // registration does.
+    fn __route(self, method: String, pattern: String, handler: ^fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String) Never! -[Net]> {
+        self.__mux.__route(method, pattern, ^handler, contract)
+    }
+}
+
 fn router() -> HTTPRouter Never! {
-    core.http.__router()
+    HTTPRouter{__mux: routes.__mux_new()}
+}
+
+// The router's route table, for `web.openapi(router)`.
+fn __router_mux(router: HTTPRouter) -> HTTPMux Never! {
+    router.__mux
 }
 
 // A request message, leniently: text without a blank line is taken as
@@ -572,8 +594,10 @@ fn parse(raw: String) -> HTTPRequest Never! {
     parse_request(bytes) ?? __request("GET", "/")
 }
 
+// A request routed as a mux routes it, with no middleware or request id; a
+// handler's error is the dispatch error.
 fn dispatch(router: HTTPRouter, request: HTTPRequest) -> HTTPResponse HTTPError! {
-    core.http.__dispatch(router, request)
+    routes.__select(router.__mux, request)
 }
 
 fn method_parse(token: String) -> Method Never! {

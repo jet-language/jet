@@ -326,6 +326,11 @@ fn __accept_timed_out(error: NetError) -> Bool Never! {
 }
 
 fn mux() -[Net]> HTTPMux Never! {
+    __mux_new()
+}
+
+// An empty route table: a mux's, and the one an `http.router()` routes with.
+fn __mux_new() -> HTTPMux Never! {
     HTTPMux{__state: shared __HTTPMuxState{routes: [__HTTPRoute]{}, layers: [Shared<__HTTPLayerCell>]{}, request_seq: 0}}
 }
 
