@@ -262,7 +262,10 @@ process_execution_receipt: fn(child: I64, status: I64) -> I64 {
     output: process_execution_receipt_text(fd_word(child, I64{80}), fd_word(spec, PROCESS_SPEC_STDOUT))
     errors: process_execution_receipt_text(fd_word(child, I64{88}), fd_word(spec, PROCESS_SPEC_STDERR))
     secrets: process_execution_secrets(spec)
-    receipt: process_receipt_build(spec, fd_word(process_execution_native(child), I64{8}), code, status == I64{0}, signal, fd_word(child, I64{104}) != I64{0}, output, errors, secrets)
+    // A run past its timeout is never a success, even when the child itself
+    // exited 0 before a lingering descendant's output held it past the limit.
+    timed_out: fd_word(child, I64{104}) != I64{0}
+    receipt: process_receipt_build(spec, fd_word(process_execution_native(child), I64{8}), code, status == I64{0} && !timed_out, signal, timed_out, output, errors, secrets)
     jet_rt_string_drop(output)
     jet_rt_string_drop(errors)
     process_text_list_drop(secrets, false)

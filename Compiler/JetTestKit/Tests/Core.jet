@@ -190,6 +190,25 @@ kit_test_core_scratch: fn(label: String) -> String {
     files.remove_all(root) ?? panic("remove pool scratch")
 }
 
+#Test("a step whose stray job holds its output or terminal ends at the wall-clock limit as TIMEOUT") {
+    root: cases_test_root("lingering-holder")
+    env: KitEnv{root: root, scratch: root, jet: "/bin/sh", jetpack: "", timeout: 2s, memory_limit: 0}
+    // Job control gives the sleep a process group of its own: the child's
+    // group sweep misses it and it keeps the captured stdout (or the terminal) open.
+    stray: ["/bin/sh", "-c", "set -m; sleep 60 2>/dev/null & exit 0"]
+    started: time.instant()
+    piped: kit_exec_invoke(env, stray, root, files.join(root, "piped"), "")
+    terminal: kit_exec_invoke_terminal(env, stray, root, files.join(root, "terminal"), "", [KitEnvVar]{}, KitTerminal{rows: 24, cols: 80})
+    kit_exec_stop_strays(root)
+    loop run in [piped, terminal] {
+        assert(run.timed_out)
+        assert_eq((kit_exec_process_failure(run) ?? panic("timeout")).status, "TIMEOUT")
+    }
+    // Two 2 s limits; a holder the limit missed would keep these waits for 60 s.
+    assert(started.elapsed().ns < 20000000000)
+    files.remove_all(root) ?? panic("remove lingering-holder scratch")
+}
+
 kit_test_pool_entry: fn(env: KitEnv, root: String, index: Int) -> KitRun {
     kit_exec_invoke(env, ["/bin/sh", "-c", "sleep 0.2"], root, files.join(root, "{index}"), "")
 }
