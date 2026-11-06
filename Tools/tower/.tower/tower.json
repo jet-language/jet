@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6610,
-    "rev": 93325,
+    "rev": 93350,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -55833,7 +55833,7 @@
       "id": "c0x9xmde",
       "num": 4730,
       "title": "Quaternion in core.math (reserved j/k literals), usable F16, and Decimal-with-Complex literals",
-      "body": "Owner note: 'include primitive types that Odin does: quaternions, endian types, complex numbers' (OwnerNotes1 digest section 6). Complex is built (D-NUMTYPE1, 3i literals). D-LITCARRIER1=D reserves i, j, k and shows `q :: 1 + 2i + 3j + 4k -> Quaternion`, but no Quaternion type exists anywhere in Core, Compiler or crates. Probes on dev-595e0dca3: `F16{1.5}` is E0108 ('needs F16, value is Decimal') and `print` of an F16 is E0112, although D-LOWFLOAT1 ratified F16; and `2.0 + 3.0i` is E0109 ('Decimal and Complex') because a bare 2.0 is Decimal.\n\nScope: (1) Quaternion beside Complex in core.math as an ordinary Core struct of four Floats, built from the reserved j/k component literals, with `*` as the Hamilton product, `+`, `-`, scalar `*`, conj, norm, normalize, inverse, from_axis_angle, rotate(Vec3) and slerp, all through the existing operator hooks (D-OPMIX1). (2) F16/BF16 literals and printing per D-LOWFLOAT1. (3) A decimal literal next to a Complex or Quaternion adopts Float the way an expected Float parameter does (D-LITCARRIER1 inference), so `2.0 + 3.0i` works. Item (1) follows the ratified reservation; if review finds any method name needs owner choice, raise a short ballot for it. Endian types are ballot D-ENDIAN-TYPES1.",
+      "body": "Owner note: 'include primitive types that Odin does: quaternions, endian types, complex numbers' (OwnerNotes1 digest section 6). Complex is built (D-NUMTYPE1, 3i literals). D-LITCARRIER1=D reserves i, j, k and shows `q: 1 + 2i + 3j + 4k -> Quaternion`, but no Quaternion type exists anywhere in Core, Compiler or crates. Probes on dev-595e0dca3: `F16{1.5}` is E0108 ('needs F16, value is Decimal') and `print` of an F16 is E0112, although D-LOWFLOAT1 ratified F16; and `2.0 + 3.0i` is E0109 ('Decimal and Complex') because a bare 2.0 is Decimal.\n\nScope: (1) Quaternion beside Complex in core.math as an ordinary Core struct of four Floats, built from the reserved j/k component literals, with `*` as the Hamilton product, `+`, `-`, scalar `*`, conj, norm, normalize, inverse, from_axis_angle, rotate(Vec3) and slerp, all through the existing operator hooks (D-OPMIX1). (2) F16/BF16 literals and printing per D-LOWFLOAT1. (3) A decimal literal next to a Complex or Quaternion adopts Float the way an expected Float parameter does (D-LITCARRIER1 inference), so `2.0 + 3.0i` works. Item (1) follows the ratified reservation; if review finds any method name needs owner choice, raise a short ballot for it. Endian types are ballot D-ENDIAN-TYPES1.",
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e3",
@@ -55846,11 +55846,17 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
-          "text": "`q :: 1 + 2i + 3j + 4k` is a Quaternion and q * q prints the Hamilton product on every tier",
+          "text": "`q: 1 + 2i + 3j + 4k` is a Quaternion and q * q prints the Hamilton product on every tier",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -55900,7 +55906,7 @@
       "parentId": "c0spgl2u",
       "needsAcceptance": false,
       "created": "2026-10-07T13:09:23.321Z",
-      "updated": "2026-10-29T11:13:37.286Z",
+      "updated": "2026-11-06T18:35:36.995Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -56708,7 +56714,7 @@
       "id": "c0tr523z",
       "num": 4761,
       "title": "Pinned shared Jet globals and isolated Core state providers",
-      "body": "D-CORE-GLOBAL-STATE1=A\nProposed compiler law: sema admits a shared initializer for #Persist, checks T under existing Shared crossing rules, and records stable binding identity and type/layout facts. The new branch requires :: so the module handle cannot be reassigned, moved out, or transiently absent.\n\nThe initializer must be a closed, non-suspending, infallible state-construction expression: literal data and checked pure construction, no task/world capture, external effects, or access to other lazy globals. Cyclic global initialization is rejected, not allowed to hang. The example creates only an empty typed map inside Storage. Allocation remains subject to existing allocation behavior; no new retry policy is introduced.\n\nAll execution modes implement identical once-only publication. State is inaccessible until initialization finishes. Ordinary statements use the existing Shared lock/cleanup law, not scalar persist take/set. Transactions and guards remain unchanged; this ballot adds no new atomicity mechanism. A failed or cancelled ordinary update releases locks under existing Shared rules; this ballot does not promise rollback outside #Transact.\n\nReload never runs the initializer again for a retained cell. Layout/migration checks complete at the existing reload boundary before new code uses old storage. The process default and each test-world provider are implemented in Jet. Vetted #Unsafe FFI/syscalls may supply host synchronization, but no Rust implementation is retained.\n\nImplementation areas: Compiler/JetSema/Source/Sema/Registration/Items.jet E0622 admission, stable Global binding facts; Compiler/JetBackend/Source/Lower/Statics.jet once/Shared global path; Jet runtime once+lock/reload/world provider; Core/math/random.jet, Core/sys/sys.jet env overlay, Core/testing/testing.jet fault switches, Core/auth/auth.jet and Core/web/storage*.jet; no scalar take/set gap\nSpec/registry: Docs/spec/syntax-decisions.md Persist writable/global/reload amendments, D-CONC-SHARE1 ordinary shared expr and migration precedence; core-library RNG/env/fault/auth/storage scope; CLOSURE 3.11 and existing leaf removal rows; Legacy Syntax.rs #Persist/KW_SHARED reference; Jet Persist registration/init constraints cite D-CORE-GLOBAL-STATE1=A; shared keyword remains D-CONC-SHARE1; NO new marker; DiagnosticRows E0622 and new cycle/initializer/handle refusal registered\nDiagnostics/UI: Equivalent unmarked mutable table rejected; immutable handle assignment/move; cyclic/effectful/suspending/world-capture initializer refusal; initializer-only retained-cell reload report; fresh identity and layout restart/migration reports\nExamples/goldens: Contended first access exactly once/no partial publication; indexed Shared map update #4751 mandatory; counter atomic statement; two-key Transact invariant + cancellation/panic guard release; compatible body/init reload retains; rename fresh/process restart empty; parallel worlds/children local-session separation; browser scope unchanged\nTiming: JET PORT NOW; minimal Persist/Shared/global admission seam essential for existing Core state rows may be mirrored under #29 with dies-at-cutover ledger. Broader unrelated feature work remains frozen. Runtime policy, once/lock/world/reload implementations are Jet-owned; scalar Alloc root does not prove shared-cell semantics. CURRENT #29/#31: a MINIMAL seam necessary to port an existing Core row/runtime layer/test harness may also change the Rust half, registered as dies at cutover; all actual layer policy/carriers must still be ported to Jet. This exception does not permit duplicating new features. #28 Sol authors, Opus reviews. Features outside required port work resume after port/Rust exit; contract/docs/tests planning may be prepared now.\nOwner: unowned compiler admission/Core-global feature owner; RuntimeJet2 + NativeTasks3 Global lowering; RtAsm1 L8a design (RuntimeJet2 confirmed); CorelibInteg11 integration; CoreNumerics3 RNG peer-confirmed parked; CoreSystem2 env/fault parked\nUnblocks: CLOSURE 3.11; CoreNumerics RNG __rng_state/__rng_try_update/seed rows; CoreSystem sys get/set/unset/vars/decode logical overlay and atexit; files fault-switch rows incl #4750; auth byte store/local-session native storage; callbacks/resources STILL separate blockers\nConflicts/prerequisites: SharedWrite1 #4751 is parked pre-verification P0 prerequisite, do not ignore silently lost indexed writes. LATEST #29 reopens previous caller-owned RNG/precise/vault/PRESENTATION port-seam deferrals; this vote settles shared-state law ONLY and does not itself supply all carrier/substrate implementations. Runtime alloc_root I64/init_array not new permission for arbitrary mutable globals; task/world scoping not automatic from Persist.",
+      "body": "D-CORE-GLOBAL-STATE1=A\nProposed compiler law: sema admits a shared initializer for #Persist, checks T under existing Shared crossing rules, and records stable binding identity and type/layout facts. The new branch requires a `name: value` declaration (not `:=`) so the module handle cannot be reassigned, moved out, or transiently absent.\n\nThe initializer must be a closed, non-suspending, infallible state-construction expression: literal data and checked pure construction, no task/world capture, external effects, or access to other lazy globals. Cyclic global initialization is rejected, not allowed to hang. The example creates only an empty typed map inside Storage. Allocation remains subject to existing allocation behavior; no new retry policy is introduced.\n\nAll execution modes implement identical once-only publication. State is inaccessible until initialization finishes. Ordinary statements use the existing Shared lock/cleanup law, not scalar persist take/set. Transactions and guards remain unchanged; this ballot adds no new atomicity mechanism. A failed or cancelled ordinary update releases locks under existing Shared rules; this ballot does not promise rollback outside #Transact.\n\nReload never runs the initializer again for a retained cell. Layout/migration checks complete at the existing reload boundary before new code uses old storage. The process default and each test-world provider are implemented in Jet. Vetted #Unsafe FFI/syscalls may supply host synchronization, but no Rust implementation is retained.\n\nImplementation areas: Compiler/JetSema/Source/Sema/Registration/Items.jet E0622 admission, stable Global binding facts; Compiler/JetBackend/Source/Lower/Statics.jet once/Shared global path; Jet runtime once+lock/reload/world provider; Core/math/random.jet, Core/sys/sys.jet env overlay, Core/testing/testing.jet fault switches, Core/auth/auth.jet and Core/web/storage*.jet; no scalar take/set gap\nSpec/registry: Docs/spec/syntax-decisions.md Persist writable/global/reload amendments, D-CONC-SHARE1 ordinary shared expr and migration precedence; core-library RNG/env/fault/auth/storage scope; CLOSURE 3.11 and existing leaf removal rows; Legacy Syntax.rs #Persist/KW_SHARED reference; Jet Persist registration/init constraints cite D-CORE-GLOBAL-STATE1=A; shared keyword remains D-CONC-SHARE1; NO new marker; DiagnosticRows E0622 and new cycle/initializer/handle refusal registered\nDiagnostics/UI: Equivalent unmarked mutable table rejected; immutable handle assignment/move; cyclic/effectful/suspending/world-capture initializer refusal; initializer-only retained-cell reload report; fresh identity and layout restart/migration reports\nExamples/goldens: Contended first access exactly once/no partial publication; indexed Shared map update #4751 mandatory; counter atomic statement; two-key Transact invariant + cancellation/panic guard release; compatible body/init reload retains; rename fresh/process restart empty; parallel worlds/children local-session separation; browser scope unchanged\nTiming: JET PORT NOW; minimal Persist/Shared/global admission seam essential for existing Core state rows may be mirrored under #29 with dies-at-cutover ledger. Broader unrelated feature work remains frozen. Runtime policy, once/lock/world/reload implementations are Jet-owned; scalar Alloc root does not prove shared-cell semantics. CURRENT #29/#31: a MINIMAL seam necessary to port an existing Core row/runtime layer/test harness may also change the Rust half, registered as dies at cutover; all actual layer policy/carriers must still be ported to Jet. This exception does not permit duplicating new features. #28 Sol authors, Opus reviews. Features outside required port work resume after port/Rust exit; contract/docs/tests planning may be prepared now.\nOwner: unowned compiler admission/Core-global feature owner; RuntimeJet2 + NativeTasks3 Global lowering; RtAsm1 L8a design (RuntimeJet2 confirmed); CorelibInteg11 integration; CoreNumerics3 RNG peer-confirmed parked; CoreSystem2 env/fault parked\nUnblocks: CLOSURE 3.11; CoreNumerics RNG __rng_state/__rng_try_update/seed rows; CoreSystem sys get/set/unset/vars/decode logical overlay and atexit; files fault-switch rows incl #4750; auth byte store/local-session native storage; callbacks/resources STILL separate blockers\nConflicts/prerequisites: SharedWrite1 #4751 is parked pre-verification P0 prerequisite, do not ignore silently lost indexed writes. LATEST #29 reopens previous caller-owned RNG/precise/vault/PRESENTATION port-seam deferrals; this vote settles shared-state law ONLY and does not itself supply all carrier/substrate implementations. Runtime alloc_root I64/init_array not new permission for arbitrary mutable globals; task/world scoping not automatic from Persist.",
       "kind": "task",
       "track": "sidequest",
       "epoch": "e11",
@@ -56723,6 +56729,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`)."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "#6563 c1 precut audit re-added 1 criteria from archived #2966: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
@@ -56731,7 +56742,7 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Admit #Persist STORE :: shared construction with closed pure non-suspending infallible initializer and Shared crossing checks; handle always present/immutable; once publication under contention without scalar take/set gap; Jet locks/transactions/cleanup; indexed writes fixed under #4751; body/initializer compatible reload retains values, identity/layout/migration reports correct; independent world+descendant providers never clear/use process default; RNG/env overlay/fault/auth/native storage state ports remove registered Rust state leaves; preserve browser semantics.",
+          "text": "Admit #Persist STORE: shared construction with closed pure non-suspending infallible initializer and Shared crossing checks; handle always present/immutable; once publication under contention without scalar take/set gap; Jet locks/transactions/cleanup; indexed writes fixed under #4751; body/initializer compatible reload retains values, identity/layout/migration reports correct; independent world+descendant providers never clear/use process default; RNG/env overlay/fault/auth/native storage state ports remove registered Rust state leaves; preserve browser semantics.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -56740,7 +56751,7 @@
         },
         {
           "n": 2,
-          "text": "(was #2966 c1) Implementation-only closure: scoped deterministic worlds, inherited task/timer lifetimes, clock/RNG providers, bounded virtual advancement and unsupported-effect refusal are implemented across native/default/interpreter/Web consumers Original runtime, tier, golden and measurement requirements remain in #2919 [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #2966 c1) Implementation-only closure: scoped deterministic worlds, inherited task/timer lifetimes, clock/RNG providers, bounded virtual advancement and unsupported-effect refusal are implemented across native and Web consumers Original runtime, tier, golden and measurement requirements remain in #2919 [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -56759,7 +56770,7 @@
       "parentId": "c0rqi33c",
       "needsAcceptance": false,
       "created": "2026-10-07T21:06:58.270Z",
-      "updated": "2026-11-04T23:50:47.490Z",
+      "updated": "2026-11-06T18:35:40.053Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -57682,6 +57693,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT)."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "#6563 c1 precut audit re-added 1 criteria from archived #1807: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
@@ -57855,7 +57871,7 @@
         },
         {
           "n": 16,
-          "text": "(was #6164) (from #6166 REPL classifies input with the parser) A string literal containing `::` or `core.log` is accepted as an expression (REPL test).",
+          "text": "(was #6164) (from #6166 REPL classifies input with the parser) A string literal containing `name: value` or `core.log` is accepted as an expression (REPL test).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -57981,7 +57997,7 @@
         },
         {
           "n": 30,
-          "text": "(was #1807 c3) Focused LSP/UI snapshots and AOT, jet run, and interpreter checks show matching report meaning and recovery data [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #1807 c3) Focused LSP/UI snapshots and O0, O1 and O2 checks show matching report meaning and recovery data [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -57999,7 +58015,7 @@
       "parentId": "c0bk3yid",
       "needsAcceptance": false,
       "created": "2026-10-09T18:06:22.233Z",
-      "updated": "2026-11-04T23:50:52.180Z",
+      "updated": "2026-11-06T18:35:42.758Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
@@ -58117,7 +58133,7 @@
       "id": "c01sunrb",
       "num": 4935,
       "title": "Build take/replace out of a borrowed field (D-TAKE-REPLACE1=A)",
-      "body": "Found 2026-10-09 while fixing Core: Core CSV (streaming rows, ~791 self.fields) and crypto (~99 hash.pending.bytes) want to move a value out of a field below a read/write borrow and immediately reinitialize it. The current rules make that E0201 by design (spec.md:1077-1082, 1e1825f4e); there is no general take/replace/swap API (only Cell.replace, spec 1313-1316). Interim: crypto restructured to consume at finish; CSV uses a restructure or an explicit .copy() then reset (an extra allocation per row). Owner decision: add a canonical take/replace (e.g. mem.replace(&place, new) -> old) or keep the rule and accept the copies. Needs a ballot with same-program alternatives.",
+      "body": "Found 2026-10-09 while fixing Core: Core CSV (streaming rows, ~791 self.fields) and crypto (~99 hash.pending.bytes) want to move a value out of a field below a read/write borrow and immediately reinitialize it. The current rules make that E0201 by design (spec.md:1077-1082, 1e1825f4e); there is no general take/replace/swap API (only Cell.replace, spec 1313-1316). Interim: crypto restructured to consume at finish; CSV uses a restructure or an explicit .copy() then reset (an extra allocation per row). Owner decision: add a canonical take/replace (e.g. mem.replace(place, new) -> old) or keep the rule and accept the copies. Needs a ballot with same-program alternatives.",
       "kind": "idea",
       "track": "epoch",
       "epoch": "e3",
@@ -58131,6 +58147,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-CALLSITE-MARK2=A and D-MOVE-SIGIL1=A (no call-site marks; `&&` marks a take)."
+        },
         {
           "at": "2026-11-01",
           "by": "Main",
@@ -58164,7 +58185,7 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-10-09T22:48:33.171Z",
-      "updated": "2026-11-01T06:54:07.005Z",
+      "updated": "2026-11-06T18:35:45.461Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -59945,7 +59966,7 @@
       "id": "c0th2wgp",
       "num": 5026,
       "title": "General defer for any statement or block (Jai defer)",
-      "body": "## Outcome\n\nDecision D-JAI-DEFER1. Jai's `defer` schedules any statement or block at scope exit, and macros use it heavily. Jet allows only `defer close(^x)` (D-SHAPE-RESOURCE2); `defer action()` and `defer { }` are E0003. The owner asked for defer when ratifying D-SHAPE-RESOURCE1. Audit row: G33.\n\nThe ballot carries the full design; this card holds the vote and, once ratified, the delivery plan.",
+      "body": "## Outcome\n\nDecision D-JAI-DEFER1. Jai's `defer` schedules any statement or block at scope exit, and macros use it heavily. Jet allows only `defer close(x)` (D-SHAPE-RESOURCE2); `defer action()` and `defer { }` are E0003. The owner asked for defer when ratifying D-SHAPE-RESOURCE1. Audit row: G33.\n\nThe ballot carries the full design; this card holds the vote and, once ratified, the delivery plan.",
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e4",
@@ -59958,11 +59979,17 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-CALLSITE-MARK2=A and D-MOVE-SIGIL1=A (no call-site marks; `&&` marks a take); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
-          "text": "Syntax.rs entry updated",
+          "text": "Syntax registry entry updated (Compiler/JetFoundation/Data/Syntax)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -60021,7 +60048,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:44.139Z",
-      "updated": "2026-10-30T21:41:37.332Z",
+      "updated": "2026-11-06T18:35:48.101Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -61823,7 +61850,7 @@
       "id": "c00ys8fj",
       "num": 5085,
       "title": "Scripting ergonomics ballots B1-B10 (list +, slot +=, char-index find, write, top-level statements, fail, Match.named, is_executable, Path.script_dir, Regex lint)",
-      "body": "# Script ergonomics ballots (final; for Main to file on Tower)\n\nOne entry per proposed new API or syntax. Each names the exact spelling, the semantics, a\nbefore/after taken from the four idiomatic tool rewrites\n(`$JET_STATE_ROOT/scratch/ScriptErgonomics/idiomatic/{TestShards,WebBundleCheck,LexerKeywordRows,Lifecycle}.jet`),\nand the saving counted with `count.sh` (program lines / whitespace tokens: no blanks, comments,\n`#Test` blocks or `package {}`). A saving marked [INFERENCE] is read off the before/after text,\nnot measured on a rewritten file.\nNot ballots (bug fixes, no new surface). Landed: `pad_start`/`pad_end` link, `remove_prefix`/`remove_suffix`\nmethods (efbc29643), web baseline (17537755c). Patch ready, not landed (see lane report): the prelude\nrows below and the collecting-loop propagation fix.\n- readable prelude names `eprint`, `read_file`, `write_file`, `file_exists`, `keep`, `Clock`,\n  `Instant`, `Date`, `Duration` resolve without `use` (Spec.md:305-317, D-CORE-PRELUDE1/2);\n  `Date.today()` reaches `LocalDate` statics; `files.read`/`read_file` take `String | Path`\n  like `write`; `.or_err(...)`/`keep(...)` no longer ICE (core.prelude loads);\n- integer selectors of every width (`{i64:Hex(8)}`) and `Pad`/`PadLeft` of any displayable value\n  (`{n:PadLeft(2, \"0\")}`), as codegen already lowered them;\n- `\"x\".pad_start(n, f)` / `pad_end` link (they share the `rjust`/`ljust` runtime routes);\n- `s.remove_prefix(p)` / `s.remove_suffix(p)` are methods (String.jet already had the bodies);\n- `Int.parse` (any fallible call) inside a collecting loop propagates like the statement form\n  (former draft B9).\n\n---\n\n## B1 — List concatenation with `+`\n- Spelling: `a + b` where `a: [T]`, `b: [T]` → new `[T]`; operands unchanged (read, not moved).\n- Semantics: eager copy of `a` then `b`. `View<T>` operands are E0108 (write `.copy()`); maps and\n  sets keep their own operators (none). No new token: `+` widens its operand set, which is\n  language surface, so it needs ratification.\n- Beginner path: `all :: header + rows`. Expert path: `&xs.extend(ys)` (in place, no copy).\n- Alternatives: (a) `xs.concat(ys)` method only; (b) status quo\n  `out := xs.copy(); loop y in ys -> &out.push(y)`.\n- Before (Lifecycle.jet:62): `text :: \"{HEADER.join(\"\\n\")}\\n{(loop row in rows -> \"{row}\\n\").join(\"\")}\"`\n  After: `text :: \"{(HEADER + rows).join(\"\\n\")}\\n\"`.\n- Before (LexerKeywordRows, 2 sites): `values := m.get(k) ?? [String]{}` / `&values.push(v)` /\n  `m[k] = values` — After: `m[k] = (m.get(k) ?? [String]{}) + [v]`.\n- Saving: −4 lines in LexerKeywordRows, −0 lines/−9 tokens in Lifecycle [INFERENCE].\n- Trade-off: `+` hides an O(n) copy; the L0501 copy-in-loop lint covers the hot case.\n\n## B2 — Compound update of a list slot (`xs[i] += n`)\n- Spelling: `xs[i] op= v` for `xs: [T]` (mutable binding), `i: Int`, every compound operator that\n  exists for `T`.\n- Semantics: one bounds check, then read-modify-write of the slot; an out-of-range index stops\n  before any write, so no partial update exists. Maps keep E0164 (a missing key has no value\n  to update); maps get no sugar in this ballot.\n- Today: E0164 \"Compound assignment can't target an indexed slot\".\n- Before (TestShards.jet:44): `loads[lightest] = loads[lightest] + row.weight`\n  After: `loads[lightest] += row.weight`.\n- Saving: 0 lines, −2 tokens per site.\n- Alternative: keep E0164 (explicit total update).\n\n## B3 — `String.find` / `rfind` return a character index as `Int?`\n- Spelling (changed signature, same names): `s.find(needle) -> Int?`, `s.rfind(needle) -> Int?`.\n- Semantics: the character (Unicode scalar) index of the first/last match, `None` when absent, so\n  it composes with `slice`, `len` and `regex.Match.start/end`, which already count characters.\n  Byte search stays available as `s.bytes().index_of_seq(n.bytes())`.\n- Today: `find` returns a UTF-8 byte offset (Core/Text/String.jet:83) and `-1` when absent;\n  `\"héllo // c\".slice(0, \"héllo // c\".find(\"//\"))` prints `héllo /` (probe r1.jet).\n- Before (LexerKeywordRows literal port): `at :: line.find(\"//\")` +\n  `code :: if at < 0 -> line else -> byte_slice(line, 0, at)` plus a `byte_slice` helper.\n  After: `code :: line.slice(0, line.find(\"//\") ?? line.len())`.\n- Saving: the byte-helper family in every text port (PortReview counted 103 lines across ports;\n  −1 line per site [INFERENCE]).\n- Changes a ratified API: one cutover migrating every caller.\n- Alternatives: (a) keep bytes, add `slice_bytes(a, b)`; (b) only document `split_once`.\n\n## B4 — Ambient `write(text)` (stdout without a newline)\n- Spelling: `write(text: String)` in the readable prelude, beside `print`/`eprint`.\n- Semantics: writes `text` to stdout unchanged (no newline), same `IO` effect and flush rules\n  as `print`; `#NoPrelude` hides it like `print`.\n- Today: `print` always appends `\\n`; raw text needs `out := term.stdout()` +\n  `&out.write(text).drop(\"...\")`; `term.stdout().write(t)` is E0202 (temporary handle).\n- Before (Lifecycle.jet:64-66): `else if args[0] == \"--print\" {` / `out := term.stdout()` /\n  `&out.write(text).drop(\"lifecycle text\")` / `}` — After: `else if args[0] == \"--print\" -> write(text)`.\n- Saving: −3 lines in Lifecycle, and its `use core.term` line once B4 lands (−1).\n- Alternatives: `print(text, end: \"\")` (labelled argument on an existing builtin); allow `&` on a\n  temporary handle for one call.\n\n## B5 — Script entry without `fn run()` (top-level statements)\n- Spelling: a loose file (or `#!` script) with no `fn run` may contain statements at top level.\n- Semantics: those statements, in order, are the body of an implicit fallible `fn run()`;\n  `fn`, `struct`, constants and `use` stay items; a file that has `fn run` and top-level\n  statements is an error. Authority and package rules are unchanged.\n- Today: \"Ordinary files execute only their explicit `fn run` body\" (Examples/features/script_mode).\n- Before: `fn run() {` … `}` (2 lines + one indent level). After: the body alone.\n- Saving: −2 lines per script (TestShards, WebBundleCheck, Lifecycle, LexerKeywordRows: −8).\n- Trade-off: two entry shapes (I8), mitigated because the implicit form desugars to exactly\n  `fn run()`. Coordinate with lane ScriptMode (`#!`, `-A`).\n\n## B6 — `fail(message, code)` for expected failures\n- Spelling: `fail(message: String, code: Int{1}) -> Never` in the readable prelude.\n- Semantics: writes `message` and a newline to stderr, runs scope guards, exits with `code`.\n  Unlike `panic` (program bugs, E3001 frame) it prints no frame.\n- Before (all four rewrites): `fn fail(message: String) -> Never {` / `term.eprint(message)` /\n  `process.exit(1)` / `}` (TestShards names it `usage` with code 64).\n- After: `fail(\"...\")` / `fail(\"...\", 64)` at the call sites; no helper.\n- Saving: −4 lines per script (−16 over the four), and `use core.process` where only `exit`\n  used it.\n- Alternative: `#Error struct` + `return Err(...)` from `run()` (exists; prints a framed report).\n\n## B7 — Named regex groups on `Match`\n- Spelling: `m.named(name: String) -> String?` on `core.regex.Match`.\n- Semantics: the text of the named group `(?<name>…)` in this match; `None` when the group did\n  not participate or the name is not in the pattern (the pattern is known: a `Regex{…}` literal\n  makes an unknown name a compile error).\n- Today: groups are positional (`m.groups[2]`); named groups parse but have no accessor on the\n  source engine path.\n- Before (Lifecycle.jet:45-49): `kind :: m.groups[0]`, `name :: m.groups[2]`,\n  `m.groups[3].trim()`. After: `m.named(\"kind\") ?? \"\"`, `m.named(\"name\") ?? \"\"`, …\n- Saving: 0 lines; removes index bookkeeping (readability only).\n\n## B8 — `files.is_executable(path)`\n- Spelling: `files.is_executable(path: String | Path) -[FS]> Bool` in `core.files`.\n- Semantics: true when `path` names a regular file the current process may execute; `false` for\n  a failed probe, like `is_file`.\n- Before (WebBundleCheck.jet:39): `if (process.cmd([\"test\", \"-x\", \"{root}/{JET_ENV}\"]).run() ?? fail(...)).code != 0 -> fail(...)`\n  After: `if !files.is_executable(\"{root}/{JET_ENV}\") -> fail(...)`.\n- Saving: 0 lines, −8 tokens, and no `Exec` authority for the probe.\n\n## B9 — `Path.script_dir()`\n- Spelling: `Path.script_dir() -> Path` (static on the prelude `Path`).\n- Semantics: the directory of the entry source file of the running program (the file `jet run`\n  was given), canonicalized; for a built binary, the directory recorded at build time.\n- Today every ported tool assumes cwd = repository root; the originals computed it from\n  `import.meta.url` / `BASH_SOURCE`.\n- Before: `root :: files.cwd()` (wrong when run from elsewhere).\n  After: `root :: Path.script_dir().join(\"../..\")`.\n- Saving: 0 lines; fixes a behavior difference from the originals.\n- Trade-off: one more ambient read of the entry path; must be defined for `jet build` output.\n\n## B10 — Lint: constant `re.compile(\"…\")` should be a `Regex{…}` literal\n- Spelling: new lint code (next free L-code) \"this pattern is a constant; write `Regex{…}`\",\n  with an auto-fix that rewrites the call and un-escapes backslashes.\n- Semantics: fires on `re.compile(<string literal>)` / `compile_with(<literal>, flags)` with no\n  interpolation; the literal is compile-checked and needs no `?? panic`.\n- Evidence: the four ports re-implemented 873 lines of scanners (PortReview) and no port used a\n  `Regex{}` literal; rewrites with literals were 0.7–1.1× the originals.\n- Saving: per site, −1 `?? panic(...)` and doubled backslashes.\n\n\nEvidence: idiomatic rewrites and measurements in $JET_STATE_ROOT/scratch/ScriptErgonomics/ (count.sh, idiomatic/, gaps.md). Additional owner-gated items from the port review not yet drafted here: merging a child process stderr into stdout or redirecting it to a file (ProcessSpec), and process.exit requiring the Exec effect.",
+      "body": "# Script ergonomics ballots (final; for Main to file on Tower)\n\nOne entry per proposed new API or syntax. Each names the exact spelling, the semantics, a\nbefore/after taken from the four idiomatic tool rewrites\n(`$JET_STATE_ROOT/scratch/ScriptErgonomics/idiomatic/{TestShards,WebBundleCheck,LexerKeywordRows,Lifecycle}.jet`),\nand the saving counted with `count.sh` (program lines / whitespace tokens: no blanks, comments,\n`#Test` blocks or `package {}`). A saving marked [INFERENCE] is read off the before/after text,\nnot measured on a rewritten file.\nNot ballots (bug fixes, no new surface). Landed: `pad_start`/`pad_end` link, `remove_prefix`/`remove_suffix`\nmethods (efbc29643), web baseline (17537755c). Patch ready, not landed (see lane report): the prelude\nrows below and the collecting-loop propagation fix.\n- readable prelude names `eprint`, `read_file`, `write_file`, `file_exists`, `keep`, `Clock`,\n  `Instant`, `Date`, `Duration` resolve without `use` (Spec.md:305-317, D-CORE-PRELUDE1/2);\n  `Date.today()` reaches `LocalDate` statics; `files.read`/`read_file` take `String | Path`\n  like `write`; `.or_err(...)`/`keep(...)` no longer ICE (core.prelude loads);\n- integer selectors of every width (`{i64:Hex(8)}`) and `Pad`/`PadLeft` of any displayable value\n  (`{n:PadLeft(2, \"0\")}`), as codegen already lowered them;\n- `\"x\".pad_start(n, f)` / `pad_end` link (they share the `rjust`/`ljust` runtime routes);\n- `s.remove_prefix(p)` / `s.remove_suffix(p)` are methods (String.jet already had the bodies);\n- `Int.parse` (any fallible call) inside a collecting loop propagates like the statement form\n  (former draft B9).\n\n---\n\n## B1 — List concatenation with `+`\n- Spelling: `a + b` where `a: [T]`, `b: [T]` → new `[T]`; operands unchanged (read, not moved).\n- Semantics: eager copy of `a` then `b`. `View<T>` operands are E0108 (write `.copy()`); maps and\n  sets keep their own operators (none). No new token: `+` widens its operand set, which is\n  language surface, so it needs ratification.\n- Beginner path: `all: header + rows`. Expert path: `xs.extend(ys)` (in place, no copy).\n- Alternatives: (a) `xs.concat(ys)` method only; (b) status quo\n  `out := xs.copy(); loop y in ys -> out.push(y)`.\n- Before (Lifecycle.jet:62): `text: \"{HEADER.join(\"\\n\")}\\n{(loop row in rows -> \"{row}\\n\").join(\"\")}\"`\n  After: `text: \"{(HEADER + rows).join(\"\\n\")}\\n\"`.\n- Before (LexerKeywordRows, 2 sites): `values := m.get(k) ?? [String]{}` / `values.push(v)` /\n  `m[k] = values` — After: `m[k] = (m.get(k) ?? [String]{}) + [v]`.\n- Saving: −4 lines in LexerKeywordRows, −0 lines/−9 tokens in Lifecycle [INFERENCE].\n- Trade-off: `+` hides an O(n) copy; the L0501 copy-in-loop lint covers the hot case.\n\n## B2 — Compound update of a list slot (`xs[i] += n`)\n- Spelling: `xs[i] op= v` for `xs: [T]` (mutable binding), `i: Int`, every compound operator that\n  exists for `T`.\n- Semantics: one bounds check, then read-modify-write of the slot; an out-of-range index stops\n  before any write, so no partial update exists. Maps keep E0164 (a missing key has no value\n  to update); maps get no sugar in this ballot.\n- Today: E0164 \"Compound assignment can't target an indexed slot\".\n- Before (TestShards.jet:44): `loads[lightest] = loads[lightest] + row.weight`\n  After: `loads[lightest] += row.weight`.\n- Saving: 0 lines, −2 tokens per site.\n- Alternative: keep E0164 (explicit total update).\n\n## B3 — `String.find` / `rfind` return a character index as `Int?`\n- Spelling (changed signature, same names): `s.find(needle) -> Int?`, `s.rfind(needle) -> Int?`.\n- Semantics: the character (Unicode scalar) index of the first/last match, `None` when absent, so\n  it composes with `slice`, `len` and `regex.Match.start/end`, which already count characters.\n  Byte search stays available as `s.bytes().index_of_seq(n.bytes())`.\n- Today: `find` returns a UTF-8 byte offset (Core/Text/String.jet:83) and `-1` when absent;\n  `\"héllo // c\".slice(0, \"héllo // c\".find(\"//\"))` prints `héllo /` (probe r1.jet).\n- Before (LexerKeywordRows literal port): `at: line.find(\"//\")` +\n  `code: if at < 0 -> line else -> byte_slice(line, 0, at)` plus a `byte_slice` helper.\n  After: `code: line.slice(0, line.find(\"//\") ?? line.len())`.\n- Saving: the byte-helper family in every text port (PortReview counted 103 lines across ports;\n  −1 line per site [INFERENCE]).\n- Changes a ratified API: one cutover migrating every caller.\n- Alternatives: (a) keep bytes, add `slice_bytes(a, b)`; (b) only document `split_once`.\n\n## B4 — Ambient `write(text)` (stdout without a newline)\n- Spelling: `write(text: String)` in the readable prelude, beside `print`/`eprint`.\n- Semantics: writes `text` to stdout unchanged (no newline), same `IO` effect and flush rules\n  as `print`; `#NoPrelude` hides it like `print`.\n- Today: `print` always appends `\\n`; raw text needs `out := term.stdout()` +\n  `out.write(text).drop(\"...\")`; `term.stdout().write(t)` is E0202 (temporary handle).\n- Before (Lifecycle.jet:64-66): `else if args[0] == \"--print\" {` / `out := term.stdout()` /\n  `out.write(text).drop(\"lifecycle text\")` / `}` — After: `else if args[0] == \"--print\" -> write(text)`.\n- Saving: −3 lines in Lifecycle, and its `use core.term` line once B4 lands (−1).\n- Alternatives: `print(text, end: \"\")` (labelled argument on an existing builtin); allow `&` on a\n  temporary handle for one call.\n\n## B5 — Script entry without `fn run()` (top-level statements)\n- Spelling: a loose file (or `#!` script) with no `fn run` may contain statements at top level.\n- Semantics: those statements, in order, are the body of an implicit fallible `fn run()`;\n  `fn`, `struct`, constants and `use` stay items; a file that has `fn run` and top-level\n  statements is an error. Authority and package rules are unchanged.\n- Today: \"Ordinary files execute only their explicit `fn run` body\" (Examples/features/script_mode).\n- Before: `fn run() {` … `}` (2 lines + one indent level). After: the body alone.\n- Saving: −2 lines per script (TestShards, WebBundleCheck, Lifecycle, LexerKeywordRows: −8).\n- Trade-off: two entry shapes (I8), mitigated because the implicit form desugars to exactly\n  `fn run()`. Coordinate with lane ScriptMode (`#!`, `-A`).\n\n## B6 — `fail(message, code)` for expected failures\n- Spelling: `fail(message: String, code: Int{1}) -> Never` in the readable prelude.\n- Semantics: writes `message` and a newline to stderr, runs scope guards, exits with `code`.\n  Unlike `panic` (program bugs, E3001 frame) it prints no frame.\n- Before (all four rewrites): `fn fail(message: String) -> Never {` / `term.eprint(message)` /\n  `process.exit(1)` / `}` (TestShards names it `usage` with code 64).\n- After: `fail(\"...\")` / `fail(\"...\", 64)` at the call sites; no helper.\n- Saving: −4 lines per script (−16 over the four), and `use core.process` where only `exit`\n  used it.\n- Alternative: `#Error struct` + `return Err(...)` from `run()` (exists; prints a framed report).\n\n## B7 — Named regex groups on `Match`\n- Spelling: `m.named(name: String) -> String?` on `core.regex.Match`.\n- Semantics: the text of the named group `(?<name>…)` in this match; `None` when the group did\n  not participate or the name is not in the pattern (the pattern is known: a `Regex{…}` literal\n  makes an unknown name a compile error).\n- Today: groups are positional (`m.groups[2]`); named groups parse but have no accessor on the\n  source engine path.\n- Before (Lifecycle.jet:45-49): `kind: m.groups[0]`, `name: m.groups[2]`,\n  `m.groups[3].trim()`. After: `m.named(\"kind\") ?? \"\"`, `m.named(\"name\") ?? \"\"`, …\n- Saving: 0 lines; removes index bookkeeping (readability only).\n\n## B8 — `files.is_executable(path)`\n- Spelling: `files.is_executable(path: String | Path) -[FS]> Bool` in `core.files`.\n- Semantics: true when `path` names a regular file the current process may execute; `false` for\n  a failed probe, like `is_file`.\n- Before (WebBundleCheck.jet:39): `if (process.cmd([\"test\", \"-x\", \"{root}/{JET_ENV}\"]).run() ?? fail(...)).code != 0 -> fail(...)`\n  After: `if !files.is_executable(\"{root}/{JET_ENV}\") -> fail(...)`.\n- Saving: 0 lines, −8 tokens, and no `Exec` authority for the probe.\n\n## B9 — `Path.script_dir()`\n- Spelling: `Path.script_dir() -> Path` (static on the prelude `Path`).\n- Semantics: the directory of the entry source file of the running program (the file `jet run`\n  was given), canonicalized; for a built binary, the directory recorded at build time.\n- Today every ported tool assumes cwd = repository root; the originals computed it from\n  `import.meta.url` / `BASH_SOURCE`.\n- Before: `root: files.cwd()` (wrong when run from elsewhere).\n  After: `root: Path.script_dir().join(\"../..\")`.\n- Saving: 0 lines; fixes a behavior difference from the originals.\n- Trade-off: one more ambient read of the entry path; must be defined for `jet build` output.\n\n## B10 — Lint: constant `re.compile(\"…\")` should be a `Regex{…}` literal\n- Spelling: new lint code (next free L-code) \"this pattern is a constant; write `Regex{…}`\",\n  with an auto-fix that rewrites the call and un-escapes backslashes.\n- Semantics: fires on `re.compile(<string literal>)` / `compile_with(<literal>, flags)` with no\n  interpolation; the literal is compile-checked and needs no `?? panic`.\n- Evidence: the four ports re-implemented 873 lines of scanners (PortReview) and no port used a\n  `Regex{}` literal; rewrites with literals were 0.7–1.1× the originals.\n- Saving: per site, −1 `?? panic(...)` and doubled backslashes.\n\n\nEvidence: idiomatic rewrites and measurements in $JET_STATE_ROOT/scratch/ScriptErgonomics/ (count.sh, idiomatic/, gaps.md). Additional owner-gated items from the port review not yet drafted here: merging a child process stderr into stdout or redirecting it to a file (ProcessSpec), and process.exit requiring the Exec effect.",
       "kind": "task",
       "track": "sidequest",
       "epoch": "e17",
@@ -61837,6 +61864,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`)."
+        },
         {
           "at": "2026-11-04",
           "by": "Main",
@@ -61916,7 +61948,7 @@
       "parentId": "c0svnelx",
       "needsAcceptance": false,
       "created": "2026-10-21T11:49:42.286Z",
-      "updated": "2026-11-04T23:49:44.325Z",
+      "updated": "2026-11-06T18:35:50.784Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -62575,6 +62607,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "#6563 c1 precut audit re-added 73 criteria from archived #294, #690, #698, #1025, #1038, #1050, #1051, #1147, #1370, #1383, #1411, #1556, #1574, #1575, #1726, #1748, #1775, #1854, #1865, #1883, #2239, #2293, #2313, #2406, #2426, #2489, #2504, #2516, #2639, #2758, #2770, #2774, #2882, #3048, #3059, #3424, #4661: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
@@ -62998,7 +63035,7 @@
         },
         {
           "n": 23,
-          "text": "(was #698 c4, #1050 c4, #1051 c4) Focused parser/sema/formatter/UI and executable-example tests cover declared and undeclared owners, typed holes, raw escape, round-trip, and default run/AOT parity on the real DSL path [precut audit: failing on 9c7ddf1359: C:dsl_blocks/typed_text_forms_cover_sql_html_sh_and_audited_raw KNOWN-FAILING #5454 assert not satisfied: original expect not satisfied: exit 1; expected 0 (known-failing #5454: assert not satisfied: original expect not satisfied)]",
+          "text": "(was #698 c4, #1050 c4, #1051 c4) Focused parser/sema/formatter/UI and executable-example tests cover declared and undeclared owners, typed holes, raw escape, round-trip, and O0, O1 and O2 parity on the real DSL path [precut audit: failing on 9c7ddf1359: C:dsl_blocks/typed_text_forms_cover_sql_html_sh_and_audited_raw KNOWN-FAILING #5454 assert not satisfied: original expect not satisfied: exit 1; expected 0 (known-failing #5454: assert not satisfied: original expect not satisfied)]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -63115,7 +63152,7 @@
         },
         {
           "n": 36,
-          "text": "(was #1411 c3) AOT, default `jet run`, the interpreter, JIT, and web use the same `()` and non-returning semantics where applicable [precut audit: failing on 9c7ddf1359: C:run_entry/retired_void_type_reports_the_migration_diagnostic KNOWN-FAILING #5454 assert not satisfied: original assert! not satisfied: [false]: stream predicate ~ failed (known-failing #5454: assert not satisfied: original assert! not satisfied: [false])]",
+          "text": "(was #1411 c3) O0, O1, O2 and web where applicable use the same `()` and non-returning semantics where applicable [precut audit: failing on 9c7ddf1359: C:run_entry/retired_void_type_reports_the_migration_diagnostic KNOWN-FAILING #5454 assert not satisfied: original assert! not satisfied: [false]: stream predicate ~ failed (known-failing #5454: assert not satisfied: original assert! not satisfied: [false])]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -63142,7 +63179,7 @@
         },
         {
           "n": 39,
-          "text": "(was #1556 c7, #1566 c6) Tier parity (I9) is proved inside this card: parser, sema, TIR, AOT, JIT/dev, comptime, REPL and web all show the same behavior, with one test per tier [precut audit: failing on 9c7ddf1359: C:unit_family/imaginary_arithmetic_abs_and_display_keep_all_hosted_tiers_equal KNOWN-FAILING #5454 verify-intent: ref build failed: E0360 No `*` operator is defined for `Complex`: exit 1; expected 0 (known-failing #5454: verify-intent: ref build failed: E0360 No…]",
+          "text": "(was #1556 c7, #1566 c6) Tier parity (I9) is proved inside this card: parser, sema, TIR, O0, O1, O2, compile-time evaluation, REPL and web all show the same behavior, with one test per tier [precut audit: failing on 9c7ddf1359: C:unit_family/imaginary_arithmetic_abs_and_display_keep_all_hosted_tiers_equal KNOWN-FAILING #5454 verify-intent: ref build failed: E0360 No `*` operator is defined for `Complex`: exit 1; expected 0 (known-failing #5454: verify-intent: ref build failed: E0360 No…]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -63277,7 +63314,7 @@
         },
         {
           "n": 54,
-          "text": "(was #1775 c3) tests/secrets_expiry.rs::expiring_secret_system_observation_is_not_pure passes [precut audit: failing on 9c7ddf1359: C:secrets_expiry/expiring_secret_lends_then_zeroizes_on_expiry KNOWN-FAILING #5454 verify-intent: ref build failed: E1803 Application authority is undecided for `Rand`: exit 1; expected 0 (known-failing #5454: verify-intent: ref build failed: E1803 Application authority…]",
+          "text": "(was #1775 c3) `jet test Compiler --profile cases secrets_expiry/expiring_secret_system_observation_is_not_pure` passes [precut audit: failing on 9c7ddf1359: C:secrets_expiry/expiring_secret_lends_then_zeroizes_on_expiry KNOWN-FAILING #5454 verify-intent: ref build failed: E1803 Application authority is undecided for `Rand`: exit 1; expected 0 (known-failing #5454: verify-intent: ref build failed: E1803 Application authority…]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -63295,7 +63332,7 @@
         },
         {
           "n": 56,
-          "text": "(was #1854 c2) tests/taskgroup_params.rs and examples/features/concurrency/*.jet pass on every applicable tier (I9) [precut audit: failing on 9c7ddf1359: C:taskgroup_params/taskgroup_type_is_second_class KNOWN-FAILING #5454 only the struct-field position reports E1110; return types report only E0113, and list/tuple/Val/closure-parameter captures of a Group compi (known-failing #5454: only the struct-field position…]",
+          "text": "(was #1854 c2) the tests/cases/taskgroup_params/ rows and Examples/features/concurrency/*.jet pass on O0, O1 and O2 (I9) [precut audit: failing on 9c7ddf1359: C:taskgroup_params/taskgroup_type_is_second_class KNOWN-FAILING #5454 only the struct-field position reports E1110; return types report only E0113, and list/tuple/Val/closure-parameter captures of a Group compi (known-failing #5454: only the struct-field position…]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -63331,7 +63368,7 @@
         },
         {
           "n": 60,
-          "text": "(was #1883 c3) m.add on an existing key returns the previous value and on a missing key returns None, byte-identical across AOT, default jet run, and the interpreter (probe program from the card body becomes a test) [precut audit: failing on 9c7ddf1359: C:collections_and_methods/map_builtin_methods KNOWN-FAILING #5454 verify-intent: ref build failed: E0224 This call writes `probe`, but it has no `&` mark: exit 1; expected 0 (known-failing #5454: verify-intent: ref build…]",
+          "text": "(was #1883 c3) m.add on an existing key returns the previous value and on a missing key returns None, byte-identical across O0, O1 and O2 (probe program from the card body becomes a test) [precut audit: failing on 9c7ddf1359: C:collections_and_methods/map_builtin_methods KNOWN-FAILING #5454 verify-intent: ref build failed: E0224 This call writes `probe`, but it has no `&` mark: exit 1; expected 0 (known-failing #5454: verify-intent: ref build…]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -63340,7 +63377,7 @@
         },
         {
           "n": 61,
-          "text": "(was #1883 c4) tests/tir_collections_and_methods.rs:722 vacant/occupied cases extend to the resident tier; examples/features/collections/map_surface.jet covers both cases with golden output through tests/dev.rs [precut audit: failing on 9c7ddf1359: C:collections_and_methods/map_builtin_methods KNOWN-FAILING #5454 verify-intent: ref build failed: E0224 This call writes `probe`, but it has no `&` mark: exit 1; expected 0 (known-failing #5454: verify-intent: ref build…]",
+          "text": "(was #1883 c4) The vacant/occupied map cases also run on O0; Examples/features/collections/map_surface.jet covers both cases with golden output (`jet test Compiler --profile golden collections/map_surface`) [precut audit: failing on 9c7ddf1359: C:collections_and_methods/map_builtin_methods KNOWN-FAILING #5454 verify-intent: ref build failed: E0224 This call writes `probe`, but it has no `&` mark: exit 1; expected 0 (known-failing #5454: verify-intent: ref build…]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -63403,7 +63440,7 @@
         },
         {
           "n": 68,
-          "text": "(was #2504 c1) Execution selection, composed interpret/release source paths, content-digest watching and resident live execution with Persist semantics are integrated; long-lived tier proof remains #2919 [precut audit: failing on 9c7ddf1359: C:dev_parts_routine/persist_example_survives_hot_reload KNOWN-FAILING #5454 REFUSED read_bytes: the testkit session `recv` is not implemented yet, and the original reads the live session output: stdout ended before r (known-failing #5454:…]",
+          "text": "(was #2504 c1) Execution selection, composed O0/O2 source paths, content-digest watching and resident live execution with Persist semantics are integrated; long-lived tier proof remains #2919 [precut audit: failing on 9c7ddf1359: C:dev_parts_routine/persist_example_survives_hot_reload KNOWN-FAILING #5454 REFUSED read_bytes: the testkit session `recv` is not implemented yet, and the original reads the live session output: stdout ended before r (known-failing #5454:…]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -63439,7 +63476,7 @@
         },
         {
           "n": 72,
-          "text": "(was #2504 c5) All named live/dev/parity/inspection/diagnostic proof and interpret-release smoke remain mandatory in #2919; source implementation is complete [precut audit: failing on 9c7ddf1359: C:dev_parts_routine/persist_example_survives_hot_reload KNOWN-FAILING #5454 REFUSED read_bytes: the testkit session `recv` is not implemented yet, and the original reads the live session output: stdout ended before r (known-failing #5454:…]",
+          "text": "(was #2504 c5) All named live/dev/parity/inspection/diagnostic proof and O0/O2 smoke remain mandatory in #2919; source implementation is complete [precut audit: failing on 9c7ddf1359: C:dev_parts_routine/persist_example_survives_hot_reload KNOWN-FAILING #5454 REFUSED read_bytes: the testkit session `recv` is not implemented yet, and the original reads the live session output: stdout ended before r (known-failing #5454:…]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -63448,7 +63485,7 @@
         },
         {
           "n": 73,
-          "text": "(was #2516 c2) tests/cli_compiler_speed.rs::production_build_reuses_and_repairs_stdlib_objects passes against the store: an unchanged build restores the binary and the runtime objects from ~/.cache/jet/store, and a corrupted blob is removed, reported with one note line, and rebuilt [precut audit: failing on 9c7ddf1359: C:cli_compiler_speed/production_build_reuses_and_repairs_stdlib_objects KNOWN-FAILING #5454 exit 1: Error [E2104]: The Jet backend can't build `main.jet` yet: run [function:main.run]: expression MathBuiltin at main.jet:68..71: strea (known-failing #5454: exit 1: Error [E2104]:…]",
+          "text": "(was #2516 c2) `jet test Compiler --profile cases cli_compiler_speed/production_build_reuses_and_repairs_stdlib_objects` passes against the store: an unchanged build restores the binary and the runtime objects from $HOME/.cache/jet/store, and a corrupted blob is removed, reported with one note line, and rebuilt [precut audit: failing on 9c7ddf1359: C:cli_compiler_speed/production_build_reuses_and_repairs_stdlib_objects KNOWN-FAILING #5454 exit 1: Error [E2104]: The Jet backend can't build `main.jet` yet: run [function:main.run]: expression MathBuiltin at main.jet:68..71: strea (known-failing #5454: exit 1: Error [E2104]:…]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -63457,7 +63494,7 @@
         },
         {
           "n": 74,
-          "text": "(was #2516 c3) Source/BuildCache.rs and Source/RuntimeCache.rs no longer exist; rg finds no JET_CACHE_DIR or JET_RUNTIME_CACHE_DIR under Source/, crates/, tools/ [precut audit: failing on 9c7ddf1359: C:cli_compiler_speed/production_build_reuses_and_repairs_stdlib_objects KNOWN-FAILING #5454 exit 1: Error [E2104]: The Jet backend can't build `main.jet` yet: run [function:main.run]: expression MathBuiltin at main.jet:68..71: strea (known-failing #5454: exit 1: Error [E2104]:…]",
+          "text": "(was #2516 c3) No JET_CACHE_DIR or JET_RUNTIME_CACHE_DIR remains under Compiler/, Core/, Jetpack/ or Tools/ [precut audit: failing on 9c7ddf1359: C:cli_compiler_speed/production_build_reuses_and_repairs_stdlib_objects KNOWN-FAILING #5454 exit 1: Error [E2104]: The Jet backend can't build `main.jet` yet: run [function:main.run]: expression MathBuiltin at main.jet:68..71: strea (known-failing #5454: exit 1: Error [E2104]:…]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -63484,7 +63521,7 @@
         },
         {
           "n": 77,
-          "text": "(was #2758 c1) tests/tir_core_and_closures.rs try_sort_by_is_atomic_and_tier_stable passes on AOT, default jet run, and forced interpreter with output 31 and no E0121 [precut audit: failing on 9c7ddf1359: C:core_and_closures/try_sort_by_is_atomic_and_tier_stable KNOWN-FAILING #5454 verify-intent: ref build failed: E0224 This call writes `ascending`, but it has no `&` mark: exit 1; expected 0 (known-failing #5454: verify-intent: ref build…]",
+          "text": "(was #2758 c1) `jet test Compiler --profile cases core_and_closures/try_sort_by_is_atomic_and_tier_stable` passes on O0, O1 and O2 with output 31 and no E0121 [precut audit: failing on 9c7ddf1359: C:core_and_closures/try_sort_by_is_atomic_and_tier_stable KNOWN-FAILING #5454 verify-intent: ref build failed: E0224 This call writes `ascending`, but it has no `&` mark: exit 1; expected 0 (known-failing #5454: verify-intent: ref build…]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -63493,7 +63530,7 @@
         },
         {
           "n": 78,
-          "text": "(was #2770 c1) The immutable fixture is rejected in sema with registered E0111 on check/run/release/build paths and never reaches generated Rust or a rustc ICE; the corrected `::`→`:=` companion exits 0 and prints exactly `[0.0, 3.0, 0.0, 0.0]` on default, interpreter, and release/build paths [precut audit: failing on 9c7ddf1359: U:compute_set_immutable FAIL snapshot mismatch: tests/ui/compute_set_immutable.stderr; C:compute_parity/compute_set_requires_mutable_binding_before_codegen KNOWN-FAILING #5454 stream predicate ~ failed; first diagnostic: E0205 Cannot edit through `tensor` — it has read access only: stream predicate…]",
+          "text": "(was #2770 c1) The immutable fixture is rejected in sema with registered E0111 on check/run/release/build paths and never reaches generated Rust or a rustc ICE; the corrected `:`→`:=` companion exits 0 and prints exactly `[0.0, 3.0, 0.0, 0.0]` on O0, O1 and O2 [precut audit: failing on 9c7ddf1359: U:compute_set_immutable FAIL snapshot mismatch: tests/ui/compute_set_immutable.stderr; C:compute_parity/compute_set_requires_mutable_binding_before_codegen KNOWN-FAILING #5454 stream predicate ~ failed; first diagnostic: E0205 Cannot edit through `tensor` — it has read access only: stream predicate…]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -63502,7 +63539,7 @@
         },
         {
           "n": 79,
-          "text": "(was #2770 c3) The prim-arrays-G2 probe and compute.set parity coverage pass on the affected default, interpreter, and release/build tiers: immutable input yields E0111, while the mutable companion preserves the exact observer values [precut audit: failing on 9c7ddf1359: U:compute_set_immutable FAIL snapshot mismatch: tests/ui/compute_set_immutable.stderr; C:compute_parity/compute_set_requires_mutable_binding_before_codegen KNOWN-FAILING #5454 stream predicate ~ failed; first diagnostic: E0205 Cannot edit through `tensor` — it has read access only: stream predicate…]",
+          "text": "(was #2770 c3) The prim-arrays-G2 probe and compute.set parity coverage pass on the affected O0, O1 and O2 tiers: immutable input yields E0111, while the mutable companion preserves the exact observer values [precut audit: failing on 9c7ddf1359: U:compute_set_immutable FAIL snapshot mismatch: tests/ui/compute_set_immutable.stderr; C:compute_parity/compute_set_requires_mutable_binding_before_codegen KNOWN-FAILING #5454 stream predicate ~ failed; first diagnostic: E0205 Cannot edit through `tensor` — it has read access only: stream predicate…]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -63538,7 +63575,7 @@
         },
         {
           "n": 83,
-          "text": "(was #3048 c1) The existing generic_method_calls_keep_owner_and_method_arguments_separate regression passes and prints ok, again, static, inferred through resident JIT [precut audit: failing on 9c7ddf1359: C:generics/generic_method_calls_keep_owner_and_method_arguments_separate KNOWN-FAILING #5454 E0904 cannot infer the owner type arguments for `Box.make` (the static method never names the owner's `T`): exit 1; expected 0 (known-failing #5454: E0904…]",
+          "text": "(was #3048 c1) The existing generic_method_calls_keep_owner_and_method_arguments_separate regression passes and prints ok, again, static, inferred through O0 (`jet run`) [precut audit: failing on 9c7ddf1359: C:generics/generic_method_calls_keep_owner_and_method_arguments_separate KNOWN-FAILING #5454 E0904 cannot infer the owner type arguments for `Box.make` (the static method never names the owner's `T`): exit 1; expected 0 (known-failing #5454: E0904…]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -63547,7 +63584,7 @@
         },
         {
           "n": 84,
-          "text": "(was #3048 c2) Equivalent owner/method-generic calls preserve explicit/inferred/static/named/default argument meaning on AOT, default run and interpreter [precut audit: failing on 9c7ddf1359: C:generics/generic_method_calls_keep_owner_and_method_arguments_separate KNOWN-FAILING #5454 E0904 cannot infer the owner type arguments for `Box.make` (the static method never names the owner's `T`): exit 1; expected 0 (known-failing #5454: E0904…]",
+          "text": "(was #3048 c2) Equivalent owner/method-generic calls preserve explicit/inferred/static/named/default argument meaning on O0, O1 and O2 [precut audit: failing on 9c7ddf1359: C:generics/generic_method_calls_keep_owner_and_method_arguments_separate KNOWN-FAILING #5454 E0904 cannot infer the owner type arguments for `Box.make` (the static method never names the owner's `T`): exit 1; expected 0 (known-failing #5454: E0904…]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -63556,7 +63593,7 @@
         },
         {
           "n": 85,
-          "text": "(was #3059 c1) Arena construction, allocation and close execute with expected values on JIT, interpreter and native release; an erased move preserves the owner, while the active use-after-close witness is rejected by sema. Constructor typing comes from checked semantic metadata [precut audit: failing on 9c7ddf1359: C:arena/alloc_and_use_compiles_and_runs KNOWN-FAILING #5454 E0111: the original writes through the arena view with `x = 43` after `x :: arena.alloc(42)`; Jet treats `x` as an immutable binding: exit…]",
+          "text": "(was #3059 c1) Arena construction, allocation and close execute with expected values on O0, O1 and O2; an erased move preserves the owner, while the active use-after-close witness is rejected by sema. Constructor typing comes from checked semantic metadata [precut audit: failing on 9c7ddf1359: C:arena/alloc_and_use_compiles_and_runs KNOWN-FAILING #5454 E0111: the original writes through the arena view with `x = 43` after `x: arena.alloc(42)`; Jet treats `x` as an immutable binding: exit…]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -63628,7 +63665,7 @@
         },
         {
           "n": 93,
-          "text": "Compiler/JetCli/Tests/Try.jet try passes without expected_fail: with use tools :: core.devtools the retained checked projection keeps its loaded-module ownership bijection (JetDriver Pipeline.jet jet_driver_doc_modules)",
+          "text": "Compiler/JetCli/Tests/Try.jet try passes without expected_fail: with use tools: core.devtools the retained checked projection keeps its loaded-module ownership bijection (JetDriver Pipeline.jet jet_driver_doc_modules)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -63652,7 +63689,7 @@
       "parentId": "c0rqi33c",
       "needsAcceptance": false,
       "created": "2026-10-23T06:35:31.835Z",
-      "updated": "2026-11-05T03:15:18.727Z",
+      "updated": "2026-11-06T18:35:53.489Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
@@ -64098,6 +64135,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); proof on the admitted `jet` (no jetc0, compiler-diff or frozen-Rust evidence)."
+        },
+        {
           "at": "2026-11-05",
           "by": "Main",
           "text": "c54 (A+B): 74fc2aea86, test results stay in memory, and the kit pool sizes itself from the scheduler's workers and the memory room. c55 (C): ca76992ee6, Core loads by use (A/B: ui 114.5->86.8 s, golden 567.9->265.1 s, lost 0). dev compiles again only once Builder4's boundaries follow-up lands; ca76992ee6 swept in its Loader.jet hunks."
@@ -64394,7 +64436,7 @@
         },
         {
           "n": 18,
-          "text": "(was #4538) Type equality is a TypeId compare; Type::clone absent from the L5 sema profile",
+          "text": "(was #4538) Type equality is a TypeId compare; no Type copy in the L5 sema profile",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -64583,7 +64625,7 @@
         },
         {
           "n": 39,
-          "text": "(was #4551) [#4308] Hello cost: • jetc0 and jet build compile hello in < 0.12 s cold and < 0.10 s warm, with peak memory < 35 MB. • The default hello binary is < 133 KB stripped and starts in < 0.28 ms. The release binary is < 14 KB stripped. • The stripped release binary is <= gcc -O2's and smaller than every other measured peer's. • The stage-one self-compile fits a 20 GB cap. • Programs link only the Core code they reach.",
+          "text": "(was #4551) [#4308] Hello cost: • `jet build` compiles hello in < 0.12 s cold and < 0.10 s warm, with peak memory < 35 MB. • The default hello binary is < 133 KB stripped and starts in < 0.28 ms. The release binary is < 14 KB stripped. • The stripped release binary is <= gcc -O2's and smaller than every other measured peer's. • The stage-one self-compile fits a 20 GB cap. • Programs link only the Core code they reach.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -64787,8 +64829,8 @@
       "parentId": "c031o59x",
       "needsAcceptance": false,
       "created": "2026-10-24T14:29:56.203Z",
-      "updated": "2026-11-05T21:16:12.428Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-06T18:35:56.262Z",
+      "updatedBy": "Main",
       "goals": [
         "G11"
       ]
@@ -65930,6 +65972,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT)."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "#6563 c1 precut audit re-added 7 criteria from archived #1897, #2398, #4236, #4422: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
@@ -66334,7 +66381,7 @@
         },
         {
           "n": 35,
-          "text": "(was #1897 c1) The recursion probe prints a registered Jet stop that names the recursing function and source line, exit 70, on jet run, jet run --release, and the interpreter (I9) [precut audit: failing on 9c7ddf1359: probe p1897_stack_overflow o0=70 o1=70 o2=70]",
+          "text": "(was #1897 c1) The recursion probe prints a registered Jet stop that names the recursing function and source line, exit 70, on O0, O1 and O2 (I9) [precut audit: failing on 9c7ddf1359: probe p1897_stack_overflow o0=70 o1=70 o2=70]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -66370,7 +66417,7 @@
         },
         {
           "n": 39,
-          "text": "(was #2398 c3) A false statement-position if with no else emits no else body, never lowers Expr::NoElse to Unreachable, and falls through on all applicable execution tiers [precut audit: failing on 9c7ddf1359: C:control_and_data/discarded_if_does_not_unify_mixed_tail_values FAIL exit 1; expected 0]",
+          "text": "(was #2398 c3) A false statement-position if with no else emits no else body, never lowers `Expr.NoElse` to Unreachable, and falls through on all applicable execution tiers [precut audit: failing on 9c7ddf1359: C:control_and_data/discarded_if_does_not_unify_mixed_tail_values FAIL exit 1; expected 0]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -66404,7 +66451,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:17:59.631Z",
-      "updated": "2026-11-06T06:19:30.277Z",
+      "updated": "2026-11-06T18:35:59.812Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -67913,7 +67960,7 @@
       "id": "c0w9o2sz",
       "num": 5983,
       "title": "Map: Owner ballots and rulings",
-      "body": "Destination: Every pending ballot has an owner ruling.\nNotes: Batch BALLOT of the 2026-10-28 board consolidation (TowerDedup). One worker (owner), one build, one proof run: each ballot ratified or withdrawn in Tower; implementation cards follow. Order: #3452 #4903 #4905 #4932 #5894 #2393 #3067 #3132 #3143 #4022 #4139 #4735 #4741 #4759 #4893 #4902 #4935 #3142 #3407 #5038.\nDecisions so far: D-EXPLAIN-NORECORD1 (open) on #4893; D-PRIVATE-NATIVE-CARRIER1 (open) on #4903; D-DB-SQLKERNEL1 (ratified=A) on #4932; D-SLICE-OPEN1 (ratified=A) on #4022; D-LIST-PLUS1 (ratified=A) on #4022; D-HAS-VERB1 (ratified=A) on #4022; D-INFER-LEVEL1 (ratified=A) on #4022; D-CLI-FOLD1 (ratified=A) on #4022; D-OP-NEG1 (ratified=A) on #4022; D-OP-CALL1 (ratified=A) on #4022; D-MARKUP1 (ratified=A) on #4022; D-PAT-MAP1 (ratified=A) on #4022; D-PAT-RECORD1 (ratified=A) on #4022; D-DEADLINE-ONE1 (ratified=A) on #4022; D-OWES1 (ratified=A) on #4139; D-DECL-FORM2 (ratified=A) on #4735; D-PERF-RUNCELL1 (ratified=B) on #4741; D-PORTABLE2 (ratified=A) on #4741; D-EXEC3 (ratified=A) on #4741; D-RESOURCE-LIMIT1 (ratified=A) on #4741; D-PERF-RUNCELL2 (open) on #4741; D-EXEC-NOEXEC1 (open) on #4741; D-EXEC-TIERUP1 (open) on #4741; D-EXEC-RELAUNCH1 (open) on #4741; D-MEM-EXPERT1 (open) on #5894; D-MEM-GCSCOPE1 (open) on #5894; D-MEM-HOSTHEAP1 (ratified=A) on #5894; D-MEM-LINKCUT1 (ratified=A) on #5894; D-MEM-LOCALRC1 (ratified=A) on #5894; D-MEM-UNBOX1 (ratified=A) on #5894; D-TAKE-REPLACE1 (ratified=A) on #4935; D-MEMBER-NAMESPACE1 (ratified=A) on #4905; D-ENUM-CASEVALUES1 (ratified=A) on #3132; D-ENUM-BACKING1 (ratified=A) on #3142; D-IFHOLE1 (ratified=A) on #3067; D-CAP-RECEIVER1 (ratified=D) on #3452\nFog: no criteria yet on #4893 #4902 #4903 #4932 #5894 #4935 (proposals in consolidate-plan.json no_criteria).\nOut of scope: cards outside this list; other batches of the consolidation plan.",
+      "body": "Destination: Every pending ballot has an owner ruling.\nNotes: Batch BALLOT of the 2026-10-28 board consolidation (TowerDedup). One worker (owner), one build, one proof run: each ballot ratified or withdrawn in Tower; implementation cards follow. Order: #3452 #4903 #4905 #4932 #5894 #2393 #3067 #3132 #3143 #4022 #4139 #4735 #4741 #4759 #4893 #4902 #4935 #3142 #3407 #5038.\nDecisions so far: D-EXPLAIN-NORECORD1 (open) on #4893; D-PRIVATE-NATIVE-CARRIER1 (open) on #4903; D-DB-SQLKERNEL1 (ratified=A) on #4932; D-SLICE-OPEN1 (ratified=A) on #4022; D-LIST-PLUS1 (ratified=A) on #4022; D-HAS-VERB1 (ratified=A) on #4022; D-INFER-LEVEL1 (ratified=A) on #4022; D-CLI-FOLD1 (ratified=A) on #4022; D-OP-NEG1 (ratified=A) on #4022; D-OP-CALL1 (ratified=A) on #4022; D-MARKUP1 (ratified=A) on #4022; D-PAT-MAP1 (ratified=A) on #4022; D-PAT-RECORD1 (ratified=A) on #4022; D-DEADLINE-ONE1 (ratified=A) on #4022; D-OWES1 (ratified=A) on #4139; D-DECL-FORM2 (ratified=A, superseded by D-DECL-COLON1=A) on #4735; D-PERF-RUNCELL1 (ratified=B) on #4741; D-PORTABLE2 (ratified=A) on #4741; D-EXEC3 (ratified=A) on #4741; D-RESOURCE-LIMIT1 (ratified=A) on #4741; D-PERF-RUNCELL2 (open) on #4741; D-EXEC-NOEXEC1 (open) on #4741; D-EXEC-TIERUP1 (open) on #4741; D-EXEC-RELAUNCH1 (open) on #4741; D-MEM-EXPERT1 (open) on #5894; D-MEM-GCSCOPE1 (open) on #5894; D-MEM-HOSTHEAP1 (ratified=A) on #5894; D-MEM-LINKCUT1 (ratified=A) on #5894; D-MEM-LOCALRC1 (ratified=A) on #5894; D-MEM-UNBOX1 (ratified=A) on #5894; D-TAKE-REPLACE1 (ratified=A) on #4935; D-MEMBER-NAMESPACE1 (ratified=A) on #4905; D-ENUM-CASEVALUES1 (ratified=A) on #3132; D-ENUM-BACKING1 (ratified=A) on #3142; D-IFHOLE1 (ratified=A) on #3067; D-CAP-RECEIVER1 (ratified=D) on #3452\nFog: no criteria yet on #4893 #4902 #4903 #4932 #5894 #4935 (proposals in consolidate-plan.json no_criteria).\nOut of scope: cards outside this list; other batches of the consolidation plan.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
@@ -67927,6 +67974,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT)."
+        },
         {
           "at": "2026-11-04",
           "by": "Main",
@@ -68077,7 +68129,7 @@
         },
         {
           "n": 15,
-          "text": "(was #1590 c2) core.tls's ciphersuites and tlsversion rows are either shipped through the native TLS bridge (extending the JetTLSPeerSnapshot handoff) with full AOT/JIT parity, or recorded as a named decline with a reason; docs/reference/core-library.md documents the outcome [precut audit: failing on 9c7ddf1359: C:core_surface_ledger/core_surface_ledger_matches_its_sources FAIL exit 1; expected 0]",
+          "text": "(was #1590 c2) core.tls's ciphersuites and tlsversion rows are either shipped through the native TLS bridge (extending the JetTLSPeerSnapshot handoff) with full O0, O1 and O2 parity, or recorded as a named decline with a reason; docs/reference/core-library.md documents the outcome [precut audit: failing on 9c7ddf1359: C:core_surface_ledger/core_surface_ledger_matches_its_sources FAIL exit 1; expected 0]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -68264,7 +68316,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:19:10.709Z",
-      "updated": "2026-11-04T23:41:11.175Z",
+      "updated": "2026-11-06T18:36:02.893Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -70666,7 +70718,7 @@
       "id": "c0efae83",
       "num": 6021,
       "title": "Forwarding derive: a distinct type takes its base type's traits in one line",
-      "body": "Rust's orphan rule forces wrapper types, and each wrapper must re-implement every trait by hand. Jet's distinct types (`Die :: distinct Int(1..6)`) meet the same chore. A forwarding derive lets a distinct type take its base type's traits (equality, ordering, printing, hashing, codable) in one line, through the ratified derive-request law (D-ONCE-DERIVE1=A, D-CORE-DERIVE-HOME1=A). Library API inside existing law; no new marker.\n\nSource: FutureAudit 2026-10-28, $JET_SCRATCH_ROOT/lanes/Audit/FUTURE.md T30.\n\nRelated: #3505 (const generics), #4609 (cross-module generics, P0).",
+      "body": "Rust's orphan rule forces wrapper types, and each wrapper must re-implement every trait by hand. Jet's distinct types (`Die: distinct Int(1..6)`) meet the same chore. A forwarding derive lets a distinct type take its base type's traits (equality, ordering, printing, hashing, codable) in one line, through the ratified derive-request law (D-ONCE-DERIVE1=A, D-CORE-DERIVE-HOME1=A). Library API inside existing law; no new marker.\n\nSource: FutureAudit 2026-10-28, $JET_SCRATCH_ROOT/lanes/Audit/FUTURE.md T30.\n\nRelated: #3505 (const generics), #4609 (cross-module generics, P0).",
       "kind": "feature",
       "track": "epoch",
       "epoch": "e4",
@@ -70679,7 +70731,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -70725,7 +70783,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:57:34.842Z",
-      "updated": "2026-10-28T11:57:34.842Z",
+      "updated": "2026-11-06T18:36:06.609Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -74684,7 +74742,7 @@
       "id": "c0aqwnas",
       "num": 6088,
       "title": "Get-push-store grouping copies the whole group per row, silently",
-      "body": "ScriptBench 2026-10-28 root cause R17 (cells: w10 (first Jet version; fixed before the timed cells)). Report: $JET_SCRATCH_ROOT/lanes/Audit/scripting/bench/BENCH.md.\n\nCause: The obvious grouping idiom `group := by_dept.get(k) ?? [Person]{}`, `&group.push(p)`, `by_dept[k] = group` copies the whole group list, strings included, on every row: the list is still shared with the map, so the push makes it unique first. `jet check` gives no warning. The in-place form `&by_dept[k].push(p)` (after `has_key`) avoids the copy.\n\nEvidence: `perf record` of the first version: `jet_rt_string_clone` 24.7 % (21.2 % under `jet_ir_unique_*`), drop 20.1 %, `jet_ir_unique_*` 7.1 %. Paired run, `hyperfine -N --runs 30 --warmup 3`, cores 16-19: old 10.3 ms ± 2.3, in-place 4.3 ms ± 1.1 (2.37×). `jet check probes/w10_old.jet` → \"has no problems\".",
+      "body": "ScriptBench 2026-10-28 root cause R17 (cells: w10 (first Jet version; fixed before the timed cells)). Report: $JET_SCRATCH_ROOT/lanes/Audit/scripting/bench/BENCH.md.\n\nCause: The obvious grouping idiom `group := by_dept.get(k) ?? [Person]{}`, `group.push(p)`, `by_dept[k] = group` copies the whole group list, strings included, on every row: the list is still shared with the map, so the push makes it unique first. `jet check` gives no warning. The in-place form `by_dept[k].push(p)` (after `has_key`) avoids the copy.\n\nEvidence: `perf record` of the first version: `jet_rt_string_clone` 24.7 % (21.2 % under `jet_ir_unique_*`), drop 20.1 %, `jet_ir_unique_*` 7.1 %. Paired run, `hyperfine -N --runs 30 --warmup 3`, cores 16-19: old 10.3 ms ± 2.3, in-place 4.3 ms ± 1.1 (2.37×). `jet check probes/w10_old.jet` → \"has no problems\".",
       "kind": "bug",
       "track": "epoch",
       "epoch": "e5",
@@ -74697,7 +74755,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-CALLSITE-MARK2=A and D-MOVE-SIGIL1=A (no call-site marks; `&&` marks a take)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -74738,7 +74802,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:27.084Z",
-      "updated": "2026-10-29T01:44:01.849Z",
+      "updated": "2026-11-06T18:36:09.349Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -76172,7 +76236,7 @@
         },
         {
           "n": 50,
-          "text": "(Defect, found 2026-11-04) A constant in an inline module ('RATE :: 3') is E0107 inside that module's own function ($JET_SCRATCH_ROOT/lanes/Main/prep/mv/n8.jet). It resolves, with a case on O0, O1 and O2.",
+          "text": "(Defect, found 2026-11-04) A constant in an inline module ('RATE: 3') is E0107 inside that module's own function ($JET_SCRATCH_ROOT/lanes/Main/prep/mv/n8.jet). It resolves, with a case on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -76197,8 +76261,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T11:29:47.978Z",
-      "updated": "2026-11-05T11:21:00.495Z",
-      "updatedBy": "owner"
+      "updated": "2026-11-06T18:36:13.416Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0q31aks",
@@ -182730,6 +182794,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-06T18:36:13.416Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c09kjhit",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:36:09.349Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0aqwnas",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:36:08.530Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0aqwnas",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-06T18:36:06.609Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0efae83",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:36:05.752Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0efae83",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-06T18:36:02.893Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0w9o2sz",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:36:01.905Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0w9o2sz",
+      "note": "criteria,body"
+    },
+    {
+      "at": "2026-11-06T18:35:59.813Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08s0ppt",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:35:58.816Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08s0ppt",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:35:56.262Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0fo37ov",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:35:55.309Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0fo37ov",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:35:53.489Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0h18kyi",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:35:52.686Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0h18kyi",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:35:50.784Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00ys8fj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:35:49.923Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00ys8fj",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-06T18:35:48.101Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0th2wgp",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:35:47.304Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0th2wgp",
+      "note": "criteria,body"
+    },
+    {
+      "at": "2026-11-06T18:35:45.462Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01sunrb",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:35:44.552Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01sunrb",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-06T18:35:42.758Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c03183d1",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:35:41.934Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c03183d1",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:35:40.053Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0tr523z",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:35:39.168Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0tr523z",
+      "note": "criteria,body"
+    },
+    {
+      "at": "2026-11-06T18:35:36.996Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0x9xmde",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:35:35.950Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0x9xmde",
+      "note": "criteria,body"
+    },
     {
       "at": "2026-11-06T18:35:33.557Z",
       "by": "Main",
