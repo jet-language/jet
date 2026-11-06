@@ -235,6 +235,9 @@ fn kit_steps_capture_value(words: [String], context: KitStepCtx, state: KitStepS
                 if argv[0] == "jet" -> argv[0] = context.env.jet
                 if argv[0] == "jetpack" -> argv[0] = context.env.jetpack
                 overlay :: kit_steps_environment(context.plan, context.env, context.work, context.scratch, state.built)
+                if kit_exec_prepare(context.env, context.work, context.scratch, overlay) == .Val(stopped) {
+                    return kit_steps_capture_failure(if stopped.refused -> "REFUSED" else -> "ERROR", stopped.error)
+                }
                 child :: kit_exec_spec(context.env, argv, context.work, context.scratch, overlay).spawn() ?? {
                     start = index + 1
                     next

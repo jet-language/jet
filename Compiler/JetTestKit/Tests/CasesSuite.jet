@@ -81,6 +81,42 @@ fn cases_test_source(root: String, name: String, text: String) {
     files.remove_all(root) ?? panic("remove token scratch")
 }
 
+#Test("cases run each row with its own HOME, JET_HOME and XDG roots under its scratch") {
+    root :: cases_test_root("home")
+    directory :: files.join(root, "tests/cases/group")
+    probe :: "probe-{process.current_pid()}"
+    kit_exec_write(files.join(directory, "home.out"), "{{scratch}}/home\n{{scratch}}/home/.jet\n{{scratch}}/home/.config\n{{scratch}}/home/.cache\n{{scratch}}/home/.local/share\n{{scratch}}/home/.local/state\nplanted\n")
+    cases_test_source(root, "home", "step: jet -c 'printf \"%s\\\\n\" \"$HOME\" \"$JET_HOME\" \"$XDG_CONFIG_HOME\" \"$XDG_CACHE_HOME\" \"$XDG_DATA_HOME\" \"$XDG_STATE_HOME\" && mkdir -p \"$HOME/.jet\" && printf \"planted\\\\n\" > \"$HOME/.jet/{probe}\" && cat \"$JET_HOME/{probe}\"'\nstdout: = home.out\nstderr: empty\n")
+    context :: cases_test_context(root, files.join(root, "scratch"))
+    result :: kit_cases_run(cases_test_entry("home"), context)[0]
+    assert_eq(result.verdict.status, "PASS")
+    // The probe landed in the row's home, never in the kit's own.
+    assert(!files.exists(files.join(sys.get("HOME") ?? "/", ".jet/{probe}")))
+    assert(!files.exists(files.join(kit_exec_user_home(), ".jet/{probe}")))
+    files.remove_all(root) ?? panic("remove home scratch")
+}
+
+#Test("cases refuse a row whose HOME or JET_HOME is the invoking user's before it runs") {
+    root :: cases_test_root("user-home")
+    user :: files.canonicalize(kit_exec_user_home()) ?? panic("invoking user's home: {err}")
+    cases_test_source(root, "user-home", "env: HOME={user}\nenv: JET_HOME={user}/.jet\nstep: jet -c 'printf reached > {{root}}/reached'\nexit: 0\n")
+    cases_test_source(root, "user-jet", "env: JET_HOME={user}/.jet\nstep: jet -c 'printf reached > {{root}}/reached'\nexit: 0\n")
+    context :: cases_test_context(root, files.join(root, "scratch"))
+    home :: kit_cases_run(cases_test_entry("user-home"), context)[0]
+    assert_eq(home.verdict.status, "REFUSED")
+    assert(home.verdict.detail.contains("HOME is the invoking user's home"))
+    jet_home :: kit_cases_run(cases_test_entry("user-jet"), context)[0]
+    assert_eq(jet_home.verdict.status, "REFUSED")
+    assert(jet_home.verdict.detail.contains("JET_HOME is the invoking user's"))
+    assert(!files.exists(files.join(root, "reached")))
+    env :: context.env
+    scratch :: files.join(root, "scratch")
+    assert_eq(kit_exec_home_refusal(env, root, scratch, [KitEnvVar]{}), None)
+    assert(kit_exec_home_refusal(env, user, scratch, [KitEnvVar{name: "HOME", value: Val(".")}]) != None)
+    assert_eq(kit_exec_home_refusal(env, root, scratch, [KitEnvVar{name: "HOME", value: None}]), None)
+    files.remove_all(root) ?? panic("remove user-home scratch")
+}
+
 #Test("cases host skips precede refusals and malformed scenarios do not spawn") {
     root :: cases_test_root("refusals")
     cases_test_source(root, "skip", "requires: os:not-{sys.family()}\nrefused: missing host capability\n")

@@ -113,6 +113,13 @@ undocumented user controls:
 - `JET_CODEMOD_CRASH_*`, `JET_CRYPTO_*_TEST_*`, and variables whose names end
   in `_OBSERVER` or `_SUBPROCESS` are fault-injection hooks.
 
+The test kit starts every case child with `HOME`, `JET_HOME`, and the
+`XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_DATA_HOME`, and `XDG_STATE_HOME`
+roots under that case's scratch directory. A child whose `HOME` would be the
+invoking user's home, or whose `JET_HOME` would be that user's `~/.jet`, is
+not started and its row is `REFUSED`, so a suite run never reads or writes the
+user's `~/.jet`, configuration, or caches.
+
 Do not build scripts against internal variables. Their names and values may
 change with the implementation; use a documented command-line flag or public
 control instead.

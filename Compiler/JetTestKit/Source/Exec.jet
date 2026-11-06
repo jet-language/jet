@@ -50,6 +50,53 @@ fn kit_exec_failed(message: String) -> KitRun {
     KitRun{stdout: "", stderr: "", code: -1, signal: None, timed_out: false, error: message}
 }
 
+fn kit_exec_refused(message: String) -> KitRun {
+    KitRun{stdout: "", stderr: "", code: -1, signal: None, timed_out: false, error: message, refused: true}
+}
+
+// Each case's children get a home of their own under its scratch: HOME,
+// JET_HOME and the XDG roots, so no case reads or writes the invoking user's
+// ~/.jet, configuration or caches.
+fn kit_exec_home(scratch: String) -> String { files.join(scratch, "home") }
+
+// The invoking user's home from the password database; HOME only when the
+// database has no row for this user, and "" when neither is known.
+fn kit_exec_user_home() -> String {
+    uid :: "{sys.getuid()}"
+    if files.read("/etc/passwd") == .Ok(text) {
+        loop line in text.split("\n") {
+            fields :: line.split(":").to_list()
+            if fields.len() >= 6 && fields[2] == uid -> return fields[5].copy()
+        }
+    }
+    sys.get("HOME") ?? ""
+}
+
+// `value` resolved from `cwd`, through its symbolic links; a path that does
+// not exist yet resolves through its parent.
+fn kit_exec_resolved(value: String?, cwd: String) -> String? {
+    path :: value ?? return None
+    if path == "" -> return None
+    absolute :: if path.starts_with("/") -> path.copy() else -> files.join(cwd, path)
+    if files.canonicalize(absolute) == .Ok(resolved) -> return Val(resolved)
+    parent :: files.canonicalize(files.dirname(absolute)) ?? return Val(absolute)
+    Val(files.join(parent, files.basename(absolute)))
+}
+
+// A child whose HOME or JET_HOME is the invoking user's own would write that
+// user's ~/.jet; the kit refuses to start it and names why.
+fn kit_exec_home_refusal(env: KitEnv, cwd: String, scratch: String, overlay: [KitEnvVar]) -> String? {
+    user :: kit_exec_resolved(Val(kit_exec_user_home()), "/") ?? return None
+    if (kit_exec_resolved(kit_steps_env_value("HOME", env, scratch, overlay), cwd) ?? "") == user {
+        return Val("refused: the child's HOME is the invoking user's home {user}")
+    }
+    user_jet :: kit_exec_resolved(Val(files.join(user, ".jet")), "/") ?? return None
+    if (kit_exec_resolved(kit_steps_env_value("JET_HOME", env, scratch, overlay), cwd) ?? "") == user_jet {
+        return Val("refused: the child's JET_HOME is the invoking user's {user_jet}")
+    }
+    None
+}
+
 fn kit_exec_base_value(name: String, env: KitEnv, scratch: String) -> String? {
     if env.env_clear -> return None
     if {
@@ -64,6 +111,12 @@ fn kit_exec_base_value(name: String, env: KitEnv, scratch: String) -> String? {
         name == "JET_STORE_DIR" -> Val(files.join(env.scratch, "store"))
         name == "JET_FFI_CACHE_DIR" -> if env.trace_node != "" -> sys.get(name) else if env.ffi_cache != "" -> Val(env.ffi_cache) else -> Val(files.join(env.scratch, "ffi"))
         name == "TMPDIR" || name == "TMP" || name == "TEMP" -> Val(files.join(scratch, "tmp"))
+        name == "HOME" -> Val(kit_exec_home(scratch))
+        name == "JET_HOME" -> Val(files.join(kit_exec_home(scratch), ".jet"))
+        name == "XDG_CONFIG_HOME" -> Val(files.join(kit_exec_home(scratch), ".config"))
+        name == "XDG_CACHE_HOME" -> Val(files.join(kit_exec_home(scratch), ".cache"))
+        name == "XDG_DATA_HOME" -> Val(files.join(kit_exec_home(scratch), ".local/share"))
+        name == "XDG_STATE_HOME" -> Val(files.join(kit_exec_home(scratch), ".local/state"))
         name == "JETPACK_ROOT" -> Val(files.join(scratch, "jetpack"))
         // The `jet` under test runs its engine verbs with the run's jetpack.
         name == "JETPACK_BIN" -> if env.jetpack != "" -> Val(env.jetpack) else -> sys.get(name)
@@ -73,7 +126,8 @@ fn kit_exec_base_value(name: String, env: KitEnv, scratch: String) -> String? {
 }
 
 // Inherit the caller's environment, removing only the compiler-extension hook.
-// Cache roots are run-wide; temporary, schema and jetpack roots are case-local.
+// Cache roots are run-wide; temporary, schema, jetpack and home roots are
+// case-local. Callers check kit_exec_home_refusal before spawning.
 fn kit_exec_spec(env: KitEnv, argv: [String], cwd: String, scratch: String, overlay: [KitEnvVar]) -> ProcessSpec {
     commands :: if env.trace_node != "" && env.trace_case != "" -> {
         cache_override := kit_exec_base_value("JET_FFI_CACHE_DIR", env, scratch) ?? ""
@@ -99,6 +153,12 @@ fn kit_exec_spec(env: KitEnv, argv: [String], cwd: String, scratch: String, over
             .env("TMPDIR", kit_exec_base_value("TMPDIR", env, scratch) ?? "")
             .env("TMP", kit_exec_base_value("TMP", env, scratch) ?? "")
             .env("TEMP", kit_exec_base_value("TEMP", env, scratch) ?? "")
+            .env("HOME", kit_exec_base_value("HOME", env, scratch) ?? "")
+            .env("JET_HOME", kit_exec_base_value("JET_HOME", env, scratch) ?? "")
+            .env("XDG_CONFIG_HOME", kit_exec_base_value("XDG_CONFIG_HOME", env, scratch) ?? "")
+            .env("XDG_CACHE_HOME", kit_exec_base_value("XDG_CACHE_HOME", env, scratch) ?? "")
+            .env("XDG_DATA_HOME", kit_exec_base_value("XDG_DATA_HOME", env, scratch) ?? "")
+            .env("XDG_STATE_HOME", kit_exec_base_value("XDG_STATE_HOME", env, scratch) ?? "")
             .env("JETPACK_ROOT", kit_exec_base_value("JETPACK_ROOT", env, scratch) ?? "")
             .env("JETPACK_BIN", kit_exec_base_value("JETPACK_BIN", env, scratch) ?? "")
             .env("JET_SCHEMA_CACHE_DIR", kit_exec_base_value("JET_SCHEMA_CACHE_DIR", env, scratch) ?? "")
@@ -112,6 +172,15 @@ fn kit_exec_spec(env: KitEnv, argv: [String], cwd: String, scratch: String, over
         }
     }
     spec
+}
+
+// Refuses a child that would run in the invoking user's home and creates the
+// case's temporary and home directories: the run that stops the spawn, or None.
+fn kit_exec_prepare(env: KitEnv, cwd: String, scratch: String, overlay: [KitEnvVar]) -> KitRun? {
+    if kit_exec_home_refusal(env, cwd, scratch, overlay) == .Val(reason) -> return Val(kit_exec_refused(reason))
+    files.create_dir_all(files.join(scratch, "tmp")) ?? return Val(kit_exec_failed("create child temp directory: {err}"))
+    files.create_dir_all(kit_exec_home(scratch)) ?? return Val(kit_exec_failed("create child home directory: {err}"))
+    None
 }
 
 fn kit_exec_receipt(receipt: ProcessReceipt, elapsed_ns: Int, input_error: String) -> KitRun {
@@ -173,7 +242,7 @@ fn kit_exec_terminal_order(events: [KitTerminalEvent]) -> [KitTerminalEvent] {
 }
 
 fn kit_exec_run(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: String, overlay: [KitEnvVar], terminal: KitTerminal?) -> KitRun {
-    files.create_dir_all(files.join(scratch, "tmp")) ?? return kit_exec_failed("create child temp directory: {err}")
+    if kit_exec_prepare(env, cwd, scratch, overlay) == .Val(stopped) -> return stopped
     started :: time.instant()
     spec := kit_exec_spec(env, argv, cwd, scratch, overlay)
     if terminal == .Val(shape) {
@@ -379,6 +448,7 @@ fn kit_exec_invoke(env: KitEnv, argv: [String], cwd: String, scratch: String, st
 }
 
 fn kit_exec_process_failure(run: KitRun) -> KitVerdict? {
+    if run.refused -> return Val(kit_expect_verdict("REFUSED", run.error))
     if run.error != "" -> return Val(kit_expect_verdict("ERROR", run.error))
     if run.timed_out -> return Val(kit_expect_verdict("TIMEOUT", "wall-clock limit"))
     if run.limit_hit == "memory" -> return Val(kit_expect_verdict("ERROR", "memory limit hit"))
