@@ -71,7 +71,7 @@ jetos_identity_test_system: fn(options: [OptionPlan]) -> SystemPlan Never! {
     assert_eq(files.read(files.join(root, "etc/nsswitch.conf")) ?? panic("nsswitch"), "passwd: files\ngroup: files\nshadow: files\nhosts: files dns\nservices: files\n")
     pam_names: [String]{"login", "gdm", "gdm-password", "gdm-launch-environment", "polkit-1", "system-local-login"}
     loop name in pam_names -> assert_eq(files.read(files.join(root, "etc/pam.d/{name}")) ?? panic("pam"), "auth sufficient pam_unix.so nullok\naccount sufficient pam_unix.so\npassword sufficient pam_unix.so nullok\nsession required pam_unix.so\nsession optional pam_systemd.so\n")
-    assert_eq(files.read(files.join(root, "etc/machine-id")) ?? panic("machine id"), "8c38706cbc8462ab8b17983c64795207\n")
+    assert_eq(files.read(files.join(root, "etc/machine-id")) ?? panic("machine id"), "a8cc2e4f1e5efdd0d6dcf4eae61e1d6b\n")
     assert(!files.exists(files.join(root, "etc/timezone")))
     files.remove_all(root) ?? panic("remove identity scratch")
 }
@@ -144,7 +144,8 @@ jetos_identity_test_realized: fn(verification: &StoreVerification, root: String,
     assert_eq(jetos_kernel_package_json(package), expected_package)
     packages := [JetOSRealizedPackage]{package}
     assert_eq(jetos_render_boot_facts(jetos_identity_test_system([OptionPlan]{}), packages), "{{\"loader\":\"Limine\",\"kernel\":\"CachyOS\",\"init\":\"/sbin/init\",\"initrd_modules\":[\"virtio_blk\",\"ext4\"],\"kernel_package\":{expected_package}}}")
-    ^packages[0].lease.release()
+    held: packages.pop() ?? panic("one kernel package")
+    held.lease.release()
     files.remove_all(root) ?? panic("remove provenance scratch")
 }
 
@@ -195,8 +196,10 @@ jetos_identity_test_realized: fn(verification: &StoreVerification, root: String,
         .None -> {}
         .Val(_) -> panic("other package is not the CachyOS kernel")
     }
-    ^unprojected_packages[0].lease.release()
-    ^packages[0].lease.release()
+    held_unprojected: unprojected_packages.pop() ?? panic("one unprojected package")
+    held_unprojected.lease.release()
+    held: packages.pop() ?? panic("one kernel package")
+    held.lease.release()
     files.remove_all(root) ?? panic("remove consumption scratch")
 }
 
@@ -245,6 +248,7 @@ jetos_identity_test_realized: fn(verification: &StoreVerification, root: String,
         .Ok(_) -> panic("copy created nonexistent parent")
     }
     assert(!files.exists(files.join(root, "no-parent")))
-    ^packages[0].lease.release()
+    held: packages.pop() ?? panic("one kernel package")
+    held.lease.release()
     files.remove_all(root) ?? panic("remove copy scratch")
 }

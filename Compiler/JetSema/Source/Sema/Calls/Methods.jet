@@ -786,6 +786,11 @@ sema_call_method_checked_from_value: fn(state: &SemaOwnershipState, receiver: Ex
     typed_option: if host_method -> sema_call_typecheck_host_bound_arguments(resolved_candidate.method.name, params, abi, true, resolved_binding, &checked_args, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics, sema_shared_access_host_method_writes(receiver_value.ty, resolved_candidate.method.name), host_stored) else -> sema_call_typecheck_bound_arguments(resolved_candidate.method.name, params, abi, true, resolved_binding, &checked_args, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics, false)
     typed: typed_option ?? return None
     consumer: "`{sema_call_method_leaf(sema_call_receiver_method_label(receiver_type))}.{resolved_candidate.method.name}`"
+    // A taking receiver read in place (`items[i].lease.release()`, a field of a
+    // read receiver) leaves its place still owning the value: a resource taken
+    // from there would be closed by the taker and again by its place (E0211, as
+    // for a taking argument).
+    if resolved_candidate.receiver_convention == AccessConvention.Move && !sema_copy_site_refuse_resource_copy(receiver_value, environment, program, scopes, context, &diagnostics) -> return None
     ownership: sema_ownership_check_two_phase_method_call(&state, resolved_candidate.method.name, consumer, receiver, resolved_candidate.receiver_convention, true, params, &checked_args, scopes, span, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return None
     lowered := sema_call_lower_bound_arguments(typed, params, &checked_args, environment, program)

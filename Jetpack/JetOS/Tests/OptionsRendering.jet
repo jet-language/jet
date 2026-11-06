@@ -301,6 +301,9 @@ jetos_test_image: fn(name: String, kind: ImageKind, from: String, format: String
     package: JetOSRealizedPackage{entry: entry, lease: lease, original_out: "/original", original_reference_text: "original@jetpack", consumption_override: Val("/override")}
     packages := [JetOSRealizedPackage]{package}
     assert_eq(jetos_render_proof(jetos_test_system([OptionPlan]{}), packages, jetos_test_plan([ImagePlan]{})), "jetos proof for devhost\ntarget: linux.x64\nrisk: low\nplan: pass\npackages:\n  fixture@jetpack -> {entry.out}\noptions:\nservices:\nimages:\n")
-    ^packages[0].lease.release()
+    // The list owns the package: take it out before releasing its lease, so the
+    // lease's locks close once (E0211 refuses a take from the element in place).
+    held: packages.pop() ?? panic("one rendered package")
+    held.lease.release()
     files.remove_all(root) ?? panic("remove root")
 }

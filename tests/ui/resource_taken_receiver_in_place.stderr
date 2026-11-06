@@ -1,0 +1,17 @@
+Error [jet.CopyNotSupported]: `Lease` can't be copied out of the place it is read from
+  --> tests/ui/resource_taken_receiver_in_place.jet:19:17
+    |
+ 19 |     packages[0].lease.release()
+    |                 ^^^^^
+ Why: It holds a resource, which has one cleanup owner; this position takes an owned value, so the copy and the place would both close the same resource
+ Fix: Use the element where it is, or remove it from its collection to own it
+More: jet-lang.dev/e/E0211
+
+Error [jet.CopyNotSupported]: `Lease` can't be copied out of the place it is read from
+  --> tests/ui/resource_taken_receiver_in_place.jet:26:14
+    |
+ 26 |         self.lease.release()
+    |              ^^^^^
+ Why: It holds a resource, which has one cleanup owner; this position takes an owned value, so the copy and the place would both close the same resource
+ Fix: Use it where it is, or take `self` with the move marker `^` (a `^` parameter or receiver) and move the field out with `^`
+More: jet-lang.dev/e/E0211
