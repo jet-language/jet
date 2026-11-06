@@ -24,7 +24,8 @@ OUT=$JET_SCRATCH_ROOT/discovery/r14/census
 C=${CENSUS_JET_DIR:-$(readlink -f "$JET_SEED")}
 ID=${CENSUS_JET_IDENTITY:-$(cat "$C/IDENTITY")}
 rm -rf "$S" "$OUT"; mkdir -p "$S" "$OUT"
-HEAD_SHA=$(git -C "$W" rev-parse HEAD) || { echo "EXPORT FAILED"; exit 2; }
+# CENSUS_COMMIT=<sha> censuses that commit instead of HEAD (a batch check of an exact commit).
+HEAD_SHA=$(git -C "$W" rev-parse "${CENSUS_COMMIT:-HEAD}^{commit}") || { echo "EXPORT FAILED"; exit 2; }
 ( cd "$W" && git archive "$HEAD_SHA" | tar -x -C "$S" ) || { echo "EXPORT FAILED"; exit 2; }
 # A named file the worktree no longer has is a deletion: remove it from the snapshot too.
 for f in "$@"; do if [ -e "$W/$f" ]; then mkdir -p "$S/$(dirname "$f")" && cp "$W/$f" "$S/$f"; else rm -f "$S/$f"; fi; done
