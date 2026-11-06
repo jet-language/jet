@@ -1922,9 +1922,16 @@ fn describe(values: [Float]) -> DataSummary DataError! {
     }
     mean_value := total / Float{values.len()}
     if nonfinite(mean_value) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing mean", "describe"))
-    minimum :: min(values) ?? return Err(data_error(DataErrorKind.NonFinite, "minimum failed while describing data", "describe"))
-    maximum :: max(values) ?? return Err(data_error(DataErrorKind.NonFinite, "maximum failed while describing data", "describe"))
-    middle :: median(values) ?? return Err(data_error(DataErrorKind.Empty, "median failed while describing data", "describe"))
+    // The sum has proved every value finite, so the extrema take one pass and
+    // the median selects without validating again.
+    minimum := values[0]
+    maximum := values[0]
+    loop value in values {
+        if value < minimum -> minimum = value
+        if value > maximum -> maximum = value
+    }
+    if values.len() > DataLimits.safe().max_sort_rows -> return Err(data_error(DataErrorKind.Empty, "median failed while describing data", "describe"))
+    middle :: finite_quantile(values, Float{0.5}) ?? return Err(data_error(DataErrorKind.Empty, "median failed while describing data", "describe"))
     spread := Float{0.0}
     if variance(values) == {
         .Ok(value) -> spread = value
@@ -2032,6 +2039,11 @@ fn quantile(values: [Float], q: Float) -> Float DataError! {
     loop value in values {
         if nonfinite(value) -> return Err(data_error(DataErrorKind.NonFinite, "numeric input must be finite", "quantile"))
     }
+    finite_quantile(values, q)
+}
+
+// The interpolated quantile of nonempty, finite values within max_sort_rows.
+fn finite_quantile(values: [Float], q: Float) -> Float DataError! {
     work := [Float]{}
     loop value in values -> &work.push(value)
     pos := q * Float{work.len() - 1}
