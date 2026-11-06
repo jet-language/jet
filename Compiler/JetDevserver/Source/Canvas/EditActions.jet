@@ -567,6 +567,9 @@ fn core_imports(src: String) -> [CoreImport] {
         if row.split_once(" :: ") == .Val(named) {
             alias = ident_prefix(named._0.trim()) // #4303
             module_ref = named._1.trim() // #4303
+        } else if row.split_once(": ") == .Val(named) {
+            alias = ident_prefix(named._0.trim()) // #4303
+            module_ref = named._1.trim() // #4303
         } else {
             module_ref = row.trim() // #4303
             alias = default_core_alias(module_ref)

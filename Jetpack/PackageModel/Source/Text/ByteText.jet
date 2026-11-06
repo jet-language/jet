@@ -65,6 +65,16 @@ fn pkg_bytes_skip_space(raw: [U8], at: Int) -> Int Never! {
     }
 }
 
+// After a declared name ending at `at`: the offset just past `: <keyword>`
+// (a colon declaration head such as `workspace: module`), else -1.
+fn pkg_bytes_colon_keyword_end(raw: [U8], at: Int, keyword: [U8]) -> Int Never! {
+    colon :: pkg_bytes_skip_space(raw, at)
+    if pkg_bytes_code(raw, colon) != 58 || pkg_bytes_code(raw, colon + 1) == 58 || pkg_bytes_code(raw, colon + 1) == 61 -> return -1
+    start :: pkg_bytes_skip_space(raw, colon + 1)
+    if !pkg_bytes_starts_with(raw, start, keyword) || pkg_bytes_is_word(pkg_bytes_code(raw, start + keyword.len())) -> return -1
+    start + keyword.len()
+}
+
 // Whether `value` holds a Unicode control scalar (C0, DEL, or C1): Rust's
 // `char::is_control` over every scalar.
 fn pkg_text_has_control(value: String) -> Bool Never! {

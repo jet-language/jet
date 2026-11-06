@@ -18,14 +18,17 @@ use {
     jetpack_foundation.[BuildEffect]
 }
 
-// Whether `source` declares the build entry `fn build(b: Build)`, as the
-// Driver's build query selects it (jet_driver_query_build_plan); any other
-// top-level `fn build` is ordinary code.
+// Whether `source` declares the build entry `fn build(b: Build)` (or, ahead of
+// the D-DECL-COLON1 cutover, `build: fn(b: Build)`), as the Driver's build
+// query selects it (jet_driver_query_build_plan); any other top-level
+// `fn build` is ordinary code.
 fn jet_cli_declares_build_entry(source: String) -> Bool Never! {
     lines :: source.split("\n").to_list()
     loop line in jet_cli_top_level_function_lines(source, "build") {
         if line < 1 || line > lines.len() -> next
-        if lines[line - 1].split_once("fn build(") == .Val(opened) && opened.after.split_once(")") == .Val(params) && params.before.split_once(":") == .Val(typed) {
+        head :: lines[line - 1]
+        opened :: head.split_once("fn build(") ?? (head.split_once("build: fn(") ?? next)
+        if opened.after.split_once(")") == .Val(params) && params.before.split_once(":") == .Val(typed) {
             if !typed.before.contains(",") && typed.after.trim() == "Build" -> return true
         }
     }
@@ -255,4 +258,11 @@ fn jet_cli_build_add_target(build: &HermeticBuildContext, target: BuildSessionTa
         "package" -> &build.add_package(target.name, spec)
         else -> &build.add_publish(target.name, spec)
     }
+}
+
+#Test("the build entry reads in both declaration spellings") {
+    assert(jet_cli_declares_build_entry("fn build(b: Build) {{}}\n"))
+    assert(jet_cli_declares_build_entry("build: fn(b: Build) {{}}\n"))
+    assert(!jet_cli_declares_build_entry("fn build(n: Int) {{}}\n"))
+    assert(!jet_cli_declares_build_entry("build: fn(n: Int) {{}}\n"))
 }

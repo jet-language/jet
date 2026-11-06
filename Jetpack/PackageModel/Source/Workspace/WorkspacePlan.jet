@@ -7,7 +7,7 @@ use {
     jet_foundation.[Diagnostic, diagnostic_from_registry]
     jetpack_foundation.[MODULE_FIELD_MEMBERS, MODULE_INTERNAL_PREFIX, NS_WORKSPACE, WORKSPACE_FILE]
     jet_lexer.[
-        TOKEN_BLOCK_COMMENT, TOKEN_IDENT, TOKEN_KW_MODULE, TOKEN_LBRACE, TOKEN_LINE_COMMENT,
+        TOKEN_BLOCK_COMMENT, TOKEN_COLON, TOKEN_DOT, TOKEN_IDENT, TOKEN_KW_MODULE, TOKEN_LBRACE, TOKEN_LINE_COMMENT,
         TOKEN_RBRACE, Token, TokenTables, lex, token_text,
     ]
     files :: core.files
@@ -148,7 +148,8 @@ fn pkg_lex_workspace_declaration(src: [U8]) -> WorkspaceDeclarationProbe Never! 
     WorkspaceDeclarationProbe{declares_module: declares_module, declares_members: declares_module && pkg_workspace_tokens_name_members(tokens, lexed.tables)}
 }
 
-// A top-level `module workspace` token pair.
+// A top-level `workspace: module` token run (or the retired `module
+// workspace` pair).
 fn pkg_workspace_tokens_declare_module(tokens: [Token], tables: TokenTables) -> Bool Never! {
     depth := 0
     loop index in 0..<(tokens.len() - 1) {
@@ -160,6 +161,9 @@ fn pkg_workspace_tokens_declare_module(tokens: [Token], tables: TokenTables) -> 
                 next_token :: tokens[index + 1]
                 name :: token_text(tables, next_token)
                 if next_token.kind == TOKEN_IDENT && name == NS_WORKSPACE && !name.starts_with(MODULE_INTERNAL_PREFIX) -> return true
+            }
+            kind == TOKEN_IDENT && depth == 0 && index + 2 < tokens.len() && tokens[index + 1].kind == TOKEN_COLON && tokens[index + 2].kind == TOKEN_KW_MODULE -> {
+                if token_text(tables, tokens[index]) == NS_WORKSPACE && (index == 0 || tokens[index - 1].kind != TOKEN_DOT) -> return true
             }
             else -> {}
         }

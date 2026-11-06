@@ -113,7 +113,8 @@ fn provider_dir_has_top_level_run(dir: String) -[FS]> Bool Never! {
     false
 }
 
-// True when `src` declares `fn run` at brace depth 0.
+// True when `src` declares `run: fn` (or the retired `fn run`) at brace
+// depth 0.
 fn provider_file_has_top_level_run(src: String) -> Bool Never! {
     lexed :: lex(src.bytes())
     tokens :: lexed.tokens
@@ -127,6 +128,8 @@ fn provider_file_has_top_level_run(src: String) -> Bool Never! {
         } else if kind == TOKEN_KW_FN && depth == 0 && index + 1 < tokens.len() {
             next_token :: tokens[index + 1]
             if next_token.kind == TOKEN_IDENT && token_text(lexed.tables, next_token) == "run" -> return true
+        } else if kind == TOKEN_IDENT && depth == 0 && index + 2 < tokens.len() && tokens[index + 1].kind == TOKEN_COLON && tokens[index + 2].kind == TOKEN_KW_FN && (index == 0 || tokens[index - 1].kind != TOKEN_DOT) {
+            if token_text(lexed.tables, tokens[index]) == "run" -> return true
         }
     }
     false

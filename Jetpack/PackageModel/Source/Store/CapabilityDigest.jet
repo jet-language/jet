@@ -32,6 +32,12 @@ fn pkg_capability_snapshot_parse(raw: String) -> PackageCapabilitySnapshot? Neve
                 if name.trim() == "" -> return None
                 &signatures.push(line)
             }
+            line.contains(": fn") -> {
+                name := line
+                if line.split_once(": fn") == .Val(pair) -> name = pair.before
+                if name.trim() == "" -> return None
+                &signatures.push(line)
+            }
             else -> return None
         }
     }

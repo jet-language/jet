@@ -108,8 +108,9 @@ fn pkg_diagnostic_codes(diagnostics: [Diagnostic]) -> String Never! {
     lines.join("\n")
 }
 
-// Whether `text` declares `module <name>` at brace depth 0 (line comments
-// stripped; `module` followed by space, tab, CR, or LF).
+// Whether `text` declares `<name>: module` (or the retired `module <name>`,
+// `module` followed by space, tab, CR, or LF) at brace depth 0 (line comments
+// stripped).
 fn pkg_file_declares_module(input: String, name: String) -> Bool Never! {
     bytes :: pkg_strip_comments(input).bytes()
     keyword :: KW_MODULE.bytes()
@@ -125,6 +126,7 @@ fn pkg_file_declares_module(input: String, name: String) -> Bool Never! {
             if depth > 0 -> depth -= 1
             next
         }
+        if depth == 0 && pkg_bytes_starts_with(bytes, index, wanted) && !pkg_bytes_is_word(pkg_bytes_code(bytes, index - 1)) && pkg_bytes_code(bytes, index - 1) != 46 && pkg_bytes_colon_keyword_end(bytes, index + wanted.len(), keyword) >= 0 -> return true
         if code != 109 || depth != 0 || !pkg_bytes_starts_with(bytes, index, keyword) -> next
         after :: index + keyword.len()
         separator :: pkg_bytes_code(bytes, after)

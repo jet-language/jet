@@ -320,7 +320,7 @@ fn pkg_cffi_binding_plan_facade(project_root: String, lib: String, header_source
     }
     marker :: pkg_cffi_plan_marker(facade) ?? return Err(pkg_bridge_error("binding lock `{lock_path}` has no facade plan marker"))
     if marker != digest.trim() -> return Err(pkg_bridge_error("binding `{lib}` facade digest does not match `{lock_path}`"))
-    if !facade.contains("#Import module c.{lib}") -> return Err(pkg_bridge_error("binding `{lib}` facade does not import its canonical C library"))
+    if !facade.contains("#Import module c.{lib}") && !facade.contains("#Import c.{lib}: module") -> return Err(pkg_bridge_error("binding `{lib}` facade does not import its canonical C library"))
     Ok(Val(facade))
 }
 

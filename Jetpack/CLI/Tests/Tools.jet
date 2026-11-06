@@ -48,6 +48,8 @@ fn cli_tools_test_replace_first(text: String, from: String, to: String) -> Strin
     assert(names.contains("serve"), "{names}")
     assert(names.contains("lint"), "{names}")
     assert(!names.contains("run"))
+    colon :: cli_task_names_in("\n#Job serve: fn() {{ }}\n#Every(5min) #Job lint: fn() {{ }}\nrun: fn() {{ }}\n")
+    assert_eq(colon, [String]{"serve", "lint"})
 }
 
 #Test("external provider list covers ballot examples") {

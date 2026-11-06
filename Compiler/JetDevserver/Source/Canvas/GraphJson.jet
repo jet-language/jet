@@ -96,7 +96,7 @@ fn next_function_start(src: String, offset: Usize) -> Usize {
     cursor := offset.min(src.len())
     loop line in src[cursor..<src.len()].split_inclusive('\n') {
         trimmed := line.trim_start() // #4303
-        if trimmed.starts_with("fn ") {
+        if trimmed.starts_with("fn ") || trimmed.split_once(": fn").is_some_and((parts) -> !parts._0.is_empty() && parts._0.chars().all((c) -> c.is_ascii_alphanumeric() || c == '_')) {
             return cursor + line.len() - trimmed.len()
         }
         cursor += line.len()

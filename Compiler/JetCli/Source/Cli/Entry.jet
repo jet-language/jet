@@ -496,14 +496,18 @@ fn jet_cli_inline_carrier(root: String) -[FS]> String? Never! {
     None
 }
 
-// `top_level_function_lines`: the lines where a top-level `fn <wanted>` is
-// declared, by the brace-depth text scan the Rust package model runs (comments
-// and strings skipped).
+// `top_level_function_lines`: the lines where a top-level `fn <wanted>` (or,
+// ahead of the D-DECL-COLON1 cutover, `<wanted>: fn`) is declared, by the
+// brace-depth text scan the Rust package model runs (comments and strings
+// skipped).
 fn jet_cli_top_level_function_lines(source: String, wanted: String) -> [Int] Never! {
     depth := 0
     token := ""
     token_line := 1
     saw_fn := false
+    candidate := false
+    candidate_line := 1
+    colon_seen := false
     in_string := false
     escaped := false
     line_comment := false
@@ -570,8 +574,19 @@ fn jet_cli_top_level_function_lines(source: String, wanted: String) -> [Int] Nev
         }
         if token.len() > 0 {
             if depth == 0 && saw_fn && token == wanted -> &matches.push(token_line)
-            saw_fn = depth == 0 && token == "fn"
+            if depth == 0 && candidate && colon_seen && token == "fn" -> &matches.push(candidate_line)
+            saw_fn = depth == 0 && token == "fn" && (ch == 32 || ch == 9)
+            candidate = depth == 0 && token == wanted && previous != 46
+            candidate_line = token_line
+            colon_seen = false
             token = ""
+        }
+        if candidate && ch != 32 && ch != 9 {
+            if ch == 58 && !colon_seen {
+                colon_seen = true
+            } else {
+                candidate = false
+            }
         }
         previous = ch
         if ch == 10 -> line += 1
@@ -887,7 +902,8 @@ fn jet_cli_find_command_entry(root: String, command: String, use_override: Bool,
     stock
 }
 
-// `declares_workspace_module`: a top-level `module workspace` declaration.
+// `declares_workspace_module`: a top-level `workspace: module` declaration
+// (or the retired `module workspace`).
 fn jet_cli_declares_workspace_module(source: String) -> Bool Never! {
     lexed :: lex(source.bytes())
     tokens :: jet_cli_significant_tokens(lexed.tokens)
@@ -896,11 +912,19 @@ fn jet_cli_declares_workspace_module(source: String) -> Bool Never! {
         kind :: tokens[index].kind
         if kind == TOKEN_LBRACE -> depth += 1
         if kind == TOKEN_RBRACE -> depth -= 1
-        if kind == TOKEN_KW_MODULE && depth == 0 && index + 1 < tokens.len() && tokens[index + 1].kind == TOKEN_IDENT && token_decoded(lexed.tables, tokens[index + 1]) == "workspace" {
-            return true
-        }
+        if depth == 0 && jet_cli_workspace_module_head(tokens, lexed.tables, index) > 0 -> return true
     }
     false
+}
+
+// The token count of a `workspace: module` head (3) or the retired `module
+// workspace` head (2) starting at `index`, else 0.
+fn jet_cli_workspace_module_head(tokens: [Token], tables: TokenTables, index: Int) -> Int Never! {
+    if index + 1 >= tokens.len() -> return 0
+    if tokens[index].kind == TOKEN_KW_MODULE && tokens[index + 1].kind == TOKEN_IDENT && token_decoded(tables, tokens[index + 1]) == "workspace" -> return 2
+    if index > 0 && tokens[index - 1].kind == TOKEN_DOT -> return 0
+    if index + 2 < tokens.len() && tokens[index].kind == TOKEN_IDENT && tokens[index + 1].kind == TOKEN_COLON && tokens[index + 2].kind == TOKEN_KW_MODULE && token_decoded(tables, tokens[index]) == "workspace" -> return 3
+    0
 }
 
 // A top-level `#Target(Web)` marker: the program builds for the browser.
@@ -1011,7 +1035,7 @@ fn jet_cli_workspace_source(dir: String, color: Bool) -[FS]> JetCLIWorkspaceSour
 }
 
 // The `members:` references of a `workspace.jet` index: the field of its
-// one `module workspace { }` body.
+// one `workspace: module { }` body.
 fn jet_cli_workspace_module_members(source: String) -> [JetCLIMemberRef]? Never! {
     lexed :: lex(source.bytes())
     tokens :: jet_cli_significant_tokens(lexed.tokens)
@@ -1020,13 +1044,13 @@ fn jet_cli_workspace_module_members(source: String) -> [JetCLIMemberRef]? Never!
         kind :: tokens[index].kind
         if kind == TOKEN_LBRACE -> depth += 1
         if kind == TOKEN_RBRACE -> depth -= 1
-        if kind != TOKEN_KW_MODULE || depth != 0 || index + 2 >= tokens.len() || token_decoded(lexed.tables, tokens[index + 1]) != "workspace" || tokens[index + 2].kind != TOKEN_LBRACE {
-            next
-        }
-        close :: jet_cli_matching_close(tokens, index + 2)
+        if depth != 0 -> next
+        head :: jet_cli_workspace_module_head(tokens, lexed.tables, index)
+        if head == 0 || index + head >= tokens.len() || tokens[index + head].kind != TOKEN_LBRACE -> next
+        close :: jet_cli_matching_close(tokens, index + head)
         if close < 0 -> return None
         inner := 0
-        loop field in index + 3..<close {
+        loop field in index + head + 1..<close {
             field_kind :: tokens[field].kind
             if field_kind == TOKEN_LBRACE || field_kind == TOKEN_LBRACKET || field_kind == TOKEN_LPAREN {
                 inner += 1
@@ -1512,4 +1536,16 @@ fn jet_cli_missing_project_context(file: String, source: String) -[FS, Env]> Dia
         dir = jet_cli_walk_up(dir) ?? break
     }
     Val(diagnostic_from_registry("E2393", Val(at), "use project.<module> needs an owning project context.", "Project-local imports are resolved from the nearest package or workspace graph; an isolated file has no declared project root to resolve them from.", "Run jet check from the package or workspace, or replace the import with the canonical file-relative form when the dependency is local to this file."))
+}
+
+#Test("entry detectors read both declaration spellings") {
+    assert(jet_cli_declares_workspace_module("module workspace {{ members: [] }}\n"))
+    assert(jet_cli_declares_workspace_module("workspace: module {{ members: [] }}\n"))
+    assert(!jet_cli_declares_workspace_module("x.workspace: module {{ }}\n"))
+    assert(!jet_cli_declares_workspace_module("dev: module {{ }}\n"))
+    assert_eq((jet_cli_workspace_module_members("workspace: module {{ members: [] }}\n") ?? panic("members")).len(), 0)
+    assert_eq(jet_cli_top_level_function_lines("fn run() {{}}\nrun: fn() {{}}\nShape.run: fn(self) {{}}\nm: module {{ run: fn() {{}} }}\n", "run"), [Int]{1, 2})
+    assert(jet_cli_repl_declares_run("run: fn() {{}}\n"))
+    assert(jet_cli_repl_declares_run("fn run() {{}}\n"))
+    assert(!jet_cli_repl_declares_run("Shape.run: fn(self) {{}}\n"))
 }

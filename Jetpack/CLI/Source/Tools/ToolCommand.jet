@@ -491,8 +491,8 @@ fn cli_collect_jet_files(dir: String, out: &[String], depth: Int) Never! -[FS]> 
     }
 }
 
-// Every `#Job fn <name>` in `src`, allowing one marker such as `#Every(…)`
-// between `#Job` and `fn`.
+// Every `#Job <name>: fn` (or the retired `#Job fn <name>`) in `src`,
+// allowing one marker such as `#Every(…)` between `#Job` and the head.
 fn cli_task_names_in(src: String) -> [String] Never! {
     raw :: src.bytes()
     needle :: "#Job".bytes()
@@ -505,8 +505,13 @@ fn cli_task_names_in(src: String) -> [String] Never! {
             next
         }
         rest := pkg_bytes_skip_space(raw, at + needle.len())
+        found :: trust_text_find(raw, fn_word, rest)
+        if found >= 0 && cli_task_colon_name(raw, rest, found) == .Val(name) {
+            &names.push(name)
+            at += needle.len()
+            next
+        }
         if pkg_bytes_code(raw, rest) == TRUST_HASH {
-            found :: trust_text_find(raw, fn_word, rest)
             if found >= 0 -> rest = found
         }
         rest = pkg_bytes_skip_space(raw, rest)
@@ -519,6 +524,20 @@ fn cli_task_names_in(src: String) -> [String] Never! {
         at += needle.len()
     }
     names
+}
+
+// The `name` of a `name: fn` head whose `fn` starts at `fn_at`, scanning no
+// further back than `from`; None for any other spelling.
+fn cli_task_colon_name(raw: [U8], from: Int, fn_at: Int) -> String? Never! {
+    colon := fn_at - 1
+    loop colon >= from && (pkg_bytes_code(raw, colon) == 32 || pkg_bytes_code(raw, colon) == 9) -> colon -= 1
+    if colon < from || pkg_bytes_code(raw, colon) != 58 -> return None
+    end := colon
+    loop end > from && (pkg_bytes_code(raw, end - 1) == 32 || pkg_bytes_code(raw, end - 1) == 9) -> end -= 1
+    start := end
+    loop start > from && (trust_text_is_alphanumeric(pkg_bytes_code(raw, start - 1)) || pkg_bytes_code(raw, start - 1) == TRUST_UNDERSCORE) -> start -= 1
+    if start == end -> return None
+    Val(pkg_bytes_text(raw, start, end))
 }
 
 // The receipt's executables as bin/member pairs: `--as` renames (and keeps

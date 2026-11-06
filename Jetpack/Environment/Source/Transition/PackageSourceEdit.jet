@@ -190,7 +190,7 @@ fn env_transition_require_output_declaration(entries: [TransitionSourceEntry], n
     loop entry in entries {
         if entry.field != Val(name) -> next
         value :: env_transition_field_value(entry.raw, name) ?? next
-        if env_transition_config_value(value).starts_with("Output.") || value.trim_start().starts_with("Output ::") -> count += 1
+        if env_transition_config_value(value).starts_with("Output.") || value.trim_start().starts_with("Output ::") || value.trim_start().starts_with("Output: ") -> count += 1
     }
     if count != 1 -> return Err(env_transition_error("outputs.{name} must be declared exactly once in {path}"))
 }

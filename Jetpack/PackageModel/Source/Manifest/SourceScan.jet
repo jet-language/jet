@@ -222,14 +222,17 @@ fn pkg_imported_source_paths(root: String, source: ParsedSource, sources: [Parse
     pkg_manifest_sorted(imported)
 }
 
-// 1-based lines of every top-level `fn <wanted>`, skipping strings and
-// comments.
+// 1-based lines of every top-level `<wanted>: fn` (or the retired
+// `fn <wanted>`), skipping strings and comments.
 fn pkg_top_level_function_lines(source: String, wanted: String) -> [Int] Never! {
     raw :: "{source} ".bytes()
     depth := 0
     token_start := -1
     token_line := 1
     saw_fn := false
+    candidate := false
+    candidate_line := 1
+    colon_seen := false
     in_string := false
     escaped := false
     line_comment := false
@@ -303,8 +306,19 @@ fn pkg_top_level_function_lines(source: String, wanted: String) -> [Int] Never! 
         if token_start >= 0 {
             token :: pkg_bytes_text(raw, token_start, current)
             if depth == 0 && saw_fn && token == wanted -> &matches.push(token_line)
+            if depth == 0 && candidate && colon_seen && token == "fn" -> &matches.push(candidate_line)
             saw_fn = depth == 0 && token == "fn"
+            candidate = depth == 0 && token == wanted && previous != 46
+            candidate_line = token_line
+            colon_seen = false
             token_start = -1
+        }
+        if candidate && code != 32 && code != 9 {
+            if code == 58 && !colon_seen {
+                colon_seen = true
+            } else {
+                candidate = false
+            }
         }
         previous = if width == 1 -> code else -> 256
         if code == 10 -> line += 1

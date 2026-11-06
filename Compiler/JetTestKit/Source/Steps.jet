@@ -1195,7 +1195,8 @@ fn kit_steps_build_entry_executable(text: String) -> String? {
     loop index < lines.len() {
         line :: lines[index]
         index += 1
-        if line.split_once("fn build(") == .Val(opened) && opened.before == "" && opened.after.split_once(")") == .Val(params) && params.before.split_once(":") == .Val(typed) {
+        opened :: line.split_once("fn build(") ?? (line.split_once("build: fn(") ?? next)
+        if opened.before == "" && opened.after.split_once(")") == .Val(params) && params.before.split_once(":") == .Val(typed) {
             if !typed.before.contains(",") && typed.after.trim() == "Build" {
                 builder = typed.before.trim().copy()
                 break
@@ -1215,7 +1216,7 @@ fn kit_steps_build_entry_executable(text: String) -> String? {
             next
         }
         call :: line.split_once("{builder}.add_executable(") ?? next
-        handle :: if call.before.split_once("::") == .Val(bound) -> bound.before.trim().copy() else -> ""
+        handle :: if call.before.split_once(":") == .Val(bound) -> bound.before.trim().copy() else -> ""
         // The target name is the call's first string, on its line or a later one.
         rest := call.after.copy()
         cursor := index

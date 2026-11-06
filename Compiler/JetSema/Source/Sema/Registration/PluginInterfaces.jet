@@ -283,7 +283,7 @@ fn sema_plugin_interface_facts(snapshots: [SemaPluginSnapshot]) -> SemaPluginInt
         exports := [SemaPluginInterfaceExport]{}
         loop raw in snapshot.text.split("\n") {
             line :: raw.trim()
-            if !line.starts_with("fn ") -> next
+            if !line.starts_with("fn ") && !line.contains(": fn") -> next
             export :: sema_plugin_snapshot_export(line) ?? {
                 complete = false
                 next

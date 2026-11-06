@@ -7,7 +7,7 @@ use {
         derivation_record_json,
         type_name,
     ]
-    jet_lexer.[Token, TOKEN_IDENT, TOKEN_DOT, TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_EQ_EQ, TOKEN_NOT_EQ, TOKEN_LT, TOKEN_GT, TOKEN_LE, TOKEN_GE, TOKEN_KW_IF, TOKEN_KW_FN, TOKEN_SELF, TOKEN_PIPE, TOKEN_UNIFIED_ARROW]
+    jet_lexer.[Token, TOKEN_IDENT, TOKEN_DOT, TOKEN_COLON, TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_EQ_EQ, TOKEN_NOT_EQ, TOKEN_LT, TOKEN_GT, TOKEN_LE, TOKEN_GE, TOKEN_KW_IF, TOKEN_KW_FN, TOKEN_SELF, TOKEN_PIPE, TOKEN_UNIFIED_ARROW]
     jet_semindex.[SymbolDB, SemanticSymbol, SymRef, SymDef, SymKind, DefinitionAnchor, SourceSpan, SemanticVisibilityAnchor]
 }
 
@@ -240,6 +240,14 @@ fn lsp_bare_function_head_start(tokens: [Token], index: Int) -> Int? Never! {
             }
             name = cursor
         }
+    }
+    // `name: fn(` / `Owner.name: fn(`: the head before `fn` names the function.
+    if tokens[name].kind == TOKEN_KW_FN {
+        colon :: lsp_previous_code_token(tokens, name) ?? return None
+        if tokens[colon].kind != TOKEN_COLON -> return None
+        named :: lsp_previous_code_token(tokens, colon) ?? return None
+        if tokens[named].kind == TOKEN_IDENT -> return Val(open)
+        return None
     }
     if tokens[name].kind != TOKEN_IDENT -> return None
     declaration := lsp_previous_code_token(tokens, name) ?? return None

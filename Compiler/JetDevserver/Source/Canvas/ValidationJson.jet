@@ -39,7 +39,7 @@ fn validate_type_fragment(fragment: String) Err! {
 }
 fn validate_function_signature(signature: String) Err! {
     if signature.contains('{') || signature.contains('}') || signature.contains('\n') -> return .Err(edit_error("bad_request", "function signature must not include a body"))
-    if !signature.split_whitespace().any((part) -> part == "fn") -> return .Err(edit_error("bad_request", "function signature must include fn"))
+    if !signature.split_whitespace().any((part) -> part == "fn" || part.starts_with("fn(") || part.starts_with("fn<")) -> return .Err(edit_error("bad_request", "function signature must include fn"))
     .Ok(_)
 }
 fn validate_single_line_fragment(fragment: String, label: String) Err! {

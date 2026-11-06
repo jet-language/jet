@@ -26,7 +26,7 @@ use {
         diagnostic_render_all, diagnostic_theme_accent, diagnostic_theme_bold, diagnostic_theme_dim, diagnostic_theme_paint,
         type_name, type_unqualified_nominals,
     ]
-    jet_lexer.[TOKEN_DOT, TOKEN_IDENT, TOKEN_KW_FN, lex]
+    jet_lexer.[TOKEN_COLON, TOKEN_DOT, TOKEN_IDENT, TOKEN_KW_FN, lex]
     jet_parser.[parse_source]
     jet_repl.[ReplInput, ReplInputParse, repl_classify, repl_reanchor]
 }
@@ -270,13 +270,17 @@ fn jet_cli_repl_help(color: Bool) -> String Never! {
 
 // --- the session program ----------------------------------------------------
 
-// Whether the session's items declare a function named `run`.
+// Whether the session's items declare a function named `run` (`run: fn`, or
+// the retired `fn run`).
 fn jet_cli_repl_declares_run(items: String) -> Bool {
     lexed :: lex(items.bytes())
-    if lexed.tokens.len() < 2 -> return false
-    loop index in 1..<lexed.tokens.len() {
-        token :: lexed.tokens[index]
-        if lexed.tokens[index - 1].kind == TOKEN_KW_FN && token.kind == TOKEN_IDENT && jet_cli_repl_bytes(items, token.span.start, token.span.end) == "run" -> return true
+    tokens :: lexed.tokens
+    if tokens.len() < 2 -> return false
+    loop index in 0..<tokens.len() {
+        token :: tokens[index]
+        if token.kind != TOKEN_IDENT || jet_cli_repl_bytes(items, token.span.start, token.span.end) != "run" -> next
+        if index > 0 && tokens[index - 1].kind == TOKEN_KW_FN -> return true
+        if index + 2 < tokens.len() && tokens[index + 1].kind == TOKEN_COLON && tokens[index + 2].kind == TOKEN_KW_FN && (index == 0 || tokens[index - 1].kind != TOKEN_DOT) -> return true
     }
     false
 }
