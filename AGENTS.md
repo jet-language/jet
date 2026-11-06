@@ -292,10 +292,14 @@ workers. Every code worker returns the exact `CHECK OK` receipt from
 `Tools/agent/LaneCheck.jet`; prose-only or static-data-only work returns
 `DOCS ONLY`. Workers address the card's criteria directly: write the code to
 the spec, run only the touched files' source checks, commit, report, and move
-on. Workers never run suites, A/B comparisons, chains, or releases; the
-orchestrator verifies reported commits in batches and returns every failure
-to its owner at once. The orchestration skill defines briefs, liveness,
-integration, proof cadence, recovery, and closure.
+on. When a spec or criterion exists, the code comes first: no worker stops to
+prove rows, waits for review, or holds a commit for the orchestrator before
+landing it and taking the next criterion. Workers never run suites, A/B
+comparisons, chains, or releases; the orchestrator tests landed commits in
+batches, never gates a landing on a proof, and returns every failure to its
+owner at once. The owner fixes those failures and moves on again. The
+orchestration skill defines briefs, liveness, integration, proof cadence,
+recovery, and closure.
 
 This repository carries no harness-specific configuration. Agent tools use
 their own global settings; Jet contributes only this contract and the skills

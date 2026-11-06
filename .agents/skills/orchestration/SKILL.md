@@ -37,14 +37,23 @@ matches the work:
 
 ## Standing work order: implement, then batch-verify
 
-This is the owner's durable order and the default for every wave:
+This is the owner's durable order and the default for every wave. It is not
+suspended near a deadline, after a crash, or for a release:
 
-- **Workers implement.** A worker takes the card's unmet criteria directly,
-  writes the code to the spec, runs only the cheap source checks for the files
-  it touched (`jet check`, `jet fmt --check`, and a generator's `--check` when
-  it changed that generator's source), commits on `dev`, reports the commit and
-  the criteria it addresses, and moves on to the next criterion. Workers never
-  run suites, A/B comparisons, chains, release builds, or censuses.
+- **Code first.** Where a spec or criterion exists, the worker writes the code
+  before anything else. It takes the card's unmet criteria directly, writes
+  the code to the spec, runs only the cheap source checks for the files it
+  touched (`jet check`, `jet fmt --check`, and a generator's `--check` when it
+  changed that generator's source), commits on `dev`, reports the commit and
+  the criteria it addresses, and moves on to the next criterion at once. It
+  never stops to prove rows, profile, or wait for the orchestrator. Workers
+  never run suites, A/B comparisons, chains, release builds, or censuses.
+- **Failures come back; the worker fixes them and moves on.** A batch failure
+  goes to its owner as one fix list; the owner lands the fixes and returns to
+  its next criterion without waiting for a re-run.
+- **The orchestrator never gates a landing on proof.** It does not hunt
+  evidence criterion by criterion mid-wave or hold workers for it; it keeps
+  every worker writing code and does its proof only in the batches below.
 - **The orchestrator verifies, in batches.** It collects the reported commits,
   builds once, and runs one collect-all verification covering every reported
   criterion's proof and the affected suites. It groups every failure by root
