@@ -10,6 +10,7 @@ use {
         JET_DRIVER_EXIT_USAGE,
         JET_DRIVER_EXIT_OK,
         JET_DRIVER_EXIT_USER_ERROR,
+        jet_driver_file_import_path,
         jet_driver_foreign_library_from_header,
         jet_driver_foreign_valid_library,
     ]
@@ -95,44 +96,85 @@ jet_cli_c_bind_admit_overlays: fn(items: [Item], overlays: &[String: HandleOverl
     }
 }
 
-// The header-path imports of `imports` and of every module nested in `items`.
-jet_cli_c_bind_collect_headers: fn(imports: [ImportDecl], items: [Item], headers: &[JetCLICHeaderImport]) Never! {
+// The header-path imports of `imports` and of every module nested in `items`,
+// and in `modules` the root-relative paths of the `.jet` files they import
+// from `relative_path`: a file import, or a body-less `name: module`'s
+// `name.jet` and `name/module.jet` (Loader.jet's rules).
+jet_cli_c_bind_collect_imports: fn(relative_path: String, imports: [ImportDecl], items: [Item], headers: &[JetCLICHeaderImport], modules: &[String]) Never! {
     loop declaration in imports {
         if declaration.kind == .File(path, _) {
-            lib: jet_driver_foreign_library_from_header(path) ?? next
-            known: loop existing in headers {
-                if existing.lib == lib -> break true
-            } ?? false
-            if !known -> headers.push(JetCLICHeaderImport{lib: lib, header: path})
+            if jet_driver_foreign_library_from_header(path) == .Val(lib) {
+                known: loop existing in headers {
+                    if existing.lib == lib -> break true
+                } ?? false
+                if !known -> headers.push(JetCLICHeaderImport{lib: lib, header: path})
+            } else {
+                jet_cli_c_bind_reach(jet_driver_file_import_path(relative_path, path).path, modules)
+            }
         }
     }
     loop item in items {
         if item == {
-            .CodeModule(definition) -> jet_cli_c_bind_collect_headers(definition.imports, definition.body ?? [Item]{}, headers)
-            .GenericModule(definition) -> jet_cli_c_bind_collect_headers(definition.imports, definition.body, headers)
+            .CodeModule(definition) -> {
+                if definition.body == .Val(body) {
+                    jet_cli_c_bind_collect_imports(relative_path, definition.imports, body, headers, modules)
+                } else {
+                    jet_cli_c_bind_reach(jet_driver_file_import_path(relative_path, definition.name).path, modules)
+                    jet_cli_c_bind_reach(jet_driver_file_import_path(relative_path, "{definition.name}/module").path, modules)
+                }
+            }
+            .GenericModule(definition) -> jet_cli_c_bind_collect_imports(relative_path, definition.imports, definition.body, headers, modules)
             else -> {}
         }
     }
 }
 
-// The binding inputs of `files`. Only a file that names a `.h"` path or an
-// `#Import` overlay is parsed, and one that does not parse adds nothing;
-// the compile reports it.
-jet_cli_c_bind_inputs: fn(files: [JetDriverAuthorizedSourceFile]) -> JetCLICBindInputs Never! {
+// Adds the root-relative `path` to `modules` once; an invalid import path
+// (empty) adds nothing.
+jet_cli_c_bind_reach: fn(path: String, modules: &[String]) Never! {
+    if path != "" && !modules.contains(path) -> modules.push(path)
+}
+
+// The binding inputs of the program `entry_path` heads. A package compiles
+// every source of its root, so each one counts; a loose entry compiles only
+// itself and the files it imports, transitively, so a loose file elsewhere
+// under its directory never binds (or refuses) a header of its own. A package
+// source is parsed only when it names a `.h"` path or an `#Import` overlay;
+// a source that does not parse adds nothing, and the compile reports it.
+jet_cli_c_bind_inputs: fn(files: [JetDriverAuthorizedSourceFile], entry_path: String, package: Bool) -> JetCLICBindInputs Never! {
     inputs := JetCLICBindInputs{headers: [JetCLICHeaderImport]{}, overlays: [String: HandleOverlay]{}}
+    modules := [String]{}
+    if package {
+        loop file in files {
+            if !file.source.contains(".h\"") && !file.source.contains("#Import") -> next
+            jet_cli_c_bind_read_file(file, inputs, modules)
+        }
+        return inputs
+    }
     loop file in files {
-        header_side: file.source.contains(".h\"")
-        overlay_side: file.source.contains("#Import")
-        if !header_side && !overlay_side -> next
-        parsed: parse_source(file.source.bytes())
-        failed: loop diagnostic in parsed.diagnostics {
-            if diagnostic.severity == DIAGNOSTIC_ERROR -> break true
-        } ?? false
-        if failed -> next
-        if header_side -> jet_cli_c_bind_collect_headers(parsed.program.imports, parsed.program.items, inputs.headers)
-        if overlay_side -> jet_cli_c_bind_admit_overlays(parsed.program.items, inputs.overlays)
+        if file.path == entry_path -> modules.push(file.relative_path.copy())
+    }
+    index := 0
+    loop index < modules.len() {
+        relative: modules[index].copy()
+        index += 1
+        loop file in files {
+            if file.relative_path == relative -> jet_cli_c_bind_read_file(file, inputs, modules)
+        }
     }
     inputs
+}
+
+// Adds the header imports and overlays of `file` to `inputs`, and the files
+// it imports to `modules`.
+jet_cli_c_bind_read_file: fn(file: JetDriverAuthorizedSourceFile, inputs: &JetCLICBindInputs, modules: &[String]) Never! {
+    parsed: parse_source(file.source.bytes())
+    failed: loop diagnostic in parsed.diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR -> break true
+    } ?? false
+    if failed -> return
+    jet_cli_c_bind_collect_imports(file.relative_path, parsed.program.imports, parsed.program.items, inputs.headers, modules)
+    if file.source.contains("#Import") -> jet_cli_c_bind_admit_overlays(parsed.program.items, inputs.overlays)
 }
 
 // A header path as written: absolute, or relative to the project root.
@@ -141,13 +183,14 @@ jet_cli_c_bind_header_path: fn(root: String, header: String) -> String Never! {
     jet_cli_authority_path(root, header)
 }
 
-// The compiler's cache refresh over the entry root's sources: each header
-// import whose `.jet/bindings/c/<lib>.jet` is missing, or whose `.hash` does
-// not match the header bytes, is bound again before the caches are read. An
-// unreadable header or a failed bind is E3208 and leaves the old files as
-// they were; an up-to-date cache is never rewritten.
-jet_cli_c_bind_refresh: fn(root: String, files: [JetDriverAuthorizedSourceFile], color: Bool) -[FS, Env, Time]> JetDriverVerbOutput? Never! {
-    inputs: jet_cli_c_bind_inputs(files)
+// The compiler's cache refresh over the sources of the program `entry_path`
+// heads (jet_cli_c_bind_inputs): each header import whose
+// `.jet/bindings/c/<lib>.jet` is missing, or whose `.hash` does not match the
+// header bytes, is bound again before the caches are read. An unreadable
+// header or a failed bind is E3208 and leaves the old files as they were; an
+// up-to-date cache is never rewritten.
+jet_cli_c_bind_refresh: fn(root: String, entry_path: String, files: [JetDriverAuthorizedSourceFile], color: Bool) -[FS, Env, Time]> JetDriverVerbOutput? Never! {
+    inputs: jet_cli_c_bind_inputs(files, entry_path, cli_files.is_file(jet_cli_authority_path(root, "package.jet")))
     loop request in inputs.headers {
         header_text: cli_files.read(jet_cli_c_bind_header_path(root, request.header)) ?? {
             return Val(jet_cli_report_output("", "E3208", jet_cli_c_bind_what(request.header), jet_cli_c_bind_unreadable("{err}"), jet_cli_c_bind_fix(request.lib), color, JET_DRIVER_EXIT_USER_ERROR))
