@@ -1,0 +1,25 @@
+# #3590 c70: a `fn build` action runs in the production executor with exactly
+# its declared inputs, outputs, argv, environment and effects. The child sees
+# only declared variables cut to the allowlist, and nothing ambient. A phony
+# target has no outputs, runs uncached as a dependency of the target, and its
+# failure fails the build. A phony action that declares an output is refused
+# before anything runs.
+fixture: fixtures/declared_action_env_and_phony_target_run_through_the_executor
+artifact: app
+requires: tool:sh
+requires: tool:bwrap
+env: NO_COLOR=1
+step: jet build main.jet --allow=Exec,FS
+exit: 0
+# GREETING is declared and allowlisted; SECRET is declared but cut by the
+# allowlist; HOME is the sandbox's fixed value (`--clearenv`), never the caller's.
+file: greet.txt = "hello world [] [/homeless-shelter]"
+write: gate.txt = "shut\n"
+step: jet build main.jet --allow=Exec,FS
+exit: nonzero
+stderr: ~ "Build action `announce` exited with status 1" # the phony target ran and its failure is the build's
+step: jet build main.jet --allow=Exec,FS
+cwd: phony_outputs
+exit: nonzero
+stderr: ~ "PhonyActionWithOutputs" # refused at declaration
+file: phony_outputs/announce.txt absent
