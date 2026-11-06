@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6610,
-    "rev": 93588,
+    "nextNum": 6611,
+    "rev": 93599,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -22065,11 +22065,16 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
-      "plan": "## Goal\nImplement D-CONC-ALLNAMED1=A at runtime. `task.all {first: f(), second: g()}` returns an anonymous record whose fields hold each branch's result. Positional `task.all {…}` keeps its ordering and failure behavior on every tier.\n\n## Current state\n- Criteria 1-4 and 6 are met. That covers Syntax.rs, syntax-decisions, grammars, snapshots, and the mixed-form diagnostic at `Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet:14988-14992`.\n- The checker is done: `Compiler/JetSema/Source/Sema/Calls/TaskGroups.jet:600-613` types a named tuple of Tasks as `Type.Tuple` of their success types.\n- Codegen routes it: `Compiler/JetCodegen/Source/Codegen/Expressions.jet:4590-4619`. `jet_codegen_task_group_result_tasks` accepts `.Tuple`, and `jet_codegen_lower_task_group_value` emits `jet_std::jet_task_all_result` with one operand. `Compiler/JetEval/Source/Evaluator.jet:7952-8013` validates the same route but only assembles positional lists.\n- Runtime is wrong. `Examples/features/concurrency/task_all.jet:11-12` printed 0/0/0 on 2026-09-15; the golden `Examples/features/expected/concurrency/task_all.out` is `10`/`20`/`30`.\n- The Rust fix commit 39b9ffd41 (\"Support named task.all results across tiers\") is not an ancestor of HEAD. It touches `crates/jet-codegen/src/Codegen/MIREval.rs`, `MIRRust.rs`, `MIRWeb.rs` and `Prelude/Scheduler.rs` (+152/-24).\n\n## Changes\n1. **Jet compiler first.** In `Compiler/JetCodegen/Source/Codegen/Expressions.jet` (`jet_codegen_lower_task_group_value`), when `tasks.ty` is a named tuple, carry the field names and order to the join. The joined value is then built as the record type (`expression.ty`), not a list.\n2. **Both Jet emitters.** In `Compiler/JetCodegen/Source/Emit/*.jet` (Rust text) and `Emit/Web`, assemble the record from the scheduler's joined ids.\n3. **Jet evaluator.** In `Compiler/JetEval/Source/Evaluator.jet` (`jet_eval_task_group_exchange`), build the named record for a tuple operand.\n4. **Retained host and shipped-binary mirror.** Cherry-pick 39b9ffd41. Its `Prelude/Scheduler.rs` join is the retained host piece, and the MIREval/MIRRust/MIRWeb edits are the mirror the shipped binary needs to prove the fix. Resolve any conflicts against current HEAD.\n5. Leave positional behavior untouched.\n\n## Proof\n- `jet test Compiler --profile golden concurrency/task_all`: pass.\n- `JET_THREE_WAY_STEM=concurrency/task_all cargo test --test dev_corpus cranelift_three_way_differential_battery`: AOT, default and interpreter match the golden.\n- `jet test Compiler --profile golden concurrency/task_group`: positional goldens unchanged.\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh`: exit 0.\n- Web: `Tools/agent/jet-env jet build --target=web Examples/features/concurrency/task_all.jet`, run the emitted module under the existing web harness (node), and confirm stdout matches the golden.\n\n## Batch\n`batch-jetc-back`: the change lives in lowering, the emitters and the evaluator.\n\n## Dependencies\nNone.\n",
+      "plan": "## Goal\nImplement D-CONC-ALLNAMED1=A at runtime. `task.all {first: f(), second: g()}` returns an anonymous record whose fields hold each branch's result. Positional `task.all {…}` keeps its ordering and failure behavior on every tier.\n\n## Current state\n- Criteria 1-4 and 6 are met. That covers Syntax.rs, syntax-decisions, grammars, snapshots, and the mixed-form diagnostic at `Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet:14988-14992`.\n- The checker is done: `Compiler/JetSema/Source/Sema/Calls/TaskGroups.jet:600-613` types a named tuple of Tasks as `Type.Tuple` of their success types.\n- Codegen routes it: `Compiler/JetCodegen/Source/Codegen/Expressions.jet:4590-4619`. `jet_codegen_task_group_result_tasks` accepts `.Tuple`, and `jet_codegen_lower_task_group_value` emits `jet_std::jet_task_all_result` with one operand. `Compiler/JetEval/Source/Evaluator.jet:7952-8013` validates the same route but only assembles positional lists.\n- Runtime is wrong. `Examples/features/concurrency/task_all.jet:11-12` printed 0/0/0 on 2026-09-15; the golden `Examples/features/expected/concurrency/task_all.out` is `10`/`20`/`30`.\n- The Rust fix commit 39b9ffd41 (\"Support named task.all results across tiers\") is not an ancestor of HEAD. It touches `crates/jet-codegen/src/Codegen/MIREval.rs`, `MIRRust.rs`, `MIRWeb.rs` and `Prelude/Scheduler.rs` (+152/-24).\n\n## Changes\n1. **Jet compiler first.** In `Compiler/JetCodegen/Source/Codegen/Expressions.jet` (`jet_codegen_lower_task_group_value`), when `tasks.ty` is a named tuple, carry the field names and order to the join. The joined value is then built as the record type (`expression.ty`), not a list.\n2. **Both Jet emitters.** In `Compiler/JetCodegen/Source/Emit/*.jet` (Rust text) and `Emit/Web`, assemble the record from the scheduler's joined ids.\n3. **Jet evaluator.** In `Compiler/JetEval/Source/Evaluator.jet` (`jet_eval_task_group_exchange`), build the named record for a tuple operand.\n4. **Retained host and shipped-binary mirror.** Cherry-pick 39b9ffd41. Its `Prelude/Scheduler.rs` join is the retained host piece, and the MIREval/MIRRust/MIRWeb edits are the mirror the shipped binary needs to prove the fix. Resolve any conflicts against current HEAD.\n5. Leave positional behavior untouched.\n\n## Proof\n- `jet test Compiler --profile golden concurrency/task_all`: pass.\n- `jet test Compiler --profile golden concurrency/task_all`: O0, O1 and O2 match the golden.\n- `jet test Compiler --profile golden concurrency/task_group`: positional goldens unchanged.\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh`: exit 0.\n- Web: `Tools/agent/jet-env jet build --target=web Examples/features/concurrency/task_all.jet`, run the emitted module under the existing web harness (node), and confirm stdout matches the golden.\n\n## Batch\n`batch-jetc-back`: the change lives in lowering, the emitters and the evaluator.\n\n## Dependencies\nNone.\n",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Main: the Cranelift three-way battery (AOT, default, interpreter) is replaced by the golden rows on O0, O1 and O2. CardCleanup Q(c)."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -22239,7 +22244,7 @@
       "parentId": "c0svnelx",
       "needsAcceptance": false,
       "created": "2026-08-28T16:03:40.015Z",
-      "updated": "2026-11-06T18:37:36.053Z",
+      "updated": "2026-11-06T19:14:01.910Z",
       "updatedBy": "Main",
       "probe": null,
       "visualMedia": [],
@@ -25738,13 +25743,18 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
-      "plan": "## Goal\nDeliver D-DEEP-CHECK1=A (ratified): one opt-in compiler control for expensive in-memory checks, with optional package/function targeting, and no weakening of required contracts or safety. It extends the existing `#DebugOnly` path; it is not a second assertion mechanism.\n\nRatified A example (package \"tree\"):\n```jet\nfn run() {\n    tree := sample_tree()\n    tree.cached_size = 4\n    #DebugOnly(.deep) {\n        assert(deep_consistent(tree), \"tree size is wrong\")\n    }\n    serve(tree)\n}\n```\n`jet run app.jet` prints 4 and runs no deep check. `--deep-checks` fails before `serve`. `--deep-checks=tree` targets this package; `--deep-checks=tree::run` targets `fn run` in every version.\n\n## Current state\n- #3043 (erased-code isolation) is done, so it is a stale blocker.\n- Parser: `Compiler/JetParser/Source/Parser/Statements.jet:611` maps `Off | DebugOnly` to `Stmt.Switched(marker, body, span)`. No `.deep` argument is recognised.\n- Sema: `Compiler/JetSema/Source/Sema/Statements.jet:3304-3316` checks the erased scope against snapshots (scopes/state/context) and emits `TStmt.DebugOnly`.\n- Codegen: `Compiler/JetCodegen/Source/Codegen/Statements.jet:95-96` `jet_codegen_lower_debug_only` → `MirScopeKind.DebugOnly`, dispatched at :1908.\n- Driver: `Compiler/JetDriver/Source/Driver/Identity.jet:39` `JetDriverCompileRequest` has no check-selection field. No `--deep-checks` exists in Source/ or Compiler/ (grep).\n\n## Changes\n1. JetParser: accept `#DebugOnly(.deep)` as the only new marker argument (registered spelling). Any other argument is a registered error.\n2. JetSema: a `.deep` body keeps the current erased-scope isolation even when off: captures are read-only, only fresh non-escaping local mutation is allowed, external/authority effects are rejected transitively, `Mem.*`/Panic follow normal reachable-effect denial, and nonlocal exits are rejected. Each site records its owner (package, module, fn).\n3. JetDriver: add a typed `deep_checks` selection (off | all | scopes) to `JetDriverCompileRequest`. It resolves scopes to authored sites before checking and lowering (global, package/module/function, repeated union, same-named instance, and unmatched scope as a registered diagnostic). It keys unit, artifact and resident-module identity by the resolved sites, so equivalent selections reuse artifacts, changed selections rebuild only affected units, and missing selection metadata fails closed.\n4. JetCodegen: lower a selected `.deep` site as a live scope and an unselected one as today's erased scope.\n5. Host (Source/ CLI, REPL/notebook, debugger engines, compiler wrappers): parse `--deep-checks[=scope,...]` once into the same typed request. Sessions keep their starting selection. The flag is off in every profile. Keep `--no-prepare`/locked admission unchanged. Register the flag and diagnostics (`crates/jet-codegen/src/Prelude/Diagnostics.jet` → `node Compiler/Bootstrap/generate-diagnostic-rows.mjs`) with snapshots.\n6. Option B's settings path is not built. No SQLite bridge, Invariant revival, or public prebuilt format.\n\n## Proof\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.\n- `jet test Compiler --profile golden contracts/deep_checks_tree` passes (default off, valid and corrupt data). `Tools/agent/jet-env jet run --deep-checks Examples/features/contracts/deep_checks_tree.jet` fails with the assert on the corrupt tree.\n- `Tools/agent/jet-env cargo test --test cli_commands -- deep_checks_selection` passes: global, package, `pkg::fn`, repeated union, unmatched scope, cache reuse on an equal selection, and a rebuild on a changed one.\n- `jet test Compiler --profile ui deep_check_` passes (captured-state write, IO effect, `return` inside the scope, unknown scope).\n\n## Batch\nbatch-jetc-driver: the selection resolution and identity keying in JetDriver are the load-bearing boundary. Parser, sema and codegen edits land in the same build.\n\n## Dependencies\nNone open (#3043 done). No performance claim is made; any perf adoption waits for the strict paired gate.\n",
+      "plan": "## Goal\nDeliver D-DEEP-CHECK1=A (ratified): one opt-in compiler control for expensive in-memory checks, with optional package/function targeting, and no weakening of required contracts or safety. It extends the existing `#DebugOnly` path; it is not a second assertion mechanism.\n\nRatified A example (package \"tree\"):\n```jet\nfn run() {\n    tree := sample_tree()\n    tree.cached_size = 4\n    #DebugOnly(.deep) {\n        assert(deep_consistent(tree), \"tree size is wrong\")\n    }\n    serve(tree)\n}\n```\n`jet run app.jet` prints 4 and runs no deep check. `--deep-checks` fails before `serve`. `--deep-checks=tree` targets this package; `--deep-checks=tree.run` targets `fn run` in every version.\n\n## Current state\n- #3043 (erased-code isolation) is done, so it is a stale blocker.\n- Parser: `Compiler/JetParser/Source/Parser/Statements.jet:611` maps `Off | DebugOnly` to `Stmt.Switched(marker, body, span)`. No `.deep` argument is recognised.\n- Sema: `Compiler/JetSema/Source/Sema/Statements.jet:3304-3316` checks the erased scope against snapshots (scopes/state/context) and emits `TStmt.DebugOnly`.\n- Codegen: `Compiler/JetCodegen/Source/Codegen/Statements.jet:95-96` `jet_codegen_lower_debug_only` → `MirScopeKind.DebugOnly`, dispatched at :1908.\n- Driver: `Compiler/JetDriver/Source/Driver/Identity.jet:39` `JetDriverCompileRequest` has no check-selection field. No `--deep-checks` exists in Source/ or Compiler/ (grep).\n\n## Changes\n1. JetParser: accept `#DebugOnly(.deep)` as the only new marker argument (registered spelling). Any other argument is a registered error.\n2. JetSema: a `.deep` body keeps the current erased-scope isolation even when off: captures are read-only, only fresh non-escaping local mutation is allowed, external/authority effects are rejected transitively, `Mem.*`/Panic follow normal reachable-effect denial, and nonlocal exits are rejected. Each site records its owner (package, module, fn).\n3. JetDriver: add a typed `deep_checks` selection (off | all | scopes) to `JetDriverCompileRequest`. It resolves scopes to authored sites before checking and lowering (global, package/module/function, repeated union, same-named instance, and unmatched scope as a registered diagnostic). It keys unit, artifact and resident-module identity by the resolved sites, so equivalent selections reuse artifacts, changed selections rebuild only affected units, and missing selection metadata fails closed.\n4. JetCodegen: lower a selected `.deep` site as a live scope and an unselected one as today's erased scope.\n5. Host (Source/ CLI, REPL/notebook, debugger engines, compiler wrappers): parse `--deep-checks[=scope,...]` once into the same typed request. Sessions keep their starting selection. The flag is off in every profile. Keep `--no-prepare`/locked admission unchanged. Register the flag and diagnostics (`crates/jet-codegen/src/Prelude/Diagnostics.jet` → `node Compiler/Bootstrap/generate-diagnostic-rows.mjs`) with snapshots.\n6. Option B's settings path is not built. No SQLite bridge, Invariant revival, or public prebuilt format.\n\n## Proof\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.\n- `jet test Compiler --profile golden contracts/deep_checks_tree` passes (default off, valid and corrupt data). `Tools/agent/jet-env jet run --deep-checks Examples/features/contracts/deep_checks_tree.jet` fails with the assert on the corrupt tree.\n- A Jet test or case row proves deep-check selection: global, package, `pkg.fn`, repeated union, unmatched scope, cache reuse on an equal selection, and a rebuild on a changed one.\n- `jet test Compiler --profile ui deep_check_` passes (captured-state write, IO effect, `return` inside the scope, unknown scope).\n\n## Batch\nbatch-jetc-driver: the selection resolution and identity keying in JetDriver are the load-bearing boundary. Parser, sema and codegen edits land in the same build.\n\n## Dependencies\nNone open (#3043 done). No performance claim is made; any perf adoption waits for the strict paired gate.\n",
       "checkSteps": "After owner selection, implement and prove only that option. For A, prove default-off, global/package/function selection, repeated-union behavior, blocking empty/unmatched occurrences and copyable dotted method scopes, declaration ownership and same-name instances. Prove valid/corrupt outcomes, disabled type checks, no escaped facts, nonlocal-exit rejection and Panic denial. Check resolved-selection cache reuse, changed-unit rebuilds, independent resident-session selections and missing-source refusals. Exercise all applicable engines and CLI and embedded compiler-option entry points. Preserve required contracts and the strict performance policy.\n\nThis ballot is a design, not runtime evidence. Cover missing, unreadable and unsupported selection identity with and without admitted source, including the default-off request.",
       "probe": null,
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Main: the --deep-checks scope selector names Jet paths, so it follows D-DECL-COLON1 (`.` separates package and function); the cargo proof line is replaced by a Jet row. CardCleanup Q(a)."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -25873,7 +25883,7 @@
         },
         {
           "n": 10,
-          "text": "Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): a Jet test or case row proves what the retired Rust test checked: \"`Examples/features/contracts/deep_checks_tree.jet` prints its default-off output under `jet run`, fails before `serve` under `jet run --deep-checks`, and honours `--deep-checks=tree` / `--deep-checks=tree::run` / an unmatched scope (registered diagnostic): `JET_GOLDEN_FILTER=contracts/deep_checks_tree Tools/agent/jet-env cargo test --test golden examples_compile_and_run` plus `Tools/agent/jet-env cargo test --test cli_commands -- deep_checks_selection` pass\". Goldens pass on O0, O1 and O2; UI fixtures match their snapshots.",
+          "text": "Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): a Jet test or case row proves what the retired Rust test checked: \"`Examples/features/contracts/deep_checks_tree.jet` prints its default-off output under `jet run`, fails before `serve` under `jet run --deep-checks`, and honours `--deep-checks=tree` / `--deep-checks=tree.run` / an unmatched scope (registered diagnostic): `JET_GOLDEN_FILTER=contracts/deep_checks_tree Tools/agent/jet-env cargo test --test golden examples_compile_and_run` plus `Tools/agent/jet-env cargo test --test cli_commands -- deep_checks_selection` pass\". Goldens pass on O0, O1 and O2; UI fixtures match their snapshots.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -25906,7 +25916,7 @@
       "parentId": "c018gdah",
       "needsAcceptance": false,
       "created": "2026-09-10T22:59:00.365Z",
-      "updated": "2026-11-06T18:38:06.739Z",
+      "updated": "2026-11-06T19:13:48.708Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -33123,13 +33133,18 @@
       "milestoneId": "e3-m21-iterator-stdlib",
       "phase": "ready",
       "priority": "P1",
-      "plan": "## Goal\nImplement D-ITER-COLLECT1=A. `FromIterator` becomes the one user-extensible destination-construction protocol: one `Item` type, and `from(source)` consumes the source through the canonical Iterable conversion. The existing `Set.from` adopts it. List, Map, text, tuple and custom destinations own their ordering, duplicate and failure-cleanup policies. `collect()` and `to_list()` stay List terminals, and an expected type never changes eager or yielding behaviour. Extending existing state stays with D-ITER-EXTEND1 (#3330).\n\n## Current state\n- `collect` and `to_list` always return `List` (`Compiler/JetFoundation/Source/Collections.jet:266-268,647,893-894`).\n- `to_set` is List-only (`:265,654,905`).\n- `Set.from([…])` exists but takes a List (`Examples/features/collections/set.jet:12`).\n- The only generic static is `Map.fromkeys`/`from_keys` (`Compiler/JetFoundation/Source/Registry/BuiltinStatics.jet:160-161`).\n- There is no FromIterator trait. Compiler-owned traits are listed in `Compiler/JetCodegen/Source/Codegen/Types.jet:77`.\n- The finding is at Docs/research/mine-for-jet-2026-09-12.md#finding-iter-f017. Operation facts come from #3325 (per #3398).\n\n## Changes\n1. Jet compiler:\n   - Declare a compiler-owned `FromIterator` trait (`type Item`, `fn from(^source: Iter<Item>) -> Self`) beside Iterable/Iterator: add it to `Types.jet:77` and the associated-name table in `Functions.jet:2175`.\n   - `Compiler/JetFoundation/Source/Registry/BuiltinStatics.jet`: add `List.from`, `Set.from`, `Map.from` (items `(key, value)`) and `String.from` (items String or Char) as FromIterator statics that accept any Iterable.\n   - `Compiler/JetSema/Source/Sema/Calls/Static.jet`: `T.from(src)` on a user type resolves through its `impl T.FromIterator`.\n   - A fallible source (an `Iter` whose items carry `E!`) makes `from` return `T E!`: construction stops at the first error and drops the partial destination.\n   - Add routes in `Compiler/JetCodegen/Source/Codegen/BuiltinMethods.jet`, plus JetEval.\n2. Host: `jet_set_from_iter`, `jet_map_from_iter` and `jet_string_from_iter` over `JetIter` in `Prelude/Core/Collections.rs`/`Core.rs` and the JIT, plus the Rust mirror.\n3. Migrate `Set.from([..])` callers to the protocol form (the spelling is unchanged). Update `Docs/spec/reference/core-library.md` to document the protocol and the explicit destination rule.\n4. Add the example and the UI fixture named in the criteria. The example includes tuple destinations through `unzip`, which is unchanged.\n\n## Proof\n- `JET_GOLDEN_FILTER=collections/from_iter Tools/agent/jet-env cargo test --test golden examples_compile_and_run` passes.\n- `JET_GOLDEN_FILTER=collections/set Tools/agent/jet-env cargo test --test golden examples_compile_and_run` still passes.\n- `jet run` and `jet run --interpret` of `from_iter` produce empty diffs.\n- The UI snapshot passes.\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.\n\n## Batch\n`batch-jetc-sema`: trait resolution and static-call typing.\n\n## Dependencies\nNone. #3354 builds on this card.",
+      "plan": "## Goal\nImplement D-ITER-COLLECT1=A. `FromIterator` becomes the one user-extensible destination-construction protocol: one `Item` type, and `from(source)` consumes the source through the canonical Iterable conversion. The existing `Set.from` adopts it. List, Map, text, tuple and custom destinations own their ordering, duplicate and failure-cleanup policies. `collect()` and `to_list()` stay List terminals, and an expected type never changes eager or yielding behaviour. Extending existing state stays with D-ITER-EXTEND1 (#3330).\n\n## Current state\n- `collect` and `to_list` always return `List` (`Compiler/JetFoundation/Source/Collections.jet:266-268,647,893-894`).\n- `to_set` is List-only (`:265,654,905`).\n- `Set.from([…])` exists but takes a List (`Examples/features/collections/set.jet:12`).\n- The only generic static is `Map.fromkeys`/`from_keys` (`Compiler/JetFoundation/Source/Registry/BuiltinStatics.jet:160-161`).\n- There is no FromIterator trait. Compiler-owned traits are listed in `Compiler/JetCodegen/Source/Codegen/Types.jet:77`.\n- The finding is at Docs/research/mine-for-jet-2026-09-12.md#finding-iter-f017. Operation facts come from #3325 (per #3398).\n\n## Changes\n1. Jet compiler:\n   - Declare a compiler-owned `FromIterator` trait (`type Item`, `from: fn(source: &&Iter<Item>) -> Self`) beside Iterable/Iterator: add it to `Types.jet:77` and the associated-name table in `Functions.jet:2175`.\n   - `Compiler/JetFoundation/Source/Registry/BuiltinStatics.jet`: add `List.from`, `Set.from`, `Map.from` (items `(key, value)`) and `String.from` (items String or Char) as FromIterator statics that accept any Iterable.\n   - `Compiler/JetSema/Source/Sema/Calls/Static.jet`: `T.from(src)` on a user type resolves through its `impl T.FromIterator`.\n   - A fallible source (an `Iter` whose items carry `E!`) makes `from` return `T E!`: construction stops at the first error and drops the partial destination.\n   - Add routes in `Compiler/JetCodegen/Source/Codegen/BuiltinMethods.jet`, plus JetEval.\n2. Host: `jet_set_from_iter`, `jet_map_from_iter` and `jet_string_from_iter` over `JetIter` in `Prelude/Core/Collections.rs`/`Core.rs` and the JIT, plus the Rust mirror.\n3. Migrate `Set.from([..])` callers to the protocol form (the spelling is unchanged). Update `Docs/spec/reference/core-library.md` to document the protocol and the explicit destination rule.\n4. Add the example and the UI fixture named in the criteria. The example includes tuple destinations through `unzip`, which is unchanged.\n\n## Proof\n- `JET_GOLDEN_FILTER=collections/from_iter Tools/agent/jet-env cargo test --test golden examples_compile_and_run` passes.\n- `JET_GOLDEN_FILTER=collections/set Tools/agent/jet-env cargo test --test golden examples_compile_and_run` still passes.\n- `jet run` and `jet run --interpret` of `from_iter` produce empty diffs.\n- The UI snapshot passes.\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.\n\n## Batch\n`batch-jetc-sema`: trait resolution and static-call typing.\n\n## Dependencies\nNone. #3354 builds on this card.",
       "checkSteps": "1. List, Set, Map, text, tuple/product destinations, outcomes and a user-defined destination have exact ownership/order/duplicate/short-circuit contracts.\n2. The requested destination is explicit at the call; no expected type silently changes a yielding loop or a plain collection map/filter.\n3. One construction mechanism handles ordinary and fallible input with the approved partial-result and cleanup law; failed construction does not leak resources.",
       "probe": "Reproducible evidence and bounded future witness: docs/research/mine-for-jet-2026-09-12.md#finding-iter-f017. Reuse the exact retained inputs and commands where recorded. Run no broad suite as a substitute for this contract. Historical receipts remain historical; no measurement or current-tree success is claimed here.",
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Main: plan signature respelled to the #6586 forms (`name: fn`, `&&` take mark). CardCleanup Q(a)."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -33407,7 +33422,7 @@
       "parentId": "c0pi33zu",
       "needsAcceptance": false,
       "created": "2026-09-12T14:48:29.180Z",
-      "updated": "2026-11-06T18:42:05.547Z",
+      "updated": "2026-11-06T19:13:52.295Z",
       "updatedBy": "Main",
       "workOrder": 48,
       "goals": []
@@ -54055,6 +54070,11 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "Main: the replaced Rust route no longer exists; c8's comparator is the standing performance gate. CardCleanup Q(c)."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); proof on the admitted `jet` (no jetc0, compiler-diff or frozen-Rust evidence)."
         },
         {
@@ -54679,7 +54699,7 @@
         },
         {
           "n": 8,
-          "text": "(was #3690) [retarget] Each wave's cutover is proven by golden examples with identical output on O0, O1, O2 and web where applicable (I9), and passes the strict performance gate against the replaced Rust route.",
+          "text": "(was #3690) [retarget] Each wave's cutover is proven by golden examples with identical output on O0, O1, O2 and web where applicable (I9), and passes the AGENTS.md performance gate for its cells: Jet/peer below 1.00 for every matched peer and Jet/ceiling at most 1.00 against the cell's asm-parity reference.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -55594,7 +55614,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-06T10:08:37.412Z",
-      "updated": "2026-11-06T18:39:32.343Z",
+      "updated": "2026-11-06T19:13:56.087Z",
       "updatedBy": "Main",
       "goals": [
         "G14",
@@ -75016,6 +75036,11 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "Main: c6's tier-trace test and interp/deopt rows have no meaning without an interpreter; c6 now proves native byte-exact runs on every level. c8's 'evaluator' is compile-time code, which runs natively at O0 (I9). CardCleanup Q(c)."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT)."
         },
         {
@@ -75092,7 +75117,7 @@
         },
         {
           "n": 6,
-          "text": "(was #2862 c4) Proof: `node --test Tools/gauntlet/harness/tier-trace.test.mjs` passes with the rebuilt jet. For each of sieve, wordfreq, datasummary, csvtransform and concurrency-service the trace shows whole_program_deopt=false, native_rows>0 and interp_rows=0, with byte-exact output; the same test fails when any listed entry deopts [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #2862 c4) Proof: the gauntlet entries sieve, wordfreq, datasummary, csvtransform and concurrency-service compile and run natively on O0, O1 and O2 with byte-exact output against their expected output, and a planted output change fails the parity check. No interpreter or deopt path exists to trace (I9, D-EXEC2=A). [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -75110,7 +75135,7 @@
         },
         {
           "n": 8,
-          "text": "(was #2864 c2) Element assignment on lists and maps in the evaluator does not copy the collection when the value is uniquely owned; outputs unchanged [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #2864 c2) Element assignment on lists and maps does not copy the collection when the value is uniquely owned, on O0, O1 and O2 and in compile-time code (which runs natively at O0); outputs unchanged [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -75137,7 +75162,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:24.863Z",
-      "updated": "2026-11-06T18:40:07.739Z",
+      "updated": "2026-11-06T19:13:58.875Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -95883,6 +95908,86 @@
       "updated": "2026-11-06T16:05:11.476Z",
       "updatedBy": "Main",
       "completedAt": "2026-11-06T16:05:11.476Z"
+    },
+    {
+      "id": "c00ctwqw",
+      "num": 6610,
+      "title": "Test suites run in seconds: fix the slow programs, the timeouts and the per-program cost",
+      "body": "Owner direction 2026-11-06: suites should finish in seconds or minutes, not take a long time; the golden suite once took about 15 minutes at most.\n\nMeasured on vb5 (dev 7f0b3d03ed, s1, 32 cores):\n- golden: 4766 rows, about 4 minutes wall, median 0.28 s per row. The 4655 rows under 5 s alone sum to 74 CPU minutes, so per-program cost sets a floor of about 2.3 minutes even with perfect parallelism.\n- cases: 4501 rows, about 13.5 minutes wall, median 0.10 s; 284 rows of 5 s or more account for 97 of 131 CPU minutes; 12 rows hit the 60 s wall-clock limit.\n- ui: 2412 rows, about 1 minute wall.\n\nSlowest golden programs (all tiers): concurrency/job_queue 248 s, foundations/storage 177 s, foundations/text 161 s, crypto/file_seal_jetc 153 s, game/raylib_indexed 148 s, foundations/realtime 100 s.\nTimeouts: cffi/concurrent_bridges_share_one_target_publish_without_racing, cffi/ffi_capability_boundary_is_safe_only_inside_unsafe, ffi_rust/rust_extern_std_round_trip_uses_the_canonical_descriptor, fixtures_crypto_bridge_entropy/jetc_v2_record_boundaries_are_canonical, fmt_project/top_level_jet_fmt_delegates_non_jet_file_to_realized_formatter, jetpack_nix_index/index_backed_nixpkgs_repairs_only_missing_transitive_object, jetpack_nix_index/static_publication_resolves_signed_index_and_nix_objects, jetpack_tool/use_ephemeral_execs_inside_and_outside_project_without_path_projection, repl/repl_tty_prompts_and_reuses_exact_session_tuple, ui_fixes/ownership_ui_fixes_compile_ffi_companions, unsafe_and_runtime/ffi_capability_edge_uses_shared_sentry_prelude, web_dev/embedded_devserver_rejects_hardlinked_source.\n\nFor every slow row, first record where the time goes (compile front end, Core/Prelude re-check, code generation per tier, link, the program's own run, or a fixed sleep or timeout in the test), then fix that root. Never raise a limit, drop a tier or move a row out of the default profile to make a number.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Each of the six slow golden programs (concurrency/job_queue, foundations/storage, foundations/text, crypto/file_seal_jetc, game/raylib_indexed, foundations/realtime, or their successors after the Examples cutover) runs in under 5 s per tier on the batch machine, with the root cause of its old time recorded on this card.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T19:02:30.892Z"
+        },
+        {
+          "n": 2,
+          "text": "The 12 cases rows that hit the 60 s wall-clock limit on vb5 are root-caused and each passes, or fails for a recorded unrelated reason, in under 10 s.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T19:02:30.892Z"
+        },
+        {
+          "n": 3,
+          "text": "Every cases row that took 5 s or more on vb5 (284 rows) runs in under 5 s, or this card records why its work is inherently longer (for example a real network or Nix fetch) and that row moves to a named opt-in profile that the default run does not include.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T19:02:30.892Z"
+        },
+        {
+          "n": 4,
+          "text": "Per-program cost: a profile of a typical golden row splits its time into Core and Prelude checking, the program's own front end, code generation per tier, link and run. Any work repeated identically for every program (for example re-checking Core) is done once per suite run and shared, and the median golden row drops to 0.1 s or less.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T19:02:30.892Z"
+        },
+        {
+          "n": 5,
+          "text": "On the batch machine the golden suite finishes in under 90 s wall, the cases suite in under 3 minutes and the ui suite in under 30 s, measured on the same commit and recorded with the commit.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T19:02:30.892Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "testing",
+        "performance",
+        "owner-direction"
+      ],
+      "goals": [
+        "G1"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T19:02:30.892Z",
+      "updated": "2026-11-06T19:02:30.892Z",
+      "updatedBy": "Main"
     }
   ],
   "decisions": [
@@ -183419,6 +183524,83 @@
   ],
   "events": [
     {
+      "at": "2026-11-06T19:14:01.910Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0509i8n",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T19:14:01.069Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0509i8n",
+      "note": "plan"
+    },
+    {
+      "at": "2026-11-06T19:13:58.875Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0a0gmpl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T19:13:58.037Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0a0gmpl",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T19:13:56.087Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rqi33c",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T19:13:54.893Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rqi33c",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T19:13:52.295Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c02vmcbl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T19:13:51.465Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c02vmcbl",
+      "note": "plan"
+    },
+    {
+      "at": "2026-11-06T19:13:48.708Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0cshs43",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T19:13:47.800Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0cshs43",
+      "note": "criteria,plan"
+    },
+    {
+      "at": "2026-11-06T19:02:30.892Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c00ctwqw",
+      "note": "Test suites run in seconds: fix the slow programs, the timeouts and the per-program cost"
+    },
+    {
       "at": "2026-11-06T18:50:26.078Z",
       "by": "Main",
       "action": "card.update",
@@ -186875,713 +187057,6 @@
       "action": "question.add",
       "ref": "q5mpjpe1",
       "note": ""
-    },
-    {
-      "at": "2026-11-06T15:30:11.212Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q4hca5vl",
-      "note": ""
-    },
-    {
-      "at": "2026-11-06T15:29:13.043Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q3rc9mv2",
-      "note": ""
-    },
-    {
-      "at": "2026-11-06T15:26:26.916Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q2fwcntm",
-      "note": ""
-    },
-    {
-      "at": "2026-11-06T15:25:00.946Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q1y3xsld",
-      "note": ""
-    },
-    {
-      "at": "2026-11-06T15:23:16.401Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q0x4qov2",
-      "note": ""
-    },
-    {
-      "at": "2026-11-06T15:20:09.015Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ENUM-DOT1",
-      "note": "B"
-    },
-    {
-      "at": "2026-11-06T15:20:09.015Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0rqt0kq",
-      "note": "#8 snapshots re-blessed"
-    },
-    {
-      "at": "2026-11-06T15:20:09.015Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0rqt0kq",
-      "note": "#7 editor grammars regenerated (jet self devtools grammars)"
-    },
-    {
-      "at": "2026-11-06T15:20:09.015Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0rqt0kq",
-      "note": "#6 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-11-06T15:20:09.015Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0rqt0kq",
-      "note": "#5 Data/Syntax registry entry updated"
-    },
-    {
-      "at": "2026-11-06T15:20:09.014Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-G12-SCOPE1",
-      "note": "C"
-    },
-    {
-      "at": "2026-11-06T15:18:19.415Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-06T15:18:19.415Z"
-    },
-    {
-      "at": "2026-11-06T14:53:10.658Z",
-      "by": "agent",
-      "action": "decision.update",
-      "ref": "D-PROCESS-EXEC1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-06T14:53:09.823Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-PROCESS-EXEC1",
-      "note": "Run exit cleanup before replacing the program"
-    },
-    {
-      "at": "2026-11-06T14:26:15.567Z",
-      "by": "agent",
-      "action": "decision.update",
-      "ref": "D-RECORD-ORDER1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-06T14:26:14.697Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-RECORD-ORDER1",
-      "note": "An unnamed record compares and prints its members in the order they are written"
-    },
-    {
-      "at": "2026-11-06T14:26:13.147Z",
-      "by": "agent",
-      "action": "decision.update",
-      "ref": "D-RECORD-BRACE1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-06T14:26:12.334Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-RECORD-BRACE1",
-      "note": "Every record uses braces: {x: 1} is an unnamed struct, and paren tuples retire"
-    },
-    {
-      "at": "2026-11-06T14:26:10.443Z",
-      "by": "agent",
-      "action": "decision.update",
-      "ref": "D-ENUM-DOT1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-06T14:26:09.182Z",
-      "by": "agent",
-      "action": "decision.update",
-      "ref": "D-BRACE-LAYOUT1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-06T14:26:08.386Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-BRACE-LAYOUT1",
-      "note": "Brace lists share one layout: commas on one line, line breaks without commas across lines"
-    },
-    {
-      "at": "2026-11-06T14:26:06.834Z",
-      "by": "agent",
-      "action": "decision.update",
-      "ref": "D-ALT-SUBSET1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-06T14:26:06.000Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-ALT-SUBSET1",
-      "note": "A value of a smaller union passes where a larger union holding all its cases is expected"
-    },
-    {
-      "at": "2026-11-06T14:26:04.348Z",
-      "by": "agent",
-      "action": "decision.update",
-      "ref": "D-ALT-CASES1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-06T14:26:03.511Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-ALT-CASES1",
-      "note": "Unions and enums share one case grammar, and each case's form decides how it widens and encodes"
-    },
-    {
-      "at": "2026-11-06T14:26:01.865Z",
-      "by": "agent",
-      "action": "decision.update",
-      "ref": "D-ALIAS-GENERIC1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-06T14:26:01.003Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-ALIAS-GENERIC1",
-      "note": "A generic alias writes its type parameters on its name: Grid<T>: [[T]]"
-    },
-    {
-      "at": "2026-11-06T14:25:59.340Z",
-      "by": "agent",
-      "action": "decision.update",
-      "ref": "D-VIEW-SET1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-06T14:25:58.471Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-VIEW-SET1",
-      "note": "Jet ships a full standard set of about forty views, built only from public primitives"
-    },
-    {
-      "at": "2026-11-06T14:25:56.909Z",
-      "by": "agent",
-      "action": "decision.update",
-      "ref": "D-THEME2",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-06T14:25:56.119Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-THEME2",
-      "note": "Apps get one Jet look on every system, with each system's own behavior for back, menus and scrolling"
-    },
-    {
-      "at": "2026-11-06T14:25:54.610Z",
-      "by": "agent",
-      "action": "decision.update",
-      "ref": "D-SYNC2",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-06T14:25:53.805Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-SYNC2",
-      "note": "App data lives in typed local collections that work offline and sync with the server"
-    },
-    {
-      "at": "2026-11-06T14:25:52.306Z",
-      "by": "agent",
-      "action": "decision.update",
-      "ref": "D-SERVER-FN1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-06T14:25:51.473Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-SERVER-FN1",
-      "note": "A #Server mark on a function makes it run on the server, called from any screen like a plain function"
-    },
-    {
-      "at": "2026-11-06T14:25:49.953Z",
-      "by": "agent",
-      "action": "decision.update",
-      "ref": "D-RUN-DEVICE1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-06T14:25:49.153Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-RUN-DEVICE1",
-      "note": "One --target flag names the platform for run, dev, test and build, and --device picks a phone"
-    },
-    {
-      "at": "2026-11-06T14:25:47.581Z",
-      "by": "agent",
-      "action": "decision.update",
-      "ref": "D-PLATFORM-OVERRIDE1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-06T14:25:46.781Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-PLATFORM-OVERRIDE1",
-      "note": "One app file does per-system work with the ratified build-fact branch, and ui.native embeds a real system view"
-    },
-    {
-      "at": "2026-11-06T14:25:45.172Z",
-      "by": "agent",
-      "action": "decision.update",
-      "ref": "D-OTA1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-06T14:25:44.290Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-OTA1",
-      "note": "Signed content updates and channel-approved compiled app updates"
-    },
-    {
-      "at": "2026-11-06T14:25:42.573Z",
-      "by": "agent",
-      "action": "decision.update",
-      "ref": "D-ONEAPP-WEBOUT1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-06T14:25:41.745Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-ONEAPP-WEBOUT1",
-      "note": "On the web, an app becomes real page elements, first painted by the server"
-    },
-    {
-      "at": "2026-11-06T14:25:39.863Z",
-      "by": "agent",
-      "action": "decision.update",
-      "ref": "D-ONEAPP-RENDER1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-06T14:25:39.050Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-ONEAPP-RENDER1",
-      "note": "Jet draws every screen itself, and each system supplies typing, screen readers and system sheets"
-    },
-    {
-      "at": "2026-11-06T14:25:37.108Z",
-      "by": "agent",
-      "action": "decision.update",
-      "ref": "D-ONEAPP-MODEL1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-06T14:25:36.264Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-ONEAPP-MODEL1",
-      "note": "One first-party app package serves the web, the desktop and phones"
-    },
-    {
-      "at": "2026-11-06T14:25:34.723Z",
-      "by": "agent",
-      "action": "decision.update",
-      "ref": "D-MOBILE-UNDEFER1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-06T14:25:33.889Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-MOBILE-UNDEFER1",
-      "note": "Phone apps follow Linux and web, with an early one-phone pilot of native contracts"
-    },
-    {
-      "at": "2026-11-06T14:25:32.295Z",
-      "by": "agent",
-      "action": "decision.update",
-      "ref": "D-LAYOUT2",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-06T14:25:31.416Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-LAYOUT2",
-      "note": "Screens lay out with rows, columns, grids and stacks; the constraint solver stays for experts"
-    },
-    {
-      "at": "2026-11-06T14:25:29.863Z",
-      "by": "agent",
-      "action": "decision.update",
-      "ref": "D-I18N1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-06T14:25:29.061Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-I18N1",
-      "note": "Extract provable view literals and use one message model for translation"
-    },
-    {
-      "at": "2026-11-06T14:25:27.546Z",
-      "by": "agent",
-      "action": "decision.update",
-      "ref": "D-GPU-UI1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-06T14:25:26.732Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-GPU-UI1",
-      "note": "Phones switch to graphics drawing only if a paired cell proves the win"
-    },
-    {
-      "at": "2026-11-06T14:25:25.271Z",
-      "by": "agent",
-      "action": "decision.update",
-      "ref": "D-A11Y-EXPORT1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-06T14:25:24.492Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-A11Y-EXPORT1",
-      "note": "One accessibility provider contract, using AccessKit on supported desktops"
-    },
-    {
-      "at": "2026-11-06T14:25:16.605Z",
-      "by": "agent",
-      "action": "decision.update",
-      "ref": "D-ENUM-DOT1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-06T14:25:11.540Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-ENUM-DOT1",
-      "note": "Enum declarations write each case with its leading dot, as values and patterns already do"
-    },
-    {
-      "at": "2026-11-06T11:43:00.837Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rqt0kq",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T11:42:59.931Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ofw8u4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T11:37:10.404Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c04j9ahx",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T11:11:57.778Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-G12-SCOPE1",
-      "note": "Finish G1 and G2 sooner by moving the feature backlogs to the goals that own them"
-    },
-    {
-      "at": "2026-11-06T11:07:04.218Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c01oyhqk",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T11:05:54.367Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0qus24o",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T10:57:27.291Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0swy9uf",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-06T10:57:21.588Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0swy9uf",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-06T10:25:37.957Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rodlty",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T10:25:14.946Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rodlty",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-06T10:25:14.046Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rodlty",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-06T10:25:13.126Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rodlty",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-06T10:25:12.012Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rodlty",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-06T10:25:10.965Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rodlty",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-06T10:12:20.886Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0o3di45",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-06T10:12:19.531Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0o3di45",
-      "note": "#4 D-UI-WEB-KEYS1=A: the web provider queues key events on prov"
-    },
-    {
-      "at": "2026-11-06T10:12:18.709Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0o3di45",
-      "note": "#3 D-UI-DRAG-NONE1=A: a drag event carries operation: UIDragOpe"
-    },
-    {
-      "at": "2026-11-06T10:11:02.788Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rdxo6y",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-06T10:10:22.724Z",
-      "by": "Main",
-      "action": "archive.shard",
-      "ref": "history.json",
-      "note": "the archive moved from history.json to shards under history/, each at most 8.0 MiB"
-    },
-    {
-      "at": "2026-11-06T10:09:14.564Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rdxo6y",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T10:04:44.401Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-06T10:04:44.401Z"
-    },
-    {
-      "at": "2026-11-06T10:04:42.190Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-UI-WEB-KEYS1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-06T10:04:42.190Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-UI-DRAG-NONE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-06T10:00:12.473Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rdxo6y",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T09:52:28.093Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-UI-WEB-KEYS1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-06T09:52:27.293Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-UI-WEB-KEYS1",
-      "note": "Keyboard shortcuts in web pages (draft)"
-    },
-    {
-      "at": "2026-11-06T09:51:52.636Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-UI-DRAG-NONE1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-06T09:51:49.061Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-UI-DRAG-NONE1",
-      "note": "A drag that leaves with no action (draft)"
-    },
-    {
-      "at": "2026-11-06T09:48:46.730Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0o3di45",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-06T09:42:00.406Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-06T09:42:00.406Z"
-    },
-    {
-      "at": "2026-11-06T09:40:13.464Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0lm9h4f",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-06T09:40:08.648Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c07hutuq",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-06T09:40:04.676Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0n8obf9",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-06T09:39:58.621Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c05s2kt4",
-      "note": "#1 Each of the five rot items is fixed or its dead harness dele"
-    },
-    {
-      "at": "2026-11-06T09:39:57.054Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0j5iuv5",
-      "note": "#1 Integer formatting in core.text fmt never converts through F"
-    },
-    {
-      "at": "2026-11-06T09:39:49.326Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c05s2kt4",
-      "note": "Runtime test rot: journey-tls fixtures undefined, NormalizationTest.txt row count off the s5 pin, missing RtCrypto1 inputs, UiKeyWitness 24-byte Text typedef"
-    },
-    {
-      "at": "2026-11-06T09:39:47.958Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0j5iuv5",
-      "note": "core.text fmt stops E3010 formatting a whole number with no exact Float (Fmt.jet:272 Float{abs_int(n)})"
-    },
-    {
-      "at": "2026-11-06T09:39:38.387Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0n8obf9",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T09:39:37.522Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0n8obf9",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-06T09:39:36.644Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0n8obf9",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-06T09:31:29.299Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0swy9uf",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T09:29:31.974Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0swy9uf",
-      "note": "#1 Each cases, ui and golden row runs with a fresh HOME, JET_HO"
     }
   ],
   "nextNum": 368,
