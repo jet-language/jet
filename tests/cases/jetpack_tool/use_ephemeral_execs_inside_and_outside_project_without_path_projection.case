@@ -9,11 +9,13 @@ mkdir: outside
 step: script -qfec "stty rows 30 cols 120; exec '{jetpack}' use omp@releases#1.0.0 -y --no-color --offline --fixtures '{work}/fx'" /dev/null
 cwd: project
 stdin: fixtures/use_ephemeral_execs_inside_and_outside_project_without_path_projection/probe.stdin
+limit: time=8
 exit: 0
 stdout: ~ "JETPACK_USE_OK" # original interactive-shell probe literal
 step: script -qfec "stty rows 30 cols 120; exec '{jetpack}' use omp@releases#1.0.0 -y --no-color --offline --fixtures '{work}/fx'" /dev/null
 cwd: outside
 stdin: fixtures/use_ephemeral_execs_inside_and_outside_project_without_path_projection/probe.stdin
+limit: time=8
 exit: 0
 stdout: ~ "JETPACK_USE_OK" # original interactive-shell probe literal
 when os windows: file: home/.jet/bin/omp.exe absent
