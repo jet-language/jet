@@ -71,10 +71,12 @@ DevPolicy: struct {
     }
 }
 
-// One named build profile declared in `build: { … }`.
+// One named build profile declared in `build: { … }`. Like every build option,
+// `optimize` is a layer over the command's stock: None when the profile leaves
+// it to the command.
 BuildProfileDef: struct {
     name: String
-    optimize: BuildOptimize
+    optimize: BuildOptimize?
     debug_info: Bool
     small: Bool
     panic: BuildPanic?
@@ -220,7 +222,7 @@ pkg_parse_build_profile: fn(name: String, value: String) -> BuildProfileDef Pack
     optimize_value := String?{None}
     profile := BuildProfileDef{
         name: name,
-        optimize: BuildOptimize.Off,
+        optimize: None,
         debug_info: false,
         small: false,
         panic: None,
@@ -279,15 +281,16 @@ pkg_parse_build_profile: fn(name: String, value: String) -> BuildProfileDef Pack
             }
         }
     }
-    selected: optimize_value ?? return Err(PackageParseError.Composition("build profile `{name}` is missing `optimize: none|basic|full`"))
-    if selected == BUILD_OPTIMIZE_NONE {
-        profile.optimize = BuildOptimize.Off
-    } else if selected == BUILD_OPTIMIZE_BASIC {
-        profile.optimize = BuildOptimize.Basic
-    } else if selected == BUILD_OPTIMIZE_FULL {
-        profile.optimize = BuildOptimize.Full
-    } else {
-        return Err(PackageParseError.Composition("build profile `{name}` is missing `optimize: none|basic|full`"))
+    if optimize_value == .Val(selected) {
+        if selected == BUILD_OPTIMIZE_NONE {
+            profile.optimize = Val(BuildOptimize.Off)
+        } else if selected == BUILD_OPTIMIZE_BASIC {
+            profile.optimize = Val(BuildOptimize.Basic)
+        } else if selected == BUILD_OPTIMIZE_FULL {
+            profile.optimize = Val(BuildOptimize.Full)
+        } else {
+            return Err(PackageParseError.Composition("build profile `{name}` has an unknown `optimize:` value `{selected}` — use none, basic or full"))
+        }
     }
     Ok(profile)
 }

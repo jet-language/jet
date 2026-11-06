@@ -5,8 +5,8 @@
 // that already have a canonical `@build.*` spelling. Git credentials and URL
 // query/fragment text are redacted before they cross the projection.
 use {
-    jetpack_foundation.[ENV_FILE, PACKAGE_FILE, UNIFIED_LOCK_FILE]
-    jet_foundation.[RuntimeLayer, jet_ring_layer_name]
+    jetpack_foundation.[BUILD_FIELD_OPTIMIZE, ENV_FILE, PACKAGE_FILE, UNIFIED_LOCK_FILE]
+    jet_foundation.[RuntimeLayer, build_option_row, jet_ring_layer_name]
 }
 
 // Version of the public package-model field matrix.
@@ -38,6 +38,8 @@ OutputView: struct {
 }
 
 // One named build profile from the package's `build: { … }` declarations.
+// `optimize` is the profile's level, or `jet build`'s stock level when the
+// profile leaves `optimize:` to the command.
 BuildProfileView: struct {
     name: String
     optimize: String
@@ -287,12 +289,22 @@ pkg_build_panic_name: fn(panic_mode: BuildPanic?) -> String? Never! {
     }
 }
 
+// The `optimize` build-option row's `jet build` stock.
+pkg_build_stock_optimize: fn() -> String Never! {
+    if build_option_row(BUILD_FIELD_OPTIMIZE) == .Val(row) -> return row.stock_build.copy()
+    panic("the build-option table has no `optimize` row")
+}
+
 pkg_build_profile_views: fn(profiles: [BuildProfileDef]) -> [BuildProfileView] Never! {
     out := [BuildProfileView]{}
     loop profile in profiles {
+        optimize: if profile.optimize == {
+            .Val(level) -> level.as_str()
+            .None -> pkg_build_stock_optimize()
+        }
         out.push(BuildProfileView{
             name: profile.name,
-            optimize: profile.optimize.as_str(),
+            optimize: optimize,
             debug_info: profile.debug_info,
             small: profile.small,
             panic: pkg_build_panic_name(profile.panic),
