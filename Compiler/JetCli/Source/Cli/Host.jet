@@ -1264,7 +1264,8 @@ jet_cli_build_option_gate_refusal: fn(root: String, options: BuildOptions, color
 // The refusal of `choice`'s `key` gate, if its policy forbids it.
 jet_cli_build_option_policy: fn(root: String, key: PolicyKey, choice: BuildOptionChoice, color: Bool) -[FS, Env]> JetDriverVerbOutput? Never! {
     // The registered row writes the site in backticks.
-    site: if choice.layer == BuildOptionLayer.Flag -> "command line ({choice.written})" else -> "{choice.written} {choice.site.replace("`", "")}"
+    written_site: choice.site.replace("`", "")
+    site: if choice.layer == BuildOptionLayer.Flag -> "command line ({choice.written})" else -> "{choice.written} {written_site}"
     pkg_check_project_gate(root, key, site) ?? {
         return Val(JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems("", "", err.diagnostics, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR})
     }
@@ -1461,14 +1462,26 @@ jet_cli_compile_build: fn(file: String, source: String, color: Bool, options: Bu
 // output to `jet_cli_main` instead. Callers keep the shapes the seed backends
 // lower: a value-returning function ends in a value, never in this call, and
 // a `??` fallback calls it directly, not from a block of statements.
+// A Jet defect (JET_CLI_EXIT_ICE, I2) ends through the runtime's process exit
+// with status 101 as it is: `process.exit` gives a program's 101 the
+// user-error status 1, since no program may claim a Jet defect's status.
 jet_cli_finish: fn(output: JetDriverVerbOutput) -> Never {
     jet_cli_write_output(output)
+    if output.exit_code == JET_CLI_EXIT_ICE {
+        #Unsafe("I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the runtime's unmapped process exit") {
+            jet_cli_defect_exit(I64{101})
+        }
+    }
     cli_process.exit(output.exit_code)
     // Unreachable: `exit` is `Never Never!`. Kept while a0_001 seeds the
     // round: its proof knows only direct `Never` calls, not module
     // calls (08fa56aaa). Remove once a seed carries 08fa56aaa.
     panic("the process outlived its exit")
 }
+
+// The runtime's process exit (Main.jet): exit handlers, flush, then the exit
+// status unchanged. Only a Jet defect's status 101 takes it.
+#Import(c) jet_cli_defect_exit: fn(code: I64) = "jet_rt_process_exit"
 
 // What a program `jet run` starts gets besides its image: argv[0] and
 // `os.executable()` are the absolute path of `file`, then `program_args`;
