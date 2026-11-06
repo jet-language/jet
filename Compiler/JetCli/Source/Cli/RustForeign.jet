@@ -378,10 +378,14 @@ fn jet_cli_rust_foreign_validate_output(directory: cli_files.Directory) JetDrive
     Ok(())
 }
 
+// Each key's digest/provenance sidecars are not Cargo output: only that key's
+// builder publishes them (jet_cli_rust_foreign_publish_sidecars), so a copy
+// of the shared tree never carries another key's sidecars back over newer ones.
 fn jet_cli_rust_foreign_copy_tree(source: cli_files.Directory, destination: cli_files.Directory) JetDriverRustForeignError! -[FS, Env]> {
     entries :: source.list() ?? return Err(jet_cli_rust_foreign_io("couldn't list private Cargo output: {err}"))
     loop entry in entries {
         if entry.name == ".jet-publication-lock" || entry.name == "metadata-source" || entry.name == "cargo-home" || entry.name == "home" -> next
+        if entry.name.starts_with("jet_ffi_") && (entry.name.ends_with(".sha256") || entry.name.ends_with(".provenance")) -> next
         if !entry.name_is_unicode -> return Err(jet_cli_rust_foreign_sandbox_error("Cargo output contains a non-Unicode filename"))
         info :: source.entry_stat(entry.name) ?? return Err(jet_cli_rust_foreign_io("couldn't stat private Cargo output: {err}"))
         if info.is_symlink || (!info.is_dir && !info.is_file) -> return Err(jet_cli_rust_foreign_sandbox_error("Cargo output `{entry.path}` is not a private regular file or directory"))
@@ -560,10 +564,8 @@ fn jet_cli_rust_foreign_build(plan: JetDriverRustForeignPlan, cache: String, sou
     jet_cli_rust_foreign_publish(inputs, "Cargo.toml", plan.manifest.bytes())
     jet_cli_rust_foreign_publish(inputs, "Cargo.lock", lock_bytes)
     jet_cli_rust_foreign_publish(src, "lib.rs", plan.source.bytes())
-    released :: cli_files.open_directory(release) ?? return Err(jet_cli_rust_foreign_io("couldn't hold published FFI artifacts: {err}"))
-    jet_cli_rust_foreign_publish(released, "{plan.crate_name}.sha256", "{JET_CLI_RUST_ARTIFACT_SCHEMA}\n{digest} {archive}\n".bytes())
     provenance :: jet_cli_rust_foreign_provenance(plan, source, toolchain, link_closure, digest, compile_time)
-    jet_cli_rust_foreign_publish(released, "{plan.crate_name}.provenance", provenance.bytes())
+    jet_cli_rust_foreign_publish_sidecars(target_dir, release, plan.crate_name, "{JET_CLI_RUST_ARTIFACT_SCHEMA}\n{digest} {archive}\n", provenance)
     if !jet_cli_rust_foreign_verified(plan, source, release, toolchain, link_closure) -> return Err(jet_cli_rust_foreign_io("published FFI artifact failed digest/provenance verification"))
     Ok(())
 }
@@ -581,6 +583,16 @@ fn jet_cli_rust_foreign_snapshot(shared: cli_files.Directory, private_output: cl
 fn jet_cli_rust_foreign_publish_output(private_output: cli_files.Directory, shared: cli_files.Directory, target_dir: String) JetDriverRustForeignError! -[FS, Env]> {
     publication :: cli_files.lock("{target_dir}/.jet-publication-lock") ?? return Err(jet_cli_rust_foreign_io("couldn't lock shared Cargo output: {err}"))
     jet_cli_rust_foreign_copy_tree(private_output, shared)
+    Ok(())
+}
+// The sidecars land in the shared release directory, so they are published
+// under the same lock: another key's snapshot never lists their staging
+// temporaries, which this writer renames away.
+fn jet_cli_rust_foreign_publish_sidecars(target_dir: String, release: String, crate_name: String, manifest: String, provenance: String) JetDriverRustForeignError! -[FS, Env]> {
+    publication :: cli_files.lock("{target_dir}/.jet-publication-lock") ?? return Err(jet_cli_rust_foreign_io("couldn't lock shared Cargo output: {err}"))
+    released :: cli_files.open_directory(release) ?? return Err(jet_cli_rust_foreign_io("couldn't hold published FFI artifacts: {err}"))
+    jet_cli_rust_foreign_publish(released, "{crate_name}.sha256", manifest.bytes())
+    jet_cli_rust_foreign_publish(released, "{crate_name}.provenance", provenance.bytes())
     Ok(())
 }
 

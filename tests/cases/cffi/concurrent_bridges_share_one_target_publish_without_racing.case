@@ -1,0 +1,30 @@
+# std-only bridges with different keys share one Cargo target (one toolchain, target and
+# link closure); max0 and max1 share one key. All four `jet check` runs build their bridge
+# at once and succeed: no build reads another writer's staging temporary in the shared
+# release directory, and each key keeps exactly its own published sidecars.
+requires: tool:cargo
+requires: tool:rustc
+fixture: concurrent_bridges_share_one_target.fixture
+env: NO_COLOR=1
+env: JET_FFI_CACHE_DIR={work}/ffi-cache
+mkdir: ffi-cache
+spawn max0: jet check main.jet
+cwd: max0
+spawn max1: jet check main.jet
+cwd: max1
+spawn min0: jet check main.jet
+cwd: min0
+spawn take0: jet check main.jet
+cwd: take0
+wait: max0
+exit: 0
+wait: max1
+exit: 0
+wait: min0
+exit: 0
+wait: take0
+exit: 0
+entries: ffi-cache kind dir name != "deps" = 3 # one key folder per distinct bridge
+entries: ffi-cache/deps kind dir = 1 # the three keys share one Cargo target
+entries: ffi-cache/deps recursive name ^= "jet_ffi_" name $= ".sha256" = 3 # each key publishes its own digest sidecar
+entries: ffi-cache/deps recursive name ^= ".jet_ffi_" = 0 # no staging temporary outlives its writer
