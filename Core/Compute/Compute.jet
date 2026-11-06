@@ -46,7 +46,7 @@ from_list: fn(values: [Float]) -> Tensor ComputeError! {
     Ok(Tensor{shape: shape, data: values.copy(), device: "CPU", numeric_profile: PROFILE_F64, requested: "Auto", reason: "", transfer: ""})
 }
 
-// The Vec and Matrix aliases share the Tensor storage law (D-COMPUTE-TYPE1)
+// The Vec and Matrix aliases share the Tensor storage law
 // and request the CPU explicitly.
 vec: fn(length: Int, value: Float) -> Tensor ComputeError! {
     if length < 0 -> return Err(ComputeError.Shape)
@@ -76,7 +76,7 @@ numel: fn(tensor: Tensor) -> Int Never! {
 
 to_list: fn(tensor: Tensor) -> [Float] Never! { tensor.data.copy() }
 
-// Tensor bracket windows (D-SHAPE-PLACE1=A; core-library.md:4293-4295). A
+// Tensor bracket windows (core-library.md:4293-4295). A
 // range selects whole first-axis slabs of the row-major `data`; sema views
 // `data` through the flat range returned here, so the list window keeps the
 // checked range, its bounds check and the caller's source location. A slab

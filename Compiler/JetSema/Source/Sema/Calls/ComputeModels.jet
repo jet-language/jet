@@ -30,7 +30,7 @@ SemaComputeModelsSpecialCheck: struct {
     value: TExpr?
 }
 
-// D-SHAPE-PLACE1=A Tensor bracket windows (core-library.md:4293-4295): a
+// Tensor bracket windows (core-library.md:4293-4295): a
 // Tensor range is a window on its owner's row-major `data`, through the flat
 // first-axis slab range `core.compute.__window` selects. A bare window reads,
 // `&tensor[range]` writes through, and element access and bounds follow the
@@ -55,7 +55,7 @@ sema_call_compute_tensor_window: fn(base: Expr, tensor: TExpr, range: TExpr, spa
     Val(sema_tree_node(data_ty, TExprKind.Slice{base: data, start: zero_start, end: zero_end, range: Val(flat), location: sema_expression_panic_location(environment, program, scopes, span)}, span))
 }
 
-// `tensor[range].copy()` (D-SHAPE-PLACE1=A `~place`): the checked window
+// `tensor[range].copy()` (`~place`): the checked window
 // `value`'s slabs as an independent Tensor on the owner's device and
 // profile, not a list copy. Unhandled for any other copied value.
 sema_call_compute_window_copy: fn(value: TExpr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> SemaComputeModelsSpecialCheck {
@@ -141,7 +141,7 @@ sema_call_compute_owned_params: fn(types: [Type], accesses: [AccessConvention]) 
 
 // `compute.vec` / `compute.matrix` check through their Core source
 // constructors; the Tensor result takes the Vec/Matrix alias type, which
-// carries the literal extents as shape facts (D-COMPUTE-TYPE1).
+// carries the literal extents as shape facts.
 sema_call_try_compute_alias: fn(module_name: String, member: String, target: SemaCallDirectTarget, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaComputeModelsSpecialCheck {
     if module_name != "core.compute" || (member != "vec" && member != "matrix") -> return SemaComputeModelsSpecialCheck{handled: false, value: None}
     context.compute_calls.push(SemaComputeCallFact{method: member, span: span})

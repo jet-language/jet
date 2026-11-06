@@ -2,7 +2,7 @@
 // Jet source-body comparison against the frozen formatter bytes committed as
 // FmtParityExpected.out (sha256 6ac11c2f…). The Rust capture's rows that owner
 // ruling #4588 replaced (half away from zero, a zero prints no sign, pretty
-// commas) and its i64 duration wrap (exact Int, D-INTBIG1) follow the rulings
+// commas) and its i64 duration wrap (exact Int) follow the rulings
 // (#6608). Preparation runs no reference.
 // This is not native selector lowering or runtime-pack admission proof.
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';

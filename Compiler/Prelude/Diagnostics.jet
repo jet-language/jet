@@ -773,7 +773,7 @@ RetiredEffectResultArrow: struct {
     impl Diagnostic {
         code: "E0071"
         status: .Retired
-        meaning: "Retired effect-only result-arrow teaching (D-ONELINE-BODY1=B; was D-ARROW-CONTROL1)"
+        meaning: "Retired effect-only result-arrow teaching"
         no_fix: None
         what: fn(self) -> String { "This retired effect-only result-arrow diagnostic is no longer emitted." }
         why: fn(self) -> String { "Effect-only one-line bodies use `->` for one statement; braces hold multiple statements or a scope." }
@@ -4173,7 +4173,7 @@ RetiredVoid: struct {
         detail: true
         no_fix: None
         what: fn(self) -> String { "`` `Void` is retired ``." }
-        why: fn(self) -> String { "`()` is the one public no-information result type; non-returning paths are compiler facts under D-NEVER1." }
+        why: fn(self) -> String { "`()` is the one public no-information result type; non-returning paths are compiler facts." }
         fix: fn(self) -> String { "Replace `Void` with `()`." }
     }
 }
@@ -10217,7 +10217,7 @@ RetiredJetosNamespace: struct {
         detail: true
         no_fix: None
         what: fn(self) -> String { "A jetos option key uses a retired namespace." }
-        why: fn(self) -> String { "D-JPK-OSNS1=B and D-JOS-SYSTEMTREE1=A: jetos option keys start with full-word namespaces: `filesystem`, `network`, `packages`, `services`, `users`, `groups`, `secrets`, `boot`, `kernel`, `init`, or `health`." }
+        why: fn(self) -> String { "A jetos option key starts with a full-word namespace: `filesystem`, `network`, `packages`, `services`, `users`, `groups`, `secrets`, `boot`, `kernel`, `init`, or `health`." }
         fix: fn(self) -> String { "Rename the option namespace, for example `net.hostName` becomes `network.hostName`." }
     }
 }
@@ -10759,7 +10759,7 @@ PinnedBuildOption: struct {
     impl Diagnostic {
         code: "E2113"
         stage: [.Jet]
-        meaning: "A build-option flag tries to change a value `build: fn` pinned (#5005, D-SETTING-ORDER1)"
+        meaning: "A build-option flag tries to change a value `build: fn` pinned (#5005)"
         detail: true
         what: fn(self) -> String { "`{self.option}` is pinned to `{self.value}`, so the flag can't change it." }
         why: fn(self) -> String { "`b.pin(.option, .Value)` in `build: fn` fixes a build option for every build; a flag may only change values that aren't pinned." }
@@ -10771,7 +10771,7 @@ CrashReportWithoutBuild: struct {
     impl Diagnostic {
         code: "E2114"
         stage: [.Jet]
-        meaning: "`jet crash` read a report with no `Build <id>` line to find its debug info by (#6035, D-RT-DEFECT-REPORT1)"
+        meaning: "`jet crash` read a report with no `Build <id>` line to find its debug info by (#6035)"
         detail: true
         what: fn(self) -> String { "This crash report has no `Build <id> (names and lines: jet crash)` line." }
         why: fn(self) -> String { "`jet crash` names a release program's frames from the debug info its build saved under the build id the report gives; without that line it can't tell which build crashed." }
@@ -10785,7 +10785,7 @@ CrashSymbolsMissing: struct {
     impl Diagnostic {
         code: "E2115"
         stage: [.Jet]
-        meaning: "`jet crash` found no debug info for the report's build id under `.jet/symbols` (#6035, D-RT-DEFECT-REPORT1)"
+        meaning: "`jet crash` found no debug info for the report's build id under `.jet/symbols` (#6035)"
         detail: true
         what: fn(self) -> String { "No debug info for build `{self.build}` is in `.jet/symbols` here or in a directory above." }
         why: fn(self) -> String { "A release build saves its function names and lines under `.jet/symbols/.build-id/` in the project that built it; any other build, even of the same source, has another id." }
@@ -12073,7 +12073,7 @@ RetiredDeriveTraitSpelling: struct {
         detail: true
         no_fix: None
         what: fn(self) -> String { "A user derive is written `derive T.{self.trait_name}`." }
-        why: fn(self) -> String { "The type parameter comes first, joined to the trait name with a dot (D-METADERIVE1, amended 2026-07-01); the `derive {self.trait_name} for T` spelling was retired." }
+        why: fn(self) -> String { "The type parameter comes first, joined to the trait name with a dot; the `derive {self.trait_name} for T` spelling was retired." }
         fix: fn(self) -> String { "Write `derive T.{self.trait_name} {{ … }}`." }
     }
 }
@@ -12593,7 +12593,7 @@ RetiredSharedNew: struct {
         detail: true
         no_fix: None
         what: fn(self) -> String { "`Shared.new(…)` is the retired shared-cell constructor." }
-        why: fn(self) -> String { "D-CONC-SHARE1=A gives shared state one construction word, so every shared cell reads the same on the page." }
+        why: fn(self) -> String { "Shared state has one construction word, so every shared cell reads the same on the page." }
         fix: fn(self) -> String { "Write `shared <value>` instead of `Shared.new(<value>)`." }
     }
 }

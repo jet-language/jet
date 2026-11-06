@@ -1,4 +1,4 @@
-// D-CONC-CHAN1 / D-CONC-CHAN2 / I9: the JS adapter for the canonical channel
+// I9: the JS adapter for the canonical channel
 // and readiness Prelude. The Web lowering only marshals checked values to these doors.
 
 function jet_web_closed_result() {

@@ -1228,7 +1228,7 @@ jet_cli_native_level: fn(options: BuildOptions) -> Int Never! {
 // built it with. `dead_code: keep` builds every function of those modules;
 // `backtrace` goes to the runtime, and so does a counting `allocator:`
 // policy of the entry package with its cap. The program's first word selects
-// a job of the entry module (D-JOB-SUBCMD1=C): a bare, `.Dev` or `.Ship` job
+// a job of the entry module: a bare, `.Dev` or `.Ship` job
 // in a dev build, a `.Ship` job only in a `release` build, where a stripped
 // job's word reports an unknown command.
 jet_cli_ir_checks: fn(result: JetDriverCompileResult, inputs: JetDriverLoweringInputs, options: BuildOptions) -> IRChecks Never! {
@@ -1247,10 +1247,10 @@ jet_cli_ir_checks: fn(result: JetDriverCompileResult, inputs: JetDriverLoweringI
     checks
 }
 
-// D-GATE-LAW1: a resolved build option value that removes a runtime check
+// A resolved build option value that removes a runtime check
 // (build_options_check_removals) is a `check_removal` gate of the package at
 // `root`, and resolved `link_args` (build_options_link_override) its
-// `link_override` gate (D-TARGET-LINKER1); E3415 when its organization or
+// `link_override` gate; E3415 when its organization or
 // package policy forbids one (pkg_check_project_gate, the writer every
 // external gate shares).
 jet_cli_build_option_gate_refusal: fn(root: String, options: BuildOptions, color: Bool) -[FS, Env]> JetDriverVerbOutput? Never! {
@@ -1369,7 +1369,7 @@ jet_cli_present_shown: fn(result: JetDriverCompileResult, snapshot: JetDriverAut
 // application authority, then write the executable, or under `os: web` the
 // web build (jet_cli_build_web). `sbom` (`--sbom`) also writes the SPDX
 // document next to the executable (jet_cli_build_sbom). Every build ends with
-// the one-line effect summary on stderr (D-EFFBUDGET1), which `quiet` and the
+// the one-line effect summary on stderr, which `quiet` and the
 // `json` channel leave out.
 jet_cli_build_result: fn(file: String, name: String, source: String, color: Bool, options: BuildOptions, invocation: JetCLIInvocationAuthority?, json: Bool, sbom: Bool, quiet: Bool, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS, Exec, Time.Wait]> JetDriverVerbOutput Never! {
     // Only the errors are presented (jet_cli_present_shown).
@@ -1398,7 +1398,7 @@ jet_cli_build_result: fn(file: String, name: String, source: String, color: Bool
     built
 }
 
-// `jet build --sbom` (D-SUPPLY1): the SPDX 2.3 document of the build's
+// `jet build --sbom`: the SPDX 2.3 document of the build's
 // package and its locked dependencies (the project's `.jet/lock`; none for a
 // loose file), written next to `binary` as `<name>.spdx`; `quiet` drops the
 // `sbom: <path>` confirmation.

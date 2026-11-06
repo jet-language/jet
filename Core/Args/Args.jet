@@ -463,7 +463,7 @@ count_flag: fn(tree: Dyn, key: String) -> Int Never! {
 
 wants_help: fn(tree: Dyn) -> Bool Never! { get_bool(tree, "help") || has(tree, "h") }
 
-// D-SHAPE-CLI1 / D-CLI-POS1 / D-CLI-FIELD-MARKERS1 / D-CLI-GLOBAL1: the typed
+// The typed
 // `run: fn(args: T)` entry. For a `#CLI` struct `T` the compiler generates
 // `__jet_cli_run` (JetSema Registration/CliEntry.jet). When `T` declares no
 // commands the compiler writes a parser for exactly the inputs of `T`: help
@@ -472,7 +472,7 @@ wants_help: fn(tree: Dyn) -> Bool Never! { get_bool(tree, "help") || has(tree, "
 // with commands writes its inputs and commands as one data table and the
 // help text of every level as text; the entry hands both to `__cli_spec`
 // and parses the process argument vector with `__cli_parse` (`__cli_parse_float` when an
-// input is a Float). Help, usage and error texts are the D-ARGS1 builder's
+// input is a Float). Help, usage and error texts are the args builder's
 // (`JetArgsSpec::help`, `jet_args_parse_mode`).
 
 // Value kinds of a non-flag input.
@@ -483,7 +483,7 @@ CLI_CHOICE: 3
 CLI_BOOL: 4
 
 // One `--flag` (a presence flag) or `--name VALUE` option. A positional input
-// also fills from bare argv in declaration order (D-CLI-POS1=A). `env` is the
+// also fills from bare argv in declaration order. `env` is the
 // value of the input's environment variable when it names one that is set.
 CLIInput: struct {
     name: String
@@ -940,7 +940,7 @@ cli_parse_level: fn(spec: CLISpec, level: CLILevel, argv: [String], start: Int, 
         out.positionals.push(arg.copy())
         i += 1
     }
-    // D-CLI-POS1=A named-wins: a named value satisfies its positional slot and
+    // Named wins: a named value satisfies its positional slot and
     // consumes one bare value without shifting later positionals.
     bare := 0
     missing := [String]{}
@@ -1104,7 +1104,7 @@ __cli_missing: fn(names: [String]) -> String Never! {
     "missing required argument{plural}: {names.join(", ")}"
 }
 
-// D-ARGS1: the `args.spec()` builder (Rust `JetArgsSpec`). A spec keeps its
+// The `args.spec()` builder (Rust `JetArgsSpec`). A spec keeps its
 // nested command specs in one list of levels: level 0 is the spec itself and
 // a command entry names the level of its own spec. The compiler lowers each
 // checked `ArgsSpec` / `ParsedArgs` method to the `__args_*` / `__parsed_*`
@@ -1546,7 +1546,7 @@ args_parse_level: fn(spec: ArgsSpec, at: Int, argv: [String], start: Int, out: &
         out.positionals.push(arg.copy())
         i += 1
     }
-    // D-CLI-POS1=A named-wins: a named value satisfies its positional slot and
+    // Named wins: a named value satisfies its positional slot and
     // consumes one bare value without shifting later positionals.
     bare := 0
     missing := [String]{}

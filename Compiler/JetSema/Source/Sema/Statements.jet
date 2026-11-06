@@ -559,7 +559,7 @@ sema_stmt_has_structural_control_flow: fn(statement: Stmt) -> Bool Never! {
 
 // Rust check_block_inner's value-tail lints for a value block: L0513 when a
 // fallback-free arm table of direct returns is followed by a default return,
-// and L0530 (D-TAIL-RETURN1) when the last line is `return value`, which only
+// and L0530 when the last line is `return value`, which only
 // repeats the implicit return. A last-line table hands its arms the value, and
 // a last-line `#Unsafe` region its body.
 sema_stmt_value_block_tail_lints: fn(statements: [Stmt], diagnostics: &[Diagnostic]) {
@@ -919,7 +919,7 @@ sema_stmt_check_unit_if_parts: fn(condition: Expr, then_body: [Stmt], then_value
     // E1403: each level of the chain is one source
     // nesting level, as an `if` expression is in the Rust checker.
     if !sema_enter_source_nesting(context, span, diagnostics) -> return SemaStatementResult{value: [TStmt]{}, complete: false}
-    // D-TYPESWITCH1: `if T == Int { … }` is the one-arm type test, checked
+    // `if T == Int { … }` is the one-arm type test, checked
     // as a type-table arm: its body reads `T` as the named type.
     type_param: sema_expression_type_table_param(condition, environment, scopes)
     type_target := Type?{None}
@@ -1036,7 +1036,7 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
         .Ident(name, _, _) -> name == "__jet_multi_head_subject"
         else -> false
     }
-    // D-TYPESWITCH1: `if T == { Int -> … else -> … }` over a type parameter
+    // `if T == { Int -> … else -> … }` over a type parameter
     // is a type table (sema_stmt_type_switch_param).
     type_param := String?{None}
     if !(subject_is_true || multi_head) -> type_param = sema_stmt_type_switch_param(subject, environment, scopes)
@@ -1210,7 +1210,7 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
     loop site in arm_found -> sema_ownership_note_share_found(state, site)
     loop site in else_path.share_found -> sema_ownership_note_share_found(state, site)
     sema_scope_join_hardware_paths(scopes, before_hardware, hardware_merged, else_hardware, true)
-    // D-TYPESWITCH1: types are an open set, so a type table ends in `else`.
+    // Types are an open set, so a type table ends in `else`.
     if type_param != None && else_body == None {
         diagnostics.push(sema_error("E0003", span, "a type table needs an `else` arm", "types are an open set, so no list of type arms covers every `{type_param ?? ""}`", "add `else -> {{ ... }}` after the last arm"))
         return SemaStatementResult{value: [TStmt]{}, complete: false}
@@ -1257,7 +1257,7 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
     SemaStatementResult{value: sema_stmt_switch_chain(conditions, branches, arms, else_result, span) ?? [TStmt]{}, complete: true}
 }
 
-// D-TYPESWITCH1: the subject of `if T == { … }` when it names a type
+// The subject of `if T == { … }` when it names a type
 // parameter of the function being checked that no value binding shadows.
 sema_stmt_type_switch_param: fn(subject: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> String? {
     if subject == {
@@ -3075,7 +3075,7 @@ sema_stmt_record_binding_views: fn(binding: Binding, init_ty: Type, scopes: Sema
     // `_: view_call(..)` discards the value at once: no local holds the
     // view, so there is no loan to record (and no binding to carry it).
     if binding.name == "_" -> return true
-    // D-ALLOC2 (Rust `check_binding` arena_alloc_source): `x: arena.alloc(v)`
+    // `x: arena.alloc(v)`
     // makes `x` a scope-bound view into `arena`; a reset invalidates it
     // (E0632) and it may not leave the region (E0631).
     if sema_ownership_is_allocator_view(Val(init_ty)) && binding.init == .MethodCall(arena, method, _, _, _, _, _) && method == "alloc" {
@@ -4507,7 +4507,7 @@ sema_stmt_check_destructure: fn(binding: Binding, pattern: BindPattern, environm
         }
         .Tuple(elements, pattern_span) -> {
             span = pattern_span
-            // D-COMPUTE-VJP1=A (syntax-decisions.md:6953-6954): a `VJPRun`
+            // A `VJPRun`
             // destructures positionally as `(value, pull)`; it is the one
             // carrier the S74 member-name law (syntax-decisions.md:982) exempts.
             positional := false
@@ -4591,8 +4591,8 @@ sema_stmt_check_destructure: fn(binding: Binding, pattern: BindPattern, environm
     }
 }
 
-// The ordered `(value, pull)` members a `VJPRun<G>` destructures into
-// (D-COMPUTE-VJP1=A), typed by the run's field rows.
+// The ordered `(value, pull)` members a `VJPRun<G>` destructures into,
+// typed by the run's field rows.
 sema_stmt_vjp_run_positional_fields: fn(gradient: Type) -> [TypeTupleField] {
     members: [String]{"value", "pull"}
     fields := [TypeTupleField]{}
@@ -4675,7 +4675,7 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
     }
     if binding.name == "err" -> diagnostics.push(sema_err_shadow_lint(binding.name_span))
     if sema_ownership_report_lending_view_escape(binding.init, "be stored in a binding", scopes, context, diagnostics) -> return None
-    // D-ALLOC2 (Rust `check_binding`): `y: x` would move an arena view to a
+    // `y: x` would move an arena view to a
     // new, possibly longer-lived binding.
     _ := sema_ownership_report_arena_view_escape(state, binding.init, "be stored in another binding", scopes, diagnostics)
     if binding.uninit -> return sema_stmt_check_uninit_binding(binding, environment, program, scopes, state, context, diagnostics)
@@ -4815,7 +4815,7 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
             diagnostics.push(sema_lint("L0531", binding.name_span, row.what, row.why, row.fix))
         }
     }
-    // D-DECIMAL1 (Rust check_binding, @ 6083377777): a money-like binding whose
+    // A money-like binding whose
     // final type is `Float`.
     if sema_checked_type_is_float(init.ty) && sema_checked_money_like_name(binding.name) {
         diagnostics.push(sema_lint("L0504", binding.name_span, "binding `{binding.name}` looks like money but has type `Float`", "floating-point money loses cents on common values like `0.1 + 0.2`", "use `Decimal` for exact money: `price: Decimal := Decimal(\"9.99\")`"))
@@ -5038,7 +5038,7 @@ sema_stmt_track_origin: fn(binding: Binding, environment: SemaScopeEnvironment, 
     })
 }
 
-// L0517 (D-PATH-CONTAINMENT1=A): `name: path.normalize().to_string()`
+// L0517: `name: path.normalize().to_string()`
 // binds the text of a typed normalized Path, so a string-prefix containment
 // check written over two such names is reported (sema_expr_lint_path_prefix).
 sema_stmt_note_normalized_path_text: fn(binding: Binding, init: TExpr, scopes: &SemaScopeTable) Never! {
@@ -5148,8 +5148,8 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
     if sema_ownership_reject_frozen_write(state, Expr.Ident{name: name, span: name_span, id: AST_NODE_GENERATED}, "be assigned", name_span, scopes, diagnostics) -> return None
     // Rust `is_global_mutable_binding`: a module-level `name := …` is the one
     // module-level write target; it writes the binding's runtime storage cell.
-    // A function writes it only when it is `#Persist` or inside `#Unsafe`
-    // (D-MODULE-WRITE1=A): every task sees module state, and two plain
+    // A function writes it only when it is `#Persist` or inside `#Unsafe`:
+    // every task sees module state, and two plain
     // writes at once can lose one.
     if binding.symbol.kind == SymbolKind.Constant {
         if sema_stmt_module_storage_binding(environment, program, binding.symbol.id) == .Val(persists) {
@@ -5332,7 +5332,7 @@ sema_stmt_compound_widens: fn(value: TExpr, target: Type) -> Bool {
 // field, or index read, and a typed literal with a written numeric head
 // (`F32{1.5}` into a `Float` parameter), has its own type whatever the hint,
 // so it checks without one and `sema_stmt_numeric_slot_value` fits it into
-// the slot (D-NUMWIDEN-CROSS1=E).
+// the slot.
 sema_stmt_numeric_slot_self_typed: fn(expr: Expr, required: Type) -> Bool Never! {
     if !sema_expr_is_numeric(required) -> return false
     if expr == {
@@ -6045,7 +6045,7 @@ sema_stmt_check_scope_member: fn(name: String, args: [Expr], args_span: Span?, b
         if !dsl_args_valid || !nested.complete -> return None
         return Val(TStmt.Region{body: nested.value, span: span})
     }
-    // Rust `#Arithmetic(mode) { … }` (D-WRAP-SCOPE1=A): one lexical
+    // Rust `#Arithmetic(mode) { … }`: one lexical
     // fixed-width arithmetic mode over the block, read by the operator checks
     // as `context.arithmetic_policy`. An argument that names no mode is the
     // block application's E0930, reported where every marked statement binds
@@ -6272,7 +6272,7 @@ sema_stmt_check_projected_assignment: fn(target: LValue, op: BinOp?, op_span: Sp
             }
         }
     }
-    // D-SWIZZLE1 write: `v.yx = value` on a Core vector or swizzleable lane
+    // Swizzle write: `v.yx = value` on a Core vector or swizzleable lane
     // type is the declaration's own `__swizzle_setN(lanes…, value)` on the
     // written place; `v.xy += value` writes `v.xy + value`.
     if target == .Field(swizzle_base, member, swizzle_span) && sema_stmt_swizzle_member(member) {
@@ -6953,7 +6953,7 @@ sema_stmt_check_return_value: fn(value: Expr, return_type: Type?, environment: S
     checked
 }
 
-// L0533 (D-TAIL-CALL1=A): a returned call of a function of this module is a
+// L0533: a returned call of a function of this module is a
 // tail call, which reuses the caller's frame (JetIR TailCalls.jet). A value
 // with a Close cleanup that is still open in the function (a live owner, or
 // one a `defer close` takes at scope exit) closes after the call returns, so
@@ -7016,7 +7016,7 @@ sema_stmt_check_returned_value: fn(value: Expr, return_type: Type?, environment:
         }
         return None
     }
-    // D-ALLOC2 (Rust `check_return`): a returned arena view would outlive the
+    // A returned arena view would outlive the
     // arena, which drops at scope end.
     if sema_ownership_report_arena_view_escape(state, value, "be returned", scopes, diagnostics) -> return None
     // (Rust `check_return`): a bare range place is a read
@@ -8432,7 +8432,7 @@ sema_stmt_context_allocator_type: fn(ty: Type) -> Bool Never! {
 // reports and everything it did to the scope, the context and the ownership
 // state are rolled back). False while the arm is unselected or incomplete.
 sema_stmt_check_prep_if: fn(cond: Expr, cond_span: Span, then_body: [Stmt], else_body: [Stmt]?, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int, output: &[TStmt]) -> Bool {
-    // D-TYPESWITCH1: `comptime if T == Int { … }` is the one-arm type test,
+    // `comptime if T == Int { … }` is the one-arm type test,
     // which already keeps its arm only in the `Int` instance.
     if sema_expression_type_table_param(cond, environment, scopes) != None {
         arm: SwitchArm{cond: cond, body: then_body, span: cond_span}
@@ -8576,7 +8576,7 @@ sema_stmt_check_prep_type_table: fn(subject: Expr, arms: [SwitchArm], else_body:
 // target. A `$build.settings.<key>` dispatch folds against the declared
 // setting's value (sema_stmt_check_setting_switch).
 sema_stmt_check_prep_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int, output: &[TStmt]) -> Bool {
-    // D-TYPESWITCH1: `comptime if T == { … }` over a type parameter is the
+    // `comptime if T == { … }` over a type parameter is the
     // type table, which already keeps one arm per instance.
     if sema_stmt_type_switch_param(subject, environment, scopes) != None -> return sema_stmt_check_prep_type_table(subject, arms, else_body, span, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth, output)
     subject_span: expr_span(subject)
@@ -8839,7 +8839,7 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
         }
         .ScopeMember(name, _, args, args_span, body, dsl, _, span) -> {
             checked := sema_stmt_check_scope_member(name, args, args_span, body, dsl, span, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth)
-            // D-DSLBLOCK1 (Rust `check_dsl_body`): a checked text block's
+            // A checked text block's
             // name, site and header were validated by the scope-member pass
             // (ScopeMembers.jet, E0927/E0355/E0617); its body is ordinary
             // checked Jet statements.

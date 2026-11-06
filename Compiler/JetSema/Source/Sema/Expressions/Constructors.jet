@@ -2104,7 +2104,7 @@ sema_expression_typed_literal_distinct_mismatch: fn(head: Type, value: TExpr, en
     true
 }
 
-// D-DOTCTOR3=A / D-RANGETYPE1: an untyped numeric literal body elaborates
+// An untyped numeric literal body elaborates
 // against a distinct head, so `UserID{42}` is the base conversion
 // `UserID.from_int(42)` and a range type checks the literal (E0135). A typed
 // value body (`CustomerID{n}`) keeps the E0753 mismatch.
@@ -2325,7 +2325,7 @@ sema_expression_typed_literal_float_to_integer: fn(head: Type, offered: Type, sp
 
 // Integer heads own an explicit conversion, including narrowing fixed carriers.
 // A changed result annotation alone cannot change the value's representation.
-// A `Float` head widens an `F32` value (D-NUMWIDEN-CROSS1=E).
+// A `Float` head widens an `F32` value.
 sema_expression_typed_literal_fixed_conversion: fn(source: Type, head: Type) -> Bool {
     if source == .IntN(_, _) {
         if head == Type.Int -> return true

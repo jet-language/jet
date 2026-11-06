@@ -1,4 +1,4 @@
-// D-DOMGEN1=A (c123 M2): first-party DOM/runtime shim for generated web JS.
+// First-party DOM/runtime shim for generated web JS.
 // Generated `app.js` imports these primitives; the loader wires WASM exports.
 
 export function print(...values) {
@@ -63,7 +63,7 @@ export function targetBindingError(expected, actual, cause) {
   );
 }
 
-// D-FAIL-EDGE1=A: every browser-visible failure keeps the report frame from
+// Every browser-visible failure keeps the report frame from
 // the edge object. The overlay uses textContent so report punctuation and
 // source lines are not interpreted as markup.
 export function showRuntimeError(error) {
@@ -151,7 +151,7 @@ function jetErrorPageNode(tag, text, className) {
   return node;
 }
 
-// D-FAIL-EDGE1=A: the browser consumes the same `jet.err/v1` projection as
+// The browser consumes the same `jet.err/v1` projection as
 // other hosts. Every dynamic field uses textContent; links are scheme-limited
 // before they become attributes, so report content cannot become markup/script.
 export function showErrorPage(error) {
@@ -263,7 +263,7 @@ export function raiseRuntimeError(error) {
   throw error;
 }
 
-// D-FAIL-EDGE1=A: Wasm exposes one host-readable JSON value. The host copies
+// Wasm exposes one host-readable JSON value. The host copies
 // it before clearing the slot; no JS runtime target guess chooses the edge.
 export function takeWasmError(wasm) {
   const length = Number(wasm?.jet_wasm_error_len?.() ?? 0);
@@ -288,7 +288,7 @@ export function takeWasmError(wasm) {
   }
 }
 
-// D-WEB-SWAP1=A: the page is the only producer of live DOM state. The host
+// The page is the only producer of live DOM state. The host
 // receives typed facts and a compiler-published module registry; it never
 // manufactures an empty web-v1 module or copies arbitrary page objects.
 const jetWebModules = new Map();
@@ -322,7 +322,7 @@ export function registerWebState(kind, key, typeFingerprint, value, identity = "
     value,
   });
 }
-// D-DX-LIVE1: persist slots cross the browser boundary as raw facts. The host
+// Persist slots cross the browser boundary as raw facts. The host
 // applies the shared Observe policy after decoding; this projection does not
 // assign disposition/reason or redact the rendered payload.
 export function publishLiveValueUpdate(key, typeIdentity, rendered) {
@@ -439,7 +439,7 @@ function jetNum(value) {
   return typeof value === "bigint" ? Number(value) : value;
 }
 
-// D-DOMGEN1=A (Phase 7 extension): when a real `document` is available (the
+// When a real `document` is available (the
 // generated app is running in a browser, not under `node`'s golden/roundtrip
 // tests), the DOM backend also mounts real elements under a fixed-id
 // container so `jet build --target web` output is an actually-viewable page,
@@ -458,7 +458,7 @@ function jetDomContainer() {
   return el;
 }
 
-// D-DX-WEBPENDING1 / cards #2427/#2478: generated route facts are the only
+// Cards #2427/#2478: generated route facts are the only
 // source for boundary attachment.  The DOM host projects their nested
 // `render_facts` without deriving a mode or copying a second route table.
 function jetWebRouteFacts(route) {
@@ -606,7 +606,7 @@ if (typeof globalThis !== "undefined") {
   });
 }
 
-// D-DX-ROUTER1 / D-WEBAPP1: the browser consumes the sema-owned App graph and
+// The browser consumes the sema-owned App graph and
 // the native server's HTML/data response.  It never matches a route, decodes a
 // typed parameter, or owns a loader cache in JavaScript.  Navigation is a
 // transport adapter around the one checked server graph; the graph remains the
@@ -1358,7 +1358,7 @@ if (typeof globalThis !== "undefined") {
   globalThis.__jetBootstrapWebApp = bootstrapWebApp;
 }
 
-// D-DX-SUITE1=C: browser adapters consume the canonical Web* state/facts
+// Browser adapters consume the canonical Web* state/facts
 // emitted by the checked Prelude.  They do not sort, cache, validate, retry,
 // or decode application values; those policies stay in the shared App/Observe
 // kernels.  Native form submission remains the default.
@@ -1744,7 +1744,7 @@ if (typeof globalThis !== "undefined") {
   globalThis.__jetSubscribeWebForm = subscribeWebForm;
 }
 
-// D-UISHOWCASE1 (c134 Phase 8): stable per-node DOM identity without adding any
+// Stable per-node DOM identity without adding any
 // argument to the Jet-level `ui.null_backend()` call (I7/I8 — no new language
 // surface for what's purely a codegen bookkeeping concern). Every exported
 // top-level `#JS` function's generated body is wrapped in
@@ -1768,8 +1768,8 @@ let jetDomScopeCounter = 0;
 let jetDomScopeDepth = 0;
 const jetDomBoxRegistry = new Map();
 let jetDomTouchedBackends = new Set();
-// D-UI-EVT-DISP1=E: O(1) click slots keyed by stable node identity
-// (D-UI-NODE-ID1=C: author key if present, else render path).
+// O(1) click slots keyed by stable node identity
+// (author key if present, else render path).
 const jetUiClickSlots = new Map();
 
 export function jetUiDispatch(identity) {
@@ -1862,7 +1862,7 @@ export function layout(backend, node, frame) {
 export const DEFAULT_MOUNT_COLS = 80;
 export const DEFAULT_MOUNT_ROWS = 24;
 
-/** D-UI-MOUNT1=A: measure → layout → paint (optional constraint; default 80×24). */
+/** Measure → layout → paint (optional constraint; default 80×24). */
 export function mount(backend, node, constraint) {
   const bounds = constraint ?? { minWidth: 0, minHeight: 0, maxWidth: DEFAULT_MOUNT_COLS, maxHeight: DEFAULT_MOUNT_ROWS };
   backend.commands = [];
@@ -1871,7 +1871,7 @@ export function mount(backend, node, constraint) {
   paint(backend, node);
 }
 
-// D-STYLESHAPE1=A wiring: pick readable text color (WCAG-style relative
+// Pick readable text color (WCAG-style relative
 // luminance threshold) so a dark fill gets light text and vice versa,
 // instead of hardcoding one text color regardless of the node's fill.
 function jetReadableTextColor(hex) {
@@ -2070,7 +2070,7 @@ export function paint(backend, node) {
       });
       return;
     }
-    // D-UI-NODE-ID1=C: author key overrides render path.
+    // Author key overrides render path.
     const identity = current.key != null && String(current.key) !== ""
       ? `key:${current.key}`
       : path;
@@ -2133,7 +2133,7 @@ export function paint(backend, node) {
     }
     if (tag === "input") jetUiWireIme(box, identity, jetUiImeEnabled(current.ime));
     jetUiWireDrop(box, identity, current.onDrop);
-    // D-UI-EVT-DISP1=E / D-UI-EVT-SET1=D: portable click only. Rebind the slot
+    // Portable click only. Rebind the slot
     // each paint so remounts keep one listener (no stacking).
     if (typeof current.onClick === "function") {
       jetUiClickSlots.set(identity, current.onClick);
@@ -2367,7 +2367,7 @@ export function ariaRoleTextInput() { return "textbox"; }
 export function ariaRoleLabel() { return "label"; }
 export function ariaRoleContainer() { return "group"; }
 
-// D-RENDERTGT2=A carried into JS (Phase 7 web/DOM backend): a minimal reactive
+// Carried into JS (Phase 7 web/DOM backend): a minimal reactive
 // runtime mirroring the Rust `JetSignal`/`jet_reactive_effect` prelude. An
 // "observer" is the closure currently (re)running; reading a signal while an
 // observer is active subscribes it; `set` re-runs every subscriber
@@ -2382,7 +2382,7 @@ function jetReactiveActiveObserver() {
     : null;
 }
 
-/** D-RENDERTGT2=A: `reactive.signal(initial)` → a `{ get, set }` cell. */
+/** `reactive.signal(initial)` → a `{ get, set }` cell. */
 export function makeSignal(initial) {
   const cell = { value: initial, subs: new Map() };
   return {
@@ -2416,7 +2416,7 @@ export function signalSet(signal, value) {
 }
 
 /**
- * D-RENDERTGT2=A: `ui.reactive_render(() => { ... })` — run `body` now, and
+ * `ui.reactive_render(() => { ... })` — run `body` now, and
  * again whenever a signal it read changes. Mirrors `jet_reactive_effect`.
  */
 export function makeEffect(body) {
@@ -2535,7 +2535,7 @@ function abiAddU32(total, amount, label) {
   return total + amount;
 }
 
-/** D-JSBIND1=A: marshal ABI-safe values at the JS/WASM boundary.
+/** Marshal ABI-safe values at the JS/WASM boundary.
  *  String params: TextEncoder → jet_abi_string_alloc → packed u64 (ptr<<32)|len.
  *  Int params: decimal UTF-8 ownership transfer on the String rail.
  *  [Int] params: count/length/decimal UTF-8 blob → jet_abi_list_int_alloc.
@@ -2700,7 +2700,7 @@ export function marshalAbi(value, kind, wasm) {
   return value;
 }
 
-/** D-JSBIND1=A: read ABI-safe return values from WASM.
+/** Read ABI-safe return values from WASM.
  *  String returns are packed u64 (ptr<<32)|len; ownership frees via jet_abi_string_free.
  *  Int returns are packed UTF-8 strings and become JS BigInt values.
  *  [Int] returns are decimal UTF-8 blobs; fixed-width lists use BigInt64Array.
@@ -2848,7 +2848,7 @@ async function loadBytes(path) {
   return response.arrayBuffer();
 }
 
-// D-DX-WEBPENDING1 / card #2478: the browser bridge transports typed stream
+// Card #2478: the browser bridge transports typed stream
 // identities only. The lifecycle kernel remains in Rust; this layer performs
 // request framing and returns the host's receipt/projection without retaining
 // a second state machine in JavaScript.
@@ -3019,7 +3019,7 @@ export function webStreamProjection(boundaryId, target) {
     target: projectionTarget,
   });
 }
-// D-DX-SERVERFN1=A: scripted calls and native forms share the App-owned
+// Scripted calls and native forms share the App-owned
 // action endpoint. This adapter does not keep a second RPC registry or copy
 // handler state; it only frames JSON/form requests and exposes transport facts.
 function jetWebServerFnBoundary(boundary, options = {}) {

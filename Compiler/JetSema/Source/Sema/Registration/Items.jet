@@ -2735,13 +2735,13 @@ sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, t
         }
     }
     // Each `#Patchable` struct gains its generated `T.Patch` and
-    // apply/diff/merge methods (Patchable.jet, D-PATCH1).
+    // apply/diff/merge methods (Patchable.jet).
     sema_patchable_expand(module_row.program.items)
     // Each struct's `validate { … }` block becomes its
     // generated `T.validate(value)` before any declaration is registered.
     sema_validate_blocks(module_row.program.items, diagnostics)
     // A `#Layout(U8)` enum gains its `to_int` and `from_int` methods
-    // (EnumNumbers.jet, D-ENUM-BACKING1).
+    // (EnumNumbers.jet).
     sema_enum_numbers_expand(module_row.program.items, diagnostics)
     // Each computed field becomes its generated getter method, which a
     // read of the field calls.
@@ -2756,7 +2756,7 @@ sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, t
     // Explicit and structurally selected codecs
     // enter as ordinary generated `impl T.Encode`/`impl T.Decode` items.
     sema_serde_expand_builtin_items(module_row.program.items)
-    // S62 delegation and D-LIB2 default bodies become written impl methods
+    // S62 delegation and default bodies become written impl methods
     // before registration (TraitImpls.jet).
     sema_trait_impls_synthesize(module_row.program.items)
     // A return type naming a fallible alias is written as its expansion.

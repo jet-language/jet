@@ -136,7 +136,7 @@ parser_layout_marker_fact: fn(state: &JetParserState, markers: [Marker], grouped
                 return None
             }
         }
-        // `#Layout(U8)`: a payload-free enum's integer backing (D-ENUM-BACKING1).
+        // `#Layout(U8)`: a payload-free enum's integer backing.
         // It is no struct layout; sema reads it from the enum's markers.
         if jet_layout_integer_backing_name(variant) {
             if !is_enum {
@@ -267,7 +267,7 @@ parser_layout_grouped_fact: fn(state: &JetParserState, marker: Marker, is_enum: 
 }
 
 // An `align(…)` byte value: a non-negative integer literal, or the build fact
-// `$build.cpu.cache_line` (D-CACHE-CONTROL1=A). Jet has no CPU selection, so
+// `$build.cpu.cache_line`. Jet has no CPU selection, so
 // the fact is the generic cache-line size on every target, as sema reads it.
 parser_layout_align_bytes: fn(argument: Expr) -> Int? {
     if argument == .Int(number, _, _, _, _) && number >= 0 -> return Val(number)

@@ -16,7 +16,7 @@ ETF_VERSION: 131
 ATOM_KEY: "$etf_atom"
 
 /// How records and String-keyed maps are laid out: an ETF map, or a proper
-/// list of `{Key, Value}` 2-tuples. (D-CORE-ETF-CODEC1 calls it `Layout`; Core
+/// list of `{Key, Value}` 2-tuples. (The codec ruling calls it `Layout`; Core
 /// enum names are unique and `core.compiler.lang` owns that one.)
 #Equatable
 TermLayout: enum {
@@ -91,7 +91,7 @@ scalar_count: fn(text: String) -> Int Never! {
     count
 }
 
-/// The one-way JSON view of one standalone ETF term (D-CORE-EETF1).
+/// The one-way JSON view of one standalone ETF term.
 ///
 /// The whole input is one version-131 term (COUNT-ETF-131
 /// `83 74 00 00 00 01 6d 00 00 00 05 "count" 61 02` is `{"count":2}`);
@@ -122,7 +122,7 @@ to_json: fn(bytes: [U8], limits: EncodingLimits{EncodingLimits.safe()}) -> Strin
     Ok(text)
 }
 
-/// A typed value from one standalone ETF term (D-CORE-ETF-CODEC1), through
+/// A typed value from one standalone ETF term, through
 /// the shared `Decode` model:
 /// - integers are exact `Int`s and floats `Float`s; a typed read range-checks
 ///   fixed-width targets;

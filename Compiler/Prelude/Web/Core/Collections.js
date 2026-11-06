@@ -1,4 +1,4 @@
-// D-CORE-EAGER1=A / D-LOOPMAP1=B: web collection adapters use the same eager
+// Web collection adapters use the same eager
 // collection contract as the native Prelude. The web tier supplies only the
 // array marshalling; these functions own the adapter call shape.
 function jet_list_map(xs, f) {
@@ -22,7 +22,7 @@ function jet_view_fold(xs, seed, f) {
   return acc;
 }
 
-// D-FRED1=A: these are only Web marshalling adapters. The compiled Prelude
+// These are only Web marshalling adapters. The compiled Prelude
 // export owns seed, lanes, and tree shape through the shared Compute bridge.
 function jet_list_sum_fixed_f32(xs) {
   const values = xs && xs.__jet_iter ? xs.to_list() : xs;
@@ -33,7 +33,7 @@ function jet_list_sum_fixed_f64(xs) {
   const values = xs && xs.__jet_iter ? xs.to_list() : xs;
   return jet_compute_web_shared_reduce(values, 0, false);
 }
-// D-FRED1=A: scalar-add folds use the same compiled fixed-order reduction
+// Scalar-add folds use the same compiled fixed-order reduction
 // export after placing the seed in lane zero.
 function jet_list_fold_add_fixed_f32(xs, seed) {
   const values = xs && xs.__jet_iter ? xs.to_list() : xs;
@@ -45,7 +45,7 @@ function jet_list_fold_add_fixed_f64(xs, seed) {
   return jet_compute_web_shared_reduce(values, seed, false);
 }
 
-// D-PARCAPTURE1=D / D-FRED1=A: parallel fold retains the stable 64-item
+// Parallel fold retains the stable 64-item
 // chunk order. Each chunk and each adjacent merge goes through the compiled
 // Prelude export, so this adapter does not define a second reduction tree.
 function jet_list_para_fold_add_fixed(xs, seed, f32) {
@@ -563,7 +563,7 @@ function jet_iter_first(view) {
   return view.length === 0 ? jet_option_none() : jet_option_some(view[0]);
 }
 
-// D-ITER-RESUME1=A: one exclusive pull; the same source keeps its remainder.
+// One exclusive pull; the same source keeps its remainder.
 function jet_iter_next(view) {
   if (view && view.__jet_iter) {
     const step = view.next();

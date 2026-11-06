@@ -175,7 +175,7 @@ embedded: module {
 
     // The address is documented and passed by the caller, but host replay must
     // not dereference it. The single unsafe audit writes a stack cell instead;
-    // a target MMIO provider will replace this boundary under D-FOUND-BOARD1.
+    // a target MMIO provider will replace this boundary.
     mmio_replay: fn(_documented_address: Int, value: Int) -> Int {
         cell := 0
         #Unsafe("host replay uses a stack cell for the CMSDK UART0 control register and never dereferences the target address") {
@@ -252,7 +252,7 @@ embedded: module {
         }
     }
 
-    // The bounded handoff is reusable queue policy. D-FOUND-BOARD1 still has
+    // The bounded handoff is reusable queue policy. The board surface still has
     // no vector-table/ISR registration seam, so this function is not claimed
     // to be a hardware interrupt handler.
     interrupt_enqueue: fn(queue: &InterruptQueue, event: Int) -> Bool {
@@ -293,14 +293,14 @@ embedded: module {
     }
 
     // Pin establishes address stability for this read. It does not map memory
-    // for a device and it does not complete a transfer (D-PIN3).
+    // for a device and it does not complete a transfer.
     dma_checksum: fn(buffer: &DmaBuffer) -> Int {
         pinned: mem.pin(buffer)
         return pinned.words[0] + pinned.words[1] + pinned.words[2] + pinned.words[3]
     }
 
     // Host replay uses the same ownership transitions that a target provider
-    // must drive. Source/destination remain unmapped until D-FOUND-BOARD1
+    // must drive. Source/destination remain unmapped until the board surface
     // supplies the target DMA mapping boundary.
     dma_submit: fn(buffer: &DmaBuffer, registers: &RegisterBlock) -> Bool {
         if buffer.owner != 0 || buffer.submitted -> return false
@@ -332,7 +332,7 @@ embedded: module {
     }
 
     dma_mapping_status: fn() -> String {
-        return "D-FOUND-BOARD1: target DMA mapping/provider boundary open"
+        return "target DMA mapping/provider boundary open"
     }
 
     UartRing: struct {
@@ -419,7 +419,7 @@ embedded: module {
     }
 
     control_timing_status: fn() -> String {
-        return "D-FOUND-REALTIME1: deadline comparison is accounting, not WCET proof"
+        return "deadline comparison is accounting, not WCET proof"
     }
 
     SlotState: enum {
@@ -524,12 +524,12 @@ embedded: module {
     }
 
     open_core_gates: fn() -> [String] { [
-        "D-FOUND-BOARD1 (G2): vector-table to bounded ISR provider is not exposed",
-        "D-FOUND-BOARD1 (G3): target DMA mapping and ownership provider is not exposed",
-        "D-FOUND-BOARD1 (G7): target-backed typed MMIO bindings are not exposed",
-        "D-FOUND-REALTIME1 (G4): call-site WCET and hard-deadline proof is not exposed",
-        "D-FOUND-COREAPI1 (G5): persistent flash/authenticated A-B updater is not exposed",
-        "D-FOUND-COREAPI1 (G6): hardware programmer/debug receipt transport is not exposed",
+        "G2: vector-table to bounded ISR provider is not exposed",
+        "G3: target DMA mapping and ownership provider is not exposed",
+        "G7: target-backed typed MMIO bindings are not exposed",
+        "G4: call-site WCET and hard-deadline proof is not exposed",
+        "G5: persistent flash/authenticated A-B updater is not exposed",
+        "G6: hardware programmer/debug receipt transport is not exposed",
         "E3302: thumbv7em-none-eabihf toolchain component is unavailable",
     ] }
 }

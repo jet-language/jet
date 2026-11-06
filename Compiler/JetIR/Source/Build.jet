@@ -243,7 +243,7 @@ IRChecks: struct {
     // fallible allocation past the cap fails (ir_entry_function passes it to
     // jet_rt_program_allocator_configure); None keeps the system heap.
     counting: Int?{None}
-    // D-JOB-SUBCMD1=C: the jobs the program's first word can select ahead of
+    // The jobs the program's first word can select ahead of
     // the entry; the entry function calls each (ir_entry_function).
     jobs: [IRJob]{[IRJob]{}}
     // `--checked-alloc` (the `checked_alloc` build option): the entry calls
@@ -1198,7 +1198,7 @@ IR_STARTUP_FUNCTION_PREFIX: "__startup_"
 // program allocator's cap (jet_rt_program_allocator_configure,
 // IRChecks.counting), computes every constant computed at startup
 // (p.startup, through ir_startup_guard), then runs the job the program's
-// first word names (D-JOB-SUBCMD1=C, jet_rt_entry_job_selected over
+// first word names (jet_rt_entry_job_selected over
 // IRChecks.jobs) or else `entry`, through ir_entry_call.
 ir_entry_function: fn(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuildFailure]) -> Int Never! {
     row: m.functions[entry].result

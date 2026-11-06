@@ -287,7 +287,7 @@ function jet_show(value) {
   return String(value);
 }
 
-// D-FMT-PLAIN1=A / I9: decimal formatting is one Prelude rail on the JS adapter
+// I9: decimal formatting is one Prelude rail on the JS adapter
 // too. BigInt stays exact; Number carries the Float path. Rulings #4588, the
 // same steps as `fixed_half_away`: round `value * 10^places` half away from
 // zero, never print a negative zero, and past the exact Int range round the
@@ -378,7 +378,7 @@ function jet_group_decimal(value) {
   return `${sign}${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",")}${fraction}`;
 }
 
-// D-DISPLAYDBG1 / I9: Web's value formatter mirrors the embedded Prelude
+// I9: Web's value formatter mirrors the embedded Prelude
 // Display and Debug rails. The JS backend supplies only the carrier
 // marshalling; it never falls back to JavaScript's object or array spelling.
 function jet_display(value) {
@@ -466,7 +466,7 @@ function jet_debug(value) {
   return String(value);
 }
 
-// D-FMT-PRETTY1=A: the JS copy of the shared Prelude's canonical Debug layout:
+// The JS copy of the shared Prelude's canonical Debug layout:
 // one item per line with commas between items (rulings #4588). It scans quoted
 // text before treating braces as structure, so a string value cannot change
 // the shape of its own pretty output.
@@ -575,7 +575,7 @@ function jet_split_top_level(value) {
   return items;
 }
 
-// D-CARRIER1: checked effect-carrier projections. The field ID is consumed
+// Checked effect-carrier projections. The field ID is consumed
 // by IR and selects one of these canonical kernels before JavaScript runs.
 function jet_carrier_report(outcome) {
   if (outcome == null || typeof outcome !== "object") {

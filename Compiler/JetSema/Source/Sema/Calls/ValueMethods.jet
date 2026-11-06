@@ -134,7 +134,7 @@ sema_value_method_kind: fn(row: BuiltinMethodRow, method: String, receiver_value
 }
 
 // String's `.matches(pattern)`/`.match(pattern)` call their `core.regex`
-// source helper with the receiver first (D-STR-DECLINE1=C: one regex
+// source helper with the receiver first (one regex
 // engine), typed by the helper's declared result; the loader loads
 // core.regex for either spelling.
 sema_value_method_regex_source: fn(member: String, receiver_value: TExpr, typed: [TExpr], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
@@ -214,7 +214,7 @@ sema_value_method_option_or_err: fn(receiver: Expr, receiver_value: TExpr, inner
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
 
-// D-FAIL-CARRIER1=A: `.partial()` and `.notes()` read the middle states a
+// `.partial()` and `.notes()` read the middle states a
 // failure's report carries under `partial` and `notes`. Each is one in-place
 // test of the outcome, so the outcome is read and never consumed, and a
 // success answers a clean absence or an empty list on every tier. A report

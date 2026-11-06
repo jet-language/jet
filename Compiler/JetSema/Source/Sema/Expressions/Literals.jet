@@ -841,7 +841,7 @@ sema_expression_index: fn(base: Expr, index: Expr, ast_kind: IndexKind, span: Sp
         diagnostics.push(sema_error("E0505", expr_span(index), "Tensor indexes must be Range, not {sema_type_show(checked_index.ty)}", "Tensor brackets select a first-axis window with an inclusive or exclusive Range", "use `tensor[start..end]` or `tensor[window]`"))
         return None
     }
-    // D-SIMD2: `v[i]` on a Core SIMD lane type reads its `lanes` fixed array,
+    // `v[i]` on a Core SIMD lane type reads its `lanes` fixed array,
     // so the read is the fixed-list index; a written literal must name a lane.
     if sema_call_math_lane_name(base_ty) == .Val(lane) {
         lanes: sema_call_math_arity(lane)
@@ -924,7 +924,7 @@ sema_expression_index: fn(base: Expr, index: Expr, ast_kind: IndexKind, span: Sp
                 slot: sema_tree_node(args[0], TExprKind.PoolSlot{pool: checked_base, id: checked_index, mutable: false, field: None, line: location.line, source_line: location.source_line}, span)
                 return sema_expr_expected_owned(slot, expected, environment, program, diagnostics)
             }
-            // D-COLUMNS1: `table[row]` on a Core `Rows<T>` reads (or, as an
+            // `table[row]` on a Core `Rows<T>` reads (or, as an
             // assignment place, writes) the row its own `Row<T>` names: the
             // table's row list indexed by the handle's 4-byte slot.
             if args.len() == 1 && sema_expression_rows_type(name, "Rows", environment, program, scopes) {
@@ -1016,8 +1016,8 @@ sema_expression_index_self_typed: fn(index: Expr) -> Bool Never! {
     }
 }
 
-// Whether the applied type `name` is Core's `kind` (`Rows` or `Row`,
-// D-COLUMNS1) rather than a user type spelled the same: its struct declares
+// Whether the applied type `name` is Core's `kind` (`Rows` or
+// `Row`) rather than a user type spelled the same: its struct declares
 // the reserved field `__rows` (`__slot` for `Row`), which only Core may name.
 sema_expression_rows_type: fn(name: String, kind: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> Bool {
     owner := sema_expression_type_symbol(scopes, environment, program, name)

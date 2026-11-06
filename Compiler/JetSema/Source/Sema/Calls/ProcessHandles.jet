@@ -267,7 +267,7 @@ sema_process_args_spec_method: fn(receiver: Expr, receiver_value: TExpr, method:
     moving_args: if method == "subcommand" -> [Bool]{false, false, true} else -> [Bool]{}
     sema_call_note_route_implicit_takes(sema_process_method_params(args, required, moving_args), args, values, environment, program, scopes, state, context)
     if !sema_process_check_method_ownership(receiver, "ArgsSpec.{method}", args, required, moving_args, receiver_access, span, scopes, state, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    // Rust D-ARGS1 recorded no effect for spec methods: `parse` reads an
+    // Rust recorded no effect for spec methods: `parse` reads an
     // option_env variable inside the parse, without application authority.
     sema_process_finish(receiver_value, operation, values, result, "", "ArgsSpec.{method}", span, expected, environment, program, scopes, context, diagnostics)
 }
@@ -393,7 +393,7 @@ sema_process_spec_method: fn(receiver: Expr, receiver_value: TExpr, method: Stri
     if known_mutating && receiver == .Ident(_, _, _) {
         if !sema_ownership_mark_unmarked_move(state, receiver, scopes, "`ProcessSpec.{method}`", diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    // D-PROCESS-SESSION2=D: the report is the ordinary Core source body
+    // The report is the ordinary Core source body
     // `core.process.__spec_abilities`, typed as the checked TerminalFact set,
     // so every tier runs the same Jet code.
     if method == "abilities" {

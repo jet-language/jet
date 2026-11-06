@@ -1,4 +1,4 @@
-// D-PATCH1: a `#Patchable` struct `T` gains the generated struct `T.Patch`,
+// A `#Patchable` struct `T` gains the generated struct `T.Patch`,
 // every stored field wrapped `?` with default `None` (absent = no change), and
 // the methods `t.apply(patch) -> T`, static `T.diff(new, old) -> T.Patch` (the
 // changed fields of `new`, `None` where equal) and `patch.merge(other) ->
@@ -47,7 +47,7 @@ sema_patchable_expand: fn(items: &[Item]) {
                         patch.name_span = definition.name_span
                         patch.is_pub = definition.is_pub
                         patch.is_package_pub = definition.is_package_pub
-                        // D-PATCH1: `T.Patch` Encode/Decode is deferred, so it
+                        // `T.Patch` Encode/Decode is deferred, so it
                         // takes no package auto-derive default.
                         patch.auto_derive_default = false
                         patch.methods = methods

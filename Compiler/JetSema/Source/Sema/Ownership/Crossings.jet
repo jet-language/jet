@@ -135,7 +135,7 @@ sema_ownership_crossing_named_builtin_problem: fn(nominal: SemaRegistrationNomin
 // The Core handles bound to the thread that made them: the allocators and
 // the browser session handles.
 sema_ownership_crossing_core_confined: fn(module_name: String, name: String, cell_only: Bool) -> SemaSendabilityProblem? {
-    // D-CONC-CROSS1 (Rust `record_fixed_backing`): a Fixed handle is a view
+    // A Fixed handle is a view
     // of the backing it allocates from, which lives in the frame that made it.
     if !cell_only && module_name == "core.mem" && name == "Fixed" -> return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.ViewBorrow))
     if !cell_only && module_name == "core.mem" && (name == "Arena" || name == "Bump" || name == "Pool") {

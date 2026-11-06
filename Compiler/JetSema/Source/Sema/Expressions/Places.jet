@@ -395,7 +395,7 @@ sema_expression_field_checked: fn(base: TExpr, member: String, span: Span, expec
             return sema_expr_expected_owned(value, expected, environment, program, diagnostics)
         }
     }
-    // D-PIN2=A / D-PIN3=A: a field reached through `Pin<T>` resolves against
+    // A field reached through `Pin<T>` resolves against
     // `T`, read or written in the pinned place; the field's own declared type
     // is the mark (a `Pin<U>` field comes back as `Pin<U>`).
     owner_ty: sema_pin_target(base.ty) ?? base.ty.copy()
@@ -482,7 +482,7 @@ sema_expression_field_checked: fn(base: TExpr, member: String, span: Span, expec
     // for prepared-constant paths, which codegen folds to their values.
     reflection: sema_fact_reflection_field(base, member, span, context)
     if reflection == .Val(value) -> return sema_expr_expected(value, expected, environment, program, diagnostics)
-    // D-COMPUTE-VJP1=A (syntax-decisions.md:6950-6954): a `VJPRun` carries
+    // A `VJPRun` carries
     // `.value`, `.pull(seed)` and `.grads` (field_type); any other member falls
     // through to the undeclared-field error below.
     if owner_name == "VJPRun" && owner_args.len() == 1 {
@@ -513,7 +513,7 @@ sema_expression_field_checked: fn(base: TExpr, member: String, span: Span, expec
     None
 }
 
-// The `VJPRun<G>` members over gradient tuple `G` (D-COMPUTE-VJP1=A): `.value`
+// The `VJPRun<G>` members over gradient tuple `G`: `.value`
 // is the primal Tensor, `.pull` maps a seed Tensor to `G`, and `.grads` is the
 // unit-seed pull's `G`.
 sema_expression_vjp_run_field: fn(gradient: Type, member: String) -> Type? {
@@ -665,7 +665,7 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
     Val(value)
 }
 
-// D-COLUMNS1 field view: `table.field` on a Core `Rows<T>` (`ty`) is the
+// Column field view: `table.field` on a Core `Rows<T>` (`ty`) is the
 // field of every row in row order, generated as the collecting loop
 // `loop __row in table.__rows -> __row.field` (the parser's own shape for
 // it). None for any other base or for the table's own field.

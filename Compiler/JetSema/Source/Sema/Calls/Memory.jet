@@ -41,7 +41,7 @@ sema_call_memory_address_of: fn(args: [CallArg], span: Span, expected: Type?, en
     sema_expr_expected_owned(sema_tree_node(Type.Int, TExprKind.RawAddressOf{place: TPlace.Expr{value: value}}, span), expected, environment, program, diagnostics)
 }
 
-// D-PIN1=A: `mem.pin(place) -> Pin<T>` borrows the place in a write window
+// `mem.pin(place) -> Pin<T>` borrows the place in a write window
 // typed `Pin<T>`; it never copies it. Pinning a place that already is a
 // `Pin<T>` keeps that pin (no `Pin<Pin<T>>`). The binding's no-move view
 // fact is recorded with the binding (sema_pin_record_binding).
@@ -164,7 +164,7 @@ sema_call_memory_check_fixed_buffer: fn(argument: CallArg, value: TExpr, environ
         .Ident(_, _, _) -> true
         else -> false
     }
-    // D-CALLSITE-MARK2=A: `over`'s parameter is a write window, so the
+    // `over`'s parameter is a write window, so the
     // buffer's name passed plain is that window.
     direct_write := argument.convention != AccessConvention.Move && direct_expr
     if !fixed_bytes || !direct_write {
@@ -326,7 +326,7 @@ sema_call_memory_allocator_method: fn(receiver: Expr, receiver_value: TExpr, nam
     // Rust `alloc_method_return` records no receiver write: `arena.alloc(v)`
     // reads the allocator handle (only `reset` writes it). On an allocator
     // name that read is no place read (Rust `allocator_view_preserving_receiver`),
-    // so the arena's own views (D-ALLOC2) never meet it; the name's moves were
+    // so the arena's own views never meet it; the name's moves were
     // checked when it was read (sema_ownership_check_root_base_use).
     ownership := if receiver == .Ident(_, _, _) -> sema_ownership_check_allocator_handle_call(state, "{name}.{method}", receiver, [SemaCallParam]{parameter}, updated_args, scopes, span, diagnostics) else -> sema_ownership_check_method_call(state, "{name}.{method}", receiver, AccessConvention.Read, [SemaCallParam]{parameter}, updated_args, scopes, span, diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}

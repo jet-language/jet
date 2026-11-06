@@ -1,6 +1,6 @@
 // `jet registry publish [--force] [--no-sign]` and `jet registry yank
-// <version> [--message <reason>]` (`run_publish`/`run_yank`, D-PKGS4,
-// D-VERSION1=A, c146 D-PKGSIGN1). Publish runs the local pre-publish gate
+// <version> [--message <reason>]` (`run_publish`/`run_yank`,
+// c146). Publish runs the local pre-publish gate
 // (clean tree, `jet check`, `jet test`, the public API SemVer gate), then
 // commits the source artifact, its API snapshot and the index entry to a
 // private checkout of the git registry and pushes it. The registry mutations
@@ -281,7 +281,7 @@ jet_cli_publish: fn(force: Bool, no_sign: Bool, quiet: Bool, color: Bool) -> Jet
                 } else if force {
                     log.err("warning: build has errors — publishing anyway (--force)\n")
                 } else {
-                    log.error("E2104", "`jet build` must pass before publishing (D-PKGS4)")
+                    log.error("E2104", "`jet build` must pass before publishing")
                     log.err(checked.stderr)
                     log.err("\n use `jet registry publish --force` to bypass this gate with a warning banner\n")
                     return log.finish(JET_DRIVER_EXIT_USER_ERROR)
@@ -317,7 +317,7 @@ jet_cli_publish: fn(force: Bool, no_sign: Bool, quiet: Bool, color: Bool) -> Jet
     if !build_ok || !tests_ok {
         if !force -> return log.finish(JET_DRIVER_EXIT_USER_ERROR)
         log.err("warning [--force]: pre-publish gate failed but continuing anyway.\n")
-        log.err("  this publish would be rejected by a registry that enforces D-PKGS4.\n")
+        log.err("  this publish would be rejected by a registry that enforces the pre-publish gate.\n")
     }
 
     // Gate step 3 (E1218): sema's public API rows against the snapshot the
@@ -327,7 +327,7 @@ jet_cli_publish: fn(force: Bool, no_sign: Bool, quiet: Bool, color: Bool) -> Jet
     if !quiet -> log.out("[3/3] checking public API ...")
     public_api: jet_cli_publish_public_api(root, entry, color) ?? JetCLIPublishAPI{rows: [PublicAPIItem]{}, refusal: "the compile stopped before sema produced the package's public API\n"}
     if public_api.refusal != "" {
-        log.error("E2104", "the public API snapshot needs a package that compiles; `jet check` must pass before publishing (D-PKGS4)")
+        log.error("E2104", "the public API snapshot needs a package that compiles; `jet check` must pass before publishing")
         log.err(public_api.refusal)
         return log.finish(JET_DRIVER_EXIT_USER_ERROR)
     }
@@ -336,7 +336,7 @@ jet_cli_publish: fn(force: Bool, no_sign: Bool, quiet: Bool, color: Bool) -> Jet
         log.render(err.diagnostic)
         return log.finish(JET_DRIVER_EXIT_USER_ERROR)
     }
-    // D-VERSION1: a version already in the index, yanked or live, is E1234.
+    // A version already in the index, yanked or live, is E1234.
     if publication_find_published(source_repo, name, version) == {
         .Ok(existing) -> {
             if existing != None {
@@ -396,7 +396,7 @@ jet_cli_publish: fn(force: Bool, no_sign: Bool, quiet: Bool, color: Bool) -> Jet
     }
     repo: checkout.path
     existing_entries: publication_read_entries(repo, name) ?? return jet_cli_publish_checkout_failed(log, checkout, publication_e2607("registry index", "{err}"))
-    // D-VERSION1 on the fresh checkout too: a concurrent publisher may land
+    // The version check runs on the fresh checkout too: a concurrent publisher may land
     // this version between the source-clone check above and this checkout.
     loop published in existing_entries {
         if published.version == version -> return jet_cli_publish_checkout_failed(log, checkout, publication_e1234(name, version))
@@ -464,7 +464,7 @@ jet_cli_publish: fn(force: Bool, no_sign: Bool, quiet: Bool, color: Bool) -> Jet
         }
         return jet_cli_publish_checkout_failed(log, checkout, diagnostic)
     }
-    // D-PKGSIGN-NOSIGN1=A: a keyless first publish has no metadata chain to
+    // A keyless first publish has no metadata chain to
     // refresh; an established registry still fails closed without its root key.
     if !no_sign || jet_cli_publish_has_metadata_chain(repo) {
         metadata: publication_refresh_registry_metadata(repo, registry.name) ?? return jet_cli_publish_checkout_failed(log, checkout, err.diagnostic)
@@ -521,7 +521,7 @@ jet_cli_publish_public_api: fn(root: String, entry: String, color: Bool) -> JetC
     }
 }
 
-// D-VERSION1=A: a yank flips the version's `yanked` flag in place; the line
+// A yank flips the version's `yanked` flag in place; the line
 // stays, so the version stays reserved but leaves new resolution.
 jet_cli_yank: fn(version: String, message: String?, color: Bool) -[FS, Env, Exec, Net, Time, Time.Wait]> JetDriverVerbOutput Never! {
     log := JetCLIPublishLog{stdout: "", stderr: "", color: color}

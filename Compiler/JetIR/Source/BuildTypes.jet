@@ -27,7 +27,7 @@ ir_raw_pointer: fn(ty: Type) -> Bool Never! {
     false
 }
 
-// The pinned type `T` of a `Pin<T>` (D-PIN1=A), spelled bare or as the Core
+// The pinned type `T` of a `Pin<T>`, spelled bare or as the Core
 // nominal `<corelib>/core.mem::Pin`; None for any other type.
 ir_pin_target: fn(ty: Type) -> Type? Never! {
     if ir_untag(ty) == .Apply(name, args) && (name == "Pin" || name == "<corelib>/core.mem::Pin") && args.len() == 1 -> return Val(args[0].copy())
@@ -1567,7 +1567,7 @@ ir_render: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int, mo
             return text
         }
         // A unit value shows its magnitude and unit label, unless its unit
-        // type has its own Display (D-QUANTITY-PRINT1). The value lays out as
+        // type has its own Display. The value lays out as
         // its Float magnitude, so the implementation is found by the checked
         // unit type, not the slot's row.
         if ir_kind_of(m, b, slot) == .Float {
@@ -1893,7 +1893,7 @@ ir_render_nominal: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, s
     if ir_enum_def(m, p, b.f.slot_type[slot]) == .Val(row) {
         if p.types[row].kind == .Enum(variants, methods) {
             if ir_render_hook(methods) -> return ir_fail(b, span, "enum with a show hook")
-            // A union value renders as the member it holds (D-UNIONTYPE1),
+            // A union value renders as the member it holds,
             // as that member renders on its own: never wrapped in its tag.
             held: ir_untag(ty) == .Union(_)
             discriminant: ir_enum_tag_of(m, b, slot)
@@ -2105,7 +2105,7 @@ ir_route_member: fn(op: TBinaryOp) -> String Never! {
 
 // Whether compound assignment `place op= value` checks overflow: as its
 // binary form does (sema_expr_check_binary), for + - * / ** << >>; only a
-// fixed-width integer reads it (D-NUMOPS1: plain arithmetic traps). An
+// fixed-width integer reads it (plain arithmetic traps). An
 // `op=` under an `#Arithmetic` policy never reaches here: sema lowers it to
 // `place = OverflowOpt(...)` (Statements.jet sema_stmt_policy_compound).
 ir_assign_overflow: fn(op: TBinaryOp) -> Bool Never! {

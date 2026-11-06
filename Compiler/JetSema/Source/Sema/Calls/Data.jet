@@ -569,7 +569,7 @@ sema_data_try_query_method: fn(receiver: Expr, receiver_value: TExpr, name: Stri
     SemaMethodSpecialCheck{handled: true, value: value}
 }
 
-// The event-time Stream stages (D-STREAM-EVENTTIME1):
+// The event-time Stream stages:
 // `stream.with_event_time(f)` is `StreamEventTime<T>`, `.key_by(f)` is
 // `KeyedStream<K, T>`, and `.window(width, watermark: lateness, late: .Drop)`
 // is `Stream<Window<K, T>>`. Each stage moves its receiver into its core.data
@@ -808,7 +808,7 @@ sema_call_try_data_method: fn(receiver: Expr, receiver_value: TExpr, method: Str
                 value := sema_tree_node(Type.Int, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.TestSuiteRun, args: [TExpr]{}}, span)
                 return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
             }
-            // `t.suite("name", body)` (D-TEST-SUITE2=A) declares a code suite:
+            // `t.suite("name", body)` declares a code suite:
             // the name is a literal, so `jet test --profile` lists every suite
             // without running code. It is the Core source body
             // `core.testing.__suite_run`, which calls `body` with a `TestRows`
@@ -841,7 +841,7 @@ sema_call_try_data_method: fn(receiver: Expr, receiver_value: TExpr, method: Str
                 value: sema_tree_node(Type.Named{name: "Unit"}, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{sema_value_method_source_arg(checked_name), sema_value_method_source_arg(checked_body)}}, span)
                 return SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, context, diagnostics)}
             }
-            // `t.shard(3, 8)`, `t.results("r.json")`, … (D-TEST-INVOKE1=A): a
+            // `t.shard(3, 8)`, `t.results("r.json")`, …: a
             // `jet test` setting row (TestSettings.jet). The call appends
             // `name<TAB>value` to the plan file TEST_SETTINGS_PLAN_ENV names
             // and does nothing in a run without it; `jet test` checks the value.
@@ -1300,7 +1300,7 @@ sema_data_is_db_decode: fn(target: SemaCallDirectTarget, environment: SemaScopeE
 // `json`/`toml`/`yaml` `to_string<T: Encode>(value)`: the `Encode` bound
 // answers for a generic codec's head, so `Wrap<Plain>` passes it even when
 // `Plain` has no wire form. The applied value is E2411 at the argument
-// (D-SERDE11/12: a non-codable type argument fails at the use site).
+// (a non-codable type argument fails at the use site).
 sema_data_encode_check_value: fn(target: SemaCallDirectTarget, args: [CallArg], checked: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool Never! {
     if target.symbol.name != "to_string" || args.len() != 1 -> return true
     encoder := false

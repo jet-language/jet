@@ -16,7 +16,7 @@ CoveragePackage: struct {
         CoveragePackage{name: name, version: version, reference: reference}
     }
 
-    // Fields in Rust order; a pair-list object keeps it (D-DATATREE-ORDER1).
+    // Fields in Rust order; a pair-list object keeps it.
     to_json_tree: fn(self) -> Dyn Never! {
         fields: [(key: String, value: Dyn)]{
             (key: "name", value: Dyn.Text(self.name.copy())),
@@ -119,8 +119,7 @@ CoverageReport: struct {
 
     // Stable machine-readable report for CI and migration dashboards:
     // compact JSON, fields in schema order. The objects are pair lists,
-    // which keep their order; a `[String: Dyn]` map would sort its keys
-    // (D-DATATREE-ORDER1).
+    // which keep their order; a `[String: Dyn]` map would sort its keys.
     to_json: fn(self) -> String Never! {
         progress_fields: [(key: String, value: Dyn)]{
             (key: "total", value: Dyn.Int(self.nativeization.total)),

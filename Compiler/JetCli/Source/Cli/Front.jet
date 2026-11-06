@@ -901,7 +901,7 @@ jet_cli_doc: fn(jet_argv: [String], args: [String], color: Bool, quiet: Bool, js
 JET_CLI_BUILD_UNPORTED_FLAGS: [String]{
     "--lib", "--verify", "--import",
     "--builder", "--output",
-    // D-BUILD-WATCH1=A (#6322 C4): refused until the shared watch engine
+    // Refused until the shared watch engine
     // drives `jet build`, never a silent single build.
     "--watch",
 }
@@ -955,7 +955,7 @@ jet_cli_profile_name: fn(jet_argv: [String]) -> String Never! {
     profile
 }
 
-// D-SETTING-ORDER1=A (#5005): the build options `command` compiles `file`
+// The build options `command` compiles `file`
 // (whose bytes are `source`) under. Over the command's stock values come the
 // selected profile's fields, then the flags (`--optimize=full`); a package
 // build adds its `build: fn` layer between the two (jet_cli_build_package). A
@@ -1406,7 +1406,7 @@ jet_cli_test_option_error: fn(what: String, color: Bool) -> JetCLIPlan Never! {
 // inside a package) tests through its own `test: fn(t: Test)` when it declares
 // one, as `jet build` runs its `build: fn`. The tested file's doctests run as
 // claims of the same harness (Doctests.jet). Each setting flag writes the
-// flag layer of D-TEST-INVOKE1=A (TestSettingLayers.jet), over a profile's
+// flag layer of the test settings (TestSettingLayers.jet), over a profile's
 // and `test: fn`'s; the result cache and JET_CLI_TEST_UNPORTED_FLAGS are not
 // ported yet.
 jet_cli_test: fn(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, threads: Int?) -[FS, Env, Exec]> JetCLIPlan Never! {
@@ -2177,7 +2177,7 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
         // `jet self toolchain`: read-only pin report.
         "toolchain" -> return jet_cli_self_toolchain(json)
         "init" -> return jet_cli_init(args, color, quiet, json)
-        // D-JPK-TOOLCHAIN1=A (#179): `jet update jet [<channel>]` moves the
+        // `jet update jet [<channel>]` moves the
         // toolchain pin; every other update refreshes dependencies through
         // the engine's package fetch.
         "update" -> {

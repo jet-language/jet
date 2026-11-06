@@ -1,4 +1,4 @@
-// D-TEST-WORLD1=A: Web uses the same scoped deterministic-world contract as
+// Web uses the same scoped deterministic-world contract as
 // native tiers. The world is an explicit mutable capability; host clock reads
 // consult the active scope through __jet_deterministic_world.
 class JetWebDeterministicWorld {

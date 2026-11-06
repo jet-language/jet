@@ -1,4 +1,4 @@
-// D-EVENT1 / D-EVENT2 / D-EVENT-CONTINUE1: Web adapter for the canonical
+// Web adapter for the canonical
 // event Prelude. The representation is JavaScript, but policy and lifecycle
 // semantics stay aligned with JetStd::ReactiveEventWatch.
 let __jet_event_next_id = 1;

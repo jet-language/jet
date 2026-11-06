@@ -267,7 +267,7 @@ round: fn(n: Float) -> Int Never! {
     Int.from_float(whole) ?? panic("bounded rounded Float fits Int")
 }
 to_bits: fn(n: Float) -> Int Never! { core.math.to_bits(n) }
-// `math.to_bits` on F32 (D-FLOATW1): the binary32 bits as a non-negative Int.
+// `math.to_bits` on F32: the binary32 bits as a non-negative Int.
 // Widening to Float is exact, so the binary64 fields repack without rounding:
 // the top 23 fraction bits, the rebiased exponent, and a binary32 subnormal
 // (a binary64 normal below 2^-126) shifted into the fraction.
@@ -1710,7 +1710,7 @@ impl Mat4.Mul(Vec4) {
 }
 
 impl F64x4 {
-    // D-SIMD3: every lane reduction is the scalar left-to-right fold.
+    // Every lane reduction is the scalar left-to-right fold.
     sum: fn(self) -> F64 Never! {
         value := F64{0.0}
         loop i in 0..<4 -> value = value + self.lanes[i]
@@ -1800,7 +1800,7 @@ __f32_swizzle_lane: fn(value: Float) -> F32 Never! {
 
 // The other SIMD lane types follow F64x4: a fixed array of scalar lanes, with
 // every operation the scalar spelling applied lane by lane and every reduction
-// the left-to-right scalar fold (D-SIMD1/D-SIMD2/D-SIMD3). Float `min` and
+// the left-to-right scalar fold. Float `min` and
 // `max` skip NaN lanes like `min_float` and `max_float`; integer `min` and
 // `max` fold from lane 0.
 F32x4: struct {
@@ -1815,7 +1815,7 @@ impl F32x4 {
         if index < 0 || index >= 4 -> core.math.__numeric_stop("lane index {index} out of range for F32x4 (4 lanes)")
         self.lanes[index]
     }
-    // Swizzles (D-SWIZZLE1): two or three lanes read as the Float vector of
+    // Swizzles: two or three lanes read as the Float vector of
     // that width and all four as an F32x4; a write takes the type its read has.
     __swizzle2: fn(self, a: Int, b: Int) -> Vec2 Never! { Vec2.new(Float.from_f32(self.lanes[a]), Float.from_f32(self.lanes[b])) }
     __swizzle3: fn(self, a: Int, b: Int, c: Int) -> Vec3 Never! { Vec3.new(Float.from_f32(self.lanes[a]), Float.from_f32(self.lanes[b]), Float.from_f32(self.lanes[c])) }
@@ -1996,7 +1996,7 @@ impl F64x2 {
         if index < 0 || index >= 2 -> core.math.__numeric_stop("lane index {index} out of range for F64x2 (2 lanes)")
         self.lanes[index]
     }
-    // Swizzles (D-SWIZZLE1): both lanes read and write as an F64x2.
+    // Swizzles: both lanes read and write as an F64x2.
     __swizzle2: fn(self, a: Int, b: Int) -> F64x2 Never! { F64x2.new(self.lanes[a], self.lanes[b]) }
     __swizzle_set1: fn(&self, a: Int, value: F64) Never! { self.lanes[a] = value }
     __swizzle_set2: fn(&self, a: Int, b: Int, value: F64x2) Never! {
@@ -3835,7 +3835,7 @@ impl Fraction.Display {
 impl Complex.Display {
     display: fn(self) -> String { __complex_to_string(self) }
 }
-// Complex has no order (D-TRAIT-OVERLOAD1=A); its arithmetic hooks and its
+// Complex has no order; its arithmetic hooks and its
 // magnitude are source methods like Fraction's and Decimal's.
 impl Complex {
     abs: fn(self) -> Float Never! { __complex_abs(self) }

@@ -141,7 +141,7 @@ sema_function_header_lint_prelude_shadow: fn(function: Func, diagnostics: &[Diag
     diagnostics.push(sema_lint("L0510", function.name_span, "Declaration {function.name} replaces a Core prelude alias", "The readable Core prelude opens this name automatically, and a user declaration wins in its file", "Keep the declaration to accept the shadow, or rename it to use the prelude alias"))
 }
 
-// L2401 (D-NARG1): a public function or method with a positional `Bool`
+// L2401: a public function or method with a positional `Bool`
 // parameter and no default invites transposed `true`/`false` arguments at the
 // call site.
 sema_function_header_lint_positional_bools: fn(function: Func, is_method: Bool, diagnostics: &[Diagnostic]) {
@@ -154,7 +154,7 @@ sema_function_header_lint_positional_bools: fn(function: Func, is_method: Bool, 
     }
 }
 
-// D-MEMO1=A (Rust `memo_bound_from_markers`): the one result-cache
+// The one result-cache
 // configuration every execution tier reads. Without `#Memo` the function is
 // not memoized; `#Memo(bound: none)` is the explicit unbounded store; any
 // other `#Memo` keeps the default bound of 128 entries.
@@ -199,7 +199,7 @@ sema_function_header_memo_target: fn(environment: SemaScopeEnvironment, program:
     None
 }
 
-// D-MEMO1=A (Rust `infer_method_call`): `name.cache()` naming a memoized
+// `name.cache()` naming a memoized
 // function is the read-only `MemoStats` of its result store, resolved
 // before the ordinary receiver lookup.
 sema_function_header_memo_stats: fn(receiver: Expr, method: String, args: [CallArg], method_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {

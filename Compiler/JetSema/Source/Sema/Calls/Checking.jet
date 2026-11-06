@@ -567,7 +567,7 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
             next
         }
         // A bare name a take parameter receives is that parameter's take, as
-        // `name.move()` was (D-CALLSITE-MARK2=A).
+        // `name.move()` was.
         taken_name: args[index].convention == AccessConvention.Move || decision == SemaCallConventionDecision.NeedsImplicitClone
         if parameter.convention == AccessConvention.Move && !sema_copy_site_check_guard_owned(checked_value, environment, program, scopes, state, context, diagnostics, taken_name) -> return None
         // A self-typed read that does not fit reports the generic E0108 at
@@ -646,7 +646,7 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
                 noted_take = true
             }
         }
-        // D-CALLSITE-MARK2=A: any other unmarked name a take parameter
+        // Any other unmarked name a take parameter
         // receives is that parameter's take, as `name.move()` was. It moves out of
         // its owner here, so a later use reports the move into this call.
         if !noted_take && decision == SemaCallConventionDecision.NeedsImplicitClone && binder_refs.len() == 0 && !default_in_owner && !parameter.variadic && !sema_ownership_type_is_copy(value.ty) && !sema_ownership_type_is_copy(required) && !sema_ownership_argument_is_function_item(args[index], scopes) {
@@ -662,7 +662,7 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
         // moves out of its owner (MovePlace, clearing its drop flag) instead
         // of reaching lowering as a bare read that only a last-use proof turns
         // into a move. A plain name noted as the call's implicit take moves the
-        // same way: a call never copies on its own (D-CALLSITE-MARK2). A read
+        // same way: a call never copies on its own. A read
         // parameter or its field has no storage to give up: E0201, never a
         // silent copy. A write parameter's field keeps the refill move the
         // last-use pass proves.
@@ -762,7 +762,7 @@ sema_call_literal_has_nul: fn(value: Expr) -> Bool Never! {
     false
 }
 
-// One registered E2702 bound (D-CRYPTO-DIAG1=A): a parameter of a Core
+// One registered E2702 bound: a parameter of a Core
 // crypto operation and the values the operation accepts there
 // (Core/Crypto/Crypto.jet, Expert.jet return CryptoError outside it).
 // `bytes`: the bound is on a byte list's length, not on an Int.
@@ -905,7 +905,7 @@ sema_crypto_misused_call: fn(source: Expr?, diagnostics: [Diagnostic]) -> Bool N
     false
 }
 
-// D-CRYPTO-DIAG1=A precedence: E2702 is considered only once syntax, types,
+// Precedence: E2702 is considered only once syntax, types,
 // effects and every other check pass, so any other error drops each E2702.
 sema_crypto_misuse_precedence: fn(diagnostics: &[Diagnostic]) Never! {
     misused := false

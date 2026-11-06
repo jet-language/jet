@@ -377,7 +377,7 @@ sema_effect_nondeterministic_core: fn(node: SemaEffectNode, expression: BodyNode
     None
 }
 
-// Rust D-DET1 `assume_deterministic { … }` (Stmt::AssumeDet, det_suppress):
+// Rust `assume_deterministic { … }` (Stmt::AssumeDet, det_suppress):
 // inside a pure body the block suspends the determinism rejections, E3403 and
 // E3401 alike.
 sema_effect_in_assume_det: fn(node: SemaEffectNode, span: Span) -> Bool Never! {
@@ -1285,7 +1285,7 @@ sema_effect_record_fact: fn(nodes: &[SemaEffectNode], node_by_key: NameRows, nod
         nodes[node_index].memory_calls.push(SemaMemoryCall{callee: callee_key, span: fact.span, executions: executions})
     }
     row_known: fact.facts.effect_bound != None
-    // D-EFFDBREAD1: the closed `core.db` table carries its declared leaves
+    // The closed `core.db` table carries its declared leaves
     // (`DB.Read` on queries, `DB.Write` on `execute`, the `DB` root on
     // transaction control) even though its body reaches only intrinsics.
     declared_row: !known_callee || sema_effect_core_db_callee(callee_key)
@@ -1312,7 +1312,7 @@ sema_effect_record_fact: fn(nodes: &[SemaEffectNode], node_by_key: NameRows, nod
     }
 }
 
-// A callee declared in `core.db` (D-EFFDBREAD1). The key alone decides it
+// A callee declared in `core.db`. The key alone decides it
 // (`kind:module:owner:name`): a collecting thread holds only its own node.
 sema_effect_core_db_callee: fn(callee_key: String) -> Bool Never! {
     callee_key.contains(":<corelib>/core.db:") || callee_key.contains(":<corelib>/core.db.")
@@ -2840,7 +2840,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         }
     }
     // A package's every other denial is a compile-time prohibition on its
-    // own functions, exactly as if each wrote `-[!E]>` (D-AUTHORITY-DENYROW1=A);
+    // own functions, exactly as if each wrote `-[!E]>`;
     // memory denials are the facts above.
     loop name in package_denials {
         if sema_effect_memory_fact(name) != None -> next

@@ -603,7 +603,7 @@ jet_driver_function_key_count: fn(functions: [FnBody], key: String) -> Int Never
 
 // jet_driver_default_run_entry over the checked functions: the entry
 // module's `run: fn`, when it takes no parameter, else the generated
-// `__jet_cli_run` of a typed `run: fn(args: T)` (D-SHAPE-CLI1).
+// `__jet_cli_run` of a typed `run: fn(args: T)`.
 jet_driver_default_run_key: fn(load: JetDriverLoadResult, functions: [FnBody]) -> String? Never! {
     key: symbol_id(SymbolKind.Function, load.entry_module_identity, "", "run").key
     typed_key: symbol_id(SymbolKind.Function, load.entry_module_identity, "", "__jet_cli_run").key
@@ -692,7 +692,7 @@ jet_driver_build_facts: fn(load: JetDriverLoadResult, request: JetDriverCompileR
 // Each declared setting's value for `profile`: the effective writer of its
 // chain (jet_driver_setting_writers): its default, then the value the selected
 // `build:` profile gives it, then the value the package's `build: fn`
-// contributed, as the lock records it (D-CONF-SPLIT1: the function's
+// contributed, as the lock records it (the function's
 // environment layer is above the profile's optimization-bundle layer), then
 // a `--set` value.
 jet_driver_build_settings: fn(package: JetDriverPackageInfo, profile: String, contributions: [LockedBuildContribution], overrides: [BuildSettingOverride]) -> [SemaBuildSetting] Never! {
@@ -2755,8 +2755,8 @@ jet_driver_c_export_rows: fn(graph: SemaRegistrationGraph, entry_module_identity
     rows
 }
 
-// One `#Job` function of the entry module that argv can select
-// (D-JOB-SUBCMD1=C): its symbol key, its name (the program word that selects
+// One `#Job` function of the entry module that argv can select:
+// its symbol key, its name (the program word that selects
 // it) and whether it is `#Job(.Ship)`, the only scope a release binary
 // exposes. `.Internal` jobs never reach argv, so they have no row.
 JetDriverJobRow: struct {
@@ -2768,7 +2768,7 @@ JetDriverJobRow: struct {
 // The entry module's argv-selectable jobs in declaration order, read from
 // the registration graph as jet_driver_c_export_rows reads its exports. Only
 // a job without parameters is selectable: typed job arguments
-// (D-CLIFLAG1) are not built.
+// are not built.
 jet_driver_job_rows: fn(graph: SemaRegistrationGraph, entry_module_identity: String) -> [JetDriverJobRow] Never! {
     rows := [JetDriverJobRow]{}
     loop registration_module in graph.modules {
@@ -4113,7 +4113,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
 // open-world call (an unannotated function value, an extern) seeds into
 // `solved` is a ceiling fact (E0743), not a required right, so it never widens
 // the authority the application must hold. The generated typed-CLI entry
-// `__jet_cli_run` (D-SHAPE-CLI1) and the parser it calls, `__jet_cli_parse` of
+// `__jet_cli_run` and the parser it calls, `__jet_cli_parse` of
 // its module (`__jet_cli_parse_<binding>` for `__jet_cli_run_<binding>`;
 // JetSema Registration/CliEntry.jet), read argv and its env fallbacks, print
 // help and exit on a refusal through Core; that parse is the toolchain's, as

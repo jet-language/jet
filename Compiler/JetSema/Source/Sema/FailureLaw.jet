@@ -679,7 +679,7 @@ sema_type_hole: fn(span: Span) -> Diagnostic {
 
 // E0119: a written type name that names nothing. A name that writes a
 // lexicon acronym word-cased (`HttpRequest`) gets E0358 with its spelling.
-// The common guess `Text` points at `String` (D-TEXT-NAMES1=A).
+// The common guess `Text` points at `String`.
 sema_unknown_type_name: fn(name: String, span: Span) -> Diagnostic {
     if name == "Text" -> return sema_error("E0119", span, "there's no type called `Text`", "Jet's text type is `String`", "write `String` instead of `Text`")
     sema_casing_acronym_diagnostic(name, span) ?? sema_error("E0119", span, "there's no type called `{name}`", "the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)", "check the spelling, or define the struct or enum first")

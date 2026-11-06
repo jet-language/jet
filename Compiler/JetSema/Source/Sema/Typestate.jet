@@ -1,11 +1,11 @@
-// The typestate flow check (D-STATE1, D-FACT-FLOW1; A value moves through the
+// The typestate flow check (A value moves through the
 // states its owner declares: `#State(S)` on a method or free function needs its
 // receiver (or first argument) in `S`, and `#Transition(From, To)` needs `From`
 // and leaves `To`. Each body is walked once, statement by statement, with the
 // state of every tracked local. Calling an operation in the wrong state is
 // E0150; an untracked local stays silent. Where two paths meet, a local keeps
 // its state only when both paths agree; otherwise it becomes untracked and
-// L0152 says so. A spawned task is a compiler-owned row (D-CONC-UNIT1): it
+// L0152 says so. A spawned task is a compiler-owned row: it
 // starts `Running` and `join`/`detach` move it to `Joined`/`Detached`.
 //
 // The receiver's type comes from the function's checked body: the type of the

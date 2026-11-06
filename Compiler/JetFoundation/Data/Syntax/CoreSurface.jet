@@ -91,7 +91,7 @@ MARKER_PUBLIC_FILE: "PublicFile"
 /// of the same package and invisible to other packages.
 PRIV_PACKAGE_QUALIFIER: "package"
 
-/// D-DECL-COLON1 immutable binding sigil `name: expr`: every declaration is
+/// The immutable binding sigil `name: expr`: every declaration is
 /// written `name: value` (`limit: 100`, `area: fn(r: Float) -> Float { … }`,
 /// `Point: struct { … }`). This rule retires typed bindings
 /// (`name: Type: expr`); types ride the value (`Type{ … }`) or live on
@@ -324,9 +324,9 @@ SIZED_NUMERIC_TYPES: [String]{
 
 /// (ratified, supersedes): memory model v5 sigils. Two
 /// sigils plus unmarked: unmarked = read (enforced in S2), `&T` = exclusive
-/// write, `&&T` = take (consume; D-MOVE-SIGIL1=A). A deliberate copy is the
+/// write, `&&T` = take (consume). A deliberate copy is the
 /// built-in method `x.copy()` and an early move `x.move()`. Marks live in
-/// signatures (D-CALLSITE-MARK2=A): calls are plain (`buf.append(x)`,
+/// signatures: calls are plain (`buf.append(x)`,
 /// `buf.seal()`, `edit(buf)`); a mark stays only on a write window bound to a
 /// name, a match that writes into its subject, and `task &&name`.
 SIGIL_MOVE: "&&"
@@ -378,7 +378,7 @@ KW_STRUCT: "struct"
 /// S30 (ratified M3): sum-type definition keyword.
 KW_ENUM: "enum"
 
-// Owner ruling 2026-10-29 (#6176), amending D-TYPEALIAS1: a transparent type
+// Owner ruling 2026-10-29 (#6176): a transparent type
 // alias has no keyword. A PascalCase `Name<T>: Type<T>` at file or module
 // scope is the alias; `alias` is an ordinary identifier.
 
@@ -610,7 +610,7 @@ COMPILER_BUILD_FACT_STAMP_TOOLCHAIN: "$build.stamp.toolchain"
 
 COMPILER_BUILD_FACT_STAMP_AT: "$build.stamp.at"
 
-/// D-CACHE-CONTROL1=A: the selected CPU's cache-line size in bytes (an `Int`).
+/// The selected CPU's cache-line size in bytes (an `Int`).
 /// Jet has no CPU selection, so every target is generic and reads 64
 /// (`COMPILER_BUILD_CPU_CACHE_LINE_GENERIC`, Registry/RegistrationFacts.jet).
 COMPILER_BUILD_FACT_CPU_CACHE_LINE: "$build.cpu.cache_line"
@@ -685,7 +685,7 @@ MEM_VOLATILE_READ: "volatile_read"
 /// volatile/MMIO write.
 MEM_VOLATILE_WRITE: "volatile_write"
 
-/// D-CACHE-CONTROL1=A: `mem.stream_store(dst, value)` — `dst = value`
+/// `mem.stream_store(dst, value)` — `dst = value`
 /// written without filling the cache where the target has a non-temporal
 /// store, else an ordinary store. Safe; no `#Unsafe`.
 MEM_STREAM_STORE: "stream_store"

@@ -522,7 +522,7 @@
     selectedOutput: canvasSelectedOutput,
     selectedTarget: canvasSelectedTarget
   };
-  // D-DX-DEVTOOLS-UX1=D / card #2429: Canvas renders the canonical
+  // Card #2429: Canvas renders the canonical
   // BrowserWebAdapter panel/view projection published by Session and the
   // first-party devtools panel catalog. Panel identity, order, availability, and
   // event-to-panel membership are decided once, server-side; this layer

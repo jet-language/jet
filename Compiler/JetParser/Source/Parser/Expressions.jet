@@ -225,7 +225,7 @@ parser_parse_expression_restricted: fn(state: &JetParserState, minimum: Int, dep
         return ParsedExpr{expr: Expr.Unit{span: span, id: parser_node_id(state)}, span: span}
     }
 
-    // D-CALLSITE-MARK2=A: `&place == pattern` is a one-arm match that writes
+    // `&place == pattern` is a one-arm match that writes
     // into its subject (`if &slot == .Val(item) -> item.count += 1`); a `&`
     // that a pattern test does not follow is not a value.
     marked_subject := parser_current_kind(state) == TOKEN_AMP
@@ -1801,7 +1801,7 @@ parser_parse_call_type_args: fn(state: &JetParserState, depth: Int) -> [Type] {
     args
 }
 
-// D-CALLSITE-MARK2=A: a mark in a body stays only where a name holds the
+// A mark in a body stays only where a name holds the
 // access: a write window bound to a name (`edit: &values[2..3]`), a match
 // that writes into its subject (`if &shape == {…}`), and a writing loop
 // source (`loop v in &values`). Those positions parse the `&` here; sema

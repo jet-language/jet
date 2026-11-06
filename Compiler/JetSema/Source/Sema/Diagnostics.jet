@@ -268,7 +268,7 @@ sema_already_defined: fn(name: String, span: Span) -> Diagnostic {
     )
 }
 
-// D-DIAG-CORE-NAME1: a lifted inline-module member is named as written
+// A lifted inline-module member is named as written
 // (`__jet_pricing_dtotal` -> `total`), as its body's own diagnostics are.
 sema_defined_twice: fn(name: String, why: String, span: Span) -> Diagnostic {
     sema_error("E0105", span, "`{sema_inline_member_source_name(name)}` is defined twice", why, "rename or remove one of the definitions")
@@ -305,7 +305,7 @@ sema_unknown_name_in: fn(name: String, span: Span, scopes: SemaScopeTable) -> Di
 
 sema_type_mismatch: fn(required: Type, offered: Type, span: Span) -> Diagnostic {
     if sema_typed_text_mismatch(required, offered, span) == .Val(typed_text) -> return typed_text
-    // A plain value offered to a `T?` slot is a payload mismatch (D-OPT-LIFT1=A).
+    // A plain value offered to a `T?` slot is a payload mismatch.
     if required == .Option(payload) {
         offered_optional: offered == .Option(_)
         if !offered_optional {

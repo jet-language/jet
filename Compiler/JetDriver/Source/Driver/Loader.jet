@@ -3301,18 +3301,18 @@ JetDriverCoreIdentifierDemand: struct {
     math_abs_receiver: Bool
     // A `Regex{…}` checked literal (produced by `core.regex.compile`) or a
     // `.matches(…)`/`.match(…)` receiver call (String's pattern methods run
-    // the `core.regex` engine, D-STR-DECLINE1=C): core.regex loads.
+    // the `core.regex` engine): core.regex loads.
     regex_source: Bool
     // An interpolation selector (`{x:Fixed(3)}`): it lowers to its
     // `Core/Text/Fmt.jet` formatter, so that source module loads.
     format_selector: Bool{false}
-    // A `.suite(…)` receiver call (`t.suite("perf", body)`, D-TEST-SUITE2=A)
+    // A `.suite(…)` receiver call (`t.suite("perf", body)`)
     // runs the `core.testing.__suite_run` source body, and
     // a bare `expect(…)` call (`expect(value).snapshot()`) the `core.testing.snap`
     // one, so core.testing loads.
     test_suite: Bool{false}
-    // A `.with_event_time(…)` receiver call (`stream.with_event_time(f)`,
-    // D-STREAM-EVENTTIME1) and the `.key_by`/`.window` stages after it run
+    // A `.with_event_time(…)` receiver call (`stream.with_event_time(f)`)
+    // and the `.key_by`/`.window` stages after it run
     // their `Core/Data/Data.jet` source stages, so core.data loads.
     stream_event_time: Bool{false}
     // A `#UnitFamily` declaration: its explicit conversions lower to their
@@ -5039,7 +5039,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
     }
     // The unreached rest of each Core module leaves it (CoreReach.jet).
     if reach.enabled -> jet_driver_reach_strip(reach, modules)
-    // D-STRUCT-EDGE1=A: each package's denied edges (E0619) and unused rules (L0619).
+    // Each package's denied edges (E0619) and unused rules (L0619).
     jet_driver_check_import_boundaries(catalog.packages, source_units, modules, resolved_imports, diagnostics)
     if !jet_driver_has_errors(diagnostics) && !jet_driver_bind_package_namespaces(modules, source_units, catalog.packages, request.authorized_sources.roots, request.core_sources, diagnostics, request.compiler_threads) {
         failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)

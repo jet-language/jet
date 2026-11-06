@@ -3311,7 +3311,7 @@ sema_check_registration_module_program: fn(environment: SemaScopeEnvironment, pr
                 .Module(_) -> {}
                 // A `migration` block has no checked body of its own: the
                 // derived decode of its published-schema struct replays it
-                // (Registration/SerdeItems.jet, D-MIGRATE4).
+                // (Registration/SerdeItems.jet).
                 .Migration(_) -> {}
                 // A #Test name is a label string, not an item name: it shares
                 // no namespace with functions or types (#6288), only with the
@@ -3810,9 +3810,9 @@ sema_check_foreign_handle_adapter_key: fn(module_row: SemaRegistrationModule, pr
 // Fenced statements are formatter metadata: sema checks their ordinary
 // expanded statements in `items`, as the Rust checker does. A script body is
 // not one of them: finalization rejects it with E0620/E0621. `#HTML(page)`
-// (html_path) is not one either: it names the web output's companion page
-// (D-HTMLPAIR1), which a native build has no use for. Nor is a web ceiling
-// (`#Target(Wasm|JS)`, D-MARK-TARGET1): the web partition (WebPartition.jet)
+// (html_path) is not one either: it names the web output's companion page,
+// which a native build has no use for. Nor is a web ceiling
+// (`#Target(Wasm|JS)`): the web partition (WebPartition.jet)
 // and the OS-axis check (OSTarget.jet) read it.
 sema_check_unsupported_program_forms: fn(program: Program) -> [String] Never! {
     forms := [String]{}

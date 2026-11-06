@@ -500,7 +500,7 @@ parser_parse_marker: fn(state: &JetParserState) -> Marker {
     Marker{name: parser_value(state, name), negated: negated, name_span: name.span, args: args.args, arg_labels: args.labels, span: parser_cover(hash.span, end), ct: None}
 }
 
-// D-MARK-FORM1=A: a marker writes parentheses exactly when it passes arguments,
+// A marker writes parentheses exactly when it passes arguments,
 // so `#Name()` of a rule that takes arguments is a leftover pair. It is E0999
 // at `(`…`)` with the delete edit, and parsing goes on so `jet fmt` can apply
 // it.
@@ -1059,7 +1059,7 @@ parser_parse_function: fn(state: &JetParserState, modifiers: ParsedItemModifiers
     } else {
         params = parser_parse_param_list(state)
     }
-    // D-COPY-MOVE-SPELL1=A: `x.copy()` and `x.move()` are the compiler's own
+    // `x.copy()` and `x.move()` are the compiler's own
     // copy and take, so a method may not take either name (E0436). A module
     // function keeps it (`files.move(from, to)`).
     if (func_name == "copy" || func_name == "move") && params.len() > 0 && params[0].name == "self" {
@@ -2452,7 +2452,7 @@ parser_parse_type_alias: fn(state: &JetParserState, modifiers: ParsedItemModifie
     TypeAliasDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: parser_value(state, name), name_span: name.span, type_params: type_params.move(), target: target.ty, target_span: target.span, span: parser_cover(name.span, target.span)}
 }
 
-// D-DECL-COLON1=A: at file and module scope an unmarked `name: fn(…)` with no
+// At file and module scope an unmarked `name: fn(…)` with no
 // body names a function type, as `Name: Type` names any other type. The item
 // parse reads it as a function first; a lone E0081 there means the signature
 // had no body, and the same tokens then reparse as the alias.
@@ -2694,7 +2694,7 @@ parser_parse_impl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
         literal_capability -> count - 2
         else -> count - 1
     }
-    // D-IMPLDOT1: a module or package alias (a snake_case segment) binds to
+    // A module or package alias (a snake_case segment) binds to
     // the segment after it, so `impl Local.labels.Named` implements
     // `labels.Named` for `Local`.
     if !literal_capability {

@@ -197,15 +197,15 @@ canonical: fn(value: Dyn) -> String EncodingError! {
 
 /// A bounded pull reader over a consumed file. The source pull engine owns
 /// framing, limits and sticky errors; text already in memory uses `parse` and
-/// `events`. (D-ENCSTREAM-SURFACE1=A) A repeated key in one object is a
-/// sticky `Syntax` error. (D-CORE-JSON-DUP1=A)
+/// `events`. A repeated key in one object is a
+/// sticky `Syntax` error.
 reader: fn(input: &&FileReader, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> JSONReader EncodingError! {
     source: stream.json_reader(input, limits, false) ?? return Err(err)
     Ok(JSONReader{input: source.move()})
 }
 
 /// The duplicate-permitting file reader reports each key occurrence as its
-/// own `Key` event. (D-CORE-JSON-DUP1=A)
+/// own `Key` event.
 reader_allow_duplicates: fn(input: &&FileReader, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> JSONReader EncodingError! {
     source: stream.json_reader(input, limits, true) ?? return Err(err)
     Ok(JSONReader{input: source.move()})

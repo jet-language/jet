@@ -34,7 +34,7 @@ jet_cli_import_output: fn(stdout: String, stderr: String, exit_code: Int) -> Jet
 
 // Rust `usage_error`.
 jet_cli_import_usage_error: fn(what: String, fix: String, json: Bool) -> JetDriverVerbOutput Never! {
-    why: "D-MIGRATE-SRC1 keeps source import arguments explicit"
+    why: "source import arguments stay explicit"
     if json -> return jet_cli_import_output("{jet_cli_status_render_with_reports("import", false, [String]{jet_cli_import_tool_report("E2102", what, why, fix)}, [JetCLIStatusField]{})}\n", "", JET_DRIVER_EXIT_USAGE)
     jet_cli_import_output("", jet_cli_report("E2102", what, why, fix, false), JET_DRIVER_EXIT_USAGE)
 }
@@ -88,7 +88,6 @@ jet_cli_import_report_value: fn(plan: JetCLIImportPlan) -> JetCLIStatusValue Nev
             jet_cli_status_field("source", jet_cli_status_text(todo.source)),
             jet_cli_status_field("source_span", jet_cli_status_text(todo.source)),
             jet_cli_status_field("generated_target", jet_cli_status_text(todo.target)),
-            jet_cli_status_field("provenance", jet_cli_status_text("D-MIGRATE-SRC1")),
             jet_cli_status_field("migration_status", jet_cli_status_text(todo.status)),
         }))
     }
@@ -105,7 +104,6 @@ jet_cli_import_report_value: fn(plan: JetCLIImportPlan) -> JetCLIStatusValue Nev
     })
     jet_cli_status_object([JetCLIStatusField]{
         jet_cli_status_field("schema", jet_cli_status_text("jet.source-import.v1")),
-        jet_cli_status_field("law", jet_cli_status_text("D-MIGRATE-SRC1")),
         jet_cli_status_field("language", jet_cli_status_text(plan.language)),
         jet_cli_status_field("source", jet_cli_status_text(plan.source)),
         jet_cli_status_field("target", jet_cli_status_text(plan.target)),

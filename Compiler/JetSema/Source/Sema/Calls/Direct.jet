@@ -813,7 +813,7 @@ sema_call_check_ambient_assert_eq: fn(call: Call, environment: SemaScopeEnvironm
     SemaDirectSpecialCheck{handled: true, value: Val(stop)}
 }
 
-// `expect(value).snapshot()` (D-TOOL4, D-TESTKIT1) asserts that `value`'s
+// `expect(value).snapshot()` asserts that `value`'s
 // Display text equals the snapshot `__snapshots__/<file>_<line>.snap` beside
 // the test. It is `assert(core.testing.snap(name, "{value}"))` with the name
 // taken from the call site, so the first run writes the snapshot, a mismatch
@@ -913,7 +913,7 @@ sema_call_try_core_direct_record: fn(record: CoreCallRecord, args: [CallArg], ty
     reflect := sema_call_try_reflect_core_call(record, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if reflect.handled -> return reflect
 
-    // D-COMPUTE-AUTODIFF1=D: every `core.compute` call is recorded before any
+    // Every `core.compute` call is recorded before any
     // route returns, so a source-owned member stays visible to the autodiff
     // trace check exactly like a transform.
     _ := sema_compute_record_core_call(record, span, context)
@@ -1539,7 +1539,7 @@ sema_call_direct_rejected_propagation: fn(candidate: SemaCallDirectTarget, call:
     sema_check_context_rollback(context, mark)
 }
 
-// D-MEMPROVENANCE3=A (Rust `check_param_view_from_requirements`): a
+// A
 // parameter `word: View<str> from corpus` takes only an argument whose view
 // owners stay inside the places of the arguments passed for the named sibling
 // parameters (E2305). `slots` maps each written argument to its parameter.

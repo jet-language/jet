@@ -1,4 +1,4 @@
-// The built-in math value types no Core declaration names (and the D-LINALG1
+// The built-in math value types no Core declaration names (and the linear-algebra
 // arms): the `[T#N]` `to_array` bridge, the vector and matrix products, and the
 // `splat` / `from_array` statics. A math type Core declares (every SIMD lane
 // type, `Vec3`) keeps its own source methods; a lane `v[i]` reads its `lanes`
@@ -82,7 +82,7 @@ sema_call_math_reduce_error: fn(span: Span, what: String, why: String, fix: Stri
     sema_error("E2510", span, what, why, fix)
 }
 
-// D-REDUCE-VALUE1: `v.reduce(.Op)` on a SIMD lane takes one Core `ReduceOp`
+// `v.reduce(.Op)` on a SIMD lane takes one Core `ReduceOp`
 // value. A written value that names no `ReduceOp` variant is E2510 before the
 // Core `reduce` method checks the call; true when it was.
 sema_call_math_lane_reduce_rejected: fn(receiver: Type, method: String, args: [CallArg], diagnostics: &[Diagnostic]) -> Bool Never! {

@@ -470,7 +470,7 @@ sema_expression_call_expected: fn(value: TExpr, expected: Type?, environment: Se
             offered: sema_expr_expected_type(success, environment, program)
             compatible: sema_expr_expected_assignable(required, offered, environment, program) ?? return None
             if !compatible {
-                // D-OPT-LIFT1: a `T` success fills a `T?` slot; the
+                // A `T` success fills a `T?` slot; the
                 // propagated payload is lifted by `sema_expression_auto_propagate`.
                 if sema_expr_optional_lift_type(required, offered, environment, program) == .Val(_) -> return Val(value)
                 diagnostics.push(sema_type_mismatch(required, offered, value.span))
@@ -2424,7 +2424,7 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
     sema_expr_expected(value, expected, environment, program, diagnostics)
 }
 
-// D-TYPESWITCH1: `if T == …` in value position, where `T` is a type
+// `if T == …` in value position, where `T` is a type
 // parameter (sema_stmt_type_switch_param).
 sema_expression_type_table_param: fn(condition: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> String? {
     if condition == {
@@ -2436,7 +2436,7 @@ sema_expression_type_table_param: fn(condition: Expr, environment: SemaScopeEnvi
     None
 }
 
-// D-TYPESWITCH1: a type table in value position. The parser lowers
+// A type table in value position. The parser lowers
 // `if T == { Int -> a  else -> b }` to `if T == Int` levels that share the
 // table's span; the whole chain is checked here as the statement table is
 // (sema_stmt_check_switch): each arm with `T` read as its type, then rebuilt

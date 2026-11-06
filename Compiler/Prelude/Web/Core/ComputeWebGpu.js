@@ -1,4 +1,4 @@
-// D-COMPUTE-BACKEND1=D / I9: browser WebGPU is a host adapter for the one
+// I9: browser WebGPU is a host adapter for the one
 // compute family. The adapter owns WebGPU's asynchronous queue and buffer ABI;
 // placement, precision, operation names, and typed outcomes stay on this
 // Prelude boundary. Native hosts keep the typed fail-closed provider.
@@ -469,7 +469,7 @@ async function jet_compute_web_upload(tensor, device) {
   result.buffer = jet_compute_webgpu_buffer(await jet_compute_webgpu_device(), jet_compute_web_f32_values(await jet_compute_web_values(tensor), "WebGPU transfer"));
   return result;
 }
-// D-FRED1=A: JS marshals into the compiled Prelude export. It does not carry
+// JS marshals into the compiled Prelude export. It does not carry
 // the lane count, seed placement, or reduction tree as a second policy.
 function jet_compute_web_shared_reduce(values, seed, f32) {
   const wasm = __jetPreludeWasm;

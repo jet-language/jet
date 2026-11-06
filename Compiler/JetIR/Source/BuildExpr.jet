@@ -544,7 +544,7 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
             ir_return(m, p, b, value, span)
         }
         .If(condition, then_body, else_body, _, span) -> {
-            // D-TYPESWITCH1: an arm of a type table is kept or dropped per
+            // An arm of a type table is kept or dropped per
             // instance; the dropped side is never built.
             if ir_folded_type_test(p, b, condition) == .Val(holds) {
                 ir_scope_open(b)
@@ -712,7 +712,7 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
     }
 }
 
-// A `.measure` member (D-CLAIM-BENCH1): its body runs while the runtime's
+// A `.measure` member: its body runs while the runtime's
 // measurement loop asks for another iteration (JetRuntime TestMeasure.jet):
 // once under plain `jet test`, as warmups, calibration and timed batches
 // under `jet test --measure`; the end prints the measured record.
@@ -1543,7 +1543,7 @@ ir_expr: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int N
             return ir_trait_propagate(m, p, b, method, value, expression_ty, span)
         }
         .IfExpr(cond, then_body, then_value, else_body, else_value) -> {
-            // D-TYPESWITCH1: a type table in value position keeps one arm per
+            // A type table in value position keeps one arm per
             // instance; the dropped side is never built.
             if ir_folded_type_test(p, b, cond) == .Val(holds) {
                 ir_scope_open(b)
@@ -2145,7 +2145,7 @@ ir_defer_close: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, close: Int, span: 
     if !ir_has_drop(m, b, binding.slot) -> ir_fail(b, span, "deferred close of {local.name}, which neither closes nor drops")
 }
 
-// An `ArgsSpec` / `ParsedArgs` method (D-ARGS1) calls its Core/Args/Args.jet
+// An `ArgsSpec` / `ParsedArgs` method calls its Core/Args/Args.jet
 // helper (CoreReach.jet ir_args_helper) with the receiver first.
 ir_args_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, helper: String, args: [Int], span: Span) -> Int Never! {
     key := ""
@@ -3907,7 +3907,7 @@ ir_mixed_switch: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, arm
     ir_release(m, b, value)
 }
 
-// D-TYPESWITCH1: whether the instance being built binds type parameter
+// Whether the instance being built binds type parameter
 // `subject` to exactly `target`. Identity is exact: an alias is already its
 // target, while a distinct type, `F32` or `Float?` is not `Float`.
 ir_type_test_holds: fn(p: IRProgram, b: IRBuilder, subject: Type, target: Type) -> Bool Never! {
@@ -5031,7 +5031,7 @@ ir_return: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int?, span: Span
     ir_return_slot(m, p, b, owned, span)
 }
 
-// D-TAIL-CALL1: in compile-time code a function's failure rail stays (a
+// In compile-time code a function's failure rail stays (a
 // `-> Int` walk returns a Result box), so its returned call is lowered as
 // `Ok(callee(...)?)`, the callee's box opened and boxed again into the same
 // carrier. When the callee's carrier is the function's own and the `?`
@@ -6289,7 +6289,7 @@ ir_borrow: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, a
     ir_fail_slot(b, span, "borrow {access} of {ir_type_name(value_ty)}")
 }
 
-// `mem.pin(place)` (D-PIN1=A): the address of the pinned aggregate's own
+// `mem.pin(place)`: the address of the pinned aggregate's own
 // storage as a `Pin<T>`, which never owns it.
 ir_pin_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, place: Int, span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
@@ -6303,7 +6303,7 @@ ir_pin_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, place: I
     pinned
 }
 
-// The storage a `Pin<T>` value names (D-PIN2=A): its address as an alias of
+// The storage a `Pin<T>` value names: its address as an alias of
 // `T`'s aggregate row, whose fields are read and written in place.
 ir_pin_window: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, pin: Int, span: Span) -> Int Never! {
     pin_ty: ir_ty(p, b, pin)

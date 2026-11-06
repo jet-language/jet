@@ -1,4 +1,4 @@
-// D-DATA-WEB1=A: Web only marshaling for the canonical typed DataFlow kernel.
+// Web only marshaling for the canonical typed DataFlow kernel.
 // This module owns bytes, handles, and callback transport only. Decoding,
 // limits, query execution, snapshot identity, and lifetime state remain in the
 // Rust DataFlow carrier.

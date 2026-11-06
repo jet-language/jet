@@ -2110,7 +2110,7 @@ sema_derive_type_ready: fn(readiness: &SemaDeriveReadiness, items: [Item], ty: T
         .Quantity(inner, _) -> !codec && sema_derive_type_ready(readiness, items, inner, type_params)
         .Named(name) -> {
             // A wire-reaching type parameter gains the codec bound on the
-            // generated impl (S55, D-META-AUTO1), so it never blocks a codec.
+            // generated impl (S55), so it never blocks a codec.
             loop param in type_params {
                 if param.name == name -> return codec || param.bounds.contains(readiness.trait_name)
             }

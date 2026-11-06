@@ -292,7 +292,7 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
 #Test("missing_method_body_is_e0081") {
     _: entry02_diag(entry02_errors("Greeter: struct {{}}\nimpl Greeter {{\n    greet: fn(self, name: String) -> String\n}}\nrun: fn() {{}}\n"), "E0081")
 }
-// D-DECL-COLON1=A: a bodiless `name: fn(…)` at file level is a function type.
+// A bodiless `name: fn(…)` at file level is a function type.
 #Test("bodiless_file_level_fn_is_a_function_type") {
     p: entry02_program("Pick: fn(Int) -> Int\nhost_open: fn(path: String) -[FS]> Int\nrun: fn() {{}}\n")
     assert(if entry02_alias(p, "Pick").target == { .Fn(_, _, _, _, _, _) -> true else -> false })

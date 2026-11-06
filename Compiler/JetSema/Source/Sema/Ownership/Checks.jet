@@ -2512,7 +2512,7 @@ sema_ownership_diag_invalidated_view: fn(fact: SemaOwnershipViewFact, span: Span
     sema_error("E0632", span, "`{owner}` was {verb} here, so the value `{fact.carrier}` points into is gone", "`{fact.carrier}` is a view into `{owner}`; `{owner}.{verb}()` invalidated everything stored in `{owner}`, so reading `{fact.carrier}` now would read freed memory", "use `{fact.carrier}` before `{owner}.{verb}()`, or re-`alloc` after the {verb} to get a fresh value")
 }
 
-// D-ALLOC2 (Rust `report_view_escape`): E0631 when a name holding an
+// E0631 when a name holding an
 // `arena.alloc` view would leave the arena's region.
 sema_ownership_report_arena_view_escape: fn(state: &SemaOwnershipState, expr: Expr, what: String, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     if expr == {
@@ -3423,7 +3423,7 @@ sema_ownership_check_call_arguments_with_accesses: fn(state: &SemaOwnershipState
             accepted = false
             next
         }
-        // D-CALLSITE-MARK2=A: an unmarked place a write parameter receives is
+        // An unmarked place a write parameter receives is
         // its write access, checked as `&place` was.
         if sema_call_unmarked_write_place(param, arg) {
             arg.convention = AccessConvention.Write
@@ -3500,7 +3500,7 @@ sema_ownership_check_call_arguments_with_accesses: fn(state: &SemaOwnershipState
                 diagnostics.push(sema_ownership_diag_take_twice(sema_ownership_argument_name(arg), callee, expr_span(arg.expr)))
                 next
             }
-            // D-CALLSITE-MARK2=A: an unmarked name a take parameter receives
+            // An unmarked name a take parameter receives
             // moves like `name.move()` did; a later use reports the move into this
             // call. A call never copies on its own.
             if !binder_rooted {
@@ -3896,7 +3896,7 @@ sema_ownership_note_call_receiver: fn(state: &SemaOwnershipState, receiver: Expr
 }
 
 // A method that writes its receiver, called on a place that can't change: the
-// report quotes the method's signature line (D-CALLSITE-MARK2=A).
+// report quotes the method's signature line.
 sema_ownership_check_receiver_write: fn(state: &SemaOwnershipState, receiver: Expr, method: String, params: [SemaCallParam], scopes: SemaScopeTable, change_span: Span, diagnostics: &[Diagnostic]) -> Bool {
     action: "be changed by `.{method}()`"
     binding: sema_ownership_binding_for_expr(state, receiver, scopes)
@@ -4020,7 +4020,7 @@ sema_ownership_check_handle_method_call: fn(state: &SemaOwnershipState, callee: 
     sema_ownership_check_method_call_as(state, callee, sema_ownership_receiver_consumer(callee), receiver, receiver_convention, false, false, true, params, args, scopes, span, expr_span(receiver), diagnostics)
 }
 
-// D-CALLSITE-MARK2=A: a call is written plain and takes each input's
+// A call is written plain and takes each input's
 // convention from the callee, so an error about a value the call would change
 // quotes the callee's signature line: `bump: fn(n: &Int, by: Int)`.
 sema_ownership_signature_line: fn(callee: String, receiver: AccessConvention?, params: [SemaCallParam]) -> String Never! {

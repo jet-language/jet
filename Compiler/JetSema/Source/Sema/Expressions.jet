@@ -942,7 +942,7 @@ sema_expr_binary_type: fn(op: BinOp, lhs: Type, rhs: Type, span: Span, diagnosti
             return None
         }
         // Rust `infer_binary` Eq/Ne: float `==` is almost always a bug
-        // (D-SMELLLINT1, L0502).
+        // (L0502).
         if lhs == Type.Float || lhs == Type.Float32 -> diagnostics.push(sema_lint("L0502", span, "Comparing floats with `{sema_expr_binary_name(op)}` is unreliable", "Floating-point arithmetic is inexact; two values computed differently may not be bit-identical even when mathematically equal", "Compare within a tolerance: `(a - b).abs() < 1e-9`"))
         if (lhs == Type.Int || lhs == Type.Float || lhs == Type.Float32 || lhs == Type.Bool || lhs == Type.String || lhs == Type.Char) || sema_expr_is_integer(lhs) || sema_expr_precise_name(lhs) != None -> return Val(Type.Bool)
         return None
@@ -1904,7 +1904,7 @@ sema_expr_unit_implicit_conversion: fn(value: TExpr, required: Type, environment
     Val(sema_expr_unit_conversion(value, source, destination, span, line, environment, program))
 }
 
-// D-DERIVED-DIMENSION-CLAIM1: a structural quantity (`distance / elapsed`) is
+// A structural quantity (`distance / elapsed`) is
 // the value of its dimension's coherent unit, the scale-one member a family
 // claims for that dimension, so it fills that unit's slot. A scaled, affine
 // or provenance-bearing member keeps the explicit conversion.
@@ -2353,7 +2353,7 @@ sema_expr_literal_range: fn(expected: Type, environment: SemaScopeEnvironment, p
 }
 
 sema_expr_integer_literal: fn(value: Int, width: IntegerWidth?, expected: Type?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
-    // D-INTLIT-WIDTH1: a bare numeral in a Float/F32 slot widens there,
+    // A bare numeral in a Float/F32 slot widens there,
     // checked exactly at compile time (E1003 past 2^53 / 2^24).
     if width == None && expected != None {
         contextual_expected: expected
@@ -2401,7 +2401,7 @@ sema_expr_integer_literal: fn(value: Int, width: IntegerWidth?, expected: Type?,
 
 // `literal_span` is the written numeral's own span, where a range error points.
 sema_expr_negative_integer: fn(value: Int, width: IntegerWidth?, expected: Type?, span: Span, literal_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
-    // D-INTLIT-WIDTH1: as sema_expr_integer_literal, `-7` in a Float slot.
+    // As sema_expr_integer_literal, `-7` in a Float slot.
     if width == None && expected != None {
         contextual_expected: expected
         if contextual_expected == Type.Float || contextual_expected == Type.Float32 {
@@ -3712,7 +3712,7 @@ sema_expr_inferred_new_owner: fn(expected: Type?) -> Type? {
 // Query declaration identity before visibility, inference, or argument shape:
 // a rejected method call must never become a successful field call.
 sema_expr_function_field: fn(receiver: Type, name: String, method_name: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
-    // D-COMPUTE-VJP1=A: `run.pull(seed)` calls the run's Fn-typed `pull`
+    // `run.pull(seed)` calls the run's Fn-typed `pull`
     // field (Rust core_generic_struct_field); `VJPRun` declares no methods.
     if sema_expr_unwrap_tag(receiver) == .Apply(run_name, run_args) {
         if run_name == "VJPRun" && run_args.len() == 1 {
@@ -3909,7 +3909,7 @@ sema_expr_check_method_call: fn(receiver: Expr, method: String, method_span: Spa
     if take_pattern.handled -> return take_pattern.value
     zip := sema_expression_zip_method(receiver, receiver_value, method, args, method_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if zip.handled -> return zip.value
-    // D-VALIDATE1=A: a `Validate.over(value)` rule binds `at:` to a field of
+    // A `Validate.over(value)` rule binds `at:` to a field of
     // the validated type, then checks as the Core builder method.
     if method == SEMA_VALIDATE_CHECK && sema_validate_over_receiver(receiver_value.ty, environment, program) == .Val(subject) {
         rule: sema_validate_over_rule(subject, args, method_span, environment, program, scopes, diagnostics) ?? {
@@ -4605,7 +4605,7 @@ sema_expr_math_shape_mismatch: fn(op: BinOp, left: Type, right: Type, span: Span
     sema_error("E2511", span, "`{sema_expr_binary_name(op)}` isn't defined between `{left_name}` and `{right_name}`", "built-in lane and linalg operators keep fixed shapes: one lane/vector type on both sides, or a matrix and its matching vector; any other pair needs an operator hook", "match the operand types (`T.splat(x)` lifts a scalar into every lane), call a named method like `.dot()`/`.matmul()`, or implement the operator's hook trait on your own type for this pair")
 }
 
-// L0516 (D-HTTP-TEXT1=A): `request.body().text(limit)` with the default
+// L0516: `request.body().text(limit)` with the default
 // limit repeats what `request.text()` / `response.text()` already do.
 // The default is Core/Http/Http.jet `C_MAX_BODY_BYTES`.
 SEMA_HTTP_DEFAULT_TEXT_LIMIT: 1048576
@@ -4768,7 +4768,7 @@ sema_expr_lint_int_constant: fn(expr: Expr, scopes: SemaScopeTable) -> Int? {
     }
 }
 
-// L0517 (D-PATH-CONTAINMENT1=A): `child != base && !child.starts_with("{base}/")`
+// L0517: `child != base && !child.starts_with("{base}/")`
 // over the texts of two typed normalized Paths repeats the separator-aware
 // lexical containment `Path.is_within()` owns.
 sema_expr_lint_path_prefix: fn(op: BinOp, left: Expr, right: Expr, span: Span, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) Never! {
@@ -4911,13 +4911,13 @@ sema_expr_check_binary_chain: fn(op: BinOp, left: Expr, right: Expr, span: Span,
     sema_expr_check_binary_operands(op, left, right, span, expected, checked, environment, program, scopes, state, tail_store, context, diagnostics)
 }
 
-// D-FLOATW1: a float power keeps one width, as an operator or as `a.pow(b)`.
+// A float power keeps one width, as an operator or as `a.pow(b)`.
 sema_expr_pow_widths_mixed: fn(base: Type, exponent: Type) -> Bool Never! {
     (base == Type.Float && exponent == Type.Float32) || (base == Type.Float32 && exponent == Type.Float)
 }
 
 sema_expr_pow_width_mismatch: fn(span: Span) -> Diagnostic {
-    sema_error("E0109", span, "`pow` needs both float operands to have the same width", "D-FLOATW1: mixing float widths is not allowed", "convert the operands to the same float width")
+    sema_error("E0109", span, "`pow` needs both float operands to have the same width", "mixing float widths is not allowed", "convert the operands to the same float width")
 }
 
 // A binary operator whose left operand `left` is checked (`checked_left`):
@@ -4962,7 +4962,7 @@ sema_expr_check_binary_operands: fn(op: BinOp, left: Expr, right: Expr, span: Sp
                 return None
             }
             // An optional compared with `None` is the presence test
-            // (S31 `x == None`, D-FLOWTYPE1 `x != None`): it reads the
+            // (S31 `x == None`, `x != None`): it reads the
             // tag only, so the payload needs no Equatable.
             if sema_expr_unwrap_tag(value_ty) == .Option(_) {
                 none_right: sema_expression_absent_none(right)
@@ -5018,7 +5018,7 @@ sema_expr_check_binary_operands: fn(op: BinOp, left: Expr, right: Expr, span: Sp
         return sema_expr_expected_owned(value, expected, environment, program, diagnostics)
     }
     if op == BinOp.And || op == BinOp.Or {
-        // Each side of `||`/`&&` is reported at its own span (D-S25-RETIRE1=A).
+        // Each side of `||`/`&&` is reported at its own span.
         if lhs.ty != Type.Bool -> diagnostics.push(sema_error("E0110", lhs.span, "the left side of `{sema_expr_binary_name(op)}` must be {sema_type_show(Type.Bool)}, but this is {sema_type_show(lhs.ty)}", "logic joins yes/no values", "compare the value to something first"))
         if rhs.ty != Type.Bool -> diagnostics.push(sema_error("E0110", rhs.span, "the right side of `{sema_expr_binary_name(op)}` must be {sema_type_show(Type.Bool)}, but this is {sema_type_show(rhs.ty)}", "each side of a logic operator must be a yes/no comparison", "write the full comparison, e.g. `x == 2`"))
         if lhs.ty != Type.Bool || rhs.ty != Type.Bool -> return None
@@ -5642,7 +5642,7 @@ sema_expr_check_method_call_expr: fn(receiver: Expr, method: String, method_span
     if method == "copy" && args.len() == 0 && type_args.len() == 0 && !sema_expr_copy_receiver_names_type(receiver, owner_type_args, scopes) {
         return sema_expr_check_copy(receiver, Span{start: expr_source_start(receiver), end: method_span.end}, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
-    // D-COPY-MOVE-SPELL1=A: `value.move()` with no arguments is the
+    // `value.move()` with no arguments is the
     // compiler-owned take of a named place. A name or a
     // field moves out of its owner; an element stays owned by its collection
     // and a fresh value has no place to give up (E0225). A receiver naming a
@@ -5671,7 +5671,7 @@ sema_expr_check_method_call_expr: fn(receiver: Expr, method: String, method_span
             return edited
         }
     }
-    // D-CALLSITE-MARK2=A: an unmarked place inside a shared cell is edited
+    // An unmarked place inside a shared cell is edited
     // through the cell when the resolved method writes its receiver, as
     // `cell.place.method()` was. The built place spans its value, so it
     // carries no written mark.
@@ -5686,7 +5686,7 @@ sema_expr_check_method_call_expr: fn(receiver: Expr, method: String, method_span
             }
         }
     }
-    // D-CALLSITE-MARK2=A with D-SHAPE-PLACE1=A: a range of a place whose
+    // A range of a place whose
     // method writes its receiver (`values[1..3].sort()`) edits a write window
     // into the owner, as a write parameter's range argument does; a reading
     // method keeps the plain range value.

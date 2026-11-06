@@ -2352,8 +2352,8 @@ ir_closure_count_by: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_row: I
 // payload to the closure, whose result is boxed fresh. The receiver is only
 // read. Sema types the map by the callback's success
 // (sema_value_method_option_map): where the callback returns a Result the
-// map's payload is its Ok and a failure passes up from the call
-// (D-CALLBACK-ERR1); where it returns an Option, that is the map's result.
+// map's payload is its Ok and a failure passes up from the call;
+// where it returns an Option, that is the map's result.
 ir_option_map: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
     receiver_ty: ir_ty(p, b, receiver)
     inner_ty: if ir_untag(receiver_ty) == .Option(inner) -> inner else -> { return ir_fail_slot(b, span, "Option map on {ir_type_name(receiver_ty)}") }
@@ -3695,7 +3695,7 @@ ir_list_random: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: In
     found
 }
 
-// A Float `xs.sum()` (and a Float fold with step `acc + x`): the D-FRED1=A
+// A Float `xs.sum()` (and a Float fold with step `acc + x`): the
 // fixed tree. Item i adds into lane i & 7 in source order, a fold's `seed`
 // starts lane 0 (-1 for none), and the lanes combine as
 // ((l0+l1)+(l2+l3))+((l4+l5)+(l6+l7)).

@@ -39,7 +39,7 @@ use {
 
 // One test the harness runs: its checked function `key`, the identity `id`
 // its outcome record carries, its report name, whether it must fail and the
-// canonical `#Test(faults: [...])` selectors it runs under (D-TESTFAULT1).
+// canonical `#Test(faults: [...])` selectors it runs under.
 IRTestCase: struct { id: Int, key: String, name: String, expected_failure: Bool, faults: [String]{[]} }
 
 // A selected Check Output: its name and its checked zero-argument function.
@@ -64,7 +64,7 @@ ir_build_tests: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&[TTypeD
     loop test in harness.tests {
         id: ir_function_id(m, p, test.key, [Type]{}) ?? -1
         if id < 0 -> failures.push(IRBuildFailure{key: test.key, name: test.name, message: "the test function is not among the checked functions", source_file: "", span: Span{start: 0, end: 0}})
-        // D-DIAG-CORE-NAME1: a stop in the body names the test as its source
+        // A stop in the body names the test as its source
         // does, not by its checked key (`<module>::test::<name>@<span>`).
         if id >= 0 -> m.functions[id].name = "test \"{test.name}\""
         bodies.push(id)

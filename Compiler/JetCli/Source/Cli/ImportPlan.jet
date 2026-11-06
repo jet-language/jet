@@ -194,7 +194,7 @@ jet_cli_import_boundary: fn(language: String, source: String, target: String, so
     identity: ForeignBoundaryIdentity.new(source_identity, "generated:{target}:sha256-{replacement_digest}", "jet-source-import-v1", source_identity, "jet-source-import:{JET_CLI_VERSION}", target_identity)
     coverage: ForeignArtifactCoverage.new(source_identity, target_identity, "jet-source-import-v1").with_transitive_dependencies([String]{}).with_reachable_callbacks([String]{}).with_compiler_flags([String]{})
     boundary: pkg_source_import_boundary(foreign, "{language}:{source}", identity, coverage) ?? return Err(jet_cli_import_plan_error(err.message))
-    Ok(boundary.with_assumptions([String]{"D-MIGRATE-SRC1 proves only the declared source subset", "foreign source remains authoritative until an accepted comparison receipt"}))
+    Ok(boundary.with_assumptions([String]{"the import proves only the declared source subset", "foreign source remains authoritative until an accepted comparison receipt"}))
 }
 
 // Rust `import_evidence`: generation is a candidate, not an accepted replacement.

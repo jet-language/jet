@@ -504,7 +504,7 @@ sema_call_core_unknown_item: fn(module_name: String, member: String, span: Span)
     }
     // #1965: an exact submodule hit outranks this module's own menu.
     if sema_call_core_submodule_path_hint(module_name, member, span) == .Val(hint) -> return hint
-    // D-SHAPE-DUNDER2=A: a reserved `__` seam is Core-internal and user code
+    // A reserved `__` seam is Core-internal and user code
     // cannot spell it, so it is never offered as a suggestion.
     menu := [String]{}
     loop item in items {
@@ -798,7 +798,7 @@ sema_call_try_core_math_float_class: fn(module_name: String, member: String, typ
     SemaDirectSpecialCheck{handled: true, value: None}
 }
 
-// D-FLOATW1: `core.math` is width-generic. A math function whose every
+// `core.math` is width-generic. A math function whose every
 // argument is F32 computes at F32 width: its Float source runs on the exactly
 // widened arguments and the Float result rounds once back to F32, and
 // `to_bits` packs the binary32 bits (`__to_bits_f32`). Any other argument
@@ -948,7 +948,7 @@ sema_call_core_tree_checked: fn(record: CoreCallRecord, args: [TExpr], span: Spa
         return sema_expr_expected_owned(value, expected, environment, program, diagnostics)
     }
     if record.module_name == "core.math" && record.member == "sqrt" && args.len() == 1 {
-        // D-FLOATW1: sqrt is width-generic. The Core source `sqrt(Float)`
+        // Sqrt is width-generic. The Core source `sqrt(Float)`
         // computes it: an F32 argument widens and the root narrows back (the
         // double root rounded to F32 is the correctly rounded F32 root), and
         // an exact Fraction or Decimal crosses to Float once.

@@ -1,4 +1,4 @@
-// The JS/WASM web partition (D-WASM1=A). Every checked function gets a web
+// The JS/WASM web partition. Every checked function gets a web
 // bucket by one precedence: its `#Target(JS|Wasm)` or `#WasmExport` marker, the
 // `Browser` effect, the inline-module or file `#Target` ceiling, a `Stream`
 // result, then the Wasm default. Unpinned functions follow their call edges
@@ -256,7 +256,7 @@ sema_web_abi_type: fn(ty: Type, context: String, span: Span) -> Diagnostic Never
     sema_error("E-WEB-ABI-TYPE", span, "`{sema_web_type_show(ty)}` cannot cross the JS/WASM boundary {context}", "web exports and imports only admit ABI-safe types (scalars, `String`, `List`/`Map` of ABI-safe values, and `#[Codable]` structs/enums)", "use a scalar, `String`, a `List`/`Map` of ABI-safe values, or a `#[Codable]` struct/enum whose fields are ABI-safe")
 }
 
-// D-JSBIND1=A: scalars, `String`, lists, options and shared cells of ABI-safe
+// Scalars, `String`, lists, options and shared cells of ABI-safe
 // values, `String`-keyed maps of them, and `#Codable` structs and enums whose
 // fields (or applied arguments) are ABI-safe.
 sema_web_abi_safe: fn(ty: Type, types: SemaWebTypes) -> Bool Never! {

@@ -1,4 +1,4 @@
-// D-TYPE2-SPELL1: the JS adapter calls the same inline-range rule as native.
+// The JS adapter calls the same inline-range rule as native.
 function jet_inline_range_from_int(value, lo, hi) {
   const n = BigInt(value);
   const low = BigInt(lo);

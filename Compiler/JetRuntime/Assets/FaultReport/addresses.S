@@ -1,5 +1,5 @@
 # The release fault report: the report of an image built with `debug_info:
-# split` (D-RT-DEFECT-REPORT1 A), which keeps no location table. It writes
+# split`, which keeps no location table. It writes
 # report.S's first line where that names no function, the image's build id,
 # and the frames as addresses, which `jet crash` (JetCli Cli/Crash.jet)
 # names from the side debug file the id finds, in report.S's words:

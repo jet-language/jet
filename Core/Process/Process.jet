@@ -200,7 +200,7 @@ run_spec: fn(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt IOError! {
     spec.run()
 }
 
-// D-CORE-PROCPOOL1=A: a bounded worker pool. At most `jobs` specs run at once
+// A bounded worker pool. At most `jobs` specs run at once
 // in one task group, and the results keep input order. A nonzero exit is an Ok
 // receipt (the caller checks `.success`); a spec that cannot start is an Err in
 // its own slot, so one bad spec never hides the others. Every child but a
@@ -240,7 +240,7 @@ run_all_cancelled: fn() -> IOError Never! {
     })
 }
 
-// D-PROCESS-SESSION2=D: `ProcessSpec.abilities()`, the open keyed report of
+// `ProcessSpec.abilities()`, the open keyed report of
 // what a terminal-backed launch can use. Stable keys are the checked
 // TerminalFact names; a preview fact is any other string key. Every host the
 // runtime launches on opens a PTY (HostSpawn spawn_pty), so the report holds

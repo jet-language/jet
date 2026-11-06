@@ -152,7 +152,7 @@ jet_cli_policy_authority: fn(required: [String], authority_policy: JetDriverAuth
         if policy.allow == None && policy.deny == None {
             authority.authority = if policy.inline_package -> JET_CLI_INLINE_PACKAGE_DEFAULT else -> JET_CLI_PACKAGE_DEFAULT
         } else {
-            // A written allow row adds to the floor (D-AUTH-AMBIENT3=A); deny still wins.
+            // A written allow row adds to the floor; deny still wins.
             granted := [String]{}
             loop right in AUTHORITY_AMBIENT_BASIC_EFFECTS -> granted.push(right)
             loop right in jet_cli_policy_effects(policy.allow ?? [String]{}) -> granted.push(right)
@@ -225,7 +225,7 @@ jet_cli_is_manifest_less: fn(authority: JetCLIAuthority) -> Bool Never! {
 }
 
 // The `allow:` row a program writes: every required right the floor does not
-// already hold (D-AUTH-AMBIENT3=A). Deny-only rights never appear in a positive
+// already hold. Deny-only rights never appear in a positive
 // grant.
 jet_cli_inline_allow_row: fn(authority: JetCLIAuthority) -> [String] Never! {
     rights := [String]{}
@@ -293,7 +293,7 @@ jet_cli_policy_why: fn(authority: JetCLIAuthority) -> String Never! {
 }
 
 // A program with no package.jet edits its leading `package: { … }` block. The
-// floor stays granted beside a written row (D-AUTH-AMBIENT3=A), so the row
+// floor stays granted beside a written row, so the row
 // names only the undecided rights. `jet fix --all` inserts a missing block
 // only, named after `file`.
 jet_cli_policy_fix: fn(authority: JetCLIAuthority, file: String) -> String Never! {

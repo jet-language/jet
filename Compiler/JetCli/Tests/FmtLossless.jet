@@ -8,7 +8,7 @@
 // struct shorthand labels and separators; and a required default alias on a
 // dotted module import. Two rules follow later ratified spellings: the
 // redundant default alias in the `name: path` use form, and the
-// D-LOOP-STMT-ARROW1 choice between `-> statement` and a braced control body.
+// choice between `-> statement` and a braced control body.
 // No rule can reorder or drop an expression operand, operator, marker payload,
 // comment or string interpolation. Not ported: the `=>` arrow rules
 // (`retired_result_arrow_removal`, the LambdaArrow half of
@@ -142,7 +142,7 @@ fl_canonical_tokens: fn(src: String, path: String) -> [FmtTok] {
             index += 1
             next
         }
-        // D-FAIL-ERROR1=A: the formatter omits an explicit default `Err` in a
+        // The formatter omits an explicit default `Err` in a
         // fallible return type (`T !Err` -> `T !`), never an `Err(...)` value.
         if kept[index].kind == TOKEN_IDENT && kept[index].text == FL_TYPE_ERR && fl_kind(canonical, canonical.len() - 1) == TOKEN_BANG && (next_kind == TOKEN_LBRACE || next_kind == TOKEN_EQ) {
             index += 1
@@ -227,7 +227,7 @@ fl_control_body_end: fn(tokens: [FmtTok], arrow: Int) -> Int {
     tokens.len()
 }
 
-// D-LOOP-STMT-ARROW1=C: "The formatter chooses the arrow when one simple body
+// "The formatter chooses the arrow when one simple body
 // fits and braces otherwise." Both spellings of a statement-position control
 // body canonicalize to the braced body; the arrow choice is layout.
 fl_canonicalize_control_arrow_bodies: fn(tokens: [FmtTok]) -> [FmtTok] {
@@ -583,7 +583,7 @@ fl_redundant_default_file_alias: fn(canonical: [FmtTok], tokens: [FmtTok], index
 fl_plain_string_value: fn(parts: [FmtPart]) -> String? {
     value := ""
     loop part in parts {
-        // D-BYTELIT1=B: a raw `\xNN` byte is not plain text.
+        // A raw `\xNN` byte is not plain text.
         if part.kind != STRING_PART_TEXT -> return None
         value = "{value}{part.text}"
     }

@@ -873,7 +873,7 @@ sema_call_try_web_form_method: fn(receiver: Expr, receiver_value: TExpr, method:
     if chain && (method != "render" || args.len() != 0) -> return SemaMethodSpecialCheck{handled: false, value: None}
     member: if chain -> "typed_validation_render" else -> sema_web_form_method_member(method, args.len()) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     updated_args := args
-    // D-DX-FORM1=A: `form.validate(.field, on: timing, with: check)` binds its
+    // `form.validate(.field, on: timing, with: check)` binds its
     // two labels; the leading-dot field selector lowers to the ABI field name.
     if member == "typed_validate_field" {
         if !sema_services_bind_labels("WebFormTyped.validate", updated_args, [String]{"", "on", "with"}, span, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}

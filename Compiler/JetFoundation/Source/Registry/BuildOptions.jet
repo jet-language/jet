@@ -1,4 +1,4 @@
-// D-JAI-BUILDOPT1=A and D-SETTING-ORDER1=A (#5005, #4913): the one build-option
+// The one build-option
 // table. By one naming rule a row is the field of a `package.jet` build profile
 // (`build: { fast: Build{ optimize: full } }`), the flag `--optimize=full` (`_`
 // is `-` in a flag), the `build: fn` method `b.optimize(.Full)` and the pin
@@ -93,7 +93,7 @@ JET_BUILD_OPTIONS: comptime { [BuildOptionRow]{
     // are found in first), `-l<name>` (a library, as in `libs`) or the path
     // of a static `.a` archive. The native linker takes no flags and reads
     // archives only, so any other word is refused (E2104). A non-empty value
-    // is a `link_override` gate (D-TARGET-LINKER1) the owning policy can
+    // is a `link_override` gate the owning policy can
     // refuse (E3415).
     {name: "link_args", kind: BuildOptionKind.List, values: [String]{}, stock_build: "", stock_run: "", removes_check: [String]{}, help: "More native link inputs: -L<dir>, -l<name> or a .a archive path"},
     // The operating system the image runs on. The native backend writes Linux
@@ -123,7 +123,7 @@ BuildOptionRefusal: struct {
 
 JET_BUILD_OPTION_REFUSALS: comptime { [BuildOptionRefusal]{
     {name: "null", law: "Jet has no null check to switch: a reference is never null, and a raw pointer's validity is the obligation of the `#Unsafe` code that uses it (I1)"},
-    {name: "casts", law: "Jet has no unchecked conversion to switch: a conversion is total or returns an Optional (D-SHAPE-CONVERT1)"},
+    {name: "casts", law: "Jet has no unchecked conversion to switch: a conversion is total or returns an Optional"},
 } }
 
 build_option_refusal: fn(name: String) -> BuildOptionRefusal? {
@@ -142,7 +142,7 @@ build_option_flag_refusal: fn(argument: String) -> BuildOptionRefusal? {
     None
 }
 
-// The layer a value came from, in D-SETTING-ORDER1 order.
+// The layer a value came from, in setting order.
 BuildOptionLayer: enum {
     Stock
     Profile
@@ -353,7 +353,7 @@ build_options_list: fn(options: BuildOptions, name: String) -> [String] Never! {
 }
 
 // The resolved `link_args`, when there are any: the `link_override` gate
-// (D-TARGET-LINKER1) of the package being built.
+// of the package being built.
 build_options_link_override: fn(options: BuildOptions) -> BuildOptionChoice? Never! {
     loop choice in options.values {
         if choice.name == "link_args" && choice.value != "" -> return Val(choice.copy())

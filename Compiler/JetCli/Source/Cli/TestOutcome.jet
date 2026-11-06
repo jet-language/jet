@@ -176,7 +176,7 @@ jet_cli_test_law_text: fn(parts: [String], separator: String) -> String Never! {
     if parts.len() == 0 -> "none" else -> parts.join(separator)
 }
 
-// The tested root's `policy.claims.min` floor (D-GRADE-POLICY1=A). Like
+// The tested root's `policy.claims.min` floor. Like
 // `contain` and `harden` it is package-only and only tightens: a member of a
 // Package root with `members:` inherits the root's floor when it sets none and
 // may raise it, and a member that lowers it is E1215.
@@ -225,7 +225,7 @@ jet_cli_claims_below_floor: fn(grade: ClaimsGrade, floor: ClaimsGrade?, target: 
     Val(diagnostic_from_registry("E2942", None, "claims grade `{have}` is below the package floor `{want}`", "`policy.claims.min` in `package.jet` asks for `{want}`, and this run's evidence reaches `{have}`", jet_cli_claims_floor_fix(grade, required, target)))
 }
 
-// The evidence that raises `grade` to `required` (D-GRADE-POLICY1=A): the
+// The evidence that raises `grade` to `required`: the
 // solver command for a proved floor, else the tests to write. A property
 // test runs 200 generated cases.
 jet_cli_claims_floor_fix: fn(grade: ClaimsGrade, required: ClaimsGrade, target: String) -> String Never! {

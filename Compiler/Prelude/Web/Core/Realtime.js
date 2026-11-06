@@ -1,4 +1,4 @@
-// D-FOUND-REALTIME1=A: Web keeps one fixed-rate callback clock and the
+// Web keeps one fixed-rate callback clock and the
 // same absolute-deadline receipt facts as the native Prelude kernel.
 const JET_REALTIME_NANOS_PER_SECOND = 1000000000n;
 
