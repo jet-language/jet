@@ -1,0 +1,16 @@
+# Every leaf Compiler/Prelude/Effects.jet declares checks the same
+# through a signature row (deny-only leaves as denials), an `#FX(leaf)` grant
+# and an `#FX(authority: leaf)` grant; an undeclared leaf fails both paths
+# with the same E0750.
+fixture: every_effect_leaf_checks_through_every_path.fixture
+step: jet check rows.jet
+exit: 0
+step: jet check grants.jet
+exit: 0
+stderr: !~ "Error ["
+step: jet check unknown_row.jet
+exit: nonzero
+stderr: ~ "Error [jet.UnknownEffectLeaf]: `FFI.Klingon` isn't a declared effect"
+step: jet check unknown_grant.jet
+exit: nonzero
+stderr: ~ "Error [jet.UnknownEffectLeaf]: `FFI.Klingon` isn't a declared effect"
