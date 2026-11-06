@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6610,
-    "rev": 93125,
+    "rev": 93150,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -34,7 +34,7 @@
         "radar:e17"
       ]
     },
-    "completionCursor": "2026-11-06T15:18:19.415Z"
+    "completionCursor": "2026-11-06T16:18:21.936Z"
   },
   "epochs": [
     {
@@ -68562,8 +68562,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:19:21.465Z",
-      "updated": "2026-11-06T15:44:50.506Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-06T16:19:14.734Z",
+      "updatedBy": "Main",
       "goals": []
     },
     {
@@ -78321,8 +78321,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T20:27:37.698Z",
-      "updated": "2026-11-06T15:44:50.506Z",
-      "updatedBy": "owner"
+      "updated": "2026-11-06T16:19:16.552Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0ui9zol",
@@ -94005,6 +94005,11 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "c3 and c4 added from TestRot's #6595/#6609 findings (no new card): runtime import ledger drift and 6 s5 witness-loop rot rows."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "Finding (Builder5): with the process-wide atexit queue built, main-run worker-fatal still loses every handler. A worker's fatal stop runs in stop domain 2, and Trap.jet trap_exit routes only domain 1 through the root. Every other domain takes trap_defect_exit, a raw exit_group with no main_exit_claim, no cleanup and the report written straight to fd 2. This looks like a regression since 114e150cba. Ruling (Main): a fatal stop in any domain under a live jet_rt_main claims the process exit (single winner), runs main_exit_cleanup, then writes the captured report. Report text and exit code 70 are unchanged; a stop during cleanup aborts; hosts with no live jet_rt_main keep the defect exit. The golden is re-recorded to all four handlers in registration order, then the report, once the fixture's registration order is deterministic. Builder5 owns Trap.jet and Scheduler.jet for this fix."
         },
         {
@@ -94020,8 +94025,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "dev e8bf2c763d (GoldenRoots3): the runtime pack imports jet_rt_fault_report, which only Jet's own linker writes, so the harness now links a fault-report object assembled from the same report.S (new Tools/packaging/fault-report-object.mjs); ProcessRoutesWitness and ProcessExecutionWitness link and PASS. TerminalProcessWitness links but fails its free-count assert, split to its own card.",
-          "at": "2026-11-06T06:18:26.383Z"
+          "evidence": "899850c3df: run-process-witnesses.mjs writes edition 2026 with authority allow [Exec, IO, Mem.Alloc]; ProcessReceiptFields.jet main->run. With s1 from 86c2809103 plus the fix (chain s1 jet 39a186ffa3, pack1 8ae36b14a8): run-process-witnesses.mjs printed 'plain process native pack witnesses: ok' rc=0; --test ProcessExecution printed 'native process Jet fixture ProcessExecution: ok' rc=0. LaneCheck CHECK OK (jet-lane-check.1502142610204)",
+          "at": "2026-11-06T16:12:32.181Z"
         },
         {
           "n": 2,
@@ -94031,6 +94036,24 @@
           "verifiedBy": null,
           "evidence": "ad3fabb5f1: fault-report object marks its stack non-executable (fault-report-object.mjs) and the codec --test driver links it. With the s1 runtime: tcp-routes ok; codec-file-leaves default and --test CodecCSV/CodecEnv/CompilerFileLeaves/DynCodec ok; main-fixtures CHECK OK; http-body PASS; cabi-driver 11 pack-linked C-ABI cases passed; closure-refs-shared PASS. LaneCheck CHECK OK (jet-lane-check.1163774306289)",
           "at": "2026-11-06T16:04:59.819Z"
+        },
+        {
+          "n": 3,
+          "text": "The s1 jet_runtime_jet.o import set matches Compiler/JetRuntime/imports.list: the 13 missing imports (fork, getgroups, getloadavg, initgroups, jet_rt_fault_report, mkfifo, round, signal, sysconf, tcgetattr, tcsetattr, times, utime) are recorded or removed, and the 23 duplicate undefined entries for self-defined symbols are fixed at the object writer, so run-host-fixtures audit and check-object.mjs pass",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T16:05:41.291Z"
+        },
+        {
+          "n": 4,
+          "text": "The s5-fixtures generic witness loop passes: MemStorage, NetUnixConnect, RootCleanup, TaskVariantPanic, NetDatagramRoutes and UiNode are fixed, and the 11 witnesses with their own runners (AllocCache included) leave the generic loop",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T16:05:42.113Z"
         }
       ],
       "refs": [],
@@ -94041,7 +94064,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T06:13:43.662Z",
-      "updated": "2026-11-06T16:04:59.819Z",
+      "updated": "2026-11-06T16:12:32.181Z",
       "updatedBy": "Main"
     },
     {
@@ -94053,7 +94076,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -94075,20 +94098,20 @@
         {
           "n": 2,
           "text": "A negative control (AllocObserverWitness leak mode) reports the live blocks and aborts",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T07:34:18.026Z"
+          "evidence": "run-alloc-observer-witness.mjs proof/observer with the s1 jet_runtime_jet.o: 'alloc observer: 6 runtime allocations and frees balanced; leak control fails (SIGABRT)'; leak mode reports 1 of 7 blocks still live and aborts (a2e2317180)",
+          "at": "2026-11-06T16:05:01.809Z"
         },
         {
           "n": 3,
           "text": "All 75 witnesses are converted to the route, with a per-witness before/after report; the ABI rot (#6601) is out of scope",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T07:34:18.760Z"
+          "evidence": "Per-witness before/after report at $JET_SCRATCH_ROOT/lanes/TestRot/census/census.md (+census.json), same s1 runtime both sides: before 0/75 pass (45 fail, 30 no build); after 59 pass, 16 deleted in af2db41544; TDigest and NativeLayout pass with their vectors, UiKey and VaultProvider through their own runners",
+          "at": "2026-11-06T16:05:02.712Z"
         }
       ],
       "refs": [],
@@ -94099,8 +94122,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T06:18:27.254Z",
-      "updated": "2026-11-06T16:05:00.638Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-06T16:05:09.696Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-06T16:05:09.696Z"
     },
     {
       "id": "c0o3di45",
@@ -94209,7 +94233,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -94222,29 +94246,29 @@
         {
           "n": 1,
           "text": "AGENTS.md names the checked-in path, and the Rust-era preflight.mjs and prepare-sharded-chain.mjs references are gone",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T06:38:18.537Z"
+          "evidence": "7d6426a7d4: AGENTS.md names Tools/agent/land/census-snap.sh and chain.sh --dry-run; no preflight.mjs or prepare-sharded-chain reference remains outside the dated Docs/audits inventory",
+          "at": "2026-11-06T16:05:04.581Z"
         },
         {
           "n": 2,
           "text": "The seed-cut, release and self-hosting launchers refuse to start without a matching receipt, shown by one refused and one admitted launch",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T06:38:22.510Z"
+          "evidence": "13163a9366: preflight-receipt.mjs keys receipts on compiler source identity; chain.sh full, release-compiler.mjs and publish-release.mjs build refuse without one. proof-gate.sh (a0_029 seed): without a receipt all three rc=2 'refused: no preflight receipt for source identity jet@0.1.0#060c8cb9...' naming the census-snap command; census-snap.sh all rows rc=0 wrote the receipt; then all three rc=0 'admitted by preflight receipt'. node --test 17/17; LaneCheck CHECK OK (jet-lane-check.1375245254246). Evidence $JET_SCRATCH_ROOT/lanes/TestRot/gate/state",
+          "at": "2026-11-06T16:05:06.400Z"
         },
         {
           "n": 3,
           "text": "AGENTS.md names the checked-in path, and the Rust-era preflight.mjs and prepare-sharded-chain.mjs references are gone",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T06:38:23.382Z"
+          "evidence": "7d6426a7d4: same as c1; AGENTS.md names the checked-in census-snap.sh path and no Rust-era preflight reference remains in live files",
+          "at": "2026-11-06T16:05:05.456Z"
         }
       ],
       "refs": [],
@@ -94255,8 +94279,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T06:38:13.946Z",
-      "updated": "2026-11-06T06:38:23.382Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-06T16:05:12.991Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-06T16:05:12.990Z"
     },
     {
       "id": "c0423zxm",
@@ -94267,7 +94292,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -94295,8 +94320,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T06:38:47.078Z",
-      "updated": "2026-11-06T16:04:58.893Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-06T16:05:07.918Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-06T16:05:07.918Z"
     },
     {
       "id": "c0yy2xbx",
@@ -94764,7 +94790,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -94777,11 +94803,11 @@
         {
           "n": 1,
           "text": "Each of the five rot items is fixed or its dead harness deleted, with the harness that consumes it passing (or proven unreachable) and NormalizationTest.txt matching its pinned UCD source",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T09:39:58.620Z"
+          "evidence": "caa9005302: journey-tls and err-report restored in run-host-fixtures (dup2 assert, env baseline, strtoull musl link, pty resize race); every step exits 0, 'host fixtures run: ok'. ddfe57e351: NormalizationTest row filter, run-native-text-normalize --native 'NFC2 Unicode17 20034 rows / both routes / ownership OK', sha matches UCD 17.0.0; stage-frozen-inputs derives RtCrypto1 inputs from AgeV1Fixtures.json, 'frozen-inputs PASS 12 files'; UiKeyWitness links the fault-report object, run-ui-key-witness byte-identical; dead #4923 citation removed, fmt-parity compare failures=0. LaneCheck CHECK OK (jet-lane-check.1163774306289)",
+          "at": "2026-11-06T16:05:03.626Z"
         }
       ],
       "refs": [],
@@ -94792,8 +94818,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T09:39:49.326Z",
-      "updated": "2026-11-06T09:39:58.620Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-06T16:05:11.476Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-06T16:05:11.476Z"
     }
   ],
   "decisions": [
@@ -181226,9 +181253,11 @@
       "by": "owner",
       "kind": "question",
       "text": "no idea what this means, redo in plain english with downsides engineered away",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-06T15:23:16.401Z"
+      "status": "answered",
+      "answer": "Rewritten in plain English: the question is whether phone apps paint the screen with the graphics chip or the main processor. A says phones use the graphics chip, which is smoother and easier on the battery, falling back to the main processor automatically, while desktops keep the main processor so one Linux file runs anywhere. The downsides are designed out: same pixels checked by tests, no blank screens, and the switch waits for a measured win before phones ship. The reworked ballot text replaces the posted one once its Opus and Sol reviews finish.",
+      "created": "2026-11-06T15:23:16.401Z",
+      "answeredAt": "2026-11-06",
+      "answeredBy": "Main"
     },
     {
       "id": "q1y3xsld",
@@ -181237,9 +181266,11 @@
       "by": "owner",
       "kind": "question",
       "text": "I dont know what this means or what committing to the recommendation entails and whether the juice is worth the squeeze and whether it would be better to have this as an external package or to use metaprogramming or something",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-06T15:25:00.946Z"
+      "status": "answered",
+      "answer": "Translation (i18n) means showing the app's text in the user's language, including plural forms that differ by language. Under A, authors just write text in views; apps that never translate pay nothing, and translating later needs no code changes. It is both a package and metaprogramming: an opt-in first-party i18n package built only on Jet's public checked-text metaprogramming, with no compiler magic. The reworked ballot text replaces the posted one once its Opus and Sol reviews finish.",
+      "created": "2026-11-06T15:25:00.946Z",
+      "answeredAt": "2026-11-06",
+      "answeredBy": "Main"
     },
     {
       "id": "q2fwcntm",
@@ -181248,9 +181279,11 @@
       "by": "owner",
       "kind": "question",
       "text": "can we offer sensible pareto defaults with opt in full expert control?",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-06T15:26:26.916Z"
+      "status": "answered",
+      "answer": "Yes, and A now does exactly that. Rows, columns and grids look right with no settings: standard gaps, aligned labels, and one column on a phone. Every flex and grid setting is an optional argument, and custom layouts and the constraint solver stay available as opt-in libraries for experts. The reworked ballot text replaces the posted one once its Opus and Sol reviews finish.",
+      "created": "2026-11-06T15:26:26.916Z",
+      "answeredAt": "2026-11-06",
+      "answeredBy": "Main"
     },
     {
       "id": "q3rc9mv2",
@@ -181259,9 +181292,11 @@
       "by": "owner",
       "kind": "question",
       "text": "recommended option is the good beginner default. if users want the native looks, then that should be opt in for the experts",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-06T15:29:13.043Z"
+      "status": "answered",
+      "answer": "Agreed, and that is now the shape of A. Jet draws every control by default, so beginners get one look and behavior everywhere. Experts opt in to a native library: use native, then native.date_picker(day) shows the system's own control for that one view. The reworked ballot text replaces the posted one once its Opus and Sol reviews finish.",
+      "created": "2026-11-06T15:29:13.043Z",
+      "answeredAt": "2026-11-06",
+      "answeredBy": "Main"
     },
     {
       "id": "q4hca5vl",
@@ -181270,9 +181305,11 @@
       "by": "owner",
       "kind": "question",
       "text": "does not look like the downside was engineered away on this one. fix",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-06T15:30:11.212Z"
+      "status": "answered",
+      "answer": "Fixed: the wrapping difference is now designed away rather than just checked. The page loads the same font files as the native app and uses the same Unicode line-break rules. Native layout is tested against boxes recorded in a real browser, so any drift fails Jet's own tests. Only a user's own browser font settings can still rewrap text, and that honors their choice. The reworked ballot text replaces the posted one once its Opus and Sol reviews finish.",
+      "created": "2026-11-06T15:30:11.212Z",
+      "answeredAt": "2026-11-06",
+      "answeredBy": "Main"
     },
     {
       "id": "q5mpjpe1",
@@ -181281,9 +181318,11 @@
       "by": "owner",
       "kind": "question",
       "text": "i am not keen on jet being a distribution platform. we want to make development easier, but actually shipping is slightly outside the initial purview. Understood? Update accordingly. I would essentially want jet to generate the files we need to send to apple for an ios app (as an example) or whatever, then it is handled through them. jet shouldnt have a ship cli command",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-06T15:32:09.083Z"
+      "status": "answered",
+      "answer": "Understood, and updated. The over-the-air update question is withdrawn, and the ballot now records where Jet stops: jet build writes a signed, store-ready .ipa for Apple or .aab for Google, with every file the store requires. The developer uploads it with the store's own tool, and there is no ship command. This overrides the earlier phone decision's ship and upload parts and keeps its local signing. The reworked ballot text replaces the posted one once its Opus and Sol reviews finish.",
+      "created": "2026-11-06T15:32:09.083Z",
+      "answeredAt": "2026-11-06",
+      "answeredBy": "Main"
     },
     {
       "id": "q6z627du",
@@ -181292,9 +181331,11 @@
       "by": "owner",
       "kind": "question",
       "text": "no clue what this means. rewrite in plain english",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-06T15:33:39.084Z"
+      "status": "answered",
+      "answer": "Rewritten in plain English. The question is how a Jet screen shows a real system view, such as Apple Maps or the camera, inside it. A says one opt-in call, native.view(...), places the system's real view in the screen, with layout, focus and the screen reader working as for any view. Effects it can't support are refused at compile time. The reworked ballot text replaces the posted one once its Opus and Sol reviews finish.",
+      "created": "2026-11-06T15:33:39.084Z",
+      "answeredAt": "2026-11-06",
+      "answeredBy": "Main"
     },
     {
       "id": "q7lo06nq",
@@ -181303,9 +181344,11 @@
       "by": "owner",
       "kind": "question",
       "text": "if experts want to match the look of a native system, then they should be able to use a library as opt in or something like that",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-06T15:36:12.819Z"
+      "status": "answered",
+      "answer": "Yes, and A now does exactly that. Beginners get one Jet look with a typed theme, and back, menus and scrolling still behave like each system. Experts opt in to the native library: theme: native.theme() follows the system's font, colors and shapes, and native controls copy the system exactly where needed. The reworked ballot text replaces the posted one once its Opus and Sol reviews finish.",
+      "created": "2026-11-06T15:36:12.819Z",
+      "answeredAt": "2026-11-06",
+      "answeredBy": "Main"
     },
     {
       "id": "q8k58yhf",
@@ -181314,9 +181357,11 @@
       "by": "owner",
       "kind": "question",
       "text": "this is confusing and I dont know what is being asked. The code is inconsistent between options so it is hard to compare",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-06T15:38:42.925Z"
+      "status": "answered",
+      "answer": "Redone against the no-dot ruling, with one program in every option: a settings record whose temp is Celsius(Float) or Fahrenheit(Float). The only question now is whether those named cases may be written inline in the field, exactly as inside an enum, instead of declaring an enum first. A says yes, and a bare name in a union always stays a type. The reworked ballot text replaces the posted one once its Opus and Sol reviews finish.",
+      "created": "2026-11-06T15:38:42.925Z",
+      "answeredAt": "2026-11-06",
+      "answeredBy": "Main"
     },
     {
       "id": "q9b2lokw",
@@ -181325,9 +181370,11 @@
       "by": "owner",
       "kind": "question",
       "text": "with commas everywhere, it does make sense to have commas for all members but does not make sense that methods would also require commas",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-06T15:41:25.636Z"
+      "status": "answered",
+      "answer": "Agreed, and the ballot now recommends exactly that: a comma after every field, enum case and value entry, on one line or many, and no comma after a method, because its closing brace already ends it. Rust and Kotlin follow the same split. The old one-line-only rule is now option C. The reworked ballot text replaces the posted one once its Opus and Sol reviews finish.",
+      "created": "2026-11-06T15:41:25.636Z",
+      "answeredAt": "2026-11-06",
+      "answeredBy": "Main"
     },
     {
       "id": "qafz11do",
@@ -182206,6 +182253,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-06T16:19:16.552Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q9b2lokw",
+      "note": ""
+    },
+    {
+      "at": "2026-11-06T16:19:15.660Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q8k58yhf",
+      "note": ""
+    },
+    {
+      "at": "2026-11-06T16:19:14.734Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q7lo06nq",
+      "note": ""
+    },
+    {
+      "at": "2026-11-06T16:19:13.838Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q6z627du",
+      "note": ""
+    },
+    {
+      "at": "2026-11-06T16:19:12.967Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q5mpjpe1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-06T16:19:12.032Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q4hca5vl",
+      "note": ""
+    },
+    {
+      "at": "2026-11-06T16:19:11.092Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q3rc9mv2",
+      "note": ""
+    },
+    {
+      "at": "2026-11-06T16:19:10.117Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q2fwcntm",
+      "note": ""
+    },
+    {
+      "at": "2026-11-06T16:19:09.109Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q1y3xsld",
+      "note": ""
+    },
+    {
+      "at": "2026-11-06T16:19:08.203Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q0x4qov2",
+      "note": ""
+    },
+    {
+      "at": "2026-11-06T16:18:21.936Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-06T16:18:21.936Z"
+    },
+    {
+      "at": "2026-11-06T16:12:32.181Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gaxqxg",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-06T16:05:42.973Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gaxqxg",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T16:05:42.113Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0gaxqxg",
+      "note": "#4 The s5-fixtures generic witness loop passes: MemStorage, Net"
+    },
+    {
+      "at": "2026-11-06T16:05:41.291Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0gaxqxg",
+      "note": "#3 The s1 jet_runtime_jet.o import set matches Compiler/JetRunt"
+    },
+    {
+      "at": "2026-11-06T16:05:12.991Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0w4gi4s",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-06T16:05:11.476Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c05s2kt4",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-06T16:05:09.696Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qeoxfp",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-06T16:05:07.918Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0423zxm",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-06T16:05:06.400Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0w4gi4s",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-06T16:05:05.456Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0w4gi4s",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-06T16:05:04.581Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0w4gi4s",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-06T16:05:03.626Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c05s2kt4",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-06T16:05:02.712Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0qeoxfp",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-06T16:05:01.809Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0qeoxfp",
+      "note": "#2"
+    },
     {
       "at": "2026-11-06T16:05:00.638Z",
       "by": "Main",
