@@ -67,8 +67,9 @@ ir_lazy_kind: fn(m: &IRModule, p: IRProgram, ty: Type) -> Int Never! {
 }
 
 // Whether the descriptor of `ty` has clone glue: a single-use declaration, an
-// Iter or a handle without a clone does not. One `seen` set shared by the
-// whole walk visits each type once; a type already seen adds nothing to the
+// Iter or a handle without a clone (a runtime handle, or a move-only native
+// one such as a Task) does not. One `seen` set shared by the whole walk
+// visits each type once; a type already seen adds nothing to the
 // conjunction.
 ir_lazy_can_clone: fn(m: &IRModule, p: IRProgram, ty: Type, seen: &[String:Bool]) -> Bool Never! {
     if ir_lazy_definition(p, ty) == .Val(row) {
@@ -85,6 +86,7 @@ ir_lazy_can_clone: fn(m: &IRModule, p: IRProgram, ty: Type, seen: &[String:Bool]
     if ir_iter_element(ty) != None -> return false
     if ir_value_type(&m, p, ty) == .Val(row) {
         if ir_is_handle(m, row) -> return m.types[row].clone != ""
+        if ir_close_handle(m, row) -> return false
     }
     key: type_carrier_identity(ty)
     if seen.get(key) != None -> return true
@@ -1174,16 +1176,22 @@ ir_lazy_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, vari
     ir_lazy_walk_source(&m, p, &b, label, variable, variable_two, source, row, stride, body, span)
 }
 
-// Whether `loop x in ^xs` (or a walk of a fresh List) takes the List's
-// items over: the List is moved or fresh, and its items close (a Close
-// method or a move-only handle at any depth) or are move-only handles. A
-// step's item can't share such a value with the List (a byte copy shares the
-// handle uncounted, so both would close it, #6415); the walk moves each item
-// out instead (ir_list_walk_taken).
-ir_list_walk_takes: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, collection_ty: Type, list: Int, row: Int, span: Span) -> Bool Never! {
-    listed: ir_untag(collection_ty) == .List(_)
+// Whether `loop x in xs.move()` (or a walk of a fresh List, or one Sema checked as
+// consuming the variable's List, `by_value`) takes the List's items over:
+// the List is moved, fresh or consumed, and its items close (a Close method
+// or a move-only handle at any depth) or are move-only handles. A step's item
+// can't share such a value with the List (a byte copy shares the handle
+// uncounted, so both would close it, #6415); the walk moves each item out
+// instead (ir_list_walk_taken).
+ir_list_walk_takes: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, collection_ty: Type, list: Int, row: Int, by_value: Bool, span: Span) -> Bool Never! {
+    // A `[T#N]` whose items are not plain is carried as the List of them.
+    listed: if ir_untag(collection_ty) == {
+        .List(_) -> true
+        .FixedList(_, _) -> ir_fixed_count(m, b.f.slot_type[list]) == None
+        else -> false
+    }
     if !listed -> return false
-    if !b.fresh[list] && !ir_movable_binding(b, list) -> return false
+    if !b.fresh[list] && !ir_movable_binding(b, list) && !(by_value && ir_owned_binding(b, list)) -> return false
     if ir_close_handle(m, row) -> return true
     ir_close_glue(&m, p, &b, row, false, span) >= 0
 }
@@ -1194,9 +1202,12 @@ ir_list_walk_takes: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, collection_ty:
 // step's scope closes and drops what is left. The items a `break`, `return`
 // or stop leaves in the Iter close as a scope end would close them (the
 // descriptor's drop is lazy.retire), when the cursor drops.
-ir_list_walk_taken: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, collection_ty: Type, list: Int, row: Int, stride: Int, body: [Int], span: Span) Never! {
+ir_list_walk_taken: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, collection_ty: Type, list: Int, row: Int, stride: Int, by_value: Bool, body: [Int], span: Span) Never! {
     element: m.types[row].ty.copy()
     ir_close_disarm(&b, list)
+    // A consuming walk moves the variable's List as `xs.move()` would: the
+    // variable stops owning it, so its scope end drops no item again.
+    if by_value && !b.fresh[list] && ir_owned_binding(b, list) -> b.moving = list
     owned: ir_own(&m, p, &b, list)
     meta: ir_lazy_meta(&m, p, &b, element, span)
     if meta < 0 -> return

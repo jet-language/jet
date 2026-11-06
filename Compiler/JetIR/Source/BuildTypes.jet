@@ -1085,8 +1085,13 @@ ir_record_out: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: In
 
 // The text of the borrowed native record `slot` of type `ty` from its runtime
 // type's own rendering, or -1 when `ty` is not a record its runtime type
-// renders in `mode`.
+// renders in `mode`. A fieldless enum carried as its variant index renders
+// the same way under Display (ir_word_record_display).
 ir_record_render: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int, mode: IRRender, span: Span) -> Int Never! {
+    if mode == .Display {
+        word: ir_word_record_display(m, p, b, ty, slot)
+        if word >= 0 -> return word
+    }
     record: ir_record_runtime(&m, p, ty) ?? return -1
     symbol: ir_render_handle_symbol(p, ty, mode) ?? return -1
     handle: ir_record_out(&m, p, &b, ty, slot, span)
@@ -1095,6 +1100,49 @@ ir_record_render: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: 
     text: ir_runtime(&m, &b, symbol, [Int]{handle}, string_row)
     _: ir_runtime(&m, &b, "jet_rt_handle_drop_{runtime_abi_atom(record.runtime)}", [Int]{handle}, -1)
     text
+}
+
+// The Display text of `slot`, a fieldless enum of type `ty` carried as its
+// variant index whose runtime type has a record schema and a Display of its
+// own (EnvError): a new runtime record of the variant renders and drops, as a
+// record carried as a handle does. -1 for any other value.
+ir_word_record_display: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int) -> Int Never! {
+    plain: ir_untag(ty)
+    if plain == .Apply(_, args) {
+        if args.len() > 0 -> return -1
+    }
+    name: ir_nominal_name(plain) ?? return -1
+    definition: ir_type_def(p, name) ?? return -1
+    row: ir_value_type(m, p, ty) ?? return -1
+    if m.types[row].kind != .Word -> return -1
+    handle: ir_handle_runtime(p, name) ?? ir_handle_runtime(p, p.types[definition].key) ?? return -1
+    if !ir_record_schema(handle) -> return -1
+    symbol: ir_render_handle_symbol(p, ty, IRRender.Display) ?? return -1
+    if p.types[definition].kind == .Enum(variants, _) {
+        loop variant in variants {
+            if variant.payload == {
+                .Unit -> {}
+                else -> return -1
+            }
+        }
+        atom: runtime_abi_atom(handle.runtime)
+        pointer_row: ir_pointer_row(m)
+        made: ir_temp(m, b, pointer_row)
+        ir_emit(b.f, IROp.Const, made, 0, -1, -1, b.line)
+        loop (index, variant) in variants {
+            expected: ir_word_const(m, b, index)
+            selected: ir_bool_op(m, b, IROp.Eq, slot, expected)
+            ir_open_if(b.f, selected, b.line)
+            record: ir_runtime(m, b, "jet_rt_record_new_{atom}_{runtime_abi_atom(variant.name)}", [Int]{}, pointer_row)
+            ir_emit(b.f, IROp.Copy, made, record, -1, -1, b.line)
+            ir_end(b.f, b.line)
+        }
+        string_row: ir_string_row(m)
+        text: ir_runtime(m, b, symbol, [Int]{made}, string_row)
+        _: ir_runtime(m, b, "jet_rt_handle_drop_{atom}", [Int]{made}, -1)
+        return text
+    }
+    -1
 }
 
 // The constructor argument for `member` of the record at `base`: a leaf word,

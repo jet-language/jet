@@ -1,5 +1,6 @@
 use {
     files: core.files
+    process: core.process
     sys: core.sys
 }
 
@@ -117,5 +118,42 @@ kit_no_nix_argv: fn(env: KitEnv, argv: [String], scratch: String, network: Strin
 
 kit_no_nix_failure: fn(step: KitStep, run: KitRun) -> KitVerdict? {
     if step.isolate == "no-nix" && run.stderr.contains("JET_TESTKIT_NO_NIX_SETUP_FAILED") -> return Val(kit_expect_verdict("ERROR", "no-nix namespace setup: {run.stderr}"))
+    None
+}
+
+// A `host-port:` golden row runs its program in a network namespace of its
+// own, so the fixed port it binds is free whatever the host holds: a user
+// namespace that maps the caller to root holds a fresh network namespace,
+// whose loopback `ip` raises before the program starts.
+KIT_NETNS_RAISE: "ip=\"$1\"; shift; \"$ip\" link set lo up || exit 125; exec \"$@\""
+
+// unshare, sh and ip, or why this host has no private network namespace.
+kit_netns_helpers: fn() -> [String] Err! {
+    if sys.name() != "linux" -> return Err("a private network namespace requires Linux")
+    helpers := [String]{}
+    loop name in ["unshare", "sh", "ip"] {
+        helper: kit_no_nix_helper(name) ?? return Err("a private network namespace requires `{name}`")
+        helpers.push(helper)
+    }
+    Ok(helpers)
+}
+
+kit_netns_wrap: fn(helpers: [String], argv: [String]) -> [String] {
+    result := [String]{helpers[0], "--user", "--map-root-user", "--net", helpers[1], "-c", KIT_NETNS_RAISE, "sh", helpers[2]}
+    loop argument in argv -> result.push(argument)
+    result
+}
+
+kit_netns_argv: fn(argv: [String]) -> [String] Err! {
+    helpers: kit_netns_helpers() ?? return Err("{err}")
+    Ok(kit_netns_wrap(helpers, argv))
+}
+
+// SKIP-HOST with the reason when this host can't give a row its own network
+// namespace: a helper is missing, or a probe can't raise a loopback in one.
+kit_netns_required: fn() -> KitVerdict? {
+    helpers: kit_netns_helpers() ?? return Val(kit_expect_verdict("SKIP-HOST", "host-port: {err}"))
+    probe: process.cmd(kit_netns_wrap(helpers, [helpers[1], "-c", "true"])).stdout(.Capture).stderr(.Capture).run() ?? return Val(kit_expect_verdict("SKIP-HOST", "host-port: private network namespace probe: {err}"))
+    if probe.code != 0 -> return Val(kit_expect_verdict("SKIP-HOST", "host-port: this host refuses a private network namespace: {probe.errors.trim()}"))
     None
 }

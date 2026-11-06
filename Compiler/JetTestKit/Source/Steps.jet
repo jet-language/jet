@@ -998,6 +998,7 @@ kit_steps_prepare: fn(step: KitStep, env: KitEnv, work: String, scratch: String,
         bootstrap: if step.action == "spawn" -> files.join(scratch, "child-{step.label}") else -> scratch
         argv = kit_no_nix_argv(policy, argv, bootstrap, step.isolate_network) ?? return Err("{err}")
     }
+    if step.isolate == "netns" -> argv = kit_netns_argv(argv) ?? return Err("{err}")
     Ok(KitProcessInput{argv: argv, cwd: cwd, stdin: stdin, env: policy, overlay: environment})
 }
 

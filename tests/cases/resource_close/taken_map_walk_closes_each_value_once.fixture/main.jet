@@ -1,0 +1,70 @@
+// A walk of a taken Map owns each entry it binds: the step closes the value
+// unless the body takes it, and `next`, `break` and `return` close the step's
+// value once. The entries a walk leaves close when the walk ends, in key
+// order, as the Map's own close orders them; a borrowed walk closes nothing
+// until the Map ends.
+Res: struct { name: String }
+impl Res.Close {
+    close: fn(&&self) { print("close {self.name}") }
+}
+
+fill: fn(prefix: String) -> [String: Res] Never! {
+    table := [String: Res]{}
+    parts: [String]{"c", "a", "b", "d"}
+    loop part in parts {
+        name: "{prefix}{part}"
+        table[name] = Res{name: name}
+    }
+    table
+}
+
+walked: fn() {
+    table := fill("w")
+    loop (key, res) in table.move() {
+        if key == "wb" -> next
+        if key == "wc" -> close(res)
+        print("step {key}")
+    }
+    print("walked done")
+}
+
+stopped: fn() {
+    table := fill("s")
+    loop (key, res) in table.move() {
+        if key == "sb" -> break
+        print("step {key} {res.name}")
+    }
+    print("stopped done")
+}
+
+first: fn() {
+    table := fill("f")
+    loop (key, _res) in table.move() {
+        print("step {key}")
+        break
+    }
+    print("first done")
+}
+
+returned: fn() -> Int {
+    table := fill("r")
+    loop (key, _res) in table.move() {
+        if key == "rb" -> return 2
+        print("step {key}")
+    }
+    0
+}
+
+kept: fn() {
+    table := fill("k")
+    loop (key, res) in table -> print("read {key} {res.name}")
+    print("kept done")
+}
+
+run: fn() {
+    walked()
+    stopped()
+    first()
+    print("returned {returned()}")
+    kept()
+}

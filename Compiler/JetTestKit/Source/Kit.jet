@@ -311,6 +311,8 @@ KitStep: struct {
     limit_time: Int{0}
     limit_memory: Int{0}
     limit_resident: Int{0}
+    // "no-nix" (the `isolate:` launcher), "netns" (a network namespace of its
+    // own: a `host-port:` golden row's program, kit_netns_argv) or "".
     isolate: String{""}
     isolate_network: String{"disabled"}
     env_clear: Bool{false}
@@ -341,7 +343,8 @@ KitPlan: struct {
     json_normalize: [KitJSONNormalization]{[KitJSONNormalization]{}}
     replacements: [KitReplacement]{[KitReplacement]{}}
     free_ports: [String]{[String]{}}
-    // A fixed TCP port the case binds; 0 is none.
+    // A fixed TCP port the case binds; 0 is none. A golden row's program
+    // binds it in a network namespace of its own (kit_netns_argv).
     host_port: Int{0}
 }
 

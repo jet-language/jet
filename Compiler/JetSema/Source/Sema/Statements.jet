@@ -2459,12 +2459,15 @@ sema_stmt_for_in_decl_loop_local: fn(name: String, name_span: Span, ty: Type?, o
     Val(checked_symbol_local(name, name_span, symbol.id, checked_ty))
 }
 
-// `loop (k, v) in ^table`: the loop takes the map, so its entries are owned.
+// `loop (k, v) in table.move()` (or `^table`): the loop takes the map, so its
+// entries are owned.
 sema_stmt_for_in_takes_map: fn(collection: Expr, collection_type: Type) -> Bool Never! {
-    if collection_type == .Map(_, _, _) {
-        if collection == .Place(_, access, _, _) -> return access == PlaceAccess.Take
+    if !(collection_type == .Map(_, _, _)) -> return false
+    if collection == {
+        .Place(_, access, _, _) -> access == PlaceAccess.Take
+        .MethodCall(receiver, method, _, _, type_args, args, _) -> method == "move" && args.len() == 0 && type_args.len() == 0 && (receiver == .Ident(_, _, _) || receiver == .Field(_, _, _, _))
+        else -> false
     }
-    false
 }
 
 // Rust lends each ViewMut item for one iteration; the descriptor may not
@@ -7907,7 +7910,8 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                                     else -> {
                                         source_value := sema_stmt_for_in_source(collection_expr, collection, method_kind)
                                         columnar := var2 == None && method_kind == None && sema_stmt_for_in_columnar_list_type(collection.ty) && sema_stmt_for_in_columnar(environment, program, item_type)
-                                        by_value := consumes_collection && (sema_stmt_for_in_by_value(collection.ty, item_type) || sema_stmt_for_in_is_list(collection.ty))
+                                        // `loop (k, v) in table.move()` takes the map, so its walk takes the entries.
+                                        by_value := (consumes_collection && (sema_stmt_for_in_by_value(collection.ty, item_type) || sema_stmt_for_in_is_list(collection.ty))) || sema_stmt_for_in_takes_map(collection_expr, collection.ty)
                                         stable := source_stable && method_kind == None && step_value == None && !by_value && !columnar && sema_stmt_for_in_stable_list(collection.ty)
                                         &output.push(TStmt.ForIn{label: label_name, variable: variable, variable_two: variable_two, source: source_value, collection: collection, step: step_value, method_kind: method_kind, columnar: columnar, by_value: by_value, source_stable: stable, body: nested.value, span: span})
                                     }

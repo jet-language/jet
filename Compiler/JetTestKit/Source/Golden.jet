@@ -204,6 +204,12 @@ kit_golden_run_entry: fn(entry: KitEntry, tier: KitTier, env: KitEnv, scratch: S
     last := kit_exec_failed("case has not run")
     if plan.error != "" -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", plan.error), run: last}
     if plan.fixture != "" -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", "golden fixture is the staged project; fixture: is case-only"), run: last}
+    // A row that binds a fixed port runs its program in a network namespace
+    // of its own, where the port is always free; a host that can't give it
+    // one skips the row.
+    if plan.host_port != 0 {
+        if kit_netns_required() == .Val(skipped) -> return KitOutcome{verdict: skipped, run: last}
+    }
     source: files.join(scratch, "source")
     work: files.join(source, entry.project)
     kit_exec_copy_tree(files.join(env.root, entry.project), work, true, false)
@@ -275,6 +281,7 @@ kit_golden_step_invoke: fn(step: KitStep, index: Int, context: KitStepCtx, previ
         }
         actual.argv = argv
     }
+    if plan.host_port != 0 && actual.isolate == "" -> actual.isolate = "netns"
     if index == plan.steps.len() - 1 && actual.stdin == "" && kit_golden_exists("{golden.expected}.stdin") -> actual.stdin = "{golden.expected}.stdin"
     // `repo-cwd:` runs the program from the staged source root. The stage keeps
     // the repository layout, so a repo-relative path the program reads (its own
