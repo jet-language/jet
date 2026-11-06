@@ -184,9 +184,10 @@ fn env_or(name: String, fallback: String) -[Env]> String Never! {
     value
 }
 
-// The confined tree sits beside the shared dev scratch, outside any tmpfs the
-// sandbox mounts, so a write that escapes it would land on the host.
-fn scratch_root() -[Env]> String Never! { "{env_or("HOME", "")}/.cache/jet-dev/scratch" }
+// The confined tree sits in the dev scratch root ($JET_SCRATCH_ROOT, else the
+// user cache's jet-dev), outside any tmpfs the sandbox mounts, so a write that
+// escapes it would land on the host.
+fn scratch_root() -[Env]> String Never! { env_or("JET_SCRATCH_ROOT", "{env_or("XDG_CACHE_HOME", "{env_or("HOME", "")}/.cache")}/jet-dev") }
 
 // The checkout holding this script, or else the one around the working directory.
 fn repo_root() -[Env, FS]> String Problem! {
