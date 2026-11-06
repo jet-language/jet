@@ -202,9 +202,35 @@ jet_cli_budget_normal: fn(path: String) -> String Never! {
 }
 
 // A store error with the project root removed, so a reason never carries an
-// absolute path into the proof.
+// absolute path into the proof: `root/x` reads `x` and a bare `root` reads
+// `.`, while a longer name the root only begins (`/perf` for the root `/p`)
+// is kept. One pass over the message, so the text a replacement leaves is
+// never matched again.
 jet_cli_budget_relative: fn(root: String, message: String) -> String Never! {
-    message.replace("{root}/", "").replace(root, ".")
+    if root == "" -> return message.copy()
+    parts: message.split(root).to_list()
+    out := parts[0].copy()
+    loop index in 1..<parts.len() {
+        rest: parts[index]
+        if rest.starts_with("/") {
+            tail: rest.removeprefix("/")
+            out = "{out}{tail}"
+        } else if jet_cli_budget_name_continues(rest) {
+            out = "{out}{root}{rest}"
+        } else {
+            out = "{out}.{rest}"
+        }
+    }
+    out
+}
+
+// Whether the text after a root match continues the same path component.
+jet_cli_budget_name_continues: fn(rest: String) -> Bool Never! {
+    loop character in rest.chars() {
+        text: "{character}"
+        return text.is_alphabetic() || text.is_numeric() || text == "." || text == "_" || text == "-"
+    }
+    false
 }
 
 #Test("budget view projects only reports of the requested sources") {

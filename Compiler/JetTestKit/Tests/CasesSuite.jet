@@ -17,6 +17,13 @@ cases_test_context: fn(root: String, scratch: String) -> KitCtx {
     KitCtx{env: env, root: root, scratch: scratch, bless: options.bless, known: kit_known_load(options.ledger), options: options}
 }
 
+// The real compiler a self-test runs: TESTKIT_JET when the caller pins one,
+// else JET, the jet under test a test profile hands every child and the kit
+// itself runs (kit_exec_defaults), else the `jet` on PATH.
+cases_test_real_jet: fn(purpose: String) -> String {
+    sys.get("TESTKIT_JET") ?? (sys.get("JET") ?? (process.which("jet") ?? panic("set TESTKIT_JET or JET to the real compiler {purpose}")))
+}
+
 cases_test_entry: fn(name: String) -> KitEntry {
     path: "tests/cases/group/{name}.case"
     KitEntry{path: path, expected: path, project: "tests/cases/group", suite: "cases", mode: ""}

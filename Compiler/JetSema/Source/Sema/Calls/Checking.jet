@@ -344,12 +344,8 @@ sema_call_is_scalar: fn(ty: Type) -> Bool Never! {
     }
 }
 
-sema_call_convention_diagnostic: fn(callee: String, param: SemaCallParam, arg: CallArg, decision: SemaCallConventionDecision) -> Diagnostic {
-    if decision == {
-        .RequiresWrite -> sema_error("E0202", arg.span, "parameter `{param.name}` requires the write-access marker `&` at the call site", "`{callee}` needs to edit this value with the write-access marker `&`", "write `&` before the argument")
-        .RejectsMove -> sema_error("E0203", arg.span, "a value was passed with the move marker `^` to a parameter that does not consume", "only a move parameter accepts a moved value", "remove the move marker `^`")
-        else -> sema_error("E0209", arg.span, "implicit clone of `{param.name}`", "`{callee}` takes ownership and this argument is not marked as a move", "write the move marker `^`, or copy the value explicitly")
-    }
+sema_call_move_rejected_diagnostic: fn(arg: CallArg) -> Diagnostic {
+    sema_error("E0203", arg.span, "a value was passed with the move marker `^` to a parameter that does not consume", "only a move parameter accepts a moved value", "remove the move marker `^`")
 }
 
 // Whether a callback argument at a C boundary is outside the C callback
@@ -487,9 +483,13 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
             return None
         }
         required: sema_call_resolved_type(required_declared, environment, program)
+        // An unmarked place a write parameter receives is its write access.
+        if sema_call_unmarked_write_place(parameter, args[index]) {
+            args[index].convention = AccessConvention.Write
+        }
         decision: sema_call_argument_convention(parameter, args[index])
-        if report_conventions && decision != SemaCallConventionDecision.Accepted {
-            &diagnostics.push(sema_call_convention_diagnostic(callee, parameter, args[index], decision))
+        if report_conventions && decision == SemaCallConventionDecision.RejectsMove {
+            &diagnostics.push(sema_call_move_rejected_diagnostic(args[index]))
             return None
         }
         // Rust CallBinder `rewrite` + `register_binder_refs`: a default names
@@ -567,7 +567,10 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
             complete = false
             next
         }
-        if parameter.convention == AccessConvention.Move && !sema_copy_site_check_guard_owned(checked_value, environment, program, scopes, state, context, &diagnostics, args[index].convention == AccessConvention.Move) -> return None
+        // A bare name a take parameter receives is that parameter's take, as
+        // `name.move()` was (D-CALLSITE-MARK2=A).
+        taken_name: args[index].convention == AccessConvention.Move || decision == SemaCallConventionDecision.NeedsImplicitClone
+        if parameter.convention == AccessConvention.Move && !sema_copy_site_check_guard_owned(checked_value, environment, program, scopes, state, context, diagnostics, taken_name) -> return None
         // A self-typed read that does not fit reports the generic E0108 at
         // the value; like any other argument, that becomes the call's E0112.
         // Integer narrowing keeps its own E0108 (Rust check_type_assignable
@@ -630,10 +633,22 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
         }
         // The ownership check that follows moves an
         // eligible unmarked take argument at its last use.
+        noted_take := false
         if !report_conventions && decision == SemaCallConventionDecision.NeedsImplicitClone && binder_refs.len() == 0 && !default_in_owner {
             if sema_ownership_note_implicit_take(&state, args[index].expr, value.ty, required, environment, program, context.generic_params, scopes) == .Val(key) {
                 &take_indices.push(index)
                 &take_keys.push(key)
+                noted_take = true
+            }
+        }
+        // D-CALLSITE-MARK2=A: any other unmarked name a take parameter
+        // receives is that parameter's take, as `^name` was. It moves out of
+        // its owner here, so a later use reports the move into this call.
+        if !noted_take && decision == SemaCallConventionDecision.NeedsImplicitClone && binder_refs.len() == 0 && !default_in_owner && !parameter.variadic && !sema_ownership_type_is_copy(value.ty) && !sema_ownership_type_is_copy(required) && !sema_ownership_argument_is_function_item(args[index], scopes) {
+            args[index].convention = AccessConvention.Move
+            if !sema_pin_check_move(&state, args[index].expr, scopes, &diagnostics) {
+                complete = false
+                next
             }
         }
         // Rust `check_call_argument_access`: the parser stores `f(^x)`'s and
@@ -698,7 +713,7 @@ sema_call_owned_trait_bound: fn(ty: Type) -> String? {
 
 // A fixed-shape Core route checks its own arguments. An unmarked bare name
 // passed to one of its taking parameters still moves at its last use, as at
-// an ordinary call; a name another argument of the same call also references
+// an ordinary call; a name a later argument of the same call also references
 // has no last use there. `values` are the checked arguments, in `args` order.
 sema_call_note_route_implicit_takes: fn(params: [SemaCallParam], args: [CallArg], values: [TExpr], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: &SemaOwnershipState, context: SemaCheckContext) {
     loop index in 0..<args.len() {
@@ -710,8 +725,7 @@ sema_call_note_route_implicit_takes: fn(params: [SemaCallParam], args: [CallArg]
         twice := false
         loop reference in context.name_references {
             if reference.symbol.id.key != key -> next
-            loop other in 0..<args.len() {
-                if other == index -> next
+            loop other in index + 1..<args.len() {
                 other_span: expr_span(args[other].expr)
                 if reference.span.start >= other_span.start && reference.span.end <= other_span.end -> twice = true
             }
@@ -983,11 +997,11 @@ sema_call_argument_replace_mismatch: fn(callee: String, index: Int, required: Ty
     diagnostics[mismatch_index] = sema_call_argument_mismatch(callee, index, required, offered_ty, shown_span)
 }
 
-// Whether an argument other than `own` references the binding `key`;
+// Whether an argument after `own` references the binding `key`: arguments
+// run in order, so an earlier one has read the name before the take.
 // `starts` holds each argument's first name reference and the end.
 sema_call_key_named_elsewhere: fn(key: String, own: Int, starts: [Int], context: SemaCheckContext) -> Bool Never! {
-    loop other in 0..<starts.len() - 1 {
-        if other == own -> next
+    loop other in own + 1..<starts.len() - 1 {
         loop index in starts[other]..<starts[other + 1] {
             if index < context.name_references.len() && context.name_references[index].symbol.id.key == key -> return true
         }

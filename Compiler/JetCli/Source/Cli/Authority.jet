@@ -16,6 +16,7 @@ use {
         Diagnostic,
         authority_effect_action,
         authority_grantable_roots,
+        authority_inline_package_fix,
         authority_is_deny_only,
         authority_parse_root,
         diagnostic_from_registry,
@@ -294,12 +295,10 @@ jet_cli_policy_why: fn(authority: JetCLIAuthority) -> String Never! {
 // A program with no package.jet edits its leading `package: { … }` block. The
 // floor stays granted beside a written row (D-AUTH-AMBIENT3=A), so the row
 // names only the undecided rights. `jet fix --all` inserts a missing block
-// only.
-jet_cli_policy_fix: fn(authority: JetCLIAuthority) -> String Never! {
+// only, named after `file`.
+jet_cli_policy_fix: fn(authority: JetCLIAuthority, file: String) -> String Never! {
     undecided: jet_cli_undecided(authority)
-    if undecided.len() > 0 && jet_cli_is_application_default(authority) {
-        return "declare `allow: [{undecided.join(", ")}]` under `authority` in a leading `package: {{ … }}` block of this file (`jet fix --all` inserts it); otherwise approve the exact operation once in an interactive terminal"
-    }
+    if undecided.len() > 0 && jet_cli_is_application_default(authority) -> return authority_inline_package_fix(file, undecided)
     if undecided.len() > 0 && jet_cli_is_manifest_less(authority) {
         return "add `allow: [{undecided.join(", ")}]` under `authority` in this file's leading `package: {{ … }}` block; otherwise approve the exact operation once in an interactive terminal"
     }
@@ -328,7 +327,7 @@ jet_cli_authority_refusal: fn(authority: JetCLIAuthority, file: String, command:
     undecided: jet_cli_undecided(authority)
     if denied.len() == 0 && undecided.len() == 0 -> return None
     what: if denied.len() == 0 -> "application authority is undecided for `{undecided.join(", ")}`" else -> "application authority denies `{denied.join(", ")}`"
-    diagnostic := diagnostic_from_registry("E1803", None, what, jet_cli_policy_why(authority), jet_cli_policy_fix(authority))
+    diagnostic := diagnostic_from_registry("E1803", None, what, jet_cli_policy_why(authority), jet_cli_policy_fix(authority, file))
     if denied.len() == 0 && jet_cli_is_manifest_less(authority) {
         fix: diagnostic.fix
         rest: if fix.len() == 0 -> "" else -> "{jet_cli_ascii_lower(fix.slice(0..<1))}{fix.slice(1..<fix.len())}"

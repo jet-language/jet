@@ -5,14 +5,14 @@ use {
 }
 native_metadata_check: fn() {
     store: sys.get("TOOL_STORE") ?? panic("TOOL_STORE")
-    entries: files.list_dir(store + "/hangar")
+    entries: files.list_dir("{store}/hangar") ?? panic("Hangar listing: {err}")
     found_any := false
     matched := false
     loop entry in entries {
-        path: entry.path + "/meta.json"
+        path: "{entry.path}/meta.json"
         if files.is_file(path.copy()) {
             found_any = true
-            metadata: files.read(path)
+            metadata: files.read(path) ?? panic("Hangar metadata: {err}")
             if metadata.contains("omp@releases") && !metadata.contains("/nix/store/") -> matched = true
         }
     }

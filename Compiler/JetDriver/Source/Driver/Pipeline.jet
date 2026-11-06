@@ -3960,8 +3960,8 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     loaded_identity_counts = [String:Int]{}
     jet_driver_trace_step_end(request.trace_sink, "driver.prelower.owners", checked_row)
     // E0601 only when neither named tests nor selected Check Outputs exist,
-    // and the run is not a code suite's.
-    if request.mode == JetDriverCompileMode.Test && !request.code_suite && jet_driver_runnable_test_count(registration_graph) == 0 {
+    // and the compile doesn't make tests optional.
+    if request.mode == JetDriverCompileMode.Test && !request.tests_optional && jet_driver_runnable_test_count(registration_graph) == 0 {
         &load.diagnostics.push(jet_driver_diagnostic_without_span("E0601", "no `#Test` blocks found to run", "add at least one top-level block: #Test(\"describes what this checks\") {{ ... }}", "use `assert` and `assert_eq` inside the block to check results"))
     }
     if jet_driver_has_errors(load.diagnostics) -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Check)
@@ -4008,6 +4008,12 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     c_export_rows: jet_driver_c_export_rows(registration_graph, load.entry_module_identity)
     job_rows: jet_driver_job_rows(registration_graph, load.entry_module_identity)
     budget_spans: jet_driver_effect_budget_name_spans(load, registration_graph)
+    // A user module only compile-time code uses is left out like an
+    // unreached Core module; a Test compile keeps every module's bodies.
+    prunable_modules := jet_driver_prunable_core_modules(load, request.core_sources, runtime_semantic_modules)
+    if request.mode != JetDriverCompileMode.Test {
+        loop identity in registration_graph.comptime_only_modules -> &prunable_modules.push(identity)
+    }
     decls := ^registration_graph.decls
     registration_graph.decls = DeclTable{}
     late_registration := SemaRegistrationGraph?{None}
@@ -4017,7 +4023,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     // #3980: lower only the Core source bodies the program reaches (Rust
     // reference lowering's `should_lower_imported_core_body`).
     if request.trace_sink == .Val(sink) -> sink.begin("lower", "", -1, -1)
-    lowering_rows := ir_reachable_core_rows(&checked_functions, decls, ^lowering_candidates, jet_driver_prunable_core_modules(load, request.core_sources, runtime_semantic_modules), request.compiler_threads)
+    lowering_rows := ir_reachable_core_rows(&checked_functions, decls, ^lowering_candidates, prunable_modules, request.compiler_threads)
     sema_functions := [FnBody]{}
     unlowered_functions := [FnBody]{}
     jet_driver_partition_checked_functions(&checked_functions, lowering_rows, &sema_functions, &unlowered_functions)

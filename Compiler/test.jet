@@ -96,7 +96,8 @@ failure_line: fn(text: String) -> String {
 // jetpack: one row per #Test of each Jetpack package, `<package>: <test>`,
 // from `jet test Jetpack/<package>`; the packages are each area and its
 // `Tests` package. A package whose tests didn't run is the failing row
-// `<package>`.
+// `<package>`. Claims that drive the jet CLI run the jet under test, named
+// by JET_BIN as Jetpack/Bootstrap/check.sh names it.
 jetpack_rows: fn(rows: TestRows) {
     setup: suite_setup(rows) ?? return
     listed: files.list_dir(files.join(setup.checkout, "Jetpack")) ?? {
@@ -114,7 +115,7 @@ jetpack_rows: fn(rows: TestRows) {
     &packages.sort()
     specs := [ProcessSpec]{}
     loop package in packages {
-        &specs.push(jet_command(setup, setup.jet, [String]{"test", "Jetpack/{package}"}))
+        &specs.push(jet_command(setup, setup.jet, [String]{"test", "Jetpack/{package}"}).env("JET_BIN", setup.jet))
     }
     results: process.run_all(specs, JETPACK_JOBS) ?? {
         rows.fail("Jetpack", "couldn't start the package runs: {err}")

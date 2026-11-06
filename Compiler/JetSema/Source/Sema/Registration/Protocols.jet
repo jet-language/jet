@@ -115,15 +115,15 @@ sema_protocol_send_method: fn(handle: String, states: [String], index: Int, mess
     to: states[index + 1]
     fields: sema_protocol_fields(message)
     suffix: if fields == "" -> "" else -> ", {fields}"
-    if terminal -> return "    #Transition({from}, {to}) {message.name}: fn(self: ^{handle}{suffix}) {{}}\n\n"
-    "    #Transition({from}, {to}) {message.name}: fn(self: ^{handle}{suffix}) -> {handle} Err! {{ Ok(self) }}\n\n"
+    if terminal -> return "    #Transition({from}, {to}) {message.name}: fn(self: &&{handle}{suffix}) {{}}\n\n"
+    "    #Transition({from}, {to}) {message.name}: fn(self: &&{handle}{suffix}) -> {handle} Err! {{ Ok(self) }}\n\n"
 }
 
 sema_protocol_recv_method: fn(handle: String, states: [String], index: Int, message: ProtocolMessage, terminal: Bool) -> String Never! {
     from: states[index]
     to: states[index + 1]
-    if terminal -> return "    #Transition({from}, {to}) recv_{message.name}: fn(self: ^{handle}) {{}}\n\n"
-    "    #Transition({from}, {to}) recv_{message.name}: fn(self: ^{handle}) -> {handle} Err! {{ Ok(self) }}\n\n"
+    if terminal -> return "    #Transition({from}, {to}) recv_{message.name}: fn(self: &&{handle}) {{}}\n\n"
+    "    #Transition({from}, {to}) recv_{message.name}: fn(self: &&{handle}) -> {handle} Err! {{ Ok(self) }}\n\n"
 }
 
 sema_protocol_fields: fn(message: ProtocolMessage) -> String Never! {

@@ -1,6 +1,6 @@
 // `mem.pin(&place) -> Pin<T>` starts a tracked write window that
 // promises the place keeps its address. The pin names that storage location,
-// so its argument must be a write window marked with `&` (E0218).
+// so its argument must be a named place (E0218).
 use jet_foundation.[
     AccessConvention,
     Binding,
@@ -12,19 +12,21 @@ use jet_foundation.[
     expr_span,
 ]
 
+// D-CALLSITE-MARK2=A: `pin`'s parameter is a write window, so a named place
+// passed plain is that window.
 sema_pin_write_window: fn(argument: CallArg) -> Bool Never! {
     if argument.convention == AccessConvention.Write -> return true
     if argument.expr == .Place(_, access, _, _) {
         return access == PlaceAccess.Write
     }
-    false
+    argument.convention == AccessConvention.Read && sema_receiver_mark_place_root(argument.expr) != None
 }
 
 // Rust `core_call` arm ("core.mem", "pin") for the one argument of
 // `mem.pin` (sema_call_memory_pin). False when the call is rejected.
 sema_pin_check_call: fn(args: [CallArg], diagnostics: &[Diagnostic]) -> Bool {
     if sema_pin_write_window(args[0]) -> return true
-    &diagnostics.push(sema_error("E0218", expr_span(args[0].expr), "`pin` needs a write window made with the write-access marker `&` into the place being pinned", "a pin promises one storage location will not move, so it has to name that location with the write-access marker `&` instead of a copied value", "write `mem.pin(&place)` with the write-access marker `&`"))
+    diagnostics.push(sema_error("E0218", expr_span(args[0].expr), "`pin` needs a named place to pin", "a pin promises one storage location will not move, so it has to name that location instead of a temporary value", "bind the value to a `:=` name, then write `mem.pin(place)`"))
     false
 }
 

@@ -524,20 +524,20 @@ sema_cli_entry_direct: fn(lines: &[String], spec: SemaCLIEntrySpec, help_end: St
         if marks -> &lines.push("    __x{slot} := false")
     }
     known: "[String]{{{names.join(", ")}}}"
-    &lines.push("    __asked := false")
-    if spec.standard -> &lines.push("    __version := false")
-    &lines.push("    __pos := [String]{{}}")
-    &lines.push("    __i := 1")
-    &lines.push("    loop __i < __argv.len() {{")
-    &lines.push("    __a: __argv[__i].copy()")
-    &lines.push("    if __a == \"--\" {{")
-    &lines.push("    __i += 1")
-    &lines.push("    loop __i < __argv.len() {{")
-    &lines.push("    &__pos.push(__argv[__i].copy())")
-    &lines.push("    __i += 1")
-    &lines.push("    }}")
-    &lines.push("    break")
-    &lines.push("    }}")
+    lines.push("    __asked := false")
+    if spec.standard -> lines.push("    __version := false")
+    lines.push("    __pos := [String]{{}}")
+    lines.push("    __i := 1")
+    lines.push("    loop __i < __argv.len() {{")
+    lines.push("    __a: __argv[__i].copy()")
+    lines.push("    if __a == \"--\" {{")
+    lines.push("    __i += 1")
+    lines.push("    loop __i < __argv.len() {{")
+    lines.push("    __pos.push(__argv[__i].copy())")
+    lines.push("    __i += 1")
+    lines.push("    }}")
+    lines.push("    break")
+    lines.push("    }}")
     // `--help`, `--version`, `--name=value`, `--flag` and `--name value`.
     &lines.push("    if __jet_cli_args.__cli_long(__a) {{")
     &lines.push("    __r: __jet_cli_args.__cli_rest(__a, 2)")
@@ -621,14 +621,14 @@ sema_cli_entry_direct: fn(lines: &[String], spec: SemaCLIEntrySpec, help_end: St
         sema_cli_entry_fail(&lines, "", sema_cli_entry_usage("\"unknown option `-{{__s}}`\""), projection)
         &lines.push("    }}")
     } else {
-        sema_cli_entry_fail(&lines, "", sema_cli_entry_usage("\"unknown option `-{{__jet_cli_args.__cli_slice(__a, 1, 2)}}`\""), projection)
+        sema_cli_entry_fail(lines, "", sema_cli_entry_usage("\"unknown option `-{{__jet_cli_args.__cli_slice(__a, 1, 2)}}`\""), projection)
     }
-    &lines.push("    __i += 1")
-    &lines.push("    next")
-    &lines.push("    }}")
-    &lines.push("    &__pos.push(__a.copy())")
-    &lines.push("    __i += 1")
-    &lines.push("    }}")
+    lines.push("    __i += 1")
+    lines.push("    next")
+    lines.push("    }}")
+    lines.push("    __pos.push(__a.copy())")
+    lines.push("    __i += 1")
+    lines.push("    }}")
     // D-CLI-POS1=A named-wins: a named value satisfies its positional slot and
     // consumes one bare value without shifting later positionals.
     bare := "0"
@@ -649,7 +649,7 @@ sema_cli_entry_direct: fn(lines: &[String], spec: SemaCLIEntrySpec, help_end: St
         &lines.push("    }}")
         &lines.push("    if __v{slot} == None {{")
         fallback: sema_cli_entry_fallback(input, slot)
-        missing: "&__missing.push({sema_cli_entry_text(input.name)})"
+        missing: "__missing.push({sema_cli_entry_text(input.name)})"
         if fallback == .Val(value) {
             &lines.push("    __v{slot} = {value}")
             if input.default == None -> &lines.push("    if __v{slot} == None -> {missing}")
@@ -813,18 +813,18 @@ sema_cli_entry_projections: fn(items: [Item]) -> [String] {
             spec: sema_cli_entry_spec(definition, items, definition.name) ?? next
             name: definition.name
             decode := [String]{}
-            sema_cli_entry_parse(&decode, spec, "__jet_cli_process.exit(0)", true, false)
-            sema_cli_entry_bind(&decode, spec, name)
-            &decode.push("    Val(__args)")
-            &sources.push(sema_cli_entry_refusing(name, SEMA_CLI_DECODE_METHOD, "", "{SEMA_CLI_DECODE_METHOD}_raw(&__refusal)"))
-            &parsers.push("{name}.{SEMA_CLI_DECODE_METHOD}_raw: fn(__refusal: &String) -> {name}? {{\n{decode.join("\n")}\n}}\n")
+            sema_cli_entry_parse(decode, spec, "__jet_cli_process.exit(0)", true, false)
+            sema_cli_entry_bind(decode, spec, name)
+            decode.push("    Val(__args)")
+            sources.push(sema_cli_entry_refusing(name, SEMA_CLI_DECODE_METHOD, "", "{SEMA_CLI_DECODE_METHOD}_raw(__refusal)"))
+            parsers.push("{name}.{SEMA_CLI_DECODE_METHOD}_raw: fn(__refusal: &String) -> {name}? {{\n{decode.join("\n")}\n}}\n")
             if sema_cli_entry_member_declared(items, definition, "merge") -> next
             merge := [String]{}
             sema_cli_entry_parse(&merge, spec, "__jet_cli_process.exit(0)", true, true)
             fields: loop input in spec.inputs -> "{input.field}: if {input.explicit} -> args.{input.field} else -> settings.{input.field}"
-            &merge.push("    Val({name}{{{fields.join(", ")}}})")
-            &sources.push(sema_cli_entry_refusing(name, "merge", "args: {name}, settings: {name}", "__jet_cli_merge(args, settings, &__refusal)"))
-            &parsers.push("{name}.__jet_cli_merge: fn(args: {name}, settings: {name}, __refusal: &String) -> {name}? {{\n{merge.join("\n")}\n}}\n")
+            merge.push("    Val({name}{{{fields.join(", ")}}})")
+            sources.push(sema_cli_entry_refusing(name, "merge", "args: {name}, settings: {name}", "__jet_cli_merge(args, settings, __refusal)"))
+            parsers.push("{name}.__jet_cli_merge: fn(args: {name}, settings: {name}, __refusal: &String) -> {name}? {{\n{merge.join("\n")}\n}}\n")
         }
     }
     loop parser in parsers -> &sources.push(parser)

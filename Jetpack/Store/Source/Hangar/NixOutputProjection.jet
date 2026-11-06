@@ -336,12 +336,47 @@ store_replay_recorded_nix: fn(verification: &StoreVerification, roots: HangarRoo
             }
         }
     }
-    hit := checked ?? return Err(store_locked_nix_error("locked Nix Hangar admission failed integrity or complete closure verification"))
+    hit := checked ?? {
+        missing: store_locked_nix_missing_members(roots, candidate)
+        if ctx.offline && missing.len() > 0 {
+            return Err(store_locked_nix_error("--offline cannot repair the locked Nix closure; missing {missing.join(", ")}"))
+        }
+        return Err(store_locked_nix_error("locked Nix Hangar admission failed integrity or complete closure verification"))
+    }
     if hit.entry != candidate -> return Err(store_locked_nix_error("locked Nix admission changed during verified reuse or repair"))
     store_require_catalog_permission(producer.facts.get("nix.index.tier"), ctx.allow_local_nix_catalog) ?? return Err(RealizeError.LockedNix(err))
     hit.entry = store_refresh_locked_entry(&verification, roots, ctx, spec, project, found, hit.entry, lock_digest) ?? return Err(RealizeError.Store(err))
     store_authorize_and_project_realization(ctx, hit.entry)
     Ok(Val(hit))
+}
+
+// The closure members of `candidate` whose Hangar objects are gone, named by
+// their Nix store path when the admission recorded one.
+store_locked_nix_missing_members: fn(roots: HangarRoots, candidate: StoreEntry) -> [String] Never! {
+    by_hash := [String: StoreEntry]{}
+    loop entry in store_list_read_only(roots) -> by_hash[entry.envelope.output_hash] = entry
+    queue := [String]{}
+    loop reference in candidate.references -> &queue.push(reference)
+    missing := [String]{}
+    index := 0
+    loop index < queue.len() {
+        digest: queue[index]
+        index += 1
+        member: by_hash.get(digest)
+        if !store_reuse_lexists(store_reuse_object_path(roots, digest)) {
+            label := digest
+            if member == .Val(found) {
+                if ProducerRecord.decode(found.producer_record) == .Ok(producer) -> label = producer.facts.get("nix.store-path") ?? digest
+            }
+            &missing.push(label)
+        }
+        if member == .Val(found) {
+            loop reference in found.references {
+                if !queue.contains(reference) -> &queue.push(reference)
+            }
+        }
+    }
+    missing
 }
 
 // Refresh the producer's lock digest only while the project lock still

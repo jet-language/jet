@@ -319,10 +319,10 @@ sema_copy_site_require_move_mark: fn(value: TExpr, environment: SemaScopeEnviron
     false
 }
 
-// `span` is the whole place read; the edit writes `^` at its start.
+// `span` is the whole place read; the edit writes `.move()` at its end.
 sema_copy_site_move_mark_diagnostic: fn(name: String, span: Span, owner: String) -> Diagnostic {
-    diagnostic: sema_error("E0209", span, "implicit move of `{name}`", "`{name}` holds a resource, which has one cleanup owner; this owning position takes it out of {owner}, and a value with cleanup moves only where `^` writes the move", "write the move marker `^` (`^{name}`), or use the value where it is")
-    diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: span.start, end: span.start}, new_text: "^"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving)
+    diagnostic: sema_error("E0209", span, "implicit move of `{name}`", "`{name}` holds a resource, which has one cleanup owner; this owning position takes it out of {owner}, and a value with cleanup moves only where `.move()` writes the move", "write the move `{name}.move()`, or use the value where it is")
+    diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: span.end, end: span.end}, new_text: ".move()"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving)
 }
 
 // The root name read of `value` when it is a field chain of an owned

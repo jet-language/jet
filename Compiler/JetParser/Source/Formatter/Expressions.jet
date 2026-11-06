@@ -2238,9 +2238,9 @@ jfmt_fmt_task_surface_method: fn(f: &JetFmt, method: String, args: [CallArg]) ->
         if lambda.params.len() > 0 -> return false
         jfmt_write(&f, "task ")
         loop taken in lambda.take_names {
-            jfmt_write(&f, "^")
-            jfmt_write(&f, taken.name)
-            jfmt_write(&f, " ")
+            jfmt_write(f, "&&")
+            jfmt_write(f, taken.name)
+            jfmt_write(f, " ")
         }
         if lambda.body == .Expr(value) {
             // `task expr` and `task { expr }` fold to one node; ask the source.

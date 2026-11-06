@@ -438,8 +438,9 @@ kit_steps_json_assertion: fn(value: String) -> KitAssertion? {
         return Val(KitAssertion{stream: stream, path: source, mode: "json", value: literal, json_mode: mode, json_path: path, json_op: op, optional_file: subject == "file?", transform: transform})
     }
     // `!= LABEL` relates the path to the same path in a prior step's document and
-    // requires them to differ; a JSON literal on the right stays a value comparison.
-    if op == "!=" && tokens.len() == needed + 1 && !kit_steps_json_literal(literal) && kit_steps_relation_label(literal) != "" {
+    // requires them to differ; a JSON literal or an integer `{cap:x}+N` form on
+    // the right stays a value comparison.
+    if op == "!=" && tokens.len() == needed + 1 && !kit_steps_json_literal(literal) && kit_steps_arithmetic(kit_steps_json_preview(literal)) == None && kit_steps_relation_label(literal) != "" {
         return Val(KitAssertion{stream: stream, path: source, mode: "json", value: literal, json_mode: mode, json_path: path, json_op: op, extra: "relation", optional_file: subject == "file?", transform: transform})
     }
     if kit_expect_named(["=", "!=", "has", "!has", "in", ">", ">=", "<", "<="], op) {

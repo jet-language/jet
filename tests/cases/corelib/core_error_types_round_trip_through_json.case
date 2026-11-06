@@ -1,21 +1,22 @@
 # Core's derived Encode/Decode bodies (core.db DBError, core.time TimeError)
 # are kept for lowering whenever a program demands them, on every tier.
+# DB is no default right (E1803), so every run and the build allow it.
 fixture: core_error_types_round_trip_through_json.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 step: jet check main.jet
 exit: 0
-step: jet run --optimize=none main.jet
+step: jet run --allow=DB --optimize=none main.jet
 exit: 0
 stdout: = core_error_types_round_trip_through_json.out
-step: jet run --optimize=basic main.jet
+step: jet run --allow=DB --optimize=basic main.jet
 exit: 0
 stdout: = core_error_types_round_trip_through_json.out
-step: jet run --optimize=full main.jet
+step: jet run --allow=DB --optimize=full main.jet
 exit: 0
 stdout: = core_error_types_round_trip_through_json.out
-step: jet build main.jet
+step: jet build --allow=DB main.jet
 exit: 0
 step aot: built
 exit: 0

@@ -58,6 +58,12 @@ NixIndexClient: struct {
         NixIndexClient.from_roots_with_mode(roots, false)
     }
 
+    // The endpoint this client read at construction; later config rewrites
+    // do not change it.
+    configured_endpoint: fn(self) -> String Never! {
+        self.endpoint
+    }
+
     // The configured official index: an explicit endpoint and trust key must
     // both be installed under the Hangar root, and the test key is refused.
     from_roots_with_mode: fn(roots: HangarRoots, offline: Bool) -[FS, Env, Net]> NixIndexClient NixIndexError! {

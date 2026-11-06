@@ -270,11 +270,6 @@ SemaOwnershipState: struct {
     // argument of the same call also names. Such a name has no last use in
     // that call (Rust `take_unmarked_last_use` `named_elsewhere`): E0209.
     implicit_take_twice: [Span]{[Span]{}}
-    // Unmarked take arguments the typed argument check found to have a type
-    // that is neither copyable nor cloneable for a reason other than a cleanup
-    // duty (a function field, a non-cloneable handle): E0201, never an
-    // implicit clone. A value with cleanup keeps the cloneable E0209.
-    noncloneable_takes: [Span]{[Span]{}}
     // `^`-marked field arguments the typed argument check found to be exact
     // moves into a consuming parameter; the call ownership check records the
     // move, so a later use of the field is E0121.
@@ -1931,7 +1926,7 @@ sema_ownership_diag_view_return_boundary: fn(span: Span) -> Diagnostic {
     sema_error("E2305", span, "returned views need a stable owner relationship", "each public `View`/`ViewMut` slot must name a bounded set of receiver, parameter, or static sources that stay live; this return did not prove those sources", "return a view derived from parameters or the receiver on every path, keep the view local, or return an owned copy with `.copy()`")
 }
 
-// Rust `consumed_view_owner` (#4392): a `^` parameter (or `^self`) moves into
+// Rust `consumed_view_owner` (#4392): a `^` parameter (or `&&self`) moves into
 // this function and is freed when it returns, so it cannot own a returned
 // view. A consumed view carrier differs: its windows still borrow the
 // caller's owner.
@@ -2379,10 +2374,10 @@ sema_ownership_report_moved: fn(state: &SemaOwnershipState, moved: SemaOwnership
     &diagnostics.push(sema_ownership_diag_moved(sema_ownership_place_name(shown), moved.origin, span))
 }
 
-// E0209 (Rust `implicit_take_reused`): an unmarked argument to a take
-// parameter moved its name, and a later use (or the next loop iteration)
-// still needs the value. The fix is the explicit copy at the argument; one
-// report per argument however many later uses reach it.
+// E0209 (Rust `implicit_take_reused`): an argument to a take parameter moved
+// its name, and a later use (or the next loop iteration) still needs the
+// value. A call never copies on its own, so the fix is the explicit copy at
+// the argument; one report per argument however many later uses reach it.
 sema_ownership_report_implicit_take_reused: fn(callee: String, name: String, site: Span, reuse: Span, diagnostics: &[Diagnostic]) {
     loop existing in diagnostics {
         if existing.code == "E0209" && existing.span == .Val(known) {
@@ -2390,9 +2385,9 @@ sema_ownership_report_implicit_take_reused: fn(callee: String, name: String, sit
         }
     }
     label: if sema_ownership_span_same(site, reuse) -> "the next loop iteration passes `{name}` here again" else -> "`{name}` is used again here"
-    diagnostic: sema_error("E0209", site, "`{callee}` takes `{name}`, but `{name}` is used again later", "`{callee}` takes ownership of this argument; an unmarked argument moves only at its name's last use, and this is not the last use of `{name}`", "write `{name}.copy()` to pass a copy and keep `{name}`, or reorder so this call is the last use of `{name}`")
-    labeled: diagnostic_with_label(^diagnostic, reuse, label)
-    &diagnostics.push(diagnostic_with_edit_grade(labeled, TextEdit{span: Span{start: site.end, end: site.end}, new_text: ".copy()"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
+    diagnostic: sema_error("E0209", site, "`{callee}` takes `{name}`, but `{name}` is used again later", "`{callee}` takes ownership of this argument, and a call never copies on its own, so `{name}` has no value after this call", "write `{name}.copy()` to pass a copy and keep `{name}`, or reorder so this call is the last use of `{name}`")
+    labeled: diagnostic_with_label(diagnostic, reuse, label)
+    diagnostics.push(diagnostic_with_edit_grade(labeled, TextEdit{span: Span{start: site.end, end: site.end}, new_text: ".copy()"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
 }
 
 sema_ownership_note_share_found: fn(state: &SemaOwnershipState, found: SemaOwnershipShareSite) Never! {
@@ -2883,7 +2878,8 @@ sema_ownership_write_capability: fn(state: &SemaOwnershipState, expr: Expr, acti
     places := sema_ownership_places_from_expr_in_state(expr, scopes, &state)
     if places.len() == 0 {
         if sema_ownership_writes_temporary_edit_guard(expr) -> return true
-        &diagnostics.push(sema_error("E0202", expr_span(expr), "the write-access marker `&` needs a place after it", "write access can only be granted to stable storage, not a temporary expression", "bind the value first, then pass the binding with `&`"))
+        what: if callee == "" -> "this write needs a place, not a temporary" else -> "`{callee}` writes to this input, so it needs a place, not a temporary"
+        diagnostics.push(sema_error("E0202", expr_span(expr), what, "write access can only be granted to stable storage, not a temporary expression", "bind the value to a `:=` name first, then pass the name"))
         return false
     }
     // The group loan outlives the borrow binding's last lexical use, so it is
@@ -3333,10 +3329,6 @@ sema_ownership_param_for_arg: fn(params: [SemaCallParam], arg: CallArg, source_i
     Val(params[slot])
 }
 
-sema_ownership_call_diag_write_required: fn(callee: String, name: String, span: Span) -> Diagnostic {
-    sema_error("E0202", span, "parameter `{name}` requires the write-access marker `&` at the call site", "`{callee}` needs to edit this value with the write-access marker `&`; passing it without that marker grants only read access", "write the write-access marker `&` (`&{name}`) when calling `{callee}`")
-}
-
 // `&` grants write access to a place — a name followed by
 // field, index, or range projections. Only a temporary lacks one.
 sema_ownership_call_diag_write_place: fn(span: Span) -> Diagnostic {
@@ -3353,29 +3345,10 @@ sema_ownership_call_diag_move_rejected: fn(span: Span) -> Diagnostic {
     sema_error("E0203", span, "a value was passed with the move marker `^` to a parameter that does not consume", "only parameters declared with the move marker `^` accept a moved value at the call site", "remove the move marker `^`, or declare the parameter with that marker to take ownership")
 }
 
-sema_ownership_call_diag_clone: fn(callee: String, name: String, span: Span) -> Diagnostic {
-    sema_error("E0209", span, "implicit clone of `{name}`", "`{callee}` expects to take ownership of this value", "write the move marker `^` (`^{name}`) if this is the last use, or copy first with `{name}.copy()`")
-}
-
-sema_ownership_call_diag_not_copyable: fn(callee: String, index: Int, name: String, span: Span) -> Diagnostic {
-    sema_error("E0201", span, "`{callee}` needs the move marker `^` here — this value can't be copied", "parameter {index + 1} takes ownership through the move marker `^`; passing `{name}` without that marker would have to copy it, but this type can't be copied", "write the move marker `^` (`^{name}`) to move ownership to `{callee}`")
-}
-
 sema_ownership_argument_is_function_item: fn(arg: CallArg, scopes: SemaScopeTable) -> Bool Never! {
     if arg.expr == .Ident(name, span, _) {
         index: sema_scope_resolve_index_at(scopes, name, span) ?? return false
         return scopes.bindings[index].symbol.kind == SymbolKind.Function
-    }
-    false
-}
-
-// The argument names a binding whose value is a secret-bearing crypto type
-// (a generic `^T` slot spells only its formal).
-sema_ownership_argument_is_secret: fn(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable) -> Bool {
-    binding: sema_ownership_binding_for_expr(&state, expr, scopes)
-    if binding != None {
-        info: binding
-        return sema_is_secret_bearing_crypto_type(info.symbol.ty ?? Type.Named{name: "Unit"})
     }
     false
 }
@@ -3442,7 +3415,7 @@ sema_ownership_check_call_arguments_with_accesses: fn(state: &SemaOwnershipState
     known: diagnostics.len()
     value_callee: single_use && sema_ownership_callee_is_value(callee, scopes)
     loop index in 0..<args.len() {
-        arg: args[index]
+        arg := args[index]
         param: sema_ownership_param_for_arg(params, arg, index) ?? {
             complete = false
             next
@@ -3464,18 +3437,22 @@ sema_ownership_check_call_arguments_with_accesses: fn(state: &SemaOwnershipState
             accepted = false
             next
         }
+        // D-CALLSITE-MARK2=A: an unmarked place a write parameter receives is
+        // its write access, checked as `&place` was.
+        if sema_call_unmarked_write_place(param, arg) {
+            arg.convention = AccessConvention.Write
+            args[index].convention = AccessConvention.Write
+        }
         decision: sema_call_argument_convention(param, arg)
         if decision == {
-            .RequiresWrite -> {
-                accepted = false
-                &diagnostics.push(sema_ownership_call_diag_write_required(callee, sema_ownership_argument_name(arg), arg.span))
-            }
             .RejectsMove -> {
                 accepted = false
                 &diagnostics.push(sema_ownership_call_diag_move_rejected(arg.span))
             }
             else -> {}
         }
+        retired: sema_ownership_retired_call_mark(callee, param, arg, value_callee)
+        if retired == .Val(diagnostic) -> diagnostics.push(diagnostic)
 
         write_place_ok := true
         if arg.convention == AccessConvention.Write && sema_receiver_mark_place_root(arg.expr) == None {
@@ -3560,28 +3537,12 @@ sema_ownership_check_call_arguments_with_accesses: fn(state: &SemaOwnershipState
                 &diagnostics.push(sema_ownership_diag_take_twice(sema_ownership_argument_name(arg), callee, expr_span(arg.expr)))
                 next
             }
-            // (Rust `take_unmarked_last_use`): an eligible
-            // unmarked argument moves like `^name`; a later use reports E0209.
-            if !binder_rooted && sema_ownership_expr_site_listed(state.implicit_take_ok, arg.expr) {
+            // D-CALLSITE-MARK2=A: an unmarked name a take parameter receives
+            // moves like `name.move()` did; a later use reports the move into this
+            // call. A call never copies on its own.
+            if !binder_rooted {
                 mark_implicit_take = true
-                if !sema_ownership_mark_implicit_take(&state, arg.expr, scopes, callee, &diagnostics) -> accepted = false
-            } else {
-                // Rust `check_take_arg_ownership`: a cloneable value is E0209, any
-                // other is E0201. The typed argument check classified a named
-                // argument's type with the registry (noncloneable_takes); another
-                // unresolved nominal takes the cloneable diagnostic. Both reject
-                // the unmarked owning argument. A secret-bearing crypto value
-                // never clones: a copy would be a second owned credential.
-                taken_ty: param.ty ?? Type.Named{name: "Unit"}
-                secret: sema_is_secret_bearing_crypto_type(taken_ty) || sema_ownership_argument_is_secret(&state, arg.expr, scopes)
-                noncloneable: sema_ownership_expr_site_listed(state.noncloneable_takes, arg.expr)
-                if {
-                    !secret && !noncloneable && (sema_ownership_type_cloneable(taken_ty) ?? true) -> &diagnostics.push(sema_ownership_call_diag_clone(callee, sema_ownership_argument_name(arg), arg.span))
-                    else -> {
-                        accepted = false
-                        &diagnostics.push(sema_ownership_call_diag_not_copyable(callee, index, sema_ownership_argument_name(arg), arg.span))
-                    }
-                }
+                if !sema_ownership_mark_implicit_take(state, arg.expr, scopes, callee, diagnostics) -> accepted = false
             }
         }
         // Exact-place inference already consumed a projected take; while an
@@ -3677,7 +3638,7 @@ sema_ownership_is_window_type: fn(ty: Type) -> Bool Never! {
 // E0209 (Rust `take_unmarked_last_use` `named_elsewhere`): one call names
 // the same binding in two argument slots, so neither slot is its last use.
 sema_ownership_diag_take_twice: fn(name: String, callee: String, span: Span) -> Diagnostic {
-    sema_error("E0209", span, "`{name}` is passed to `{callee}` more than once in this call", "a name used in two arguments of one call has no last use in that call, so `{callee}` can't take `{name}` without a mark", "write `{name}.copy()` to pass a copy, or the move marker `^` (`^{name}`) where the call hands `{name}` over")
+    sema_error("E0209", span, "`{name}` is passed to `{callee}` more than once in this call", "a name used in two arguments of one call has no last use in that call, so `{callee}` can't take `{name}` there", "write `{name}.copy()` in the argument that keeps a copy")
 }
 
 sema_ownership_expr_site_listed: fn(sites: [Span], expr: Expr) -> Bool Never! {
@@ -3834,18 +3795,17 @@ sema_ownership_call_once_lambda: fn(state: &SemaOwnershipState, callee: Expr, sc
 }
 
 // (Rust `take_unmarked_last_use`): the typed argument
-// check notes an unmarked argument to a take parameter that may move at its
+// check notes an unmarked argument to a take parameter that moves at its
 // name's last use. Only a plain owned local or take parameter of an ordinary
-// copyable value qualifies: a value with cleanup (a `Close` resource, a
-// consume duty, or a type holding one), a type parameter, a task, a view, a
-// string view, and a capture inside a lambda body keep `^`. Returns the
-// noted binding's symbol key, so the caller can find the same name in
-// another argument (sema_ownership_note_implicit_take_twice).
+// copyable value qualifies: any other argument (a value with cleanup, a type
+// parameter, a task, a view, a string view, a capture inside a lambda body)
+// the typed argument check marks as the parameter's take. Returns the noted
+// binding's symbol key, so the caller can find the same name in a later
+// argument (sema_ownership_note_implicit_take_twice).
 sema_ownership_note_implicit_take: fn(state: &SemaOwnershipState, expr: Expr, ty: Type, required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, generic_params: [TGenericParam], scopes: SemaScopeTable) -> String? Never! {
     if expr == .Ident(_, span, _) {
         facts: sema_copy_classify(ty, SemaCopyIntent.Clone, environment, program, generic_params, false)
-        if facts.complete && !facts.copyable && !facts.cloneable && !facts.resource && !facts.holds_resource -> &state.noncloneable_takes.push(span)
-        binding: sema_ownership_binding_for_expr(&state, expr, scopes) ?? return None
+        binding: sema_ownership_binding_for_expr(state, expr, scopes) ?? return None
         if binding.symbol.kind != SymbolKind.Local && binding.symbol.kind != SymbolKind.Parameter -> return None
         if sema_ownership_binding_is_borrowed_param(binding) || binding.string_view -> return None
         if sema_single_use_key(state, binding.symbol.id.key) -> return None
@@ -4035,7 +3995,9 @@ sema_receiver_mark_begin: fn(state: &SemaOwnershipState, receiver: Expr) -> Expr
             else -> false
         }
         if access != PlaceAccess.Read && !window {
-            mark = Val(SemaReceiverMark{mark_span: Span{start: span.start, end: span.start + 1}, access: access})
+            // A place a desugaring builds (`g[1] = 99` through an index hook)
+            // starts where its value does: it has no written mark.
+            if span.start < expr_span(value).start -> mark = Val(SemaReceiverMark{mark_span: Span{start: span.start, end: span.start + 1}, access: access})
             unmarked = value
         }
     }
@@ -4116,8 +4078,41 @@ sema_receiver_mark_remove: fn(mark: SemaReceiverMark, written: String, what: Str
     diagnostic_with_edit(sema_error("E0225", mark.mark_span, what, why, "remove `{written}`"), TextEdit{span: mark.mark_span, new_text: ""})
 }
 
-sema_receiver_mark_replace: fn(mark: SemaReceiverMark, written: String, needed: String, verb: String) -> Diagnostic {
-    diagnostic_with_edit(sema_error("E0226", mark.mark_span, "this call {verb} its receiver, so the mark is `{needed}`, not `{written}`", "`&` marks a place the call writes and `^` a place the call takes; the resolved method declares which one", "replace `{written}` with `{needed}`"), TextEdit{span: mark.mark_span, new_text: needed})
+// A receiver mark naming the other permission than the method declares; the
+// call is written plain, so the edit removes it.
+sema_receiver_mark_replace: fn(mark: SemaReceiverMark, written: String, verb: String) -> Diagnostic {
+    diagnostic_with_edit(sema_error("E0226", mark.mark_span, "this call {verb} its receiver, so `{written}` names the wrong permission", "the resolved method's signature declares whether a call writes (`&self`) or takes (`&&self`) its receiver, and the call is written plain", "remove `{written}`"), TextEdit{span: mark.mark_span, new_text: ""})
+}
+
+// D-CALLSITE-MARK2=A: a call is written plain. The `&` or `^` a call writes
+// where the signature already states it is retired (E0434); the edit removes
+// it, or writes `place.move()` for a field a take parameter receives.
+// `declarer` names the signature that states the mark.
+sema_ownership_retired_mark_diagnostic: fn(declarer: String, mark: Span, written: String, edit: TextEdit) -> Diagnostic {
+    fix: if edit.new_text == "" -> "Remove `{written}`" else -> "Write `{edit.new_text}`"
+    diagnostic: sema_error("E0434", mark, "`{written}` repeats what {declarer} declares; a call is written plain.", "A signature says what a function does to each input (`c: &Counter` edits it, `c: &&Counter` takes it), so the call reads `bump(score)`. A mark stays only on a write window bound to a name, a match that writes into its subject, and `task &&name`.", "{fix}; `jet fix` applies this fix.")
+    diagnostic_with_edit_grade(diagnostic, edit, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving)
+}
+
+// The E0434 of a call argument whose mark its parameter states. A function
+// value's call keeps its marks: there the written `&` is the write.
+sema_ownership_retired_call_mark: fn(callee: String, param: SemaCallParam, arg: CallArg, value_callee: Bool) -> Diagnostic? {
+    if value_callee -> return None
+    mark: arg.flags.written_mark ?? return None
+    if arg.convention == AccessConvention.Write && param.convention == AccessConvention.Write && sema_receiver_mark_place_root(arg.expr) != None {
+        return Val(sema_ownership_retired_mark_diagnostic("`{callee}`", mark, "&", TextEdit{span: mark, new_text: ""}))
+    }
+    if arg.convention != AccessConvention.Move || param.convention != AccessConvention.Move -> return None
+    if arg.expr == {
+        .Ident(_, _, _) -> return Val(sema_ownership_retired_mark_diagnostic("`{callee}`", mark, "^", TextEdit{span: mark, new_text: ""}))
+        .Field(_, _, _, _) -> {
+            place: sema_expression_move_mark_text(arg.expr)
+            if place.contains("…") -> return None
+            return Val(sema_ownership_retired_mark_diagnostic("`{callee}`", mark, "^", TextEdit{span: Span{start: mark.start, end: expr_source_span(arg.expr).end}, new_text: "{place}.move()"}))
+        }
+        else -> {}
+    }
+    None
 }
 
 sema_receiver_mark_is_write_window: fn(state: SemaOwnershipState, root: String) -> Bool Never! {
@@ -4127,51 +4122,39 @@ sema_receiver_mark_is_write_window: fn(state: SemaOwnershipState, root: String) 
     false
 }
 
-// A taking call on a whole local at its last use moves
-// the local with no mark, so the compiler chooses and `^` stays optional
-// there. A writing call still needs `&`, and a take anywhere else (a field,
-// or a local read again later) still needs `^`.
+// D-CALLSITE-MARK2=A: the resolved method's signature says whether a call
+// reads, writes, or takes its receiver, so an unmarked receiver needs no mark.
+// A written mark is still checked against that convention.
 // A compiler-generated body names no receiver marks: its frame closes unread.
-sema_receiver_mark_finish: fn(state: &SemaOwnershipState, receiver: Expr, scopes: SemaScopeTable, receiver_last_use: Bool, compiler_generated: Bool, diagnostics: &[Diagnostic]) {
+sema_receiver_mark_finish: fn(state: &SemaOwnershipState, receiver: Expr, scopes: SemaScopeTable, compiler_generated: Bool, diagnostics: &[Diagnostic]) {
     frame: &state.receiver_frames.pop() ?? return
     if compiler_generated -> return
     root: sema_receiver_mark_place_root(receiver)
     places: sema_ownership_places_from_expr_in_state(receiver, scopes, &state)
     is_place: root != None && places.len() > 0
-    if frame.mark == .Val(mark) {
-        written: if mark.access == PlaceAccess.Take -> "^" else -> "&"
-        if !is_place {
-            &diagnostics.push(sema_receiver_mark_remove(mark, written, "`{written}` marks a fresh value, not a named place", "a mark binds a name plus fields, indexes, or ranges; a call result or literal is new, so the call receives it without a mark"))
-            return
-        }
-        convention: frame.convention ?? return
-        if {
-            convention == AccessConvention.Write && mark.access == PlaceAccess.Take -> &diagnostics.push(sema_receiver_mark_replace(mark, written, "&", "writes"))
-            convention == AccessConvention.Move && mark.access == PlaceAccess.Write -> &diagnostics.push(sema_receiver_mark_replace(mark, written, "^", "takes"))
-            convention == AccessConvention.Read && mark.access == PlaceAccess.Write && (frame.write_mark_optional || sema_receiver_mark_is_write_window(state, root ?? "")) -> {}
-            convention == AccessConvention.Read -> &diagnostics.push(sema_receiver_mark_remove(mark, written, "this call only reads its receiver, so it takes no `{written}` mark", "a mark shows that a call writes (`&`) or takes (`^`) the named place; a read call leaves the place unmarked"))
-            else -> {}
-        }
+    mark: frame.mark ?? return
+    written: if mark.access == PlaceAccess.Take -> "^" else -> "&"
+    if !is_place {
+        &diagnostics.push(sema_receiver_mark_remove(mark, written, "`{written}` marks a fresh value, not a named place", "a mark binds a name plus fields, indexes, or ranges; a call result or literal is new, so the call receives it without a mark"))
         return
     }
-    if !is_place -> return
-    needed: if frame.convention == {
-        .Val(convention) -> if convention == {
-            .Write -> "&"
-            .Move -> "^"
-            else -> ""
+    convention: frame.convention ?? return
+    if {
+        convention == AccessConvention.Write && mark.access == PlaceAccess.Take -> {
+            diagnostics.push(sema_receiver_mark_replace(mark, written, "writes"))
         }
-        .None -> ""
+        convention == AccessConvention.Move && mark.access == PlaceAccess.Write -> {
+            diagnostics.push(sema_receiver_mark_replace(mark, written, "takes"))
+        }
+        convention == AccessConvention.Write || convention == AccessConvention.Move -> {
+            diagnostics.push(sema_ownership_retired_mark_diagnostic("the method", mark.mark_span, written, TextEdit{span: mark.mark_span, new_text: ""}))
+        }
+        convention == AccessConvention.Read && mark.access == PlaceAccess.Write && (frame.write_mark_optional || sema_receiver_mark_is_write_window(state, root ?? "")) -> {}
+        convention == AccessConvention.Read -> {
+            diagnostics.push(sema_receiver_mark_remove(mark, written, "this call only reads its receiver, so it takes no `{written}` mark", "a call is written plain; only a write window bound to a name, a match that writes into its subject, and `task &&name` keep a mark"))
+        }
+        else -> {}
     }
-    if needed == "" -> return
-    if needed == "&" && sema_ownership_place_under_edit_guard(receiver, scopes) -> return
-    if needed == "^" && receiver_last_use -> return
-    verb: if needed == "&" -> "writes" else -> "takes"
-    place_name: sema_ownership_place_name(places[0])
-    // The whole receiver place (`holder.buf`), so the caret and the `^` edit
-    // sit where the mark belongs; a field's own span is only its name.
-    span: expr_source_span(receiver)
-    &diagnostics.push(diagnostic_with_edit(sema_error("E0224", span, "this call {verb} `{place_name}`, but `{place_name}` has no `{needed}` mark", "the method is declared with `{needed}self`, so the call {verb} the named place it is called on; the mark sits on that place, the same way `edit(&buf)` and `consume(^text)` mark arguments", "write `{needed}{place_name}`"), TextEdit{span: Span{start: span.start, end: span.start}, new_text: needed}))
 }
 
 sema_ownership_check_method_call: fn(state: &SemaOwnershipState, callee: String, receiver: Expr, receiver_convention: AccessConvention, params: [SemaCallParam], args: &[CallArg], scopes: SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> SemaOwnershipCheckResult {

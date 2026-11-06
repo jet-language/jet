@@ -599,15 +599,18 @@ sema_call_core_receiver_record: fn(receiver_type: Type, member: String, actual_a
     Val(record)
 }
 
-sema_call_core_first_is_move: fn(args: [CallArg]) -> Bool Never! {
-    args.len() > 0 && args[0].convention == AccessConvention.Move
+// `tls.client(tcp, server_name: …, config: …, deadline: …)` takes a connected
+// stream: the native resource consumer row, where the `(host, port)` form is
+// source-owned. The two forms differ by arity.
+sema_call_core_configured_client: fn(args: [CallArg]) -> Bool Never! {
+    args.len() >= 3
 }
 
-sema_call_core_native_resource_consumer: fn(module_name: String, member: String, first_is_move: Bool) -> Bool Never! {
+sema_call_core_native_resource_consumer: fn(module_name: String, member: String, configured_client: Bool) -> Bool Never! {
     // #4747: the fixed floating constraint preserves Float/F32 inference.
     // The checked-tree call below selects the reserved source wrapper.
     (module_name == "core.math" && (member == "cmp" || member == "is_finite" || member == "sqrt")) ||
-        (module_name == "core.net.tls" && member == "client" && first_is_move) ||
+        (module_name == "core.net.tls" && member == "client" && configured_client) ||
         // Worker alone keeps checked fn() inference; its source slot is opaque.
         (module_name == "core.service" && member == "worker")
 }
@@ -638,7 +641,7 @@ sema_call_core_no_os_hint: fn(module_name: String) -> String? Never! {
 // bespoke Core arms take their own `<T>` and only the fixed-signature fallback
 // (`sema_call_core_check_fixed_record`, Rust `resolved_core_fixed_sig`) checks
 // the count against the typed row.
-sema_call_core_resolve_route: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_name: String, member: String, type_args: [Type], actual_arity: Int, first_is_move: Bool, span: Span, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
+sema_call_core_resolve_route: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_name: String, member: String, type_args: [Type], actual_arity: Int, configured_client: Bool, span: Span, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
     diagnostic_count := diagnostics.len()
     if sema_scope_environment_no_os(environment) && sema_call_core_no_os_hint(module_name) == .Val(hint) {
         short_name: module_name.slice(module_name.rfind(".") + 1, module_name.len())
@@ -646,7 +649,7 @@ sema_call_core_resolve_route: fn(environment: SemaScopeEnvironment, program: Sem
         &diagnostics.push(sema_error("E3301", span, "`{api}` is not available on a no-OS target.", "No-OS targets have no OS; only `core`-level APIs are available.", hint))
         return None
     }
-    source_identity: if sema_compiler_services_is_compiler_query(module_name, member) || sema_call_core_has_explicit_source_target(module_name, member) || sema_call_core_native_resource_consumer(module_name, member, first_is_move) -> None else -> sema_call_core_module_identity(environment, program, module_name)
+    source_identity: if sema_compiler_services_is_compiler_query(module_name, member) || sema_call_core_has_explicit_source_target(module_name, member) || sema_call_core_native_resource_consumer(module_name, member, configured_client) -> None else -> sema_call_core_module_identity(environment, program, module_name)
     source: if source_identity == {
         .Val(identity) -> sema_call_core_source_target(environment, program, identity, member, type_args, span, false, &diagnostics)
         .None -> None
@@ -660,7 +663,7 @@ sema_call_core_resolve_route: fn(environment: SemaScopeEnvironment, program: Sem
     Val(SemaCoreCallRoute.Core{record: record})
 }
 
-sema_call_core_resolve_import_route: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, alias: String, requested_member: String, type_args: [Type], actual_arity: Int, first_is_move: Bool, span: Span, alias_span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
+sema_call_core_resolve_import_route: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, alias: String, requested_member: String, type_args: [Type], actual_arity: Int, configured_client: Bool, span: Span, alias_span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
     imported: sema_call_core_import_target(environment, program, alias) ?? return None
     if !sema_call_core_import_is_unshadowed(environment, program, scopes, imported) -> return None
     member: sema_call_core_import_member(imported, requested_member) ?? return None
@@ -672,7 +675,7 @@ sema_call_core_resolve_import_route: fn(environment: SemaScopeEnvironment, progr
     // `core.term` owns only the one-argument print, eprint
     // and progress wrappers; other arities keep the fixed Core route.
     variadic_term: imported.module_name == "core.term" && (member == "print" || member == "eprint" || member == "progress") && actual_arity != 1
-    source_identity: if sema_compiler_services_is_compiler_query(imported.module_name, member) || variadic_term || sema_call_core_has_explicit_source_target(imported.module_name, member) || sema_call_core_native_resource_consumer(imported.module_name, member, first_is_move) -> None else -> sema_call_core_import_source_identity(environment, program, imported)
+    source_identity: if sema_compiler_services_is_compiler_query(imported.module_name, member) || variadic_term || sema_call_core_has_explicit_source_target(imported.module_name, member) || sema_call_core_native_resource_consumer(imported.module_name, member, configured_client) -> None else -> sema_call_core_import_source_identity(environment, program, imported)
     source: if source_identity == {
         .Val(identity) -> sema_call_core_source_target(environment, program, identity, member, type_args, span, false, &diagnostics)
         .None -> None
@@ -690,14 +693,14 @@ sema_call_core_resolve_import_route: fn(environment: SemaScopeEnvironment, progr
 // module alias's known Core submodule (`core.math.fabs(n)` under `use core as
 // core`) routes against that submodule by name, exactly as an alias of the
 // submodule itself would, including the `core.mem` Shared sites.
-sema_call_core_resolve_import_path_route: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, alias: String, module_name: String, member: String, type_args: [Type], actual_arity: Int, first_is_move: Bool, span: Span, alias_span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
+sema_call_core_resolve_import_path_route: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, alias: String, module_name: String, member: String, type_args: [Type], actual_arity: Int, configured_client: Bool, span: Span, alias_span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
     imported: sema_call_core_import_target(environment, program, alias) ?? return None
     if imported.item != None -> return None
     if !sema_call_core_record_import_reference(environment, program, scopes, imported, alias_span, &context) -> return None
     if module_name == "core.mem" {
         if shared_lifetime_core_member(member) == .Val(lifetime) -> return Val(SemaCoreCallRoute.SharedSite{lifetime: lifetime})
     }
-    sema_call_core_resolve_route(environment, program, module_name, member, type_args, actual_arity, first_is_move, span, &diagnostics)
+    sema_call_core_resolve_route(environment, program, module_name, member, type_args, actual_arity, configured_client, span, diagnostics)
 }
 
 // (`("core.term", "print")`): an imported `core.term` print with other than one
@@ -1391,7 +1394,7 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
 // Resolve source exports before building a fixed Core call. The callee's
 // canonical typed contract is discovered here; callers never supply its Type.
 sema_call_core_check_fixed: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_name: String, member: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    route: sema_call_core_resolve_route(environment, program, module_name, member, type_args, args.len(), sema_call_core_first_is_move(args), span, &diagnostics) ?? return None
+    route: sema_call_core_resolve_route(environment, program, module_name, member, type_args, args.len(), sema_call_core_configured_client(args), span, diagnostics) ?? return None
     if route == {
         .SharedSite(lifetime) -> { return sema_call_core_global_shared(lifetime, member, type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) }
         .Source(target) -> { return sema_call_core_check_source_owned(target, "{module_name}.{member}", type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) }
@@ -1533,10 +1536,10 @@ sema_call_core_identity_value: fn(value: TExpr, type_args: [Type], expected: Typ
 }
 
 #Test("worker checked-function inference changes no other Core route") {
-    moves: [Bool]{false, true}
+    configured: [Bool]{false, true}
     loop row in CORE_CALLS {
-        loop moved in moves {
-            previous: (row.module_name == "core.math" && (row.member == "cmp" || row.member == "is_finite")) ||
+        loop moved in configured {
+            previous: (row.module_name == "core.math" && (row.member == "cmp" || row.member == "is_finite" || row.member == "sqrt")) ||
                 (row.module_name == "core.net.tls" && row.member == "client" && moved)
             worker: row.module_name == "core.service" && row.member == "worker"
             assert(sema_call_core_native_resource_consumer(row.module_name, row.member, moved) == (previous || worker))

@@ -1875,14 +1875,14 @@ jfmt_fmt_param: fn(f: &JetFmt, p: Param) {
     // (`name: &Type`), or `self` for a receiver (`&self`). `Read` is unmarked.
     sigil: if p.convention == {
         .Write -> "&"
-        .Move -> "^"
+        .Move -> "&&"
         .Read -> ""
     }
     is_self_receiver: p.name == "self" && jfmt_type_name_is_empty(p.ty)
     if is_self_receiver {
-        // `&self` / `^self`: the sigil attaches to `self`, no type printed.
-        if sigil.len() > 0 -> jfmt_write(&f, sigil)
-        jfmt_write(&f, p.name)
+        // `&self` / `&&self`: the sigil attaches to `self`, no type printed.
+        if sigil.len() > 0 -> jfmt_write(f, sigil)
+        jfmt_write(f, p.name)
     } else {
         // `timeout seconds: Int` — public label, then local name.
         if p.public_label == .Val(label) {
@@ -2443,22 +2443,26 @@ jfmt_fmt_const: fn(f: &JetFmt, c: ConstDef) {
 }
 
 // The imports of one scope (#6542): two or more print as one `use { … }`
-// block with a row per line, the re-exports as one `pub use { … }` block,
-// and a lone import keeps its one line. Comments before the first import
-// print above the group; the rest stay beside their rows.
+// block with a row per line, the build-only rows as one `comptime use { … }`
+// block, the re-exports as one `pub use { … }` block, and a lone import
+// keeps its one line. Comments before the first import print above the
+// group; the rest stay beside their rows.
 jfmt_fmt_import_groups: fn(f: &JetFmt, imports: [ImportDecl]) {
-    plain := [ImportDecl]{}
-    reexports := [ImportDecl]{}
+    groups := [[ImportDecl]]{[ImportDecl]{}, [ImportDecl]{}, [ImportDecl]{}, [ImportDecl]{}}
     loop import in jfmt_import_rows(imports) {
-        if import.is_pub -> &reexports.push(import) else -> &plain.push(import)
+        slot := if import.is_pub -> 2 else -> 0
+        if import.comptime_span != None -> slot += 1
+        &groups[slot].push(import)
     }
-    if plain.len() > 0 -> jfmt_fmt_import_group(&f, plain)
-    if reexports.len() > 0 {
-        if plain.len() > 0 {
+    printed := false
+    loop group in groups {
+        if group.len() == 0 -> next
+        if printed {
             jfmt_newline(&f)
             jfmt_newline(&f)
         }
-        jfmt_fmt_import_group(&f, reexports)
+        jfmt_fmt_import_group(&f, group)
+        printed = true
     }
 }
 
@@ -2477,7 +2481,7 @@ jfmt_import_rows: fn(imports: [ImportDecl]) -> [ImportDecl] Never! {
                 item_span: if index < import.item_spans.len() -> import.item_spans[index] else -> items_span
                 local_span: if index < import.local_spans.len() -> import.local_spans[index] else -> item_span
                 if item.alias == .Val(alias) {
-                    &renamed.push(ImportDecl{kind: ImportKind.Module{name: "{module_alias}.{item.original}", span: item_span}, alias: alias, alias_span: local_span, span: import.span, item_spans: [Span]{}, local_spans: [Span]{}, is_pub: import.is_pub, is_package_pub: import.is_package_pub, inline_version: None})
+                    &renamed.push(ImportDecl{kind: ImportKind.Module{name: "{module_alias}.{item.original}", span: item_span}, alias: alias, alias_span: local_span, span: import.span, item_spans: [Span]{}, local_spans: [Span]{}, is_pub: import.is_pub, is_package_pub: import.is_package_pub, inline_version: None, comptime_span: import.comptime_span})
                 } else {
                     &plain.push(item)
                     &item_spans.push(item_span)
@@ -2510,8 +2514,8 @@ jfmt_fmt_import_group: fn(f: &JetFmt, imports: [ImportDecl]) {
         jfmt_emit_trailing(&f, imports[0].span.end)
         return
     }
-    if imports[0].is_pub -> jfmt_write(&f, "pub ")
-    jfmt_write(&f, "use {{")
+    jfmt_fmt_import_head(&f, imports[0])
+    jfmt_write(&f, "{{")
     jfmt_newline(&f)
     f.indent += 1
     loop import in imports {
@@ -2525,10 +2529,16 @@ jfmt_fmt_import_group: fn(f: &JetFmt, imports: [ImportDecl]) {
 }
 
 jfmt_fmt_import: fn(f: &JetFmt, imp: ImportDecl) {
-    // `pub use` is the only re-export spelling (ballot pending).
-    if imp.is_pub -> jfmt_write(&f, "pub ")
-    jfmt_write(&f, "use ")
+    jfmt_fmt_import_head(&f, imp)
     jfmt_fmt_import_row(&f, imp)
+}
+
+// `pub use` is the only re-export spelling (ballot pending); `comptime use`
+// marks a build-only import.
+jfmt_fmt_import_head: fn(f: &JetFmt, imp: ImportDecl) {
+    if imp.is_pub -> jfmt_write(&f, "pub ")
+    if imp.comptime_span != None -> jfmt_write(&f, "comptime ")
+    jfmt_write(&f, "use ")
 }
 
 // One import row; an alias prints as `alias: path` (#6542).

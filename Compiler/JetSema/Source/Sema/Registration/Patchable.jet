@@ -103,10 +103,10 @@ sema_patchable_source: fn(base: String, fields: [Field]) -> String Never! {
     changed: loop field in fields -> "            {field.name}: if new.{field.name} == old.{field.name} -> None else -> Val(new.{field.name})"
     merged: loop field in fields -> "            {field.name}: if self.{field.name} == None -> other.{field.name} else -> self.{field.name}"
     out := [String]{}
-    &out.push("{SEMA_PATCHABLE_BASE_METHODS}: struct {{\n")
-    &out.push("    apply: fn(self, patch: {patch}) -> {base} {{\n        return {base}{{\n{applied.join(",\n")}\n        }}\n    }}\n\n")
-    &out.push("    diff: fn(^new: {base}, ^old: {base}) -> {patch} {{\n        return {patch}{{\n{changed.join(",\n")}\n        }}\n    }}\n}}\n\n")
-    &out.push("Patch: struct {{\n{rows.join("")}\n")
-    &out.push("    merge: fn(self, ^other: {patch}) -> {patch} {{\n        return {patch}{{\n{merged.join(",\n")}\n        }}\n    }}\n}}\n")
+    out.push("{SEMA_PATCHABLE_BASE_METHODS}: struct {{\n")
+    out.push("    apply: fn(self, patch: {patch}) -> {base} {{\n        return {base}{{\n{applied.join(",\n")}\n        }}\n    }}\n\n")
+    out.push("    diff: fn(new: &&{base}, old: &&{base}) -> {patch} {{\n        return {patch}{{\n{changed.join(",\n")}\n        }}\n    }}\n}}\n\n")
+    out.push("Patch: struct {{\n{rows.join("")}\n")
+    out.push("    merge: fn(self, other: &&{patch}) -> {patch} {{\n        return {patch}{{\n{merged.join(",\n")}\n        }}\n    }}\n}}\n")
     out.join("")
 }

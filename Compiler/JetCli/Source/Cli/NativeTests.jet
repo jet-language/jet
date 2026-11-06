@@ -265,12 +265,17 @@ jet_cli_native_test_records_dir: fn(fallback: String) -> String Never! {
 // Memory each concurrently rerun test child may claim.
 JET_NATIVE_TEST_CHILD_MEMORY: 1073741824
 
-// The selected children a fatal batch reruns at once: one per core the process
-// may use, fewer while the memory free for new work (`None` when the host
-// can't tell) can't hold JET_NATIVE_TEST_CHILD_MEMORY for each, at least one.
-jet_cli_native_test_width: fn(cores: Int, available: Int?) -> Int Never! {
+// Memory each concurrent `jet test` of a workspace member or profile run may
+// claim: it compiles a whole package first, and the largest Compiler member
+// (JetCli) peaks near 4.6 GiB doing so.
+JET_TEST_MEMBER_MEMORY: 5368709120
+
+// The children that run at once: one per core the process may use, fewer
+// while the memory free for new work (`None` when the host can't tell) can't
+// hold `claim` bytes for each, at least one.
+jet_cli_native_test_width: fn(cores: Int, available: Int?, claim: Int) -> Int Never! {
     width := cores
-    if available == .Val(free) && free /% JET_NATIVE_TEST_CHILD_MEMORY < width -> width = free /% JET_NATIVE_TEST_CHILD_MEMORY
+    if available == .Val(free) && free /% claim < width -> width = free /% claim
     if width < 1 -> return 1
     width
 }
@@ -403,7 +408,7 @@ jet_cli_native_test_run: fn(spec: ProcessSpec, tests: [JetNativeTestCase], check
     } else {
         // Children run in waves of `width`, reaped in test order, so every
         // outcome and stream lands where an unbounded launch put it.
-        width: jet_cli_native_test_width(native_test_sys.cpu_count(), jet_cli_memory_available())
+        width: jet_cli_native_test_width(native_test_sys.cpu_count(), jet_cli_memory_available(), JET_NATIVE_TEST_CHILD_MEMORY)
         spawn_error := String?{None}
         wait_error := String?{None}
         start := 0
@@ -544,10 +549,16 @@ jet_cli_native_test_wire: fn(parts: JetNativeTestWire) -> String Never! {
 }
 
 #Test("fatal reruns run one child per core within the free memory") {
-    assert_eq(jet_cli_native_test_width(16, None), 16)
-    assert_eq(jet_cli_native_test_width(16, Val(5 * JET_NATIVE_TEST_CHILD_MEMORY + 1)), 5)
-    assert_eq(jet_cli_native_test_width(16, Val(JET_NATIVE_TEST_CHILD_MEMORY /% 2)), 1)
-    assert_eq(jet_cli_native_test_width(0, None), 1)
+    assert_eq(jet_cli_native_test_width(16, None, JET_NATIVE_TEST_CHILD_MEMORY), 16)
+    assert_eq(jet_cli_native_test_width(16, Val(5 * JET_NATIVE_TEST_CHILD_MEMORY + 1), JET_NATIVE_TEST_CHILD_MEMORY), 5)
+    assert_eq(jet_cli_native_test_width(16, Val(JET_NATIVE_TEST_CHILD_MEMORY /% 2), JET_NATIVE_TEST_CHILD_MEMORY), 1)
+    assert_eq(jet_cli_native_test_width(0, None, JET_NATIVE_TEST_CHILD_MEMORY), 1)
+}
+
+#Test("workspace members run one per core within the free memory a package compile claims") {
+    // A 12 GiB cap holds two member compiles, not twelve test children.
+    assert_eq(jet_cli_native_test_width(24, Val(12 * JET_NATIVE_TEST_CHILD_MEMORY), JET_TEST_MEMBER_MEMORY), 2)
+    assert_eq(jet_cli_native_test_width(4, Val(64 * JET_NATIVE_TEST_CHILD_MEMORY), JET_TEST_MEMBER_MEMORY), 4)
 }
 
 #Test("fatal native child retains only completed records") {

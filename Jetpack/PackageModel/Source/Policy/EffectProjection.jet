@@ -8,11 +8,10 @@
 // are sorted, duplicate-free `[String]` (Foundation `authority_holds`).
 use {
     jet_foundation.[
-        ApplicationAuthority, Diagnostic, Span, TextEdit, authority_holds,
+        ApplicationAuthority, Diagnostic, Span, TextEdit, authority_holds, authority_inline_package_block,
         diagnostic_from_registry, diagnostic_with_detail, diagnostic_with_edit, diagnostic_with_rights,
     ]
     jetpack_foundation.[ReportError, StatusEnvelope]
-    files: core.files
 }
 
 EFFECT_AUTHORITY_PACKAGE: "package.jet authority"
@@ -105,46 +104,17 @@ pkg_application_policy_diagnostic: fn(projection: EffectProjection, denied: [Str
     denied_required: authority.denied_required_effects()
     what: if denied_required.len() == 0 -> "application authority is undecided for `{pkg_effect_show_set(missing)}`" else -> "application authority denies `{pkg_effect_show_set(denied_required)}`"
     repair: script ?? {
-        base: diagnostic_from_registry("E1803", None, what, authority.policy_why(), authority.policy_fix())
+        base: diagnostic_from_registry("E1803", None, what, authority.policy_why(), authority.policy_fix(""))
         return diagnostic_with_rights(diagnostic_with_detail(^base, authority.policy_facts()), "authority", [String]{}, [String]{projection.authority}, None)
     }
     scripted: denied.len() == 0 && missing.len() > 0 && authority.is_application_default()
-    fix: if scripted -> "run `jet {repair.command} --allow={missing.join(",")} {repair.path}` (or `-A`/`--allow-all` for every effect) to allow it for this run, or {authority.policy_fix()}" else -> authority.policy_fix()
+    fix: if scripted -> "run `jet {repair.command} --allow={missing.join(",")} {repair.path}` (or `-A`/`--allow-all` for every effect) to allow it for this run, or {authority.policy_fix(repair.path)}" else -> authority.policy_fix(repair.path)
     base: diagnostic_from_registry("E1803", None, what, authority.policy_why(), fix)
     diagnostic: diagnostic_with_rights(diagnostic_with_detail(^base, authority.policy_facts()), "authority", [String]{}, [String]{projection.authority}, None)
     if !scripted -> return diagnostic
     // E1803's registry row owns a suggested, needs-review source edit.
     at: pkg_inline_package_insertion_offset(repair.source)
-    diagnostic_with_edit(diagnostic, TextEdit{span: Span{start: at, end: at}, new_text: pkg_inline_authority_package(repair.path, authority.inline_allow_row())})
-}
-
-// The inline Package carrier granting `allow` to the script at `path`; its
-// name is the file stem, or `script` when the stem is not a plain name.
-pkg_inline_authority_package: fn(path: String, allow: [String]) -> String Never! {
-    name: pkg_effect_script_name(path)
-    "package: {{\n    name: \"{name}\"\n    authority: {{ allow: [{allow.join(", ")}] }}\n}}\n\n"
-}
-
-pkg_effect_script_name: fn(path: String) -> String Never! {
-    base: files.basename(path)
-    raw: base.bytes()
-    stem_end := raw.len()
-    index := raw.len() - 1
-    loop index > 0 {
-        if Int.from_u8(raw[index]) == 46 {
-            stem_end = index
-            break
-        }
-        index -= 1
-    }
-    stem: String.from_bytes(raw[0..<stem_end]) ?? ""
-    if stem == "" -> return "script"
-    loop byte in stem.bytes() {
-        code: Int.from_u8(byte)
-        plain: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 || code == 45 || code == 46
-        if !plain -> return "script"
-    }
-    stem
+    diagnostic_with_edit(diagnostic, TextEdit{span: Span{start: at, end: at}, new_text: authority_inline_package_block(repair.path, authority.inline_allow_row())})
 }
 
 // Every effect reachable from `entry` through statically known calls.

@@ -43,7 +43,8 @@ use {
 }
 
 // Set in each child of a profile run to the profile's name: a child never
-// plans a profile of its own.
+// plans a profile of its own. Every child also finds the jet under test in
+// JET (JET_CLI_TEST_SUITE_JET_ENV).
 JET_CLI_TEST_PROFILE_ENV: "JET_TEST_PROFILE"
 // A row's state when its test passed, and when it failed.
 JET_CLI_TEST_ROW_PASSED: "passed"
@@ -316,9 +317,9 @@ jet_cli_test_profile_runs: fn(profile: String, root: String, settings: [TestSett
             &envs.push([String]{JET_CLI_TEST_PROFILE_ENV, profile.copy(), TEST_SETTINGS_ENV, inherited.copy(), JET_CLI_TEST_SUITE_ENV, run.suite.copy(), JET_CLI_TEST_SUITE_ROWS_ENV, jet_cli_rooted_join(scratch.path, "{index}.rows"), JET_CLI_TEST_SUITE_ROOT_ENV, root.copy(), JET_CLI_TEST_SUITE_JET_ENV, executable.copy()})
             next
         }
-        &envs.push([String]{JET_CLI_TEST_PROFILE_ENV, profile.copy(), TEST_SETTINGS_ENV, inherited.copy(), EVIDENCE_REPORT_ENV, jet_cli_rooted_join(scratch.path, "{index}.bin")})
+        &envs.push([String]{JET_CLI_TEST_PROFILE_ENV, profile.copy(), TEST_SETTINGS_ENV, inherited.copy(), EVIDENCE_REPORT_ENV, jet_cli_rooted_join(scratch.path, "{index}.bin"), JET_CLI_TEST_SUITE_JET_ENV, executable.copy()})
     }
-    finished: jet_cli_test_members_run("profile `{profile}`, run", labels, argvs, envs, jet_cli_native_test_width(cli_sys.cpu_count(), jet_cli_memory_available()), quiet)
+    finished: jet_cli_test_members_run("profile `{profile}`, run", labels, argvs, envs, jet_cli_native_test_width(cli_sys.cpu_count(), jet_cli_memory_available(), JET_TEST_MEMBER_MEMORY), quiet)
     exit_code := JET_DRIVER_EXIT_OK
     summary := ""
     baselines: jet_cli_rooted_join(root, ".jet/test/{profile}")

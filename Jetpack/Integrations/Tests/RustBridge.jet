@@ -9,7 +9,7 @@ use {
         pkg_ffi_emit_cargo_toml, pkg_ffi_emit_inline_build_rs, pkg_ffi_emit_inline_wrapper_fn,
         pkg_ffi_emit_native_inline_source, pkg_ffi_emit_wrapper_lib_with_handles,
         pkg_ffi_foreign_descriptor_stamp, pkg_ffi_inline_asm_target_diagnostic,
-        pkg_ffi_normalize_ffi_generated_source_line, pkg_ffi_rust_type,
+        pkg_ffi_cargo_lock_bridge_packages, pkg_ffi_normalize_ffi_generated_source_line, pkg_ffi_rust_type,
     ]
     jet_foundation.[
         AccessConvention, Dimension, DimensionAxis, InlineAsmContract, InlineAsmOutput, TagMarker, Type,
@@ -17,6 +17,8 @@ use {
     jet_pkg_model.[
         FFIHandleFact, FFILinkClosure, ForeignLanguage, pkg_sha256_hex,
     ]
+    files: core.files
+    process: core.process
 }
 
 // The Rust test-only `emit_wrapper_lib`: no handle or C-record facts.
@@ -361,7 +363,7 @@ dependencies = [
     entry.c_module = true
     source: pkg_ffi_emit_cabi_trampoline(entry, [String]{"HbFont"}, CRecordDefinitions.empty()) ?? panic("handle trampoline")
     assert(source.contains("args[0].value as usize as *mut std::os::raw::c_void"))
-    assert(source.contains("jet_ffi_hb_font_set_scale(args[0].value"))
+    assert(source.contains("jet_ffi_hb_font_set_scale_native(args[0].value"))
 }
 
 #Test("cabi trampoline emits mutable scalar and string pointer abi") {

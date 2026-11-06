@@ -159,7 +159,7 @@ export function parseDispositions(text) {
 }
 
 const good = status => status === 'PASS' || status === 'UNEXPECTED-PASS';
-// A failing row no known-failing line or refusal accounts for: nothing tracks it.
+// A failing row no known-failing line, refusal or release disposition accounts for: nothing tracks it.
 const untracked = status => !good(status) && !['KNOWN-FAILING', 'REFUSED', 'SKIP-HOST', 'OPT-IN'].includes(status);
 const rowKey = row => `${row.suite}\t${row.case}\t${row.tier}`;
 
@@ -185,6 +185,9 @@ export function compareSuites(release, candidate, retry = [], dispositions = [])
         result.lost.push(lost);
     }
     for (const [key, row] of candidateRows) if (!releaseRows.has(key) && good(row.status)) result.added.push(row);
+    // A dispositioned lost row is tracked by its card, so it does not count as untracked.
+    const tracked = new Set(result.lost.filter(row => row.disposition).map(rowKey));
+    result.untracked = result.untracked.filter(row => !tracked.has(rowKey(row)));
     return result;
 }
 

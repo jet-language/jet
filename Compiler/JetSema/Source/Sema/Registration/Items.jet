@@ -797,6 +797,14 @@ SemaRegistrationGraph: struct {
     // checked for their diagnostics only; nothing is lowered or registered,
     // so no "not built yet" E2104 applies (sema_refuses_unbuilt).
     check_tests: Bool{false}
+    // `comptime use` (ComptimeUse.jet): "{module}\n{target}" -> the
+    // `comptime ` prefix of the import that brings `target` into `module`
+    // for compile-time code only, so a runtime read of a value of its types
+    // is reported with the edit that drops the prefix.
+    comptime_use_targets: [String:Span]{[String:Span]{}}
+    // User modules only compile-time code uses, however they are imported;
+    // the driver leaves their functions out of the shipped program.
+    comptime_only_modules: [String]{[String]{}}
     // One table per package namespace (Rust
     // `NameLedger::namespace_owner`): namespace -> slot, and per slot name ->
     // entry; entry -> declaring module and name. Entries are numbered in
@@ -4383,6 +4391,7 @@ sema_registration_prepare_graph: fn(inputs: ^[SemaRegistrationModuleInput], edge
         sema_inline_modules_check_imports(&graph, module_index)
         module_index += 1
     }
+    sema_comptime_use_check(&graph)
     sema_registration_canonicalize_qualified_types(&graph)
     module_index = 0
     loop module_index < graph.modules.len() {

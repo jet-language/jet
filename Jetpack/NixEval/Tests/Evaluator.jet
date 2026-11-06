@@ -674,6 +674,14 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
     assert_eq(evaluated.packages, [String]{"fd"})
 }
 
+#Test("nixeval native devshell projects a direct shell.nix function of pkgs") {
+    bare: nixeval_test_shell(`pkgs: mkShell { packages = [ pkgs.fd ]; }`, "x86_64-linux")
+    assert_eq(bare.packages, [String]{"fd"})
+    pattern: nixeval_test_shell(`{ pkgs, system ? "x86_64-linux" }: pkgs.mkShell { packages = [ pkgs.ripgrep ]; }`, "x86_64-linux")
+    assert_eq(pattern.packages, [String]{"ripgrep"})
+    assert(nixeval_test_unsupported(nixeval_test_shell_error(`{ pkgs, extra }: pkgs.mkShell { packages = [ pkgs.fd ]; }`, "x86_64-linux")).contains("devShell"))
+}
+
 #Test("nixeval native devshell preserves string contexts during projection") {
     evaluated: nixeval_test_shell(`{
           devShells.x86_64-linux.default = pkgs.mkShell {
@@ -779,7 +787,7 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
     manifest: NixEvalOracleManifest.embedded() ?? panic("embedded manifest")
     loop system in nixeval_required_systems() {
         fixture_identity: nixeval_test_object(document, nixeval_test_get(identities, system))
-        manifest_identity: manifest.builds.get(system) ?? panic("required manifest system")
+        manifest_identity: manifest.build(system) ?? panic("required manifest system")
         assert_eq(Val(nixeval_test_text(document, fixture_identity, "build_nar_hash")), manifest_identity.build_nar_hash)
         assert_eq(Val(nixeval_test_text(document, fixture_identity, "executable_nar_hash")), manifest_identity.executable_nar_hash)
     }

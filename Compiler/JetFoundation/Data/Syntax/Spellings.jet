@@ -28,6 +28,7 @@ LEXICAL_LEDGER: [LexicalEntry]{
     { spelling: "comptime if", meaning: "build-time branch; unchosen arms are name-checked only", decision: "D-PREP-BRANCH1=A" },
     { spelling: "comptime loop", meaning: "build-time loop over statements or declarations", decision: "D-PREP-BRANCH1=A; D-STRUCT-ONCE1=A" },
     { spelling: "comptime fn", meaning: "build-time literal-hook method", decision: "D-PREP-FN1=A; D-FOUND-LITERAL1=A" },
+    { spelling: "comptime use {{ … }} / comptime use alias: path", meaning: "build-only import: the rows of `use`, whose names work only in compile-time code (a `comptime {{ … }}` block, a `comptime fn` body, a comptime argument, a value computed while building); a user module only compile-time code uses, however it is imported, stays out of the shipped program", decision: "D-COMPTIME-USE1=A" },
     { spelling: "<comptime N: Int>", meaning: "compile-time number parameter declaration", decision: "D-CONSTGEN2=A" },
     { spelling: "$", meaning: "compiler fact: `T.$layout`, `f.$effects`, `value.$origin`; fact declaration metadata `$holds:`; template name splice `$method: fn`, `self.$field`, `.$left`", decision: "D-COMPILER-NS1=A; D-META-ROOT3=A; D-DECL-META1=A; D-NAME-SPLICE1=B" },
     { spelling: "$build", meaning: "build fact root: `$build.os`, `.profile`, `.settings.*`, `.stamp.*`, `.cpu.cache_line` (an `Int`, also accepted in `#Layout(c, align(…))`)", decision: "D-BUILD-FACT3=A; D-CACHE-CONTROL1=A" },
@@ -45,7 +46,8 @@ LEXICAL_LEDGER: [LexicalEntry]{
     { spelling: "!", meaning: "error-contract mark after its error type (`E!`, `(A | B)!`); deny-only root in an effect row", decision: "D-TYPE-SUFFIX1=A; D-EFF4" },
     { spelling: "?", meaning: "optional type mark after its type (`T?`)", decision: "D-TYPE-SUFFIX1=A" },
     { spelling: "??", meaning: "fallback", decision: "D-RESULT-DECON2" },
-    { spelling: "&place.method(…) / ^place.method(…)", meaning: "receiver place mark: `&`/`^` on the maximal named place a method call writes or takes; fresh receivers stay unmarked; a line starting `&name`/`^name` begins a statement", decision: "D-CAP-RECEIVER1=D" },
+    { spelling: "x.move()", meaning: "an early take: a compiler-owned method that moves a named place out before its last use; a call that takes is written plain because its signature declares `&&T` or `&&self`", decision: "D-COPY-MOVE-SPELL1=A; D-CALLSITE-MARK2=A" },
+    { spelling: "&&T / &&self", meaning: "take mark in a signature, and `task &&name` for a task capture; `&T` / `&self` is the write mark; calls stay unmarked", decision: "D-MOVE-SIGIL1=A; D-CALLSITE-MARK2=A" },
     { spelling: "&self.field / &self.[a, b]", meaning: "stated receiver field footprint: the record fields a method may read or change, checked against its body (E0231) and published in the API snapshot; reuses member spread `.[`", decision: "D-METHOD-FOOTPRINT1=A; D-SPREAD1=A" },
     { spelling: "T{{expr}}", meaning: "field default", decision: "D-DEFAULT-SHAPE1" },
     { spelling: "Name{{\"…\"}}", meaning: "checked text head", decision: "S8; D-CHECKED-TEXT1" },
@@ -113,8 +115,8 @@ KW_CONC_TASK: "task"
 /// creates a deeply immutable owned snapshot for a task crossing.
 KW_FREEZE: "freeze"
 
-// This rule adds no second token for consuming captures: `task ^name`
-// reuses SIGIL_MOVE (`^`) as task-capture syntax on a group child.
+// This rule adds no second token for consuming captures: `task &&name`
+// reuses SIGIL_MOVE (`&&`) as task-capture syntax on a group child.
 // The child owns the value; later use of the name is ordinary E0121.
 /// `task.all` is the one fan-out
 /// selector that accepts either positional branches or uniformly named

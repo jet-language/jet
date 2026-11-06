@@ -99,7 +99,7 @@ pkg_test_plan_source_parses: fn(source: String) -> Bool Never! {
         // The renderer probe lexes and parses.
         assert(pkg_test_plan_source_parses(source))
 
-        response_externs: pkg_test_plan_externs(source, [String]{"input: String", "deadline_ms: Int) String ="}, false)
+        response_externs: pkg_test_plan_externs(source, [String]{"input: String", "deadline_ms: Int) -> String ="}, false)
         assert(response_externs.len() > 0)
         loop name in response_externs {
             body: pkg_test_plan_wrapper_body(source, name, true)
