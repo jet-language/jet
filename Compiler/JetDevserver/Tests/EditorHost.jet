@@ -40,12 +40,12 @@ editor_test_envelope: fn() -> String Never! {
     assert(if transport.open(request) == .Err(.SourcePathRejected(_)) -> true else -> false)
     request.source_path = "src/main.jet"
     request.revision = "rev-2"
-    assert(if transport.open(request) == .Err(.RevisionMismatch{..}) -> true else -> false)
+    assert(if transport.open(request) == .Err(.RevisionMismatch(_, _)) -> true else -> false)
 }
 #Test("commands_require_the_transport_grant") {
     request: EditorCommandRequest.new(.VsCode, "session-1", "src/main.jet", "src/main.jet", "rev-1", .Build)
     denied: editor_test_transport([String]{})
-    assert(if denied.command(request) == .Err(.CommandDenied{..}) -> true else -> false)
+    assert(if denied.command(request) == .Err(.CommandDenied(_, _)) -> true else -> false)
     authorized: editor_test_transport([String]{"editor.command:build"})
     receipt: authorized.command(request) ?? panic("authorized command")
     assert_eq(receipt.required_grant, "editor.command:build")
@@ -73,7 +73,7 @@ editor_test_envelope: fn() -> String Never! {
     }
     assert_eq(transport.event_count(), 256)
     assert_eq(transport.latest_cursor(), Val(U64{258}))
-    assert(if transport.stream_after(Val(U64{1})) == .Err(.CursorExpired{requested: (U64{1}), oldest: (U64{3})}) -> true else -> false)
+    assert(if transport.stream_after(Val(U64{1})) == .Err(.CursorExpired(requested, oldest)) && requested == U64{1} && oldest == U64{3} -> true else -> false)
     retained: transport.stream_after(Val(U64{2})) ?? panic("oldest predecessor")
     assert_eq(retained.events[0].sequence, U64{3})
     assert_eq(retained.events[255].sequence, U64{258})
