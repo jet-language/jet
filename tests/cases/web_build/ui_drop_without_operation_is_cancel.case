@@ -1,0 +1,25 @@
+# D-UI-DRAG-NONE1=A (#6596 c3): a drag event carries `operation: UIDragOperation?`. The default browser provider
+# forwards the raw drop effect; Core maps `none` to no operation and delivers a drop with no operation as Cancel,
+# while a drop with an operation keeps it. The same page runs at O0, O1 and O2.
+requires: tool:node
+fixture: ui_drop_without_operation_is_cancel.fixture
+env: NO_COLOR=1
+step: jet build --target web --optimize=none main.jet
+exit: 0
+copy: harness.mjs .jet/build/harness.mjs
+step: node harness.mjs
+cwd: .jet/build
+exit: 0
+stdout: = ui_drop_without_operation_is_cancel.out
+step: jet build --target web --optimize=basic main.jet
+exit: 0
+step: node harness.mjs
+cwd: .jet/build
+exit: 0
+stdout: = ui_drop_without_operation_is_cancel.out
+step: jet build --target web --optimize=full main.jet
+exit: 0
+step: node harness.mjs
+cwd: .jet/build
+exit: 0
+stdout: = ui_drop_without_operation_is_cancel.out

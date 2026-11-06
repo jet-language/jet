@@ -3711,7 +3711,9 @@ drag/drop events (event type, data, drop effect) to `ime.poll` and
 `drag_drop.poll`; Core maps each event type to its phase (a `compositionend`
 with no text cancels), places an unreported IME caret after the composition
 text in characters, reads URI items from `text/uri-list` lines, and reports a
-host buffer overflow as `QueueFull`. Shortcuts and accessibility are
+host buffer overflow as `QueueFull`. A drag event's `operation` is a
+`UIDragOperation?`: a `none` drop effect is no operation, and a drop with no
+operation arrives as `Cancel` (D-UI-DRAG-NONE1=A). Shortcuts and accessibility are
 available. `clipboard.read_text` answers the clipboard text the page last
 observed (a paste, copy or cut, or its own `write_text`), because a browser
 lends the live clipboard only to a user gesture; before any is observed it
