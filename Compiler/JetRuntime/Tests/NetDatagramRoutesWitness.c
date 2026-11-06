@@ -1,7 +1,6 @@
-// The UDP family is intentionally excluded from the native pack until its
-// packet bridge is ported. Link this fixture only with NetDatagramRoutes +
-// NetRoutes explicitly composed; it covers the six completed UDP leaves.
-// Baseline native U8 list stride is eight, as in NetTests.c.
+// The six UDP leaves of NetDatagramRoutes, linked with the composed native
+// runtime object.
+// Native U8 lists are packed: one byte per element (RT_HOST_U8_STRIDE).
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -21,8 +20,8 @@ extern int64_t jet_net_udp_bind_addr(Address *, UDP **, NetError **);
 extern int64_t jet_net_udp_local_addr(UDP *, Address **, NetError **);
 extern int64_t jet_net_udp_set_timeout(UDP *, int64_t, NetError **);
 extern int64_t jet_net_udp_send_to(UDP *, Text *, Address *, int64_t *, NetError **);
-extern int64_t jet_net_udp_send_bytes_to(UDP *, const uint64_t *, int64_t, Address *, int64_t *, NetError **);
-extern int64_t jet_socket_receive_from_raw(FD *, uint64_t *, int64_t, Address *, Facts *);
+extern int64_t jet_net_udp_send_bytes_to(UDP *, const unsigned char *, int64_t, Address *, int64_t *, NetError **);
+extern int64_t jet_socket_receive_from_raw(FD *, unsigned char *, int64_t, Address *, Facts *);
 extern void jet_udp_socket_mark_closed_raw(UDP *);
 extern void jet_rt_handle_drop_jet_udp_socket(UDP *);
 extern void jet_rt_handle_drop_jet_socket_addr(Address *);
@@ -43,7 +42,7 @@ int main(void) {
     unsigned char binary[]={0,1,127,255}; Text message={binary,4,0}; int64_t sent;
     assert(jet_net_udp_send_to(sender,&message,endpoint,&sent,&error)==1 && !error);
     assert(jet_int_owned_to_i64(sent)==4); jet_rt_int_drop(sent);
-    uint64_t bytes[4]={0},input[]={255,127,1,0}; Address from={0}; Facts facts={0};
+    unsigned char bytes[4]={0},input[]={255,127,1,0}; Address from={0}; Facts facts={0};
     assert(jet_socket_receive_from_raw(receiver->state->fd,bytes,4,&from,&facts)==4);
     for(int i=0;i<4;i++) assert(bytes[i]==binary[i]);
     assert(jet_net_udp_send_bytes_to(sender,input,4,endpoint,&sent,&error)==1 && !error);

@@ -97,7 +97,7 @@ extern int64_t jet_rt_record_new_io_context(int64_t, int64_t, int64_t, int64_t);
 extern int64_t jet_rt_record_new_jet_date(int64_t, int64_t, int64_t);
 extern int64_t jet_rt_record_new_jet_period(int64_t, int64_t, int64_t);
 extern int64_t jet_rt_record_new_jet_memo_stats(int64_t, int64_t, int64_t, int64_t);
-extern int64_t jet_rt_record_new_limits(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t);
+extern int64_t jet_rt_record_new_encoding_limits(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t);
 extern int64_t jet_rt_record_new_log_span(int64_t, int64_t);
 extern int64_t jet_rt_record_new_plugin_frame(int64_t, int64_t, int64_t);
 extern int64_t jet_string_repeat(int64_t, int64_t);
@@ -205,6 +205,8 @@ static void run_int_stop(int64_t test) {
     const int64_t sentinel = INT64_C(0x12345678);
     int64_t out[4] = {sentinel, sentinel, sentinel, sentinel};
     int64_t a = WORD(&out[0]), b = WORD(&out[1]), c = WORD(&out[2]), d = WORD(&out[3]);
+    /* An optional Int argument is a pointer to its carrier (0 is None). */
+    int64_t one = 1;
     if (test <= 5) {
         int64_t (*const divisions[])(int64_t, int64_t, int64_t, int64_t, int64_t) = {
             jet_int_div, jet_int_rem, jet_int_floor_div, jet_int_mod, jet_int_div_euclid, jet_int_rem_euclid
@@ -262,12 +264,12 @@ static void run_int_stop(int64_t test) {
     else if (test == 44) assert(jet_rt_record_new_jet_period(1, 1, big) == 0);
     else if (test == 45) assert(jet_rt_record_new_jet_memo_stats(big, 1, 1, 0) == 0);
     else if (test == 46) assert(jet_rt_record_new_jet_memo_stats(1, 1, big, 0) == 0);
-    else if (test == 47) assert(jet_rt_record_new_limits(1, 1, 1, 1, 1, big) == 0);
+    else if (test == 47) assert(jet_rt_record_new_encoding_limits(1, 1, 1, WORD(&one), 1, big) == 0);
     else if (test == 48) assert(jet_rt_record_new_log_span(big, WORD(&key)) == 0);
     else if (test == 49) assert(jet_rt_record_new_plugin_frame(WORD(&key), WORD(&key), big) == 0);
     else if (test == 50) assert(jet_rt_record_new_terminal_size(80, big) == 0);
     else if (test == 51) assert(jet_rt_record_new_watch_event(0, 0, WORD(&key), WORD(&key), 0, big) == 0);
-    else if (test == 52) assert(jet_rt_record_new_limits(1, 1, 1, 1, big, 1) == 0);
+    else if (test == 52) assert(jet_rt_record_new_encoding_limits(1, 1, 1, WORD(&one), big, 1) == 0);
     else if (test == 53) assert(jet_string_repeat(WORD(&key), big) == 0);
     else if (test >= 54 && test <= 56) {
         assert(jet_string_slice(WORD(&key), test == 54 ? big : 0, test == 55 ? big : 1, WORD(&key), test == 56 ? big : 0) == 0);

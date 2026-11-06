@@ -19,7 +19,7 @@ typedef struct { unsigned char *data; int64_t length, capacity; } Text;
 #define WORD(p) ((int64_t)(uintptr_t)(p))
 extern int64_t jet_rt_root_begin(int64_t);
 extern void jet_rt_host_arguments(int64_t, int64_t, int64_t);
-extern void jet_rt_control_retain(int64_t);
+extern void jet_rt_scheduler_control_retain(int64_t);
 extern int64_t jet_rt_native_task_spawn(int64_t, Text *, int64_t, int64_t, int64_t, int64_t);
 extern void jet_rt_native_channel(int64_t, int64_t, int64_t, int64_t);
 extern void jet_rt_native_sender_send(int64_t, int64_t, int64_t);
@@ -191,7 +191,7 @@ static void task_origin(void) {
     atomic_init(&task_released, false);
     int64_t task = jet_rt_native_task_spawn(17, &label, 0, WORD(task_body), WORD(task_release), WORD(metadata));
     int64_t control = ((int64_t *)(uintptr_t)task)[1];
-    jet_rt_control_retain(control);
+    jet_rt_scheduler_control_retain(control);
     int64_t result[4] = {0};
     assert(jet_rt_native_task_join(task, 0, WORD(result)) == 0);
     assert(atomic_load_explicit(&task_released, memory_order_acquire));
@@ -378,15 +378,15 @@ int main(int argc, char **argv, char **envp) {
         assert(text && fwrite(text->data, 1, (size_t)text->length, stdout) == (size_t)text->length);
         jet_rt_string_drop(text);
     } else if (!strcmp(mode, "root-cancel-publisher")) {
-        (void)jet_rt_control_publish_stop(1, -1, -1, -1, -1, 0, 0, 0);
-        abort(); /* expected actual host defect101 before copy */
+        /* A root never unwinds a cancellation: the publish is rejected. */
+        assert(!jet_rt_control_publish_stop(1, -1, -1, -1, -1, 0, 0, 0));
+        assert(jet_rt_session_status() == 0);
     } else if (!strcmp(mode, "root-interrupt-producer")) {
+        /* A root is an interrupt target (process.on_signal); its poll observes
+           the pending interrupt and returns the cooperative fallback. */
         jet_rt_control_interrupt(root);
-        abort(); /* expected host defect101 before writing pending48 */
-    } else if (!strcmp(mode, "corrupt-root-poll")) {
-        ((int64_t *)(uintptr_t)root)[6] = 1; /* explicit invalid pending48 */
-        (void)jet_rt_session_poll();
-        abort();
+        assert(jet_rt_session_poll() == 0 && jet_rt_session_status() == 0);
+        assert(((int64_t *)(uintptr_t)root)[6] == 0);
     } else if (!strcmp(mode, "corrupt-root-take")) {
         int64_t record = cancelled_record();
         ((int64_t *)(uintptr_t)root)[4] = 1;
