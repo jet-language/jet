@@ -1988,6 +1988,10 @@ sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFun
     context.host_hooks = host_hooks
     context.generic_params = generic_params
     if func.return_type != None -> context.failure_contract_source = sema_failure_contract_source(func.return_type)
+    if func.return_type == .Val(.Result(success, _)) {
+        // copy: `success` is a payload of `func`, which keeps the original; the repair fact owns this one
+        if func.return_type_span == .Val(return_span) -> context.failure_repair = Val(SemaFailureRepair{return_span: return_span, success: success.copy(), declaration_end: func.span.end})
+    }
     // A lifted inline-module member reports its own body under its source name.
     context.function_name = sema_inline_member_source_name(func.name)
     context.arithmetic_policy = sema_function_arithmetic_policy(func.markers)

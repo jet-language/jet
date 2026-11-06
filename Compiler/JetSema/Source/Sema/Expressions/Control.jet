@@ -7,6 +7,8 @@ use jet_foundation.[
     Call,
     CallArg,
     Diagnostic,
+    DiagnosticFixApplicability,
+    DiagnosticFixSafety,
     Expr,
     Func,
     Lambda,
@@ -31,10 +33,13 @@ use jet_foundation.[
     TPatternBindingFact,
     TPatternPosition,
     TTryConvert,
+    TextEdit,
     TryConvert,
     Type,
     ast_empty_call_arg_flags,
+    diagnostic_with_alternative_edit,
     diagnostic_with_detail,
+    diagnostic_with_edit_grade,
     expr_span,
     failure_contract_of_function,
     is_compute_tensor_family,
@@ -837,7 +842,13 @@ sema_failure_domain_mismatch: fn(expr: Expr?, span: Span, source: Type, target: 
         "`{callee}` is defined at `{provenance.definition}` with effective failure contract `{provenance.contract}`; the caller's `{caller}` contract has no route from `{source_name}` to `{target_name}`",
         "Declare the caller with `{source_name}` as its failure domain, or add `impl {source_name} -> {target_name} {{ … }}`; otherwise handle `{callee}` locally with `??`",
     )
-    diagnostic_with_detail(diagnostic, "failure-domain:{callee}|{source_name}|{target_name}\ncallee: {callee}\ndefinition: {provenance.definition}\neffective contract: {provenance.contract}\ncaller contract: {caller}")
+    detailed: diagnostic_with_detail(diagnostic, "failure-domain:{callee}|{source_name}|{target_name}\ncallee: {callee}\ndefinition: {provenance.definition}\neffective contract: {provenance.contract}\ncaller contract: {caller}")
+    // The repair, for review: the caller takes the callee's domain, or a
+    // conversion `impl` (its body left to write) routes one into the other.
+    repair: context.failure_repair ?? return detailed
+    retyped: diagnostic_with_edit_grade(detailed, TextEdit{span: repair.return_span, new_text: "{type_name(repair.success)} {source_name}!"}, DiagnosticFixApplicability.Suggested, DiagnosticFixSafety.NeedsReview)
+    conversion: "\n\nimpl {source_name} -> {target_name} {{\n    convert: fn(error: {source_name}) -> {target_name} {{\n    }}\n}}"
+    diagnostic_with_alternative_edit(retyped, TextEdit{span: Span{start: repair.declaration_end, end: repair.declaration_end}, new_text: conversion})
 }
 
 sema_failure_no_carrier: fn(error: Type, span: Span, implicit: Bool) -> Diagnostic {

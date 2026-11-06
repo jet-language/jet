@@ -9,10 +9,10 @@ json: stdout doc $.reports[?code="E2404"] #= 1
 json: stdout doc $.reports[?code="E2404"][0].what ~ "wrong_helper" # original predicate rs38
 json: stdout doc $.reports[?code="E2404"][0].why ~ "wrong_helper" # original predicate rs39
 json: stdout doc $.reports[?code="E2404"][0].why ~ "input.jet:" # original predicate rs40
-json: stdout doc $.reports[?code="E2404"][0].why ~ "explicit !WrongDomain" # original predicate rs42
+json: stdout doc $.reports[?code="E2404"][0].why ~ "explicit WrongDomain!" # original predicate rs42
 json: stdout doc $.reports[?code="E2404"][0].detail ^= "failure-domain:wrong_helper|WrongDomain|CallerDomain" # original prefix predicate rs49; missing/null fails
 json: stdout doc $.reports[?code="E2404"][0].fix_edits #= 2
-json: stdout doc $.reports[?code="E2404"][0].fix_edits[0].new_text = "Int !WrongDomain"
+json: stdout doc $.reports[?code="E2404"][0].fix_edits[0].new_text = "Int WrongDomain!"
 json: stdout doc $.reports[?code="E2404"][0].applicability = "suggested"
 json: stdout doc $.reports[?code="E2404"][0].fix_edits[*].safety = "needs-review"
 json: stdout doc $.reports[?code="E2404"][0].fix_edits[1].new_text ~ "impl WrongDomain -> CallerDomain" # original existential rs70, with primary fixed and exactly2 this is the second edit

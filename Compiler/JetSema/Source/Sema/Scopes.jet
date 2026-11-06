@@ -569,6 +569,14 @@ SemaScopeProbeSource: enum {
     Namespace(module_index: Int, position: Int)
 }
  
+// The caller's written `T E!` return (its span and success type `T`) and the
+// end of its declaration, where E2404 offers a conversion `impl`.
+SemaFailureRepair: struct {
+    return_span: Span
+    success: Type
+    declaration_end: Int
+}
+
 SemaCheckContext: struct {
     exact_int_reachable: Bool
     unsafe_depth: Int
@@ -643,6 +651,9 @@ SemaCheckContext: struct {
     callback_return_closed: Bool{false}
     // The enclosing callable's written failure contract, for E2404 provenance.
     failure_contract_source: String
+    // Where E2404's repair edits go: the caller's written `T E!` return and
+    // the end of its declaration. None when no fallible return was written.
+    failure_repair: SemaFailureRepair?
     // The enclosing named callable, for the return verdicts.
     function_name: String
     // E0408/E0409: a fallback with no failure report to name (`??` on an
@@ -1110,6 +1121,7 @@ sema_check_context_init: fn() -> SemaCheckContext Never! {
         failure_inference: false,
         inferred_failure_carrier: None,
         failure_contract_source: "no declared failure contract",
+        failure_repair: None,
         function_name: "",
         fallback_err_denial: None,
         noelse_chain_starts: [Int]{},
@@ -1181,6 +1193,7 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
         callback_return_closed: source.callback_return_closed,
         callback_return_row: source.callback_return_row,
         failure_contract_source: source.failure_contract_source,
+        failure_repair: source.failure_repair,
         function_name: source.function_name,
         fallback_err_denial: source.fallback_err_denial,
         noelse_chain_starts: source.noelse_chain_starts.copy(),
@@ -1327,6 +1340,7 @@ sema_check_context_save: fn(context: SemaCheckContext) -> SemaCheckContextMark N
             callback_return_closed: context.callback_return_closed,
             callback_return_row: context.callback_return_row,
             failure_contract_source: context.failure_contract_source,
+            failure_repair: context.failure_repair,
             function_name: context.function_name,
             fallback_err_denial: context.fallback_err_denial,
             noelse_chain_starts: [Int]{},
@@ -1425,6 +1439,7 @@ sema_check_context_rollback: fn(context: &SemaCheckContext, mark: SemaCheckConte
     context.callback_return_closed = saved.callback_return_closed
     context.callback_return_row = saved.callback_return_row
     context.failure_contract_source = saved.failure_contract_source
+    context.failure_repair = saved.failure_repair
     context.function_name = saved.function_name
     context.fallback_err_denial = saved.fallback_err_denial
     context.lost_tail_span = saved.lost_tail_span

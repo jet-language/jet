@@ -461,6 +461,10 @@ sema_call_builtin_static_bind: fn(pattern: Type, actual: Type, row: BuiltinStati
             .Option(offered) -> sema_call_builtin_static_bind(inner, offered, row, bindings)
             else -> false
         }
+        .Shared(inner) -> if actual == {
+            .Shared(offered) -> sema_call_builtin_static_bind(inner, offered, row, bindings)
+            else -> false
+        }
         .Result(ok, err) -> if actual == {
             .Result(offered_ok, offered_err) -> sema_call_builtin_static_bind(ok, offered_ok, row, bindings) && sema_call_builtin_static_bind(err, offered_err, row, bindings)
             else -> false
