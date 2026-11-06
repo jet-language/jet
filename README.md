@@ -2,14 +2,15 @@
 
 <p align="center"><img src="./Docs/assets/jetlang.png" width="120" alt="Jet logo" /></p>
 
-Jet is a memory-safe, compiled programming language. Beginners get safe
-defaults, little ceremony, and diagnostics that explain what went wrong, why,
-and how to fix it. Experts get explicit control — down to audited unsafe
-regions — without that machinery leaking into everyday code.
+Jet is a memory-safe, compiled programming language that aims to be the
+easiest language to start with and the hardest to outgrow. Beginners get safe
+defaults, little ceremony and diagnostics that say what went wrong, why, and
+how to fix it. Experts get explicit control, down to audited unsafe regions,
+without that machinery leaking into everyday code.
 
-> **Pre-release.** Jet is at 0.0.1 and has no compatibility promise yet. The
-> language, standard library, and tools change in place, without deprecation
-> periods, until a 1.0 policy is declared. See the
+> **Pre-release.** Jet ships as numbered `a0_NNN` releases and makes no
+> compatibility promise yet. The language, library and tools change in place,
+> with no deprecation period, until a 1.0 policy is declared. See the
 > [release policy](Docs/spec/release-policy.md).
 
 ## A first look
@@ -41,7 +42,7 @@ next: fn(light: Light) -> Light {
     }
 }
 
-clean_name: fn(raw: String) -> String !NameError {
+clean_name: fn(raw: String) -> String NameError! {
     if raw == "" -> return Err(NameError.Empty)
     Ok(raw)
 }
@@ -62,6 +63,7 @@ run: fn(args: Args) {
     print(greet(name))
     p: Point{x: 3.0, y: 4.0}
     print("distance squared: {p.dist_sq()}")
+    print("after red: {next(Light.Red)}")
 }
 ```
 
@@ -69,135 +71,140 @@ run: fn(args: Args) {
 $ jet run tour.jet -- --name Ada
 hello, Ada
 distance squared: 25.0
+after red: Green
+
+$ jet test tour.jet
+greet says hello: pass
+1 passed, 0 failed, 0 skipped
 ```
 
-A few things to notice:
-
-- `name: value` binds an immutable name; `name := value` binds a mutable one.
-  Types come from values or from signatures.
-- `-> String !NameError` declares a result that is either a `String` or a
-  `NameError`. Errors are ordinary values; `??` supplies a fallback.
-- `if subject == { … }` matches a value against arms; each arm is an
-  expression or a block.
-- A `#CLI` struct *is* the command-line interface: `jet run tour.jet -- --help`
-  lists `--name` with its documentation and default.
-- `#Test` blocks live next to the code they test and run with `jet test`.
-
-The [executable examples](Examples/README.md) cover the rest of the
-language, each with golden-tested output.
-
-## What Jet provides
-
-- **Safety by default.** Programs are memory- and type-safe. Low-level
-  control is available, but unsafe operations must sit inside an explicit
-  `#Unsafe("reason") { … }` region that tools can audit.
-- **Diagnostics as a product.** Every error has a stable code and explains
-  what happened, why Jet enforces the rule, and how to fix it.
-  `jet explain <CODE>` expands any code into a short lesson, and `jet fix`
-  applies registered safe repairs.
-- **One meaning on every execution tier.** `jet run` and `jet dev` compile a
-  native executable through the normal build path and run it (`jet dev`
-  rebuilds and restarts on every save), compile-time code runs in the
-  in-process evaluator until native in-memory O0 replaces it, and web
-  targets compile to WebAssembly. A program means the same thing on each.
-- **A batteries-included core library.** Files, HTTP, JSON and other
-  encodings, time, text, collections, concurrency, terminal and UI, data,
-  and more ship as `core.*` modules, most of them written in Jet. See the
-  [core library reference](Docs/spec/reference/core-library.md).
-- **One tool for the whole workflow.** The `jet` command formats, checks,
-  tests, documents, debugs, profiles, packages, and manages dependencies.
-  `jet help` lists every command.
-- **Interoperability.** Jet binds to C and C++ and to a range of other
-  language runtimes through checked foreign-function boundaries.
+- Every declaration is written `name: value`. A type, a function and a
+  constant all use the same form; `name := value` makes a mutable binding.
+- `-> String NameError!` returns a `String` or fails with a `NameError`.
+  Errors are ordinary values, and `??` supplies a fallback.
+- `if subject == { … }` matches a value against arms.
+- A `#CLI` struct *is* the command line: `jet run tour.jet -- --help` lists
+  `--name` with its documentation and default.
+- `#Test` blocks sit next to the code they test and run with `jet test`.
 
 ## Install
 
-The supported install path uses [Nix](https://nixos.org/) with flakes on
-x86_64 Linux and x86_64 macOS:
+Jet runs on x86_64 Linux. Each release on
+[GitHub](https://github.com/jet-language/jet/releases) is one archive with
+the `jet` binary, its runtime and checksums:
 
 ```sh
-nix --extra-experimental-features "nix-command flakes" profile install github:jet-language/jet
+gh release download --repo jet-language/jet --pattern 'jet-*-linux-x64.tar.gz*'
+sha256sum -c jet-*-linux-x64.tar.gz.sha256
+mkdir -p ~/.local/jet && tar -xzf jet-*-linux-x64.tar.gz -C ~/.local/jet
+export PATH="$HOME/.local/jet:$PATH"
 jet version
 ```
 
-Create and run your first project:
+> Until the release binary carries its own library sources, `jet run` needs a
+> checkout of the same release. Clone it once and point Jet at it:
+> `git clone --depth 1 --branch "$(cat ~/.local/jet/RELEASE)" https://github.com/jet-language/jet ~/.local/jet-src`
+> and `export JET_TOOLCHAIN_ROOT=~/.local/jet-src`.
+
+Create and run a project:
 
 ```sh
-jet new hello
-cd hello
-jet run          # prints: hello, world
-jet test         # runs the project's #Test blocks
+jet new hello && cd hello
+jet run     # prints: hello, world
+jet test    # runs the project's #Test blocks
 ```
+
+## What you get
+
+- **Safety by default.** Programs are memory-safe, type-safe and leak-free.
+  Low-level work goes in an explicit `#Unsafe("reason") { … }` region that
+  tools can audit.
+- **Diagnostics as a product.** Every error has a stable code and says what
+  happened, why the rule exists and how to fix it. `jet explain <CODE>`
+  expands a code into a short lesson; `jet fix` applies the safe repairs.
+- **One meaning everywhere.** `jet run` and `jet dev` compile natively and run
+  in memory, `jet build` and `--release` produce optimized executables, and
+  compile-time code runs natively too. One runtime serves every tier, so a
+  program means the same thing on each.
+- **A large core library**, written in Jet: files, processes, HTTP, JSON and
+  other encodings, time, text, collections, concurrency, terminal and UI, and
+  more, as `core.*` modules. See the
+  [core library reference](Docs/spec/reference/core-library.md).
+- **One tool for the workflow.** `jet` formats, checks, tests, documents,
+  debugs, profiles, packages and manages dependencies; `jet help` lists every
+  command. Jetpack, the package manager, is built in.
+- **Interop.** Jet binds to C and C++ through checked foreign-function
+  boundaries.
 
 ## Learn Jet
 
 | Start with | For |
 |---|---|
-| [First-hour guide](Docs/spec/guides/first-hour.md) | Install, then `new` → `run` → `check` → `test` → `fix` → `explain` |
-| `jet learn` | Offline practice exercises in your terminal |
-| [Examples](Examples/README.md) | Small, golden-tested programs for each feature |
+| [First-hour guide](Docs/spec/guides/first-hour.md) | `new`, `run`, `check`, `test`, `fix` and `explain`, step by step |
+| [Examples](Examples/README.md) | Small programs for every feature, grouped by topic, each with checked output |
 | [Diagnostic recovery](Docs/spec/guides/diagnostic-recovery.md) | Reading and fixing compiler errors |
-| [Core library reference](Docs/spec/reference/core-library.md) | The standard `core.*` modules |
+| [Core library reference](Docs/spec/reference/core-library.md) | The `core.*` modules |
 | [Language spec](Docs/spec/spec.md) | The language contract, topic by topic |
+| [Philosophy](Docs/spec/philosophy.md) | What Jet is for and how it ranks trade-offs |
 | [Documentation index](Docs/README.md) | Everything else |
 
-## How Jet is built
+## Where Jet is going
 
-The compiler front end — lexer, parser, and semantic checker — owns every
-language rule. Code generation only lowers facts the checker has already
-established, so a backend failure is always a compiler bug, never a user
-error. Native builds go through Jet's own back end
-([`Compiler/JetBackend`](Compiler/JetBackend/)); `jet run` and `jet dev` use
-that same build path. Shared runtime meaning lives in the Prelude and the
-Jet-authored core library, which every tier calls rather than
-re-implementing.
+Plans, priorities and status live on [Tower](Tools/tower/skills/tower/SKILL.md),
+the project board, not in documents. The active goals are:
 
-**Jet is self-hosted.** The compiler is written in Jet, under `Compiler/`,
-and builds itself: a candidate compiler must rebuild its own sources to a
-byte-identical fixed point before it becomes the next seed.
-
-The Jet parser's token entry points carry `TokenTables` alongside tokens:
-spelling names and literal facts belong to the originating lexer tables, not
-to an embedded token payload. Fence and named-marker expansion preserve that
-association, and imported marker tokens are rebased into the receiving tables.
+- **Hand-off and durability:** a fresh contributor can clone, fetch the latest
+  release and build, test and ship Jet with no private setup.
+- **Finish Rust removal and self-hosting:** every tool and test runs on Jet
+  alone.
+- **Declarations as types and metaprogramming:** the core library declares its
+  own runtime functions, with no compiler-side copy of its API.
+- **Core library completeness**, **effects on types**, and **memory safety and
+  soundness**.
+- **Developer experience:** the CLI, error messages, the editor, and a
+  first-class testing toolkit.
+- **Packages and configuration,** replacing Nix entirely.
+- **Best scripting language**, and **web, end to end**, measured against the
+  strongest competitors.
+- **Speed and size:** beat every peer language and match hand-written machine
+  code on each measured workload.
 
 ## Work on Jet
 
-Read [AGENTS.md](AGENTS.md) first: it defines how decisions are made, the
-invariants every change must keep, and how work is proven. Plans, decisions,
-and status live in [Tower](Tools/tower/skills/tower/SKILL.md), the
-project board, not in documentation.
+The compiler, the package manager and the tools are written in Jet. The
+compiler builds itself: a candidate must rebuild its own sources to a
+byte-identical fixed point before it becomes the next release.
 
-Run repository commands with an admitted `jet` on `PATH`; no Nix, no
-wrapper and no environment variables are needed.
-[Rebuilding Jet](Docs/spec/contributing/bootstrap.md#from-a-fresh-clone) builds
-one from a fresh clone and a released seed.
+Read [AGENTS.md](AGENTS.md) first. It defines how decisions are made, the
+invariants every change keeps and how work is proven. Then see
+[CONTRIBUTING.md](CONTRIBUTING.md); report vulnerabilities through
+[SECURITY.md](SECURITY.md).
+
+To build Jet from a fresh clone, take the latest release as the seed and let
+it build the compiler:
 
 ```sh
-jet run Examples/features/basics/hello.jet
-jet check Examples/features/basics/functions.jet
-
-# Check one example against its golden output
-jet test Compiler --profile golden Examples/features/basics/hello.jet
+TAG=$(gh release view --repo jet-language/jet --json tagName --jq .tagName)
+git clone --branch "$TAG" https://github.com/jet-language/jet && cd jet
+gh release download "$TAG" --repo jet-language/jet --pattern "jet-$TAG-linux-x64.tar.gz*" --dir ../release
+(cd ../release && sha256sum -c "jet-$TAG-linux-x64.tar.gz.sha256")
+mkdir ../seed && tar -xzf "../release/jet-$TAG-linux-x64.tar.gz" -C ../seed
+../seed/jet build Compiler     # writes Compiler/JetCli/.jet/build/jet
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow and
-[SECURITY.md](SECURITY.md) to report a vulnerability.
+[Building Jet](Docs/spec/contributing/bootstrap.md) covers the rest: giving the
+new compiler its runtime, the full self-host chain, walking forward across
+releases, and the frozen `rust` branch as the last-resort seed.
 
-## Repository map
-
-| Path | Contents |
+| Path | Holds |
 |---|---|
-| [`Compiler/`](Compiler/) | The Jet compiler, written in Jet |
-| [`Core/`](Core/) | The core library's Jet sources |
-| [`Jetpack/`](Jetpack/) | Jetpack, the package manager, written in Jet |
-| [`Examples/`](Examples/) | Executable examples and their golden output |
-| [`tests/`](tests/) | Behavior, diagnostic-snapshot, and regression tests |
-| [`Docs/`](Docs/README.md) | Specifications, guides, dated evidence, and the project website |
-| [`Tools/`](Tools/) | Contributor tooling: the agent environment, CI and performance scripts, the performance gauntlet, editor integrations, and Tower, the project board |
-
-`tests/` keeps its lowercase name; every other top-level folder is
-capitalized.
+| [`Compiler/`](Compiler/) | The compiler, its runtime and the embedded Prelude |
+| [`Core/`](Core/) | The core library |
+| [`Jetpack/`](Jetpack/) | The package manager |
+| [`Examples/`](Examples/README.md) | Executable examples with checked output |
+| [`tests/`](tests/) | Behavior, diagnostic-snapshot and regression tests |
+| [`Docs/`](Docs/README.md) | Specifications, guides, dated evidence and the website |
+| [`Tools/`](Tools/) | Contributor tooling, CI, performance gates and Tower |
 
 ## License
 
