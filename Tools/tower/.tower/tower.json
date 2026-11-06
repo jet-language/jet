@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6611,
-    "rev": 93599,
+    "nextNum": 6612,
+    "rev": 93600,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -95988,6 +95988,57 @@
       "created": "2026-11-06T19:02:30.892Z",
       "updated": "2026-11-06T19:02:30.892Z",
       "updatedBy": "Main"
+    },
+    {
+      "id": "c0pcddhe",
+      "num": 6611,
+      "title": "Passing a read parameter to a method's owning argument copies silently, while a plain call reports E0201",
+      "body": "Found by SyntaxOwner during the #6586 sweep (2026-11-06, dev 529e9d9ddd). With a read parameter `item: [Int]`, `rows.push(item)` is accepted silently: the list is copied into the owning argument. Passing the same value to a plain function whose parameter owns it, `keep(bag)`, reports E0201 MissingMoveMarker. One meaning must have one mechanism (I8): an owning argument position needs the same move or copy rule whether it belongs to a method call or a plain call, and sema decides it (I3).\n\nFirst establish from the ratified ownership decisions (D-CALLSITE-MARK2, D-MOVE-SIGIL1, #6586) which behaviour is correct for a non-copyable value from a read parameter, then make both call forms follow it.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A UI fixture shows `rows.push(item)` on a read parameter `item: [Int]` and `keep(item)` with an owning parameter giving the same result: the same registered diagnostic and snapshot, or both accepted with the same copy rule, whichever the ratified ownership decisions require.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T19:23:08.815Z"
+        },
+        {
+          "n": 2,
+          "text": "A tests/cases row covers method calls, plain calls, operator hooks and trailing blocks with an owning argument taken from a read parameter, and passes with the admitted jet.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T19:23:08.815Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "syntax",
+        "ownership",
+        "sema"
+      ],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T19:23:08.815Z",
+      "updated": "2026-11-06T19:23:08.815Z",
+      "updatedBy": "Main"
     }
   ],
   "decisions": [
@@ -183523,6 +183574,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-06T19:23:08.815Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0pcddhe",
+      "note": "Passing a read parameter to a method's owning argument copies silently, while a plain call reports E0201"
+    },
     {
       "at": "2026-11-06T19:14:01.910Z",
       "by": "Main",
