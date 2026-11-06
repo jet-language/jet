@@ -3120,7 +3120,7 @@ fn jet_driver_inline_package_failure(code: String, start: Int, end: Int) -> JetD
 fn jet_driver_inline_package_found(bytes: [U8], start: Int, open: Int, end: Int) -> JetDriverInlinePackage Never! {
     keyword_end :: start + "package".len()
     colon :: jet_driver_inline_trivia_end(bytes, keyword_end)
-    retired :: if jet_driver_inline_byte(bytes, colon) == 58 -> Diagnostic?{None} else -> Val(parser_colon_retired_diagnostic("package {{", "package: {{", TextEdit{span: Span{start: start, end: keyword_end}, new_text: "package:"}))
+    retired :: if colon >= 0 -> Diagnostic?{None} else -> Val(parser_colon_retired_diagnostic("package {{", "package: {{", TextEdit{span: Span{start: start, end: keyword_end}, new_text: "package:"}))
     JetDriverInlinePackage{found: true, start: start, end: end, body_start: open + 1, body_end: end - 1, error: None, retired: retired}
 }
 
