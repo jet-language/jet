@@ -11,7 +11,7 @@ s5_web_crlf: fn() -> String { String.from_bytes([U8]{13, 10}) ?? panic("CRLF") }
 
 s5_web_bytes: fn(bytes: [U8], start: Int, end: Int) -> [U8] {
     selected := [U8]{}
-    loop index in start..<end -> &selected.push(bytes[index])
+    loop index in start..<end -> selected.push(bytes[index])
     selected
 }
 
@@ -39,7 +39,7 @@ s5_web_words: fn(text: String) -> [String] {
     loop index < bytes.len() {
         width: s5_web_space_width(bytes, index)
         if width > 0 {
-            if start >= 0 -> &words.push(String.from_bytes_lossy(s5_web_bytes(bytes, start, index)))
+            if start >= 0 -> words.push(String.from_bytes_lossy(s5_web_bytes(bytes, start, index)))
             start = -1
             index = index + width
         } else {
@@ -47,7 +47,7 @@ s5_web_words: fn(text: String) -> [String] {
             index = index + 1
         }
     }
-    if start >= 0 -> &words.push(String.from_bytes_lossy(s5_web_bytes(bytes, start, bytes.len())))
+    if start >= 0 -> words.push(String.from_bytes_lossy(s5_web_bytes(bytes, start, bytes.len())))
     words
 }
 
@@ -64,12 +64,12 @@ s5_web_find: fn(bytes: [U8], marker: [U8]) -> Int? {
     None
 }
 
-s5_web_read_to_end: fn(stream: net.TCPStream) -> [U8]? {
+s5_web_read_to_end: fn(stream: &net.TCPStream) -> [U8]? {
     output := [U8]{}
     loop {
         part: net.tcp_read_bytes(stream, 8192) ?? return None
         if part.len() == 0 -> return Val(output)
-        loop byte in part -> &output.push(byte)
+        loop byte in part -> output.push(byte)
     }
 }
 
@@ -127,7 +127,7 @@ s5_web_response: fn(raw: [U8]) -> S5HTTPResponse? {
 }
 
 s5_web_get: fn(port: Int, path: String, session: String?) -> S5HTTPResponse? {
-    stream: net.tcp_connect("127.0.0.1:{port}") ?? return None
+    stream := net.tcp_connect("127.0.0.1:{port}") ?? return None
     net.set_read_timeout(stream, 5000) ?? return None
     crlf: s5_web_crlf()
     authorization: if session == .Val(token) -> "Authorization: Bearer {token}{crlf}" else -> ""
@@ -139,7 +139,7 @@ s5_web_get: fn(port: Int, path: String, session: String?) -> S5HTTPResponse? {
 }
 
 s5_web_post: fn(port: Int, path: String, body: String, session: String?) -> S5HTTPResponse? {
-    stream: net.tcp_connect("127.0.0.1:{port}") ?? return None
+    stream := net.tcp_connect("127.0.0.1:{port}") ?? return None
     net.set_read_timeout(stream, 5000) ?? return None
     crlf: s5_web_crlf()
     authorization: if session == .Val(token) -> "Authorization: Bearer {token}{crlf}" else -> ""
@@ -151,7 +151,7 @@ s5_web_post: fn(port: Int, path: String, body: String, session: String?) -> S5HT
 }
 
 s5_web_raw: fn(port: Int, request: [U8]) -> [U8]? {
-    stream: net.tcp_connect("127.0.0.1:{port}") ?? return None
+    stream := net.tcp_connect("127.0.0.1:{port}") ?? return None
     net.set_read_timeout(stream, 5000) ?? return None
     net.tcp_write_all_bytes(stream, request) ?? return None
     net.tcp_shutdown(stream, .Write) ?? return None

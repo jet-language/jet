@@ -9,17 +9,17 @@ copy: {root}/tests/cases/web_dev/support.fixture/HTTP.jet requests/HTTP.jet
 session app raw: node {root}/Tools/web-test/serve.mjs --port {free-port:web} --root {work}/root
 stdout: null
 stderr: null
-step: jet run ready
+step: jet run --allow=Env,Net,Time ready
 exit: 0
-spawn swapper: jet run swapper
+spawn swapper: jet run --allow=Env,FS,Time swapper
 await: file swapper-ready timeout 60s
-spawn request0: jet run requests
+spawn request0: jet run --allow=Env,FS,Net,Time requests
 env: S5_WORKER=0
-spawn request1: jet run requests
+spawn request1: jet run --allow=Env,FS,Net,Time requests
 env: S5_WORKER=1
-spawn request2: jet run requests
+spawn request2: jet run --allow=Env,FS,Net,Time requests
 env: S5_WORKER=2
-spawn request3: jet run requests
+spawn request3: jet run --allow=Env,FS,Net,Time requests
 env: S5_WORKER=3
 wait: request0
 exit: 0
