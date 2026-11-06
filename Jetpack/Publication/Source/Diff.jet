@@ -1,19 +1,48 @@
-// Source/Publish/Diff.rs: pure SemVer consumer of the Compiler PublicAPIItem.
-// The checked producer (#4445) and Root provider cutover (#4262) are separate
-// composition gates; this module does not parse or reconstruct public APIs.
-// Diagnostics use the single registry constructor and its sentence casing.
-// Rust Publish/API.rs ApiItem: `kind` is "fn", "struct", "enum", "trait" or
-// "const"; `signature` is the whitespace-normalised canonical text.
-use jet_foundation.[Diagnostic, diagnostic_from_registry]
-
-struct PublicAPIItem {
-    kind: String
-    name: String
-    signature: String
+// Pure SemVer consumer of the Compiler's PublicAPIItem rows: sema produces
+// them (sema_public_api_items) and this module only diffs two snapshots and words
+// the gate's diagnostics. It never parses or reconstructs a public API from
+// source. Diagnostics use the single registry constructor and its sentence
+// casing.
+//
+// What breaks (the spec's publish section lists the same rules): a removed or
+// changed row, except a fn whose solved effect row only narrowed; a `variant`
+// added to an existing enum; a `require` added to an existing trait; a
+// `field` without a default added to an existing struct whose row is not
+// sealed (`{ .. }`). Every other added row is compatible.
+use {
+    jet_foundation.[Diagnostic, PublicAPIItem, diagnostic_from_registry]
+    jet_pkg_model.[PackageCapabilitySnapshot, pkg_api_snapshot_line_name]
 }
+
 struct PublicationBreakingChange {
     description: String
     item_name: String
+}
+
+// A registry snapshot's rows; publication_read_api_snapshot has checked every
+// line names its kind.
+fn publication_api_snapshot_items(snapshot: PackageCapabilitySnapshot) -> [PublicAPIItem] Never! {
+    items := [PublicAPIItem]{}
+    loop line in snapshot.signatures {
+        if pkg_api_snapshot_line_name(line) == .Val(row) -> &items.push(PublicAPIItem{kind: row.kind, name: row.name, signature: line.copy()})
+    }
+    items
+}
+
+// The published entry a new release's API is compared with: the highest
+// version below it, yanked or not, so a backport to 1.4.x is held to 1.4's
+// API and not to a later 2.0.
+fn publication_api_baseline(entries: [PublicationIndexEntry], version: PublicationSemVer) -> PublicationIndexEntry? Never! {
+    best := PublicationIndexEntry?{None}
+    best_version := publication_ver(0, 0, 0)
+    loop entry in entries {
+        published :: publication_parse_semver(entry.version) ?? next
+        if publication_precedence(published, version) != Ordering.Less -> next
+        if best != None && publication_precedence(published, best_version) != Ordering.Greater -> next
+        best = Val(entry)
+        best_version = published
+    }
+    best
 }
 
 // Match the first unused full triple before the first unused kind/name pair.
@@ -45,6 +74,7 @@ fn publication_diff_public_api(old: [PublicAPIItem], new: [PublicAPIItem]) -> [P
         if replacement >= 0 {
             matched[replacement] = true
             item :: new[replacement]
+            if publication_api_effects_narrowed(old_item, item) -> next
             &changes.push(PublicationBreakingChange{
                 description: "public {old_item.kind} `{old_item.name}` changed signature\n   | was: {old_item.signature}\n   | now: {item.signature}",
                 item_name: old_item.name.copy(),
@@ -56,7 +86,69 @@ fn publication_diff_public_api(old: [PublicAPIItem], new: [PublicAPIItem]) -> [P
             })
         }
     }
+    loop index in 0..<new.len() {
+        item :: new[index]
+        if matched[index] || !publication_api_addition_breaks(old, new, item) -> next
+        &changes.push(PublicationBreakingChange{
+            description: "public {item.kind} `{item.name}` was added to an existing type\n   | (absent)\n   | {item.signature}",
+            item_name: item.name.copy(),
+        })
+    }
     changes
+}
+
+// The row of kind `kind` that `member` (`Owner.member`) belongs to.
+fn publication_api_owner(items: [PublicAPIItem], kind: String, member: String) -> PublicAPIItem? Never! {
+    loop item in items {
+        if item.kind == kind && member.starts_with("{item.name}.") && !member.removeprefix("{item.name}.").contains(".") -> return Val(item)
+    }
+    None
+}
+
+// A new variant breaks every exhaustive match, a new required member every
+// implementation, and a new field without a default every literal of a
+// struct dependents can build. Members of a new owner are new API.
+fn publication_api_addition_breaks(old: [PublicAPIItem], new: [PublicAPIItem], item: PublicAPIItem) -> Bool Never! {
+    if item.kind == {
+        "variant" -> publication_api_owner(old, "enum", item.name) != None
+        "require" -> publication_api_owner(old, "trait", item.name) != None
+        "field" -> {
+            if item.signature.ends_with(" = _") || publication_api_owner(old, "struct", item.name) == None -> return false
+            owner :: publication_api_owner(new, "struct", item.name) ?? return true
+            !owner.signature.ends_with("{{ .. }}")
+        }
+        else -> false
+    }
+}
+
+struct PublicationAPIEffects {
+    // The signature with its effect row cut out.
+    rest: String
+    effects: [String]
+}
+
+// `fn f(x: Int) Int -[IO, Net]> = _` as `fn f(x: Int) Int = _` and [IO, Net].
+fn publication_api_effects(signature: String) -> PublicationAPIEffects? Never! {
+    parts :: signature.split(" -[").to_list()
+    if parts.len() < 2 -> return None
+    tail :: parts[parts.len() - 1].split_once("]>") ?? return None
+    head :: (loop index in 0..<(parts.len() - 1) -> parts[index].copy()).join(" -[")
+    effects :: if tail.before == "" -> [String]{} else -> (loop name in tail.before.split(", ") -> name.copy())
+    Val(PublicationAPIEffects{rest: "{head}{tail.after}", effects: effects})
+}
+
+// A fn whose effect row only lost effects still runs in every caller's
+// context; a widened row (or a newly maximal `*` one) does not.
+fn publication_api_effects_narrowed(old: PublicAPIItem, new: PublicAPIItem) -> Bool Never! {
+    if old.kind != "fn" -> return false
+    before :: publication_api_effects(old.signature) ?? return false
+    after :: publication_api_effects(new.signature) ?? return false
+    if before.rest != after.rest -> return false
+    if before.effects.contains("*") -> return true
+    loop name in after.effects {
+        if !before.effects.contains(name) -> return false
+    }
+    true
 }
 
 fn publication_e2601(version: String, bump_kind: PublicationBumpKind, change: PublicationBreakingChange, next_major: Int) -> Diagnostic Never! {
@@ -82,10 +174,12 @@ fn publication_e1218(old_version: String, new_version: String, bump: Publication
         .Same -> "unchanged"
         .Major -> "major"
     }
-    diagnostic_from_registry("E1218", None,
-        "publishing {new_version} after {old_version} is a {label} bump but breaks the public API",
-        "a {label} bump promises callers no breaking changes, but the public API changed since {old_version}:\n  {change.description}",
-        "bump to {next_major}.0.0 (a major release), or restore `{change.item_name}` (a deprecated shim counts).")
+    diagnostic := diagnostic_from_registry("E1218", None,
+        "publishing {new_version} after {old_version} is a {label} bump but breaks the public API item `{change.item_name}`",
+        "a {label} bump promises callers no breaking changes, but the public API changed since {old_version}",
+        "bump to {next_major}.0.0 (a major release), or restore `{change.item_name}` (a deprecated shim counts); `--force` publishes anyway with a warning banner.")
+    diagnostic.detail = Val("  {change.description}")
+    diagnostic
 }
 
 struct PublicationPrePublishGate {

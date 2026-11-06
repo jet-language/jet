@@ -1,7 +1,7 @@
 // Registry source objects use every visible regular file, including registry.json.
 // SourceStore's held tree hash has exactly this path/NUL/u64be/content wire form.
 use {
-    jet_pkg_model.[LockFile, PKG_MAX_LOCK_BYTES, PackageSourceSnapshot, pkg_lock_parse, pkg_lock_write, pkg_source_snapshot_into]
+    jet_pkg_model.[LockFile, PKG_API_SNAPSHOT_VERSION, PKG_MAX_LOCK_BYTES, PackageCapabilitySnapshot, PackageSourceSnapshot, pkg_api_snapshot_line_name, pkg_capability_snapshot_parse, pkg_lock_parse, pkg_lock_write, pkg_source_snapshot_into]
     jetpack_foundation.[FoundationDirectoryAuthority, UNIFIED_LOCK_FILE, foundation_open_directory_authority, foundation_read_file_nofollow_at_root, foundation_write_file_nofollow_at_root]
     files :: core.files
 }
@@ -157,4 +157,36 @@ fn publication_verify_artifact(repo: String, entry: PublicationIndexEntry) -[FS,
     if entry.content_hash != "" && publication_registry_artifact_hash(path) != entry.content_hash -> return Err(publication_read_error(.InvalidInput, path, "registry source artifact for {entry.name} {entry.version} failed its content hash"))
     publication_verify_oci_referrers(repo, entry)
     Ok(path)
+}
+
+// Each published version's public API snapshot (sema_public_api rows) sits
+// at `apis/<name>/<version>.api`, written once beside the source artifact;
+// the next publish's SemVer gate (E1218) diffs against it.
+fn publication_api_snapshot_path(repo: String, name: String, version: String) -> String IOError! {
+    publication_validate_index_component(name, "package name")
+    publication_validate_index_component(version, "package version")
+    Ok(files.join(files.join(files.join(repo, "apis"), name), "{version}.api"))
+}
+fn publication_write_api_snapshot(repo: String, name: String, version: String, text: String) -[FS, Env, Time]> String IOError! {
+    path :: publication_api_snapshot_path(repo, name, version)
+    publication_write_oci_file(path, text.bytes(), "registry API snapshot")
+    Ok(path)
+}
+// None when the version has no snapshot; a present snapshot must be this
+// format version, name this package and version, and hold only signature rows.
+fn publication_read_api_snapshot(repo: String, name: String, version: String) -[FS, Env]> PackageCapabilitySnapshot? IOError! {
+    path :: publication_api_snapshot_path(repo, name, version)
+    bytes :: foundation_read_file_nofollow_at_root(files.dirname(path), files.basename(path), PUBLICATION_MAX_OCI_REFERRER_BYTES) ?? {
+        if err == .NotFound(_) -> return Ok(None)
+        return Err(err)
+    }
+    text :: String.from_bytes(bytes) ?? return Err(publication_read_error(.InvalidInput, path, "registry API snapshot is not UTF-8"))
+    snapshot :: pkg_capability_snapshot_parse(text) ?? return Err(publication_read_error(.InvalidInput, path, "registry API snapshot is malformed"))
+    if snapshot.api_version != PKG_API_SNAPSHOT_VERSION || snapshot.package != name || snapshot.published_version != version {
+        return Err(publication_read_error(.InvalidInput, path, "registry API snapshot is not api_version {PKG_API_SNAPSHOT_VERSION} for {name} {version}"))
+    }
+    loop line in snapshot.signatures {
+        if pkg_api_snapshot_line_name(line) == None -> return Err(publication_read_error(.InvalidInput, path, "registry API snapshot has a row without a kind: {line}"))
+    }
+    Ok(Val(snapshot))
 }

@@ -5663,6 +5663,27 @@ libraries (D-LOCK1). SHA-256 verification always-on (E1204); Ed25519 signing
 opt-in (D-PKGSIGN1). `jet registry vendor`, `jet inspect audit`, `jet build --sbom`
 (D-SUPPLY1; E1217/E1218). Store is content-addressed (D-CASTORE1).
 
+**Publish SemVer gate** *(#6600, E1218)*: `jet registry publish` checks the
+package and asks sema for its public API rows (every public fn with its solved
+effect row, struct with its fields, enum with its variants, trait with its
+required and defaulted members, method, `impl`, distinct, type, const and unit
+family; another module's names carry the module prefix). It uploads them as
+`apis/<name>/<version>.api` beside the artifact and compares them with the
+registry's snapshot for the highest published version below the new one,
+yanked or not; the local `.jet/cache/api/<name>.api` copy feeds the lock
+fingerprint only. A published version without a snapshot is E2607. Breaking:
+a removed or changed row; a widened effect row (a narrowed one is
+compatible); a field without a default added to a struct that has no private
+fields; a variant added to an enum; a required member added to a trait; a
+changed distinct range or unit scale. Compatible: every other addition,
+including a defaulted field and a defaulted trait method. A release may break
+exactly when it lies outside the caret range of the version it is compared
+with (the resolver's `^` rule: `1.4.2` → `2.0.0`, `0.2.3` → `0.3.0`, `0.0.3`
+→ `0.0.4`); an additive change under a patch bump is accepted. A breaking
+change elsewhere is E1218 per change and the registry is untouched; `--force`
+publishes anyway behind a warning banner that lists every change. A package
+that does not compile has no API and never publishes, `--force` included.
+
 **Cryptographic entropy** *(D-CRYPTO-RNG1, D-CRYPTO-WASI-ALLOC2)*: one
 fail-closed operating-system provider supplies `random.bytes`, envelope
 nonces, signing keys, password salts, and file envelopes. WASI retries
