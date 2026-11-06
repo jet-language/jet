@@ -2234,6 +2234,25 @@ function parseCoreSource(source, root = ROOT) {
       throw new Error("encoding format row names missing Core module `" + row.module + "`");
     }
   }
+  // The format_row lines are the formats' one home; the EncodingFormat enum
+  // and its as_str labels in Core must repeat them in order.
+  if (formatRows.length > 0) {
+    const encoding = readSource("Core/Encoding/Encoding.jet");
+    const declared = encoding.match(/^EncodingFormat: enum \{\n([\s\S]*?)\n\}/m);
+    if (!declared) throw new Error("Core/Encoding/Encoding.jet declares no EncodingFormat enum");
+    const cases = declared[1].split("\n").map(line => line.trim()).filter(line => line !== "");
+    const variants = formatRows.map(row => row.variant);
+    if (cases.join(" ") !== variants.join(" ")) {
+      throw new Error("EncodingFormat cases (" + cases.join(" ") + ") differ from the format_row lines in " +
+        CORE_SOURCE_PATH + " (" + variants.join(" ") + "); edit the rows, then make the enum repeat them in order");
+    }
+    for (const row of formatRows) {
+      if (!encoding.includes("." + row.variant + " -> \"" + row.label + "\"")) {
+        throw new Error("EncodingFormat.as_str does not label ." + row.variant + " as \"" + row.label +
+          "\" like its format_row at " + CORE_SOURCE_PATH + " line " + row.sourceLine);
+      }
+    }
+  }
   for (const row of dispatcherRows) {
     if (row.kind === "receiver") continue;
     if (coreCallIdentity(row.expression, row.sourceLine).constructor === "CoreCallRecord::source_owned" &&
@@ -5265,6 +5284,10 @@ function hostileFixtures() {
       "module core.fake exports {call}",
       'dispatcher_row plain core.fake call | CoreCallRecord::source_owned("core.fake", "call", &[])',
     ].join("\n"));
+  }));
+  results.push(rejects("encoding format row without its EncodingFormat case",
+    "differ from the format_row lines", function () {
+    parseCoreSource(read(CORE_SOURCE_PATH).replace("format_row ETF core.encoding.eetf ETF\n", ""));
   }));
   results.push(holds("source-owned constructor preserves its declaration facts", function () {
     const actual = translateCoreCallExpression(

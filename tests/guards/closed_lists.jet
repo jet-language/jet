@@ -5,17 +5,19 @@ use closed_list_files: core.files
 // one is a finding keyed by file and name, never by line, so edits do not churn
 // the ledgers. A file whose header says it is generated from a declared twin
 // holds no findings; any other finding passes when the kernel ledger keeps it
-// closed with a reason class or when the migration baseline still lists it.
+// closed with a reason class, when the mirror ledger names it as an exact copy
+// of its one hand-written home, or when the migration baseline still lists it.
 // Function-local lists are state private to one function and are not findings.
 CLOSED_LIST_ROOTS: [String]{"Compiler", "Core", "Jetpack"}
 CLOSED_LIST_BASELINE_PATH: "tests/guards/closed_lists/baseline.tsv"
 CLOSED_LIST_KERNEL_PATH: "tests/guards/closed_lists/kernel.tsv"
 CLOSED_LIST_DUPLICATES_PATH: "tests/guards/closed_lists/duplicates.tsv"
+CLOSED_LIST_MIRRORS_PATH: "tests/guards/closed_lists/mirrors.tsv"
 
 // The migration baseline and the duplicate baseline only shrink: delete a row
 // when its list moves to a declared home, then lower the ceiling to match.
-CLOSED_LIST_BASELINE: 1017
-CLOSED_LIST_DUPLICATE_BASELINE: 379
+CLOSED_LIST_BASELINE: 1016
+CLOSED_LIST_DUPLICATE_BASELINE: 376
 
 // The reasons a list may stay closed. Each kernel ledger row names one.
 CLOSED_LIST_REASONS: [String]{"grammar", "soundness", "ir", "kernel", "protocol", "fixed-standard"}
@@ -256,9 +258,35 @@ closed_list_duplicate_problem: fn(pair: String) -> String {
     "two lists share 80% or more of their members: {pair}. Keep one hand-written home: {CLOSED_LIST_DECLARE}"
 }
 
-// Every finding the kernel ledger or the baseline does not hold, every stale
-// or malformed ledger row, and a baseline that grew or shrank past its ceiling.
-closed_list_home_problems: fn(findings: [ClosedListFinding], problems: &[String]) {
+// A mirror ledger row names a copy the compiler can't import from its home:
+// copy file, copy name, home file, home name. The copy must hold the home's
+// members in the home's order, so editing the copy alone fails; edit the home
+// and copy it, or generate the copy. Returns the copies' keys.
+closed_list_mirror_problems: fn(findings: [ClosedListFinding], rows: [[String]], problems: &[String]) -> [String] {
+    at := [String:Int]{}
+    loop (index, finding) in findings -> at[closed_list_key(finding.path, finding.name)] = index
+    copies := [String]{}
+    loop row in rows {
+        if row.len() != 4 {
+            problems.push("mirror ledger row needs copy file, copy name, home file and home name: {row.join("\t")}")
+            next
+        }
+        copy_at: at.get(closed_list_key(row[0], row[1])) ?? -1
+        home_at: at.get(closed_list_key(row[2], row[3])) ?? -1
+        if copy_at < 0 || home_at < 0 {
+            problems.push("mirror ledger row {row.join(" ")} names a list that is gone; delete the row")
+            next
+        }
+        copies.push(closed_list_key(row[0], row[1]))
+        if findings[copy_at].members.join(" ") != findings[home_at].members.join(" ") -> problems.push("{row[0]} {row[1]} is a copy of {row[2]} {row[3]} and no longer matches it. The home is the one hand-written list: edit {row[2]}, then copy it here, or generate this copy.")
+    }
+    copies
+}
+
+// Every finding the kernel ledger, the mirror ledger or the baseline does not
+// hold, every stale or malformed ledger row, and a baseline that grew or
+// shrank past its ceiling.
+closed_list_home_problems: fn(findings: [ClosedListFinding], copies: [String], problems: &[String]) {
     kernel := [String:Bool]{}
     kernel_keys := [String]{}
     loop row in closed_list_rows(CLOSED_LIST_KERNEL_PATH) {
@@ -279,6 +307,7 @@ closed_list_home_problems: fn(findings: [ClosedListFinding], problems: &[String]
         }
         key: closed_list_key(row[0], row[1])
         if kernel.get(key) ?? false -> problems.push("{row[0]} {row[1]} is in both the baseline and the kernel ledger; keep the kernel row")
+        if copies.contains(key) -> problems.push("{row[0]} {row[1]} is in both the baseline and the mirror ledger; keep the mirror row")
         baseline[key] = true
         baseline_keys.push(key)
     }
@@ -289,7 +318,7 @@ closed_list_home_problems: fn(findings: [ClosedListFinding], problems: &[String]
     loop finding in findings {
         key: closed_list_key(finding.path, finding.name)
         hand[key] = true
-        if (kernel.get(key) ?? false) || (baseline.get(key) ?? false) -> next
+        if (kernel.get(key) ?? false) || (baseline.get(key) ?? false) || copies.contains(key) -> next
         problems.push(closed_list_new_list_problem(finding))
     }
     loop key in baseline_keys {
@@ -373,10 +402,22 @@ closed_list_duplicate_pairs: fn(findings: [ClosedListFinding]) -> [String] {
     pairs
 }
 
+// Whether one side of `pair` is a mirror copy.
+closed_list_mirror_pair: fn(pair: String, copies: [String]) -> Bool {
+    loop twin in copies {
+        if pair.starts_with("{twin}\t") || pair.ends_with("\t{twin}") -> return true
+    }
+    false
+}
+
 // Every pair of lists in different files that the duplicate baseline does not
 // hold, every stale baseline pair, and a baseline past its ceiling either way.
-closed_list_duplicate_problems: fn(findings: [ClosedListFinding], problems: &[String]) {
-    pairs: closed_list_duplicate_pairs(findings)
+// A mirror copy matches its home, so its pairs are its home's pairs.
+closed_list_duplicate_problems: fn(findings: [ClosedListFinding], copies: [String], problems: &[String]) {
+    pairs := [String]{}
+    loop pair in closed_list_duplicate_pairs(findings) {
+        if !closed_list_mirror_pair(pair, copies) -> pairs.push(pair)
+    }
     known := [String:Bool]{}
     known_keys := [String]{}
     loop row in closed_list_rows(CLOSED_LIST_DUPLICATES_PATH) {
@@ -398,13 +439,34 @@ closed_list_duplicate_problems: fn(findings: [ClosedListFinding], problems: &[St
     }
 }
 
-// One scan of the roots feeds both checks.
+// One scan of the roots feeds every check.
 #Test("every closed list is generated, kept closed by the kernel ledger, or in the shrinking baseline, and no two files duplicate one") {
     findings: closed_list_findings()
     problems := [String]{}
-    closed_list_home_problems(findings, problems)
-    closed_list_duplicate_problems(findings, problems)
+    copies: closed_list_mirror_problems(findings, closed_list_rows(CLOSED_LIST_MIRRORS_PATH), problems)
+    closed_list_home_problems(findings, copies, problems)
+    closed_list_duplicate_problems(findings, copies, problems)
     assert_eq(problems.join("\n"), "")
+}
+
+#Test("editing a mirror copy without its home fails the mirror ledger") {
+    home: ClosedListFinding{path: "h.jet", name: "HOME", members: [String]{"abi", "cli", "ffi"}}
+    twin: ClosedListFinding{path: "c.jet", name: "COPY", members: [String]{"abi", "cli", "ffi"}}
+    edited: ClosedListFinding{path: "c.jet", name: "COPY", members: [String]{"abi", "cli", "ffi", "gpu"}}
+    rows: [[String]]{[String]{"c.jet", "COPY", "h.jet", "HOME"}}
+    clean := [String]{}
+    assert_eq(closed_list_mirror_problems([ClosedListFinding]{home.copy(), twin.copy()}, rows, clean).join(","), "c.jet\tCOPY")
+    assert_eq(clean.len(), 0)
+    drift := [String]{}
+    closed_list_mirror_problems([ClosedListFinding]{home.copy(), edited.copy()}, rows, drift)
+    assert_eq(drift.len(), 1)
+    assert(drift[0].contains("c.jet COPY is a copy of h.jet HOME and no longer matches it"))
+    gone := [String]{}
+    closed_list_mirror_problems([ClosedListFinding]{home.copy()}, rows, gone)
+    assert(gone[0].contains("names a list that is gone"))
+    // A copy's duplicate pairs are its home's, so they leave the duplicate ledger.
+    assert(closed_list_mirror_pair("h.jet\tHOME\tc.jet\tCOPY", [String]{"c.jet\tCOPY"}))
+    assert(!closed_list_mirror_pair("a.jet\tX\th.jet\tHOME", [String]{"c.jet\tCOPY"}))
 }
 
 #Test("the closed list scanner reads enums, string lists and generated headers") {
