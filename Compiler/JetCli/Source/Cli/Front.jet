@@ -152,6 +152,11 @@ enum JetCLIPlan {
     Keygen(registry: String, force: Bool, color: Bool)
     // `jet registry key backup` (SigningKey.jet): copy `registry`'s secret key to `dest`.
     KeyBackup(registry: String, dest: String, color: Bool)
+    // `jet registry publish` (Publish.jet): the pre-publish gate, then the
+    // registry index and artifact push.
+    Publish(force: Bool, no_sign: Bool, quiet: Bool, color: Bool)
+    // `jet registry yank <version>` (Publish.jet): flip the version's `yanked` flag.
+    Yank(version: String, message: String?, color: Bool)
     // `jet lint --a11y|--complexity <file>`: the accessibility lints or the
     // cognitive-complexity view of the entry (`run_lint_a11y`,
     // `run_lint_complexity`); `category` is `a11y` or `complexity`, `raw` is
@@ -2064,6 +2069,8 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
         "review" -> return JetCLIPlan.Review{argv: jet_cli_command_first(argv, command), json: json, color: color}
         "keygen" -> return jet_cli_keygen_plan(jet_argv, color)
         "key" -> return jet_cli_key_plan(jet_argv, color, json)
+        "publish" -> return jet_cli_publish_plan(jet_argv, color, quiet)
+        "yank" -> return jet_cli_yank_plan(jet_argv, color)
         "lint" -> return jet_cli_lint(jet_argv, args, color, quiet, json)
         "fmt" -> return jet_cli_fmt(argv, jet_argv, args, color, quiet)
         "find" -> return jet_cli_find(jet_cli_tail(argv, 1), color, json)
