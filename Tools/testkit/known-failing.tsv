@@ -125,6 +125,29 @@ tests/ui/project_module_invalid	#4275	fixture has no package.jet (E2393), and in
 tests/ui/project_module_missing	#4275	fixture has no package.jet, so the import is E2393 ImportWithoutProject, not E0603
 tests/ui/manifest_unknown_field	#4275	the driver loader reports E0003 "package manifest has no name" before the unknown `payload:` field (E1215)
 tests/ui/manifest_bad_layer	#4275	the driver loader reports manifest shape errors as E0003 InvalidStatement, not the E1215 manifest row
+tests/ui/check_scope_owned	#4275	inside a package an inline `module services { }` declaration is not a project module, so `use services :: project.services` is E0603 "not present in the package source snapshot" (same root as project_module_*)
+tests/ui/import_missing	#4275	the driver's source unit path is relative to the entry root (`run.jet`), so the E0603 fix prints authority path `no_such_module.jet` without the invocation prefix `tests/ui/import_missing/` (Loader.jet jet_driver_missing_file_import)
+tests/ui/inline_package_stale_lock	#4275	`jet check` never compares `.jet/lock` with the manifest (pkg_lock_verify_lock_matches_manifest runs only in locked fetch), so the absent `./dep` root is E0603, not the stale-lock E1202
+tests/ui/manifest_lock_stale	#4275	`jet check` never compares `.jet/lock` with package.jet (pkg_lock_verify_lock_matches_manifest runs only in locked fetch), so the absent `../helpers_not_in_lock` root is E0603, not the stale-lock E1202
+tests/ui/cffi/foreign_js_import_uses_generated_binding_cache_for_symbols	#6366	`use plot :: js.plotly` with a .jet/bindings/js cache reports E1002 `js` is reserved, and `use js.[d3]` draws E0610; the snapshot has no errors
+tests/ui/cffi/foreign_js_inline_member_list_uses_the_same_binding_cache	#6366	`use inner_plot :: js.plotly` with a .jet/bindings/js cache reports E1002 `js` is reserved, and `use js.[d3]` draws E0610; the snapshot has no errors
+tests/ui/cffi/foreign_js_inline_pub_member_list_reexports_the_namespace	#6366	`pub use plots :: js.plotly` with a .jet/bindings/js cache reports E1002 `js` is reserved; the snapshot has no errors
+tests/ui/arena_bounded_open_multiplicity	#6425	check not ported: E0921 for the unbounded `reserve()` loop (9:18); `mem.Arena.new` has no checked body, so the memory-denial walk stops first at it (4:24) as a foreign or dynamically selected body
+tests/ui/arena_bounded_transitive_overflow	#6425	check not ported: E0921 arena path total ("proven path total is 8 bytes"); `mem.Arena.new` has no checked body, so the open-dispatch E0921 is reported instead
+tests/ui/corelib_parts_runtime/solve_constructor_is_static_only	#6425	check not ported: E0311 for an instance call of a static constructor (reports E0104: `solver.new(2)` resolves to the static `Solver.new`)
+tests/ui/crypto_release_entropy_seam	#6425	check not ported: E2702 caller-controlled salt (reports E0112: `password_hash_with_salt` now takes `Secret` for argument 1, and the fixture passes a String)
+tests/ui/crypto_secret_local_operations	#6425	check not ported: E0905 Encode, E0102 `clone`/`hash` on `Secret`, L0101 and L0103 (reports nothing)
+tests/ui/crypto_secret_nested_provenance	#6425	check not ported: E1004 and E0119 for `crypto.Secret` in a value and a type position (reports E0629 `crypto` is a module, not a value)
+tests/ui/embedded_generic_method_scope	#6425	the fixture's `T: Clone` bounds name a Rust-era trait that Jet does not declare (E0904 "No trait named `Clone` is in scope", four times); the snapshot is from the Rust checker
+tests/ui/generic_constructor_ambiguous	#6425	check not ported: E0904 for `Same.new(1, "two")` with conflicting receiver arguments (reports E0112 at argument 2)
+tests/ui/generic_constructor_bound	#6425	check not ported: E0905 `[Int]` isn't `Named` for a bounded generic constructor argument (reports E0904 `Box.new` needs its generic receiver type)
+tests/ui/generic_lambda_conflict	#6425	check not ported: E0904 inference conflict between argument 2 and the lambda return, with E0112 at the lambda (reports only E0112 at argument 2)
+tests/ui/reflect_name_ledger	#6425	check not ported: E0302 names an ambiguous imported owner by its module (`alpha.Point`; reports `Point`); the snapshot lines also predate the `use { "alpha" "beta" }` block (+2)
+tests/ui/taint/external_boundaries_seed_origin_facts_3	#6425	check not ported: E0433 after E1004 (the unresolved `process.run` call's value is not reported as thrown away)
+tests/ui/value_carrying_return_resultless	#6425	check not ported: E0405 for `?? return Err(…)` in a resultless fn (the fallback return is checked as a plain value return: `Err(…)` is accepted and `?? return 5` is E0108 "needs Unit"; the Int tail then draws E0433)
+tests/ui/serde_u64_direct_codable	#6419	unbuilt: `cbor.decode<U64>(bytes)` with an explicit type argument is E1004 "`core.encoding.cbor` exposes `decode`, but not in this position", as cases comptime_diff/cbor_generic_whole_decode
+tests/ui/quantity_measured_scale	#6004	the measured-scale E0127 spans the whole literal `1dalton` (4:12, width 7), not its unit suffix, and prints the pinned constants in exponent form (`1.66053906892e-27`), not the expanded decimal
+tests/ui/repl_effect_denied_e1803	#6418	`jet repl --deny=FS` reports E1803 for the denied turn but exits 0, without the span or policy fields; the snapshot's banner and `--allow-fs` fix are from the Rust REPL
 tests/cases/archive/archive_names_and_path_rejection_are_source_owned_on_all_tiers.case	#5454	verify-intent: ref build failed: E0109 Arithmetic needs matching number types
 tests/cases/authority/authority_boundary_consumers_take_the_named_value.case	#5454	assert not satisfied: original expect not satisfied
 tests/cases/authority/authority_comptime_uses_the_same_value.case	#5454	assert not satisfied: original expect not satisfied
