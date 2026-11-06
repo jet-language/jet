@@ -175,6 +175,7 @@ fn fs_held_parent(key: I64, name: I64, operation: I64, shown: I64, out: I64, err
                 return false
             }
             next := I64{0}
+            rt_test_reads_path(I64{83}, current, part)
             #Unsafe("the owned walk descriptor and terminated part live through openat") {
                 next = os_syscall_i64(I64{257}, current, part, I64{720896}, I64{0}, I64{0}, I64{0})
             }
@@ -233,6 +234,7 @@ fn fs_open_at(key: I64, name: I64, access: I64, if_exists: I64, mode: I64, links
             if (links == I64{1}) -> flags = flags.bit_or(I64{131072})
             bits :: if (mode >= I64{0}) -> mode.bit_and(I64{4095}) else -> I64{438}
             opened := I64{0}
+            rt_test_reads_open(directory, part, flags)
             #Unsafe("the walk directory and terminated final part live through openat") {
                 opened = os_syscall_i64(I64{257}, directory, part, flags, bits, I64{0}, I64{0})
             }
@@ -427,6 +429,7 @@ fn fs_statx_facts(path: I64, follow: Bool, facts: I64, birth: I64, errno: I64) -
     buffer :: jet_rt_alloc(I64{256}, I64{8})
     name :: fd_c_path(path)
     result := I64{0}
+    rt_test_reads_path(I64{83}, I64{-100}, name)
     #Unsafe("the terminated borrowed path and the 256-byte statx buffer are live for the syscall") {
         // statx(AT_FDCWD, name, follow ? 0 : AT_SYMLINK_NOFOLLOW, STATX_BASIC_STATS | STATX_BTIME, buffer)
         result = os_syscall_i64(I64{332}, I64{-100}, name, if follow -> I64{0} else -> I64{256}, I64{4095}, buffer, I64{0})
@@ -532,6 +535,7 @@ fn fs_stat_facts_at(key: I64, name: I64, follow: Bool, scratch: I64, error: I64)
         part :: fs_held_cpart(name, start, end, HOST_IO_OP_READ, shown, error)
         if (part != I64{0}) {
             opened := I64{0}
+            rt_test_reads_path(I64{83}, directory, part)
             #Unsafe("the walk directory and terminated final part live through O_PATH|O_NOFOLLOW|O_CLOEXEC openat") {
                 opened = os_syscall_i64(I64{257}, directory, part, I64{2752512}, I64{0}, I64{0}, I64{0})
             }

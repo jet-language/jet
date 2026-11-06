@@ -197,6 +197,7 @@ fn sys_some(some: I64, value: I64) -> I64 {
 // logical overlay never writes it). musl getenv finds no name holding '=' (or
 // empty); std refuses an interior NUL as absent.
 #Export(c) fn jet_sys_host_env_raw(name: I64, data_out: I64, length_out: I64) -> I64 {
+    rt_test_reads_text(I64{69}, name)
     host_arguments_require()
     length :: rt_text_len(name)
     if (length == I64{0}) -> return I64{0}

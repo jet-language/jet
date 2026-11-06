@@ -31,6 +31,7 @@ fn files_lstat_mode(path: I64) -> I64 {
 fn files_lstat_c(name: I64) -> I64 {
     scratch :: jet_rt_alloc(I64{128}, I64{8})
     result := I64{0}
+    rt_test_reads_path(I64{83}, I64{-100}, name)
     #Unsafe("the terminated raw path and the 128-byte stat fact row are live for the syscall") {
         result = os_stat_facts_i64(I64{6}, name, scratch)
     }

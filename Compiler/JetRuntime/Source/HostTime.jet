@@ -138,6 +138,7 @@ fn time_optional_i64(present: Bool, output: I64) -> I64 {
 }
 // std::env::var_os(...).to_string_lossy(): startup bytes, NOT the Core overlay.
 #Export(c) fn jet_time_raw_zone_env(name: I64, output: I64) -> I64 {
+    rt_test_reads_text(I64{69}, name)
     value :: rt_env_get_lossy(name)
     if (value == I64{0}) -> return I64{0}
     sync_store(output, value)

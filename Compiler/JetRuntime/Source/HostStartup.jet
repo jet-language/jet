@@ -86,6 +86,7 @@ fn host_arguments_register(argc: I64, argv: I64, envp: I64, main: Bool) {
         // The envp array is word aligned: bit 0 tells capture it is a main's.
         _ := coll_call1(capture, if main -> envp.bit_or(I64{1}) else -> envp)
     }
+    rt_test_reads_arm(envp)
     #Unsafe("host argument registration is single-threaded and precedes user code") {
         host_argc = count
     }

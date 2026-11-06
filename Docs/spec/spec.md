@@ -3820,7 +3820,12 @@ walked recursively for `*.jet` files. A package-level `fn test` override owns
 the command unless `--show-default` requests the stock harness.
 The default child-output policy is `--capture=failed`; choose `all` or `none`
 explicitly. `--fresh` bypasses only the persisted test-result cache; the build
-cache remains reusable. `--docs` selects checked documentation examples.
+cache remains reusable. The test-result cache keeps a passing run's outcomes
+with the reads its tests made: each file or directory opened, each path
+stat'ed, each environment variable read. A rerun of the same test executable
+and selection reuses the outcomes while every recorded read is unchanged (a
+file's content, a directory's listing, a variable's value) and runs the tests
+again when one changed. `--docs` selects checked documentation examples.
 `--watch`, `--where=<expr>`, `--filter=<substring>`, `--shuffle[=<seed>]`,
 `--serial`, `--coverage`, `--update-snapshots` (or `-u`), `--release`, and
 `--profile=<name>` select the corresponding test-run behavior. Browser claims

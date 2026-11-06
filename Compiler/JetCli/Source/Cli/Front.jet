@@ -270,6 +270,9 @@ struct JetCLITestOptions {
     status: String
     // A test profile's `time_limit`: each test's wall-time bound.
     time_limit_ms: Int?{None}
+    // `--fresh`: run the tests even when the test-result store (TestReuse.jet)
+    // holds their outcomes.
+    fresh: Bool{false}
 }
 
 // Commands that validate their own flags.
@@ -1367,6 +1370,7 @@ fn jet_cli_test_file(jet_argv: [String], file: String, color: Bool, verbose: Boo
         return jet_cli_report_done(options.status, "E2105", "can't find `{file}`", jet_cli_why("E2105"), "correct the named problem, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
     }
     if fresh && !quiet -> options.status = "{options.status}jet test: fresh result run (test-result cache bypassed; build cache reusable)\n"
+    options.fresh = fresh
     source :: cli_files.read(file) ?? {
         return jet_cli_report_done(options.status, "E2105", "couldn't read `{file}`: {err}", jet_cli_why("E2105"), "correct the named problem, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
     }

@@ -370,6 +370,7 @@ fn fd_operation(state: I64, syscall: I64, a2: I64, a3: I64, errno: I64) {
 #Export(c) fn jet_fs_stat_raw(path: I64, follow: Bool, stat: I64, errno: I64) {
     name :: fd_c_path(path)
     result := I64{0}
+    rt_test_reads_path(I64{83}, I64{-100}, name)
     #Unsafe("the terminated borrowed path and 128-byte stat fact output are live for the syscall") {
         result = os_stat_facts_i64(if follow -> I64{4} else -> I64{6}, name, stat)
     }
@@ -436,6 +437,7 @@ fn fd_zero(result: I64, zero: I64) {
     fd_lock(directory)
     result := I64{-9}
     if (fd_word(directory, I64{16}) == I64{0}) {
+        rt_test_reads_open(fd_word(directory, I64{8}), name, bits)
         #Unsafe("the held directory and terminated source-approved single name stay live through openat") {
             result = os_syscall_i64(I64{257}, fd_word(directory, I64{8}), name, bits.bit_or(I64{524288}), native_mode.bit_and(I64{4294967295}), I64{0}, I64{0})
         }
@@ -458,6 +460,7 @@ fn fd_zero(result: I64, zero: I64) {
     fd_lock(directory)
     opened := I64{-9}
     if (fd_word(directory, I64{16}) == I64{0}) {
+        rt_test_reads_path(I64{83}, fd_word(directory, I64{8}), name)
         #Unsafe("the held directory and terminated final name live through O_PATH|O_NOFOLLOW|O_CLOEXEC openat; no read access or link traversal") {
             opened = os_syscall_i64(I64{257}, fd_word(directory, I64{8}), name, I64{2752512}, I64{0}, I64{0}, I64{0})
         }
@@ -616,6 +619,7 @@ fn fd_created_finish(result: I64, output: I64, errno: I64) {
     fd_lock(directory)
     result := I64{-9}
     if (fd_word(directory, I64{16}) == I64{0}) {
+        rt_test_reads_path(I64{83}, fd_word(directory, I64{8}), name)
         #Unsafe("the held directory, terminated plain name and writable byte range are borrowed only through readlinkat") {
             result = os_syscall_i64(I64{267}, fd_word(directory, I64{8}), name, bytes, requested, I64{0}, I64{0})
         }

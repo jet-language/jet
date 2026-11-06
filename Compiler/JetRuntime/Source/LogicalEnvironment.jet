@@ -90,6 +90,7 @@ fn logical_environment_startup() {
 // The Rust original is Option<String>, not Result: absent and a present
 // non-Unicode value both return None. Raw OS lookup preserves bytes.
 #Export(c) fn jet_rt_logical_env_get(key: I64) -> I64 {
+    rt_test_reads_text(I64{69}, key)
     jet_rt_logical_env_seed()
     shared_acquire(logical_env_root, false)
     entry :: logical_environment_find(rt_text_data(key), rt_text_len(key))
@@ -116,6 +117,7 @@ fn logical_environment_startup() {
 // Presence: 0 absent / 1 present. Both outputs are always initialized. Present
 // empty is (1,0,0); nonempty bytes transfer one allocation, length/align=1.
 #Export(c) fn jet_rt_logical_env_get_os(key: I64, data_out: I64, len_out: I64) -> I64 {
+    rt_test_reads_text(I64{69}, key)
     jet_rt_logical_env_seed()
     rt_text_store(data_out, I64{0})
     rt_text_store(len_out, I64{0})

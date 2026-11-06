@@ -1727,7 +1727,17 @@ fn jet_cli_test_result(file: String, source: String, doctests: [JetCLIDoctestFil
     if options.time_limit_ms == .Val(limit_ms) -> time_limit = Val(Duration.milliseconds(limit_ms) ?? return jet_cli_ice("the test time limit of {limit_ms} ms is out of range"))
     // The children's outcome records stay in memory: no test writes the disk.
     records_path :: "{jet_cli_native_test_records_dir(build_dir)}/{stem}.records"
-    run :: jet_cli_native_test_run(spec, native_tests, check_names, jet_cli_native_test_unrun_check_report, options.serial, records_path, time_limit) ?? {
+    // A plain run goes through the test-result store (TestReuse.jet): a
+    // snapshot update, a measured or a code-suite run, or one `jet prove`
+    // captures always runs.
+    reuse := JetCLITestReuse?{None}
+    if !options.update_snapshots && measure == None && !code_suite && cli_sys.get(JET_CLI_REPLAY_CAPTURE_ENV) == None {
+        names :: (loop test in native_tests -> test.key).join(",")
+        settings :: "{options.filter ?? "-"}\n{options.shuffle_seed ?? "-"}\n{options.serial}\n{options.trace_tiers}\n{options.capture}\n{options.project_root ?? "-"}\n{options.docs}\n{options.time_limit_ms ?? -1}\n{names}\n{check_names.join(",")}"
+        reuse = jet_cli_test_reuse_at(root, binary, settings, records_path)
+    }
+    how := JetCLITestReuseHow.Plain
+    run :: jet_cli_test_reuse_run(reuse, options.fresh, &how, spec, native_tests, check_names, jet_cli_native_test_unrun_check_report, options.serial, records_path, time_limit) ?? {
         cli_files.remove(binary).drop("the native run already failed")
         return jet_cli_ice(err.message)
     }
@@ -1768,6 +1778,7 @@ fn jet_cli_test_result(file: String, source: String, doctests: [JetCLIDoctestFil
     }
     cli_files.remove(binary).drop("the harness is one-shot; a leftover binary is harmless")
     passed :: ran.receipt.success
+    if how == .Logged && reuse == .Val(store) -> jet_cli_test_reuse_keep(store, run, passed)
     exit_code :: if passed -> JET_DRIVER_EXIT_OK else -> JET_DRIVER_EXIT_USER_ERROR
     show :: options.capture == "all" || (!passed && options.capture == "failed")
     // The canonical report always prints; the children's own streams follow the capture policy.
@@ -1775,7 +1786,9 @@ fn jet_cli_test_result(file: String, source: String, doctests: [JetCLIDoctestFil
     stderr :: if show -> ran.errors else -> ran.receipt.errors
     if measure == None {
         outcome :: jet_cli_test_outcome(file, source, options.build, wires, claims, run.contracts, passed, floor) ?? return jet_cli_ice(err.message)
-        notice :: jet_cli_test_persist(outcome.report)
+        persisted :: jet_cli_test_persist(outcome.report)
+        plural :: if wires.len() == 1 -> "" else -> "s"
+        notice :: if how == .Reused && !options.json -> "jet test: reused {wires.len()} stored result{plural} (every read they recorded is unchanged; --fresh runs them)\n{persisted}" else -> persisted
         below := ""
         if outcome.below == .Val(diagnostic) -> below = diagnostic_render_all("", "", [Diagnostic]{diagnostic}, color)
         floor_exit :: if outcome.below != None && exit_code == JET_DRIVER_EXIT_OK -> JET_DRIVER_EXIT_USER_ERROR else -> exit_code

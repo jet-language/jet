@@ -1,0 +1,11 @@
+use core.files
+
+fn run() {
+    print(files.read("data.txt") ?? "")
+}
+
+#Test("reads its data file") {
+    files.append_all("runs.log", "ran\n") ?? panic("can't append runs.log")
+    text :: files.read("data.txt") ?? panic("can't read data.txt")
+    assert(text.len() > 0)
+}

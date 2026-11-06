@@ -811,6 +811,7 @@ fn spawn_stream_io(child: I64, stream: I64, bytes: I64, length: I64, number: I64
 
 #Export(c) fn jet_process_path_stat_raw(path: I64, facts: I64, error: I64) {
     result := I64{0}
+    rt_test_reads_path(I64{83}, I64{-100}, path)
     #Unsafe("source lends a NUL-terminated raw path including non-Unicode bytes and a writable 128-byte stat fact row") {
         result = os_stat_facts_i64(I64{4}, path, facts)
     }

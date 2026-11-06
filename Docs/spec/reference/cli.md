@@ -785,10 +785,19 @@ and `opt_in:` fields steer the pool; `time_limit:` bounds each step; the
 `shard:`. `jet test Compiler --profile ui` (also `golden`, `cases`, `full`)
 runs the repository's corpora; a bare `jet test Compiler` runs `quick`. A bare
 `--shuffle` and the other test flags are refused
-with E2104 until they are ported. The test-result cache, the evidence
-report, and the package claims
-floor are not ported yet: every run compiles fresh, and the outcome is the
-harness exit (the outcome for a package without a claims floor).
+with E2104 until they are ported. The evidence report and the package claims
+floor are not ported yet: the outcome is the harness exit (the outcome for a
+package without a claims floor). The test-result cache lives in
+`.jet/test-results/`, keyed by the harness executable's bytes, the run's
+selection and every `JET_*` variable. A passing run stores its outcomes with
+the reads the harness runtime recorded (`JET_TEST_READS_PATH` names the log:
+opened files and directories, stat'ed paths, environment variables; reads
+under `/proc`, `/sys` and `/dev` key nothing). The next run with that key
+reuses the outcomes while every read's fingerprint (a file's content hash, a
+directory's listing, a stat's kind, size, mode and modification time, a
+variable's value) is unchanged, and runs the tests again otherwise. Snapshot
+updates, `--measure`, code-suite rows and `jet prove` captures always run;
+`--fresh` skips the lookup.
 
 `jet new <name> [--template cli|ui|web|overrides] [--annotated]` writes a
 project: `package.jet`
