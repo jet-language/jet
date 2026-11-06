@@ -2310,10 +2310,6 @@ sema_registration_value_type_rules: fn(module_row: SemaRegistrationModule, item:
         }
         .TypeAlias(definition) -> {
             if definition.type_params.len() == 0 && !(definition.target == .Named(_)) {
-                if sema_casing_alias_number_zero(definition) == .Val(zero) {
-                    diagnostics.push(sema_casing_alias_number_diagnostic(definition, zero))
-                    return false
-                }
                 diagnostics.push(sema_error("E0324", definition.name_span, "a type alias needs type parameters — write `Name<T>: …`", "a transparent type alias is only for shortening generic spellings", "for a distinct type name over a primitive, use `Name: struct(BaseType)` instead"))
                 return false
             }
@@ -3758,7 +3754,22 @@ sema_registration_core_private: fn(module_row: SemaRegistrationModule, name: Str
         leaf = parts.after.copy()
     }
     if core_module_export(owner) == None -> return false
+    if sema_registration_core_toolchain_read(owner, leaf, requester_module) -> return false
     !core_module_has_member(owner, leaf) && !core_module_has_type(owner, leaf) && core_module_export("{owner}.{leaf}") == None
+}
+
+// The one unexported Core item code outside Core may name: the compiler's CLI
+// (the jet_cli package) reads the Core sources jet was built with through
+// `core.devtools.toolchain_core_source`. To any other package it is private,
+// like every unexported Core item. A module identity is
+// `module:<length>:<package identity>:<path>`, and a package identity is
+// `package:<length>:<name>:<version>`.
+sema_registration_core_toolchain_read: fn(owner: String, leaf: String, requester_module: String) -> Bool Never! {
+    if owner != "core.devtools" || leaf != "toolchain_core_source" -> return false
+    kind: requester_module.split_once(":") ?? return false
+    if kind.before != "module" -> return false
+    package: kind.after.split_once(":") ?? return false
+    package.after.starts_with("package:7:jet_cli:")
 }
 
 sema_registration_core_private_error: fn(name: String, module_name: String, span: Span) -> Diagnostic {
