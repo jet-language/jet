@@ -83,7 +83,7 @@ fn cli_transition_result(verb: String, result: TransitionResult, check_only: Boo
 fn cli_transition_error(theme: Theme, error: EnvironmentError) -[IO, Time.Wait]> Int Never! {
     message :: error.message()
     if message.contains("pkg.jet") || message.contains("retired") {
-        theme.error_coded("E1226", message, "the package transition accepts only the current package manifest and its recorded migration path", "rename the retired manifest to `package.jet`, or run `jet init --check` in the project root")
+        theme.error_coded("E1226", message, "the package transition accepts only the current package manifest and its recorded migration path", "rename the retired manifest to `package.jet` in the project root")
     } else if message.contains("already exists") {
         theme.error_coded("E1252", message, "a transition never overwrites an existing package manifest or generated role file", "review the existing file, or run the transition in an empty package root")
     } else if message.contains("journal") || message.contains("fingerprint") {

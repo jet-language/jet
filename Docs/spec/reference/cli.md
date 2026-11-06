@@ -547,13 +547,21 @@ changes. A later write failure does not undo earlier successful writes.
 
 ## Shared option spellings
 
-The options below are intentionally named exactly as in `jet help`:
+The options below are intentionally named exactly as in `jet help`. Each
+registered flag's `jet help` row opens with the commands that take it
+(`With fmt/doc/split/fold:`); an unscoped row goes with every command. That
+row is the one rule: a command that does not read its own flags refuses a
+registered flag scoped to other commands with E2102 and exit 2 before it
+does anything, naming the commands that take it (`jet init --check` writes
+nothing and points at `jet fmt --check`), and `jet help <command>` lists
+exactly the flags the command takes.
 
 - `--target` selects a triple, `board.<name>`, or named database target;
   `--profile` selects `release`, `debug`, `ci`, `hardened`, or a named bundle.
 - `--allow=RIGHTS` and `--deny=RIGHTS` set effect roots or leaves for
   `run`, `build`, `jobs`, `repl`, and `db`; `-A` (`--allow-all`) allows every
-  right on `run` and `build`; `--offline` reuses only cached
+  right on `run` and `build`; `jet inspect gates` records these and the other
+  invocation choices as gate rows; `--offline` reuses only cached
   signed toolchain and package data.
 - `--locked` requires locked dependency and provenance facts; `--fixtures`
   selects an explicit fixture bundle.

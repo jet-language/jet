@@ -216,25 +216,86 @@ fn jet_cli_flag_scope(help: String) -> [String]? Never! {
     Val([String]{parts[0], rest.slice(parts[0].len() + 1..<rest.len()).trim()})
 }
 
+// The commands a flag's registry row scopes it to: the first command word of
+// each `/`-separated form in every `With <forms>: ` clause (`fmt --check`
+// names fmt, `inspect digest` inspect); None for an unscoped (global) flag.
+fn jet_cli_flag_commands(help: String) -> [String]? Never! {
+    commands := [String]{}
+    scoped := false
+    loop clause in help.split("; ").to_list() {
+        rest := ""
+        if {
+            clause.starts_with("with ") || clause.starts_with("With ") -> rest = clause.slice(5..<clause.len())
+            else -> next
+        }
+        parts :: rest.split(":").to_list()
+        if parts.len() < 2 -> next
+        scoped = true
+        loop form in parts[0].split("/").to_list() {
+            loop word in form.split(" ").to_list() {
+                if jet_cli_command_index(word) == None && jet_cli_word_group(word) == None -> next
+                if !commands.contains(word) -> &commands.push(word)
+                break
+            }
+        }
+    }
+    if !scoped -> return None
+    Val(commands)
+}
+
+// The group a word dispatches under when it is not a top-level command: a
+// group action's name (`digest`) or the word its handler normalizes the
+// action to (`self update` dispatches as `self-update`).
+fn jet_cli_word_group(word: String) -> String? Never! {
+    if jet_cli_command_index(word) != None -> return None
+    loop command in JET_CLI_COMMANDS {
+        loop action in command.actions {
+            if action.name == word -> return Val(command.name.copy())
+            handler :: jet_cli_handler_index(action.handler) ?? next
+            if JET_CLI_HANDLERS[handler].dispatch_word == word -> return Val(command.name.copy())
+        }
+    }
+    None
+}
+
+// Does the registry row of `spec` let `command` take it? Unscoped flags go
+// with every command. A group's action (`jet inspect digest`, dispatched as
+// `digest`) takes its group's flags, and a group that keeps its own word
+// (`jet inspect expand`, dispatched as `inspect`) takes its actions' flags.
+fn jet_cli_flag_takes(spec: JetCLIFlagSpec, command: String) -> Bool Never! {
+    commands :: jet_cli_flag_commands(spec.help) ?? return true
+    if commands.contains(command) -> return true
+    if jet_cli_word_group(command) == .Val(group) {
+        if commands.contains(group) -> return true
+    }
+    loop word in commands {
+        if jet_cli_word_group(word) == .Val(group) {
+            if group == command -> return true
+        }
+    }
+    false
+}
+
 // Flags attached to one command: the scoped flags that name it plus the global
 // output flags, each with its help text after the scope prefix.
 fn jet_cli_flags_for_command(name: String) -> [JetCLIFlagSpec] Never! {
     flags := [JetCLIFlagSpec]{}
     loop spec in JET_CLI_FLAGS {
-        scope :: jet_cli_flag_scope(spec.help)
-        scoped := false
-        help := spec.help
-        if scope == .Val(parts) {
-            help = parts[1]
-            loop group in parts[0].split("/").to_list() {
-                loop candidate in group.split(",").to_list() {
-                    if candidate.trim() == name -> scoped = true
-                }
-            }
-        }
-        if scoped || JET_CLI_GLOBAL_FLAGS.contains(spec.long) -> &flags.push(JetCLIFlagSpec{long: spec.long, help: help})
+        commands :: jet_cli_flag_commands(spec.help) ?? [String]{}
+        if !commands.contains(name) && !JET_CLI_GLOBAL_FLAGS.contains(spec.long) -> next
+        help :: if jet_cli_flag_scope(spec.help) == .Val(parts) -> parts[1] else -> spec.help.copy()
+        &flags.push(JetCLIFlagSpec{long: spec.long, help: help})
     }
     flags
+}
+
+// The registry row of a known flag (`--flag` or `--flag=value`).
+fn jet_cli_flag_spec(flag: String) -> JetCLIFlagSpec? Never! {
+    head :: flag.split("=").to_list()[0]
+    loop spec in JET_CLI_FLAGS {
+        if spec.long == head -> return Val(spec.copy())
+    }
+    None
 }
 
 fn jet_cli_lower_byte(byte: Int) -> Int Never! {
