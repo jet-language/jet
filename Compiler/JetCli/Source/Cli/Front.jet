@@ -266,6 +266,9 @@ JetCLIPlan: enum {
     // the ProofReport and its artifact. `lenses` only shape the human report;
     // `capture` and `replay` add the replay preflight (ProveReplay.jet).
     Prove(target: JetCLIProveTarget, lenses: [String], capture: JetCLIProveCapture?, replay: String?, color: Bool, json: Bool)
+    // `jet budget check` (Budget.jet): the checked budget specs of the
+    // project entry `entry` under `root`, and their canonical report.
+    Budget(options: JetCLIBudgetOptions, root: String, entry: String, color: Bool)
 }
 
 // One native `jet fmt` invocation (`"fmt"` -> `run_fmt`).
@@ -2160,6 +2163,7 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
         }
         "test" -> return jet_cli_test(jet_argv, color, quiet, verbose, threads)
         "prove" -> return jet_cli_prove(jet_cli_tail(jet_cli_command_first(argv, command), 1), color, json)
+        "budget" -> return jet_cli_budget_plan(jet_cli_command_first(argv, command), color)
         "new" -> return jet_cli_new(jet_argv, args, color, quiet, json)
         "doc" -> return jet_cli_doc(jet_argv, args, color, quiet, json, jet_argv.contains("--check"))
         "emit" -> return jet_cli_emit(jet_argv, args, color, quiet, json)

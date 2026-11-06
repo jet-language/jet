@@ -229,7 +229,7 @@ jet_cli_gc_fail: fn(error: JetCLIGCError, color: Bool, json: Bool) -> JetCLIPlan
     detail := error.detail
     loop detail.ends_with(".") -> detail = detail.slice(0, detail.len() - 1)
     diagnostic: diagnostic_from_registry("E2110", None, "GC trace cannot be reported", "{detail}.", "{fix}.")
-    if json -> return jet_cli_done(jet_cli_status_render_with_reports("gc.report", false, jet_cli_reports_json(None, "", "", [Diagnostic]{diagnostic}), [JetCLIStatusField]{}), "", JET_DRIVER_EXIT_USER_ERROR)
+    if json -> return jet_cli_done(jet_cli_render_all_json(None, "", "", [Diagnostic]{diagnostic}), "", JET_DRIVER_EXIT_USER_ERROR)
     jet_cli_done("", diagnostic_render_all("", "", [Diagnostic]{diagnostic}, color), JET_DRIVER_EXIT_USER_ERROR)
 }
 jet_cli_gc_report_at: fn(root: String, args: [String], color: Bool, json: Bool) -[FS, Env, Time, Time.Wait]> JetCLIPlan Never! {

@@ -38,6 +38,8 @@ use {
         SemaSourceLocation,
         SemaSourceOrigin,
         SemaSourceSegment,
+        BudgetSpec,
+        sema_budget_located_specs_graph,
         sema_check_comptime_function,
         SemaComptimeFailureClosure,
         sema_comptime_failure_closure_add,
@@ -3097,12 +3099,18 @@ JetDriverCheckedProjectionResult: struct {
     // The entry module's jobs (jet_driver_job_rows): the list a run's
     // unknown-job report (E1294) names.
     job_rows: [JetDriverJobRow]{[JetDriverJobRow]{}}
+    // `jet budget`'s checked budget specs (sema_budget_located_specs_graph),
+    // in declaration order.
+    budget_specs: [BudgetSpec]{[BudgetSpec]{}}
 }
 JetDriverCheckedProjectionCapture: struct {
     source_modules: [Int]{[Int]{}}
     entry_module: Int?{None}
     schema_ingress: JetDriverSchemaIngress?{None}
     job_rows: [JetDriverJobRow]{[JetDriverJobRow]{}}
+    // `jet_driver_budget_projection`: collect the graph's budget specs.
+    budget: Bool{false}
+    budget_specs: [BudgetSpec]{[BudgetSpec]{}}
     // `jet_driver_lowering_inputs`: stop right before IR lowering and keep its inputs.
     stop_before_lowering: Bool{false}
     lowering_inputs: JetDriverLoweringInputs?{None}
@@ -3309,6 +3317,17 @@ jet_driver_checked_projection: fn(request: &&JetDriverCompileRequest) -> JetDriv
         capture.job_rows = [JetDriverJobRow]{}
     }
     JetDriverCheckedProjectionResult{compile: compile.move(), source_modules: capture.source_modules, entry_module: capture.entry_module, schema_ingress: capture.schema_ingress, job_rows: capture.job_rows}
+}
+
+// `jet budget`'s preflight: the `Check` compile of `request` and, when it
+// completes, its checked budget specs. Invalid specs are the compile's
+// diagnostics, as a check reports them.
+jet_driver_budget_projection: fn(request: &&JetDriverCompileRequest) -> JetDriverCheckedProjectionResult {
+    capture := JetDriverCheckedProjectionCapture{budget: true}
+    kg := jet_driver_keep_going_log(None)
+    compile := jet_driver_compile_stages(request, kg, false, capture)
+    if !compile.complete -> capture.budget_specs = [BudgetSpec]{}
+    JetDriverCheckedProjectionResult{compile: compile.move(), source_modules: [Int]{}, entry_module: None, schema_ingress: None, budget_specs: capture.budget_specs}
 }
 
 jet_driver_compile: fn(request: &&JetDriverCompileRequest) -> JetDriverCompileResult {
@@ -4007,6 +4026,15 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         if check_entry == .Val(budget_entry) {
             budget: jet_driver_effect_budget_diagnostics(load, checked_functions, budget_entry, jet_driver_effect_budget_name_spans(load, registration_graph))
             if jet_driver_has_errors(budget) -> return jet_driver_effect_budget_failure(load, budget, trace)
+        }
+        if capture.budget {
+            if sema_budget_located_specs_graph(registration_graph) == {
+                .Ok(located) -> capture.budget_specs = loop row in located -> row.spec
+                .Err(error) -> {
+                    loop diagnostic in error.diagnostics -> load.diagnostics.push(diagnostic.copy())
+                    return jet_driver_compile_result(load, load.diagnostics, Val(JetDriverStage.Check), false, trace)
+                }
+            }
         }
         result := jet_driver_compile_result(load, load.diagnostics, None, true, trace)
         result.rust_foreign = if jet_driver_rust_foreign_present(registration_graph) -> jet_driver_rust_foreign_facts(registration_graph) else -> jet_driver_rust_foreign_empty()
