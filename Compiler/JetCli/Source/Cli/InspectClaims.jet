@@ -416,7 +416,7 @@ jet_cli_capability_relation: fn(root: String) -[FS]> JetCLIStatusValue JetCLIRea
         return Ok(jet_cli_claim_unavailable(path, "capability relation source `{path}` is absent"))
     }
     raw: cli_files.read(path) ?? return Err(jet_cli_read_error("can't read canonical capability relation source `{path}`: {jet_cli_io_error_text(err)}"))
-    tree: report_status_value_parse(raw) ?? return Err(jet_cli_read_error("can't parse canonical manifest `{path}`: {err.message}"))
+    tree: jet_cli_status_tree_parse(raw) ?? return Err(jet_cli_read_error("can't parse canonical manifest `{path}`: {err.message}"))
     manifest: jet_cli_status_from_tree(tree)
     if jet_cli_claim_validate_manifest(manifest) == .Val(error) {
         return Err(jet_cli_read_error("canonical manifest `{path}` is invalid: {error}"))

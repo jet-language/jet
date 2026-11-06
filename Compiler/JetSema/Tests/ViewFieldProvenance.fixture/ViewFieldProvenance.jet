@@ -32,7 +32,7 @@ view_field_case: fn(parameter: Bool, access: AccessConvention, expected: String)
     view_field_require(sema_scope_declare_local(scopes, selected, false, AccessConvention.Read, None, false), "range binding is declared")
     slice: Expr.Slice{base: Expr.Ident{name: "values", span: use_span, id: AST_NODE_GENERATED}, start: Expr.Int{value: 0, span: use_span, width: None, raw: None, id: AST_NODE_GENERATED}, end: Expr.Int{value: 1, span: use_span, width: None, raw: None, id: AST_NODE_GENERATED}, range: None, span: use_span, id: AST_NODE_GENERATED}
     sema_ownership_declare_binding(state, selected, false)
-    view_field_require(sema_ownership_record_binding_view(state, view_field_binding("selected", slice, view_type, use_span), scopes), "production range binding records its owner")
+    view_field_require(sema_stmt_record_binding_views(view_field_binding("selected", slice, view_type, use_span), view_type, scopes, state, context, diagnostics), "production range binding records its owner")
     window: view_field_window(Expr.Ident{name: "selected", span: use_span, id: AST_NODE_GENERATED}, use_span)
     valid: sema_stmt_record_return_views(window, Type.Named{name: "Window"}, scopes, state, context, diagnostics)
     if expected != "" {
@@ -74,9 +74,9 @@ view_pattern_case: fn(name: String, source: String, expected: String) {
             if function.name != "select" -> next
             provenance: function.return_view_provenance ?? panic("{name}: missing parameter provenance")
             loop entry in provenance.entries {
-                loop source in entry.value.sources {
-                    view_field_require(source.source == ViewSource.Parameter{index: 0}, "{name}: payload still aliases the parameter")
-                    view_field_require(source.projections.contains(ViewSourceProjection.Range), "{name}: payload slice keeps its range projection")
+                loop origin in entry.value.sources {
+                    view_field_require(origin.source == ViewSource.Parameter{index: 0}, "{name}: payload still aliases the parameter")
+                    view_field_require(origin.projections.contains(ViewSourceProjection.Range), "{name}: payload slice keeps its range projection")
                     found = true
                 }
             }
@@ -95,11 +95,11 @@ view_pattern_sources: fn() {
     view_pattern_case("consumed-payload-table", "{declaration}select: fn(value: &&Payload) -> View<Int> Err! {{ {table} }}", "E2305")
     view_pattern_case("local-payload-if", "{declaration}select: fn() -> View<Int> Err! {{ value: Payload.Array([Int]{{1}})\n{ordinary} }}", "E2305")
     view_pattern_case("local-payload-table", "{declaration}select: fn() -> View<Int> Err! {{ value: Payload.Array([Int]{{1}})\n{table} }}", "E2305")
-    sum: "total := 0\nloop item in ^items -> total += item\ntotal"
+    sum: "total := 0\nloop item in items.move() -> total += item\ntotal"
     owned_table: "if value == {{ .Object(items) -> {{ {sum} }} .Array(items) -> {{ {sum} }} }}"
     view_pattern_case("consumed-table-payload-retains-ownership", "{declaration}sum: fn(value: &&Payload) -> Int {{ {owned_table} }}", "")
     view_pattern_case("local-table-payload-retains-ownership", "{declaration}sum: fn() -> Int {{ value := Payload.Object([Int]{{1, 2}})\n{owned_table} }}", "")
-    view_pattern_case("taken-table-payload-retains-ownership", "{declaration}sum: fn() -> Int {{ value := Payload.Object([Int]{{1, 2}})\nif ^value == {{ .Object(items) -> {{ {sum} }} .Array(items) -> {{ {sum} }} }} }}", "")
+    view_pattern_case("taken-table-payload-retains-ownership", "{declaration}sum: fn() -> Int {{ value := Payload.Object([Int]{{1, 2}})\nif value.move() == {{ .Object(items) -> {{ {sum} }} .Array(items) -> {{ {sum} }} }} }}", "")
 }
 
 view_pattern_reborrows: fn() {
@@ -109,7 +109,7 @@ view_pattern_reborrows: fn() {
     view_pattern_case("nested-write-payload-table", "{declaration}edit: fn(result: &Value, item: &&Value, i: Int, j: Int) {{ if &result == {{ .Struct(_, fields) -> {{ {nested} }} else -> {{}} }} }}", "")
     view_pattern_case("nested-write-parent-suspended", "{declaration}edit: fn(result: &Value, item: &&Value, i: Int, j: Int) {{ if &result == .Struct(_, fields) {{ if &fields[i].value == .Struct(_, metadata_fields) {{ count: fields.len()\nif &metadata_fields[j].value == .List(items) {{ items.push(item) }} }} }} }}", "E0220")
     view_pattern_case("nested-write-unrelated-view-conflicts", "{declaration}edit: fn(result: &Value, item: &&Value, i: Int, j: Int) {{ if &result == .Struct(_, fields) {{ unrelated: fields[0..<fields.len()]\n{nested}\ncount: unrelated.len() }} }}", "E0212")
-    view_pattern_case("inner-owned-match-subject-type", "Outer: enum {{ Case(Int) }}\nInner: enum {{ Text(String) Empty }}\ninspect: fn(value: Outer) -> Int {{ if value == {{ .Case(number) -> {{ inner: Inner.Text(\"x\")\nif ^inner == {{ .Text(text) -> text.count_bytes() .Empty -> 0 }} }} }} }}", "")
+    view_pattern_case("inner-owned-match-subject-type", "Outer: enum {{ Case(Int) }}\nInner: enum {{ Text(String) Empty }}\ninspect: fn(value: Outer) -> Int {{ if value == {{ .Case(number) -> {{ inner: Inner.Text(\"x\")\nif inner.move() == {{ .Text(text) -> text.count_bytes() .Empty -> 0 }} }} }} }}", "")
 }
 
 view_pattern_reinitialization: fn() {
@@ -164,8 +164,8 @@ view_disjoint_admission_sources: fn() {
 
 run: fn() {
     view_field_case(true, AccessConvention.Read, "")
-    view_field_case(false, AccessConvention.Read, "this view points into `values`, which this function owns")
-    view_field_case(true, AccessConvention.Move, "this view points into `values`, which this function consumes")
+    view_field_case(false, AccessConvention.Read, "This view points into `values`, which this function owns")
+    view_field_case(true, AccessConvention.Move, "This view points into `values`, which this function consumes")
     view_pattern_sources()
     view_pattern_reborrows()
     view_pattern_reinitialization()

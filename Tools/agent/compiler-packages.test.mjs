@@ -109,6 +109,21 @@ test('a fixture unit blanks package imports and repeated Core imports in place a
     assert.equal(compilerFixtureUnit(root, ['Compiler/JetFoundation']).includes('cli: fn()'), false);
 });
 
+test('a fixture unit refuses every top-level name two packages declare', t => {
+    const root = tree({
+        'Compiler/JetCli/package.jet': manifest('jet_cli', { jet_foundation: '../JetFoundation' }),
+        'Compiler/JetCli/Source/Cli.jet': 'rows: fn() {}\npub Shape: struct {}\ncli: fn() {}\n',
+        'Compiler/JetFoundation/package.jet': manifest('jet_foundation'),
+        'Compiler/JetFoundation/Source/Found.jet': 'rows: fn() {}\nShape: struct {}\n',
+    });
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    assert.throws(() => compilerFixtureUnit(root), /2 top-level name\(s\)[^]*rows: Compiler\/JetFoundation\/Source\/Found\.jet, Compiler\/JetCli\/Source\/Cli\.jet[^]*Shape: /);
+});
+
+test('the repository compiler closure is one fixture namespace', () => {
+    assert.doesNotThrow(() => compilerFixtureUnit(repo));
+});
+
 test('unblockUses keeps every offset and leaves pub blocks', () => {
     const source = 'use {\n    jet_lexer.[\n        lex,\n    ]\n    // note\n    fs: core.files\n}\npub use {\n    core.sys\n}\nm: module {\n    use {\n        core.term\n    }\n}\n';
     const flat = unblockUses(source);

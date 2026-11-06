@@ -128,9 +128,9 @@ build_canonical_action_key: fn(plan: HermeticBuildPlan, action: HermeticBuildAct
         .None -> w.flag(false)
     }
     w.text("toolchain")
-    build_key_toolchain(w, plan.toolchains[action.toolchain.id])
+    hermetic_build_key_toolchain(w, plan.toolchains[action.toolchain.id])
     w.text("probes")
-    loop probe in action.probes -> build_key_probe(w, plan, plan.probes[probe.id])
+    loop probe in action.probes -> hermetic_build_key_probe(w, plan, plan.probes[probe.id])
     w.text("signing")
     if action.signing_identity == {
         .Val(identity) -> {
@@ -231,7 +231,7 @@ build_effect_set: fn(effects: [BuildEffect]) -> [BuildEffect] Never! {
     out
 }
 
-build_key_toolchain: fn(w: &BuildKeyWriter, toolchain: HermeticBuildToolchain) Never! {
+hermetic_build_key_toolchain: fn(w: &BuildKeyWriter, toolchain: HermeticBuildToolchain) Never! {
     w.text(toolchain.name)
     w.text(if toolchain.role == ToolchainRole.Host -> "host" else -> "target")
     w.text(toolchain.host_triple)
@@ -280,7 +280,7 @@ build_key_toolchain: fn(w: &BuildKeyWriter, toolchain: HermeticBuildToolchain) N
     build_key_provenance(w, toolchain.provenance)
 }
 
-build_key_probe: fn(w: &BuildKeyWriter, plan: HermeticBuildPlan, probe: HermeticBuildProbe) Never! {
+hermetic_build_key_probe: fn(w: &BuildKeyWriter, plan: HermeticBuildPlan, probe: HermeticBuildProbe) Never! {
     w.text(probe.name)
     if probe.kind == {
         .FindProgram(program) -> {
@@ -311,7 +311,7 @@ build_key_probe: fn(w: &BuildKeyWriter, plan: HermeticBuildPlan, probe: Hermetic
     }
     w.text(if probe.reproducibility == ReproducibilityClass.Reproducible -> "reproducible" else -> "ambient")
     build_key_provenance(w, probe.provenance)
-    build_key_toolchain(w, plan.toolchains[probe.toolchain.id])
+    hermetic_build_key_toolchain(w, plan.toolchains[probe.toolchain.id])
 }
 
 build_key_provenance: fn(w: &BuildKeyWriter, provenance: BuildProvenance) Never! {

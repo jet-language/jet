@@ -38,7 +38,7 @@ jet_cli_build_report: fn(query: JetDriverBuildQueryResult, subject: String?, jso
     }
     if json {
         payload: jet_driver_build_plan_json(plan)
-        build: jet_cli_status_from_tree(report_status_value_parse(payload) ?? panic("checked build projection lost its JSON")) ?? panic("checked build projection lost its status value")
+        build: jet_cli_status_from_tree(jet_cli_status_tree_parse(payload) ?? panic("checked build projection lost its JSON")) ?? panic("checked build projection lost its status value")
         return "{jet_cli_status_render("inspect.build", true, [jet_cli_status_field("build", build)])}\n"
     }
     graph: query.graph ?? panic("checked plan lost its graph")

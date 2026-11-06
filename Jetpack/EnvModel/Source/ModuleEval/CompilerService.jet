@@ -61,9 +61,9 @@ envmodel_compiler_service: fn(op: String, request: String) -[FS, Env, Exec, Time
 }
 
 // Evaluate `expr` (spelled in `source`) with `funcs` callable and `globals`
-// readable, as `jet` does in-process: a plain literal is already its value;
-// every other expression is the config-value program the sibling compiler
-// evaluates, and its refusal is placed on `expr`.
+// readable: a plain literal is already its value; every other expression is
+// the config-value program the sibling compiler evaluates (JetCli
+// `jet_config_evaluate_program`), and its refusal is placed on `expr`.
 comptime_evaluate: fn(expr: Expr, source: String, funcs: [String: Func], base_dir: String, globals: [String: CtValue]) -[FS, Env, Exec, Time.Wait]> CtValue ComptimeEvalError! {
     if jet_config_plain_literal(expr) == .Val(value) -> return Ok(value)
     program: jet_config_program(expr, source, funcs, globals) ?? return Err(err)

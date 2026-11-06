@@ -1022,7 +1022,7 @@ jet_cli_review_read_receipt: fn(path: String?) -> JetCLIReviewReceipt JetCLIRead
     file: path ?? return Ok(JetCLIReviewReceipt{recorded: false, claims: [JetCLIReviewClaim]{}, claim_key: None, proof: None})
     raw: cli_files.read(file) ?? return Err(jet_cli_read_error("could not read receipt `{file}`: {jet_cli_io_error_text(err)}"))
     proof: JetCLIReviewProof{path: file.copy(), digest: sha256_hex(raw)}
-    root: report_status_value_parse(raw) ?? return Err(jet_cli_read_error("could not parse receipt `{file}`: {err.message}"))
+    root: jet_cli_status_tree_parse(raw) ?? return Err(jet_cli_read_error("could not parse receipt `{file}`: {err.message}"))
     report: jet_cli_review_first_field(root, [String]{"proofReport", "proof_report"}) ?? root.copy()
     claim_key := String?{None}
     holders: [Dyn]{root.copy(), report.copy()}

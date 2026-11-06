@@ -395,7 +395,7 @@ jet_cli_palette: fn() -> String Never! {
     "{out}\nRun `{JET_CLI_BINARY} help` for every command's usage and flags.\n"
 }
 
-jet_cli_flag_rows: fn(flags: [JetCLIFlagSpec]) -> String Never! {
+jet_cli_flag_help_rows: fn(flags: [JetCLIFlagSpec]) -> String Never! {
     out := ""
     loop spec in flags -> out = "{out}  {jet_cli_pad(spec.long, 28)} {spec.help}\n"
     out
@@ -413,7 +413,7 @@ jet_cli_command_help: fn(name: String) -> String Never! {
     if jet_cli_structural_help(name) == .Val(bespoke) -> return bespoke
     if jet_cli_group_index(name) == .Val(index) {
         out := "{JET_CLI_BINARY} {name} — {JET_CLI_COMMANDS[index].summary}\n\n{jet_cli_group_usage(name)}"
-        if name == "db" -> out = "{out}\nFlags:\n{jet_cli_flag_rows(jet_cli_flags_for_command(name))}"
+        if name == "db" -> out = "{out}\nFlags:\n{jet_cli_flag_help_rows(jet_cli_flags_for_command(name))}"
         return out
     }
     if jet_cli_moved_command(name) == .Val(moved) {
@@ -425,5 +425,5 @@ jet_cli_command_help: fn(name: String) -> String Never! {
     }
     index: jet_cli_command_index(name) ?? return "{JET_CLI_BINARY} {name}\n\nRun `{JET_CLI_BINARY} help` to see every command.\n"
     job_help: if name == "jobs" -> JET_CLI_JOB_INVOCATION_HELP else -> ""
-    "{JET_CLI_BINARY} {name} — {JET_CLI_COMMANDS[index].summary}\n\n  {jet_cli_command_usage(name)}\n{jet_cli_flag_rows(jet_cli_flags_for_command(name))}{job_help}"
+    "{JET_CLI_BINARY} {name} — {JET_CLI_COMMANDS[index].summary}\n\n  {jet_cli_command_usage(name)}\n{jet_cli_flag_help_rows(jet_cli_flags_for_command(name))}{job_help}"
 }

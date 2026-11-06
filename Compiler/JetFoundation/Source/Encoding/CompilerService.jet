@@ -12,11 +12,10 @@
 //   comptime-evaluate  {"program", "base_dir"} -> {"value"} | {"error"}
 //   check-entry        {"file", "source"}      -> {"diagnostics"}
 // A response `error` / `diagnostics` row is a wire diagnostic; the requester
-// places a config failure on its own expression. `comptime_evaluate` has one
-// definition per binary over this file: in `jet` (JetCli ConfigEval.jet) it
-// evaluates in-process, in `jetpack` (EnvModel CompilerService.jet) it asks
-// the sibling `jet` through this service; both place the outcome with
-// `jet_config_eval_placed`.
+// places a config failure on its own expression. EnvModel's
+// `comptime_evaluate` (CompilerService.jet) asks `jet` through this service,
+// and JetCli's `jet_config_evaluate_program` answers it; the requester places
+// the outcome with `jet_config_eval_placed`.
 use {
     service_json: core.encoding.json
     service_math: core.math

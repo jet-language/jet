@@ -165,7 +165,7 @@ JET_CLI_RECORD_INDEX_FIELDS: [String]{"capture", "consumed", "engine", "id", "ki
 
 jet_cli_record_index_parse_line: fn(line: String) -> JetCLIRecordIndexEntry JetCLIReadError! {
     if line.bytes().len() > 1048576 -> return Err(jet_cli_read_error("record index line exceeds the 1 MiB limit"))
-    tree: report_status_value_parse(line) ?? return Err(jet_cli_read_error("record index line is not valid JSON"))
+    tree: jet_cli_status_tree_parse(line) ?? return Err(jet_cli_read_error("record index line is not valid JSON"))
     value: jet_cli_status_from_tree(tree)
     fields: if value == {
         .Object(fields) -> fields

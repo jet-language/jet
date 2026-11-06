@@ -10,7 +10,7 @@
 // (they hold a package.jet, pkg.jet, workspace.jet or .jet/lock).
 import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, readdirSync, readFileSync } from 'node:fs';
-import { join, relative, resolve, sep } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 
 const ENTRY_PACKAGE = 'Compiler/JetCli';
 // The workspace files `jet build Compiler` reads beside the packages.
@@ -176,12 +176,42 @@ export function isCompilerInput(repo, path, roots = compilerInputRoots(repo)) {
 export function compilerFixtureUnit(repo, entries = [ENTRY_PACKAGE]) {
     const packages = new Map(entries.flatMap(entry => [...compilerPackages(repo, entry)]));
     const names = [...compilerPackages(repo).keys(), ...packages.keys()];
-    const files = compilerSources(repo, packages).flatMap(entry => entry.files.filter(file => file !== `${entry.directory}/run.jet`));
-    return fixtureUnit(repo, files, [...new Set(names)]);
+    return fixtureUnit(repo, fixtureFiles(repo, packages), [...new Set(names)]);
+}
+
+function fixtureFiles(repo, packages) {
+    return compilerSources(repo, packages).flatMap(entry => entry.files.filter(file => file !== `${entry.directory}/run.jet`));
+}
+
+// The comptime inputs (`embed_file`/`embed_bytes`) of compilerFixtureUnit's
+// files: each literal, relative to its own file, mapped to the absolute file it
+// names there. A unit joined into one file reads them beside that file, so the
+// fixture project copies them there; a literal two files resolve to different
+// files is refused, every one at once. A literal naming no file (a comment's
+// example) is left out.
+export function compilerFixtureInputs(repo, entries = [ENTRY_PACKAGE]) {
+    const root = resolve(repo);
+    const packages = new Map(entries.flatMap(entry => [...compilerPackages(repo, entry)]));
+    const inputs = new Map();
+    const clashes = [];
+    for (const path of fixtureFiles(repo, packages)) {
+        const text = readFileSync(join(root, path), 'utf8');
+        for (const [, literal] of text.matchAll(/\bembed_(?:file|bytes)\("([^"\\{}]+)"\)/g)) {
+            const target = resolve(root, dirname(path), literal);
+            if (!existsSync(target)) continue;
+            const known = inputs.get(literal);
+            if (known !== undefined && known !== target) clashes.push(`${literal}: ${repoPath(root, known)}, ${repoPath(root, target)}`);
+            inputs.set(literal, target);
+        }
+    }
+    if (clashes.length > 0) throw new Error(`fixture unit: ${clashes.length} comptime input name(s) resolve to more than one file:\n${clashes.join('\n')}`);
+    return inputs;
 }
 
 // `files` (repo-relative) joined into one namespace, blanking `use` lines of the
-// named packages and repeated Core imports.
+// named packages and repeated Core imports. Packages keep separate namespaces
+// in a real build, so a top-level name two files declare cannot share this one:
+// every such name is refused at once, with its files.
 export function fixtureUnit(repo, files, packageNames = [...compilerPackages(repo).keys()]) {
     const root = resolve(repo);
     const packageImport = new RegExp(`^use (?:${packageNames.join('|')})\\.(?:\\[[^\\]]*\\]|[A-Za-z_][A-Za-z0-9_]*[ \\t]*$)`, 'gm');
@@ -207,7 +237,8 @@ export function fixtureUnit(repo, files, packageNames = [...compilerPackages(rep
         const rewritten = parts.map((part, index) => (kept[index] ? part : blank(part)) + (index === parts.length - 1 ? '' : kept[index] && index < last ? ',' : ' ')).join('');
         return importText.slice(0, importText.indexOf('[') + 1) + rewritten + ']';
     };
-    return files.map(path => {
+    const owners = new Map();
+    const unit = files.map(path => {
         const text = unblockUses(readFileSync(join(root, path), 'utf8'))
             .replace(packageImport, blank)
             .replace(/^use (core(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\.\[([^\]]*)\]/gm, memberImports)
@@ -217,6 +248,10 @@ export function fixtureUnit(repo, files, packageNames = [...compilerPackages(rep
                 seenImports.add(key);
                 return line;
             });
+        for (const [, name] of text.matchAll(/^(?:pub )?([A-Za-z_][A-Za-z0-9_]*): /gm)) owners.set(name, [...(owners.get(name) ?? []), path]);
         return text.endsWith('\n') ? text : `${text}\n`;
     }).join('');
+    const clashes = [...owners].filter(([, paths]) => paths.length > 1).map(([name, paths]) => `${name}: ${paths.join(', ')}`);
+    if (clashes.length > 0) throw new Error(`fixture unit: ${clashes.length} top-level name(s) declared in more than one file:\n${clashes.join('\n')}`);
+    return unit;
 }

@@ -1,9 +1,9 @@
 // Forced-build-fact test, using the existing Jet fact resolver.
 run: fn() Never! {
     span: Span{start: 7, end: 12}
-    contribution: FactContribution.new("Build.Settings.tls", FactValue.Bool(false), SourceScope.Package, ContributionLayer.System, "system.jet").at(span).force_with_reason("fleet certification")
-    fact: pkg_fact_resolve(FactKey.new("Build.Settings.tls"), [contribution]) ?? panic("forced writer must resolve")
-    resolved: fact ?? panic("forced writer must produce a value")
+    contribution: FactContribution.new("Build.Settings.tls", FactValue.Bool{value: false}, SourceScope.Package, ContributionLayer.System, "system.jet").at(span).force_with_reason("fleet certification")
+    // `??` takes the resolver's error and its None alike.
+    resolved: pkg_fact_resolve(FactKey.new("Build.Settings.tls"), [contribution]) ?? panic("forced writer must resolve to a value")
     ledger := GateLedger{}
     jet_cli_gate_append_build_facts(ledger, [resolved])
     if ledger.rows.len() != 1 -> panic("forced writer must produce one gate")

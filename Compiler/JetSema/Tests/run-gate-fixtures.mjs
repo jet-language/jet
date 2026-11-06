@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 // Production sources with each executable fixture. The tuple registry fixture
 // needs the Foundation package; gate fixtures need the whole compiler (every
-// package the CLI depends on, without the CLI's own entry).
+// package the CLI depends on, without the CLI's own entry), with the files its
+// comptime inputs name copied beside the joined unit.
 // Usage: node Compiler/JetSema/Tests/run-gate-fixtures.mjs OUTDIR
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { copyFileSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { compilerFixtureUnit, compilerPackages, unblockUses } from "../../../Tools/agent/compiler-packages.mjs";
+import { compilerFixtureInputs, compilerFixtureUnit, compilerPackages, unblockUses } from "../../../Tools/agent/compiler-packages.mjs";
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const out = process.argv[2] && resolve(process.argv[2]);
 if (!out) throw new Error("usage: run-gate-fixtures.mjs OUTDIR");
@@ -14,7 +15,9 @@ if (!out) throw new Error("usage: run-gate-fixtures.mjs OUTDIR");
 const packageImport = new RegExp(`^use (?:${[...compilerPackages(repo).keys()].join("|")})\\.(?:\\[[^\\]]*\\]|[A-Za-z_][A-Za-z0-9_]*[ \\t]*$)`, "gm");
 const blank = text => text.replace(/[^\n]/g, " ");
 const production = compilerFixtureUnit(repo);
+const productionInputs = compilerFixtureInputs(repo);
 const foundation = compilerFixtureUnit(repo, ["Compiler/JetFoundation"]);
+const foundationInputs = compilerFixtureInputs(repo, ["Compiler/JetFoundation"]);
 const fixtures = [
     ["unsafe-obligations", "Compiler/JetSema/Tests/UnsafeObligations.fixture/UnsafeObligations.jet"],
     ["gate-ledger", "Compiler/JetSema/Tests/GateLedger.fixture/GateLedger.jet"],
@@ -31,6 +34,10 @@ for (const [name, path] of fixtures) {
     const entry = name === "named-tuple-identity" ? "\nrun: fn() { named_tuple_identity_fixture() }\n" : "";
     const implementation = name === "named-tuple-identity" ? foundation : production;
     writeFileSync(join(project, "src/compiler.jet"), implementation + "\n" + fixture + entry);
+    for (const [literal, file] of name === "named-tuple-identity" ? foundationInputs : productionInputs) {
+        mkdirSync(dirname(join(project, "src", literal)), { recursive: true });
+        copyFileSync(file, join(project, "src", literal));
+    }
     writeFileSync(join(project, "package.jet"), `name: "${name}"\nversion: "0.1.0"\nauthority: { allow: [IO, Mem.Alloc, Mem.Rc, Time.Wait] }\n`);
     console.log(join(project, "src/compiler.jet"));
 }

@@ -146,7 +146,7 @@ jet_cli_memory_read: fn(path: String) -[FS]> [JetCLIMemoryRow] JetCLIReadError! 
         if text.trim() == "" -> next
         if rows.len() >= 65536 -> return Err(jet_cli_read_error("memory ledger has more than 65536 rows"))
         line += 1
-        tree: report_status_value_parse(text) ?? return Err(jet_cli_read_error("memory ledger row {line} is malformed"))
+        tree: jet_cli_status_tree_parse(text) ?? return Err(jet_cli_read_error("memory ledger row {line} is malformed"))
         rows.push(jet_cli_memory_parse_row(jet_cli_status_from_tree(tree), line))
     }
     // Stable merge sort by the same tuple as Rust; avoid quadratic insertion
