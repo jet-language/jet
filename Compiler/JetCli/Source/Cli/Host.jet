@@ -216,6 +216,13 @@ jet_cli_compile_check: fn(file: String, source: String, color: Bool, quiet: Bool
             }
             output = if json -> jet_cli_check_json_outcome(file, source, diagnostics, watch.elapsed_millis()) else -> jet_driver_check_outcome(file, source, diagnostics, color, quiet)
             if verbose && !project && !json && output.exit_code == JET_DRIVER_EXIT_OK -> output.stdout = jet_cli_inspect_check_text(file, watch.elapsed_millis(), diagnostics.len())
+            // `emit_check_outcome`: a human check also prints each `#Todo` goal card (no candidates; `jet fill` checks those).
+            if result.typed_goals && !json && !quiet && jet_cli_errors(diagnostics).len() == 0 && result.internal_problem == None {
+                if jet_cli_check_goal_cards(file, color) == {
+                    .Ok(cards) -> output.stdout = "{output.stdout}{cards}"
+                    .Err(error) -> output = jet_cli_ice(error.message)
+                }
+            }
             if jet_cli_errors(diagnostics).len() == 0 {
                 if result.internal_problem == .Val(problem) -> output = jet_cli_ice(problem)
             }

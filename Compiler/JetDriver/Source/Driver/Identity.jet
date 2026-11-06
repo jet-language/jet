@@ -590,6 +590,8 @@ JetDriverLoadResult: struct {
     // The entry package's member files that declare a top-level `run: fn`
     // (Loader.jet `jet_driver_run_member_paths`).
     run_member_paths: [String]{[String]{}}
+    // `JetDriverCompileMode.Check`: a checked body holds a `#Todo` goal.
+    typed_goals: Bool{false}
 }
 
 // The entry package's written authority policy, for the host's application
@@ -627,6 +629,9 @@ JetDriverCompileResult: struct {
     authority_policy: JetDriverAuthorityPolicy?{None}
     // `JetDriverCompileMode.Doc`: the checked user modules, in load order.
     doc_modules: [JetDriverDocModule]{[JetDriverDocModule]{}}
+    // `JetDriverCompileMode.Check`: a checked body holds a `#Todo` goal, so
+    // `jet check` prints the goal cards from a Doc projection.
+    typed_goals: Bool{false}
     // `JetDriverCompileMode.Doc` that fails after registration: the structure
     // facts the registration graph already proved (Sema
     // `sema_name_structure_facts`), so `jet inspect structure` prints them

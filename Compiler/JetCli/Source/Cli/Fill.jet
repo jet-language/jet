@@ -76,13 +76,21 @@ jet_cli_fill_function_name: fn(function: FnBody) -> String Never! {
     function.name
 }
 
+// The goal card's required effects: the function's solved row without the
+// deny-only rows (`Panic`, `Mem`), which no positive ceiling has to list
+// (spec.md "`Panic` and `Mem` are deny-only rows"); the hole's own `#Todo`
+// panic is one of them.
 jet_cli_fill_effects: fn(function: FnBody, alias: String, facts: [JetCLISemEffect]) -> String Never! {
     local: jet_cli_fill_function_name(function).replace(".", "::")
     keys: [String]{"{alias}::{local}", local, function.name}
     loop key in keys {
         loop fact in facts {
             if fact.function == key {
-                return if fact.inferred.len() == 0 -> "none" else -> "[{fact.inferred.join(", ")}]"
+                required := [String]{}
+                loop row in fact.inferred {
+                    if row != "Panic" && row != "Mem" && !row.starts_with("Mem.") -> required.push(row)
+                }
+                return if required.len() == 0 -> "none" else -> "[{required.join(", ")}]"
             }
         }
     }
@@ -99,7 +107,7 @@ jet_cli_fill_candidate_checks: fn(file: String, source: String, goal: JetCLIFill
     if compiled == {
         .Refused(_) -> return false
         .Compiled(result, _) -> {
-            return result.diagnostics.len() == 0 && result.internal_problem == .None
+            return jet_cli_errors(result.diagnostics).len() == 0 && result.internal_problem == .None
         }
     }
 }
@@ -187,6 +195,20 @@ jet_cli_fill_report: fn(result: JetDriverCompileResult, file: String?, line: Int
         return Val(jet_cli_status_render("fill", true, [JetCLIStatusField]{jet_cli_status_field("fill", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("goals", jet_cli_status_array(cards))}))}))
     }
     Val(text)
+}
+
+// `jet check`'s goal cards. A check retains no checked programs, so a check
+// that found `#Todo` goals (JetDriverCompileResult.typed_goals) projects the
+// file once more as Doc and prints each card without candidates.
+jet_cli_check_goal_cards: fn(file: String, color: Bool) -> String JetCLIReadError! {
+    compiled: jet_cli_compile_file(file, color, None, JetDriverCompileMode.Doc) ?? return Err(jet_cli_read_error("the goal-card projection of `{file}` failed before returning diagnostics"))
+    if compiled == {
+        .Refused(_) -> return Err(jet_cli_read_error("the goal-card projection of `{file}` was refused after its check passed"))
+        .Compiled(result, _) -> {
+            report: jet_cli_fill_report(result, Val(file), None, false, false)
+            return report ?? ""
+        }
+    }
 }
 
 jet_cli_compile_fill: fn(target: String, json: Bool, color: Bool) -> JetDriverVerbOutput {
