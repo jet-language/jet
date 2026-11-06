@@ -388,7 +388,7 @@ cli_realize_ref_outcome: fn(verification: &StoreVerification, theme: Theme, root
 
 // The verified recorded reuse, else one Store realization of the ref.
 cli_reuse_or_realize: fn(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, spec: RefSpec, table: SourceTable, &&recorded: VerifiedRealization?) -> VerifiedRealization RealizeError! {
-    if recorded == .Val(reused) -> return Ok(reused)
+    if recorded == .Val(reused) -> return Ok(reused.move())
     store_realize_verified(verification, roots, ctx, RealizeRequest.Package{spec: spec, table: table})
 }
 

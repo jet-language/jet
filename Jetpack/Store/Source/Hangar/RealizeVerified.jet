@@ -333,7 +333,7 @@ store_realize_verified: fn(verification: &StoreVerification, roots: HangarRoots,
             .Package(spec, _) -> {
                 replayed: store_replay_locked_nix_package(verification, roots, ctx, spec)
                 if replayed == {
-                    .Val(hit) -> return Ok(hit)
+                    .Val(hit) -> return Ok(hit.move())
                     .None -> {}
                 }
             }
