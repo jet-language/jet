@@ -1,0 +1,14 @@
+# D-CHANNEL-AUTO2=A: when the refreshed lock can't be written, the refresh stops with E1224 and env.jet stays byte for byte as written.
+# `--trust`: the typed env.dev needs a trust decision and these steps are non-interactive.
+fixture: automatic_channel_refresh_lock_write_failure_leaves_env_jet_unchanged.fixture
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project/.jet
+chmod: project/.jet 0555
+copy: project/env.jet env.before
+step: jetpack env --prep --no-color --yes --trust --fixtures {work}/fixtures
+cwd: project
+exit: 2
+stderr: ~ "E1224" # the lock write failure is reported
+file: project/env.jet == env.before
+chmod: project/.jet 0755

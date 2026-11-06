@@ -4770,10 +4770,13 @@ exact = "acme/tool@github#v1.2.0"
 ```
 
 `jetpack update [<source>]` is the operation that moves a source-channel
-record. `jetpack outdated` compares lock facts with channel metadata without
-writing. `jet build`, `jet run`, the environment view, and `jet dev` read the
-exact lock entry; an unlocked channel is E1271, including in CI and `--offline`
-mode (D-JPK-CHANNEL1).
+record. Neither it nor an automatic refresh rewrites the source declaration:
+the lock is the one home of the exact version (D-CHANNEL-AUTO2=A).
+`jetpack outdated` compares lock facts with channel metadata without writing;
+each row names the locked exact version, and a row whose metadata lookup fails
+says `unknown`, never `current`. `jet build`, `jet run`, the environment view,
+and `jet dev` read the exact lock entry; an unlocked channel is E1271,
+including in CI and `--offline` mode (D-JPK-CHANNEL1).
 
 ### Package identity
 

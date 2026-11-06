@@ -216,11 +216,6 @@ cli_apply_project_update: fn(theme: Theme, plan: ProjectUpdatePlan) -[IO, FS, En
     ok := true
     loop update in plan.updates {
         source: update.source
-        if cli_rewrite_channel_manifest(plan.project_dir, source, update.after) == .Err(error) {
-            theme.error_coded("E1340", "channel `{source.name}` could not update the manifest", error.message, "fix the manifest permissions and run the command again")
-            ok = false
-            next
-        }
         channel: LockedSourceChannel{name: source.name, channel: source.lock_channel, exact: update.after}
         if pkg_lock_record_source_channel(plan.project_dir, channel) == .Err(error) {
             theme.error_coded("E1224", "couldn't write source channel `{source.name}` to the lock", error.message(), "fix the project lock permissions and rerun the update")
@@ -263,16 +258,19 @@ cli_cmd_outdated: fn(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, 
             any = true
             next
         }
+        // Every row names the locked exact version. A failed lookup is not
+        // evidence of freshness, so that row says `unknown`, never `current`.
         if cli_resolve_source_channel(source, parsed.flags) == {
             .Ok(latest) -> {
                 if latest != locked.exact {
                     any = true
                     theme.detail("{theme.bold(source.name)}  {theme.gray(policy.as_str())}  {locked.exact} → {latest}")
                 } else {
-                    theme.detail("{theme.bold(source.name)}  {theme.gray(policy.as_str())}  current")
+                    theme.detail("{theme.bold(source.name)}  {theme.gray(policy.as_str())}  {locked.exact}  current")
                 }
             }
             .Err(error) -> {
+                theme.detail("{theme.bold(source.name)}  {theme.gray(policy.as_str())}  {locked.exact}  unknown")
                 error.report(theme)
                 ok = false
             }

@@ -5629,9 +5629,10 @@ inline structs (D-JPK23):
 three policies on one axis, decided by who moves the pin. A declaration with no
 policy marker is pinned and never moves. `#latest` is the existing manual tier:
 it moves only when the user runs `jetpack update`. `#auto` is the explicit
-automatic tier: realization may refresh it without an update command, and the
-resolved exact selector is written back to the declarative manifest. Moving
-tiers retain their visible policy marker when writeback records the exact pin:
+automatic tier: realization may refresh it without an update command. The
+exact resolved selector lives only in `.jet/lock`; a refresh or update never
+rewrites the declaration, which keeps its policy marker as written
+(**D-CHANNEL-AUTO2=A**, amending AUTO1's writeback clause):
 
 ```jet
 rustc@nixpkgs
@@ -5640,7 +5641,7 @@ omp@releases#auto
 ```
 
 `#pin` is not a spelling in this ruling. The marker is checked on source
-declarations before channel resolution; pinned entries never propagate.
+declarations before channel resolution; pinned entries never move.
 
 ```jet
 deps: {

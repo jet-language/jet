@@ -2,10 +2,13 @@
 // jetpack::CLI::realize. A declared
 // source that tracks a channel resolves to one exact upstream, which is
 // written to `.jet/lock`; build, run, and env read only that exact source.
+// The lock is the one home of the exact selection: a refresh or update never
+// rewrites env.jet, whose declaration keeps the developer's update intent
+// (D-CHANNEL-AUTO2=A).
 
 // One declared source that tracks a channel. `lock_channel` is the channel
 // name recorded in the lock; a pinned NixOS/nixpkgs declaration records its
-// nixpkgs channel and keeps its manifest spelling.
+// nixpkgs channel.
 ChannelSource: struct {
     name: String
     priv base: String
@@ -14,7 +17,6 @@ ChannelSource: struct {
     raw: String
     lock_channel: String
     priv nix_channel: String?
-    priv preserve_manifest: Bool
 
     // The channel `git ls-remote` or the local catalog resolves.
     resolution_channel: fn(self) -> String Never! {
@@ -49,7 +51,6 @@ cli_channel_sources: fn(table: SourceTable) -> [ChannelSource] Never! {
             raw: raw,
             lock_channel: lock_channel,
             nix_channel: nix_channel,
-            preserve_manifest: pinned && nix_channel != None,
         })
     }
     sources
@@ -103,10 +104,6 @@ cli_apply_locked_channels: fn(theme: Theme, project_dir: String, table: &SourceT
                         .None -> true
                     }
                     if changed {
-                        if cli_rewrite_channel_manifest(project_dir, source, exact) == .Err(error) {
-                            theme.error_coded("E1340", "automatic channel `{source.name}` could not update the manifest", error.message, "fix the manifest permissions and run the command again")
-                            return Err(CLIError.Reported(EXIT_USAGE))
-                        }
                         record: LockedSourceChannel{name: source.name, channel: source.lock_channel, exact: exact}
                         if pkg_lock_record_source_channel(project_dir, record) == .Err(error) {
                             theme.error_coded("E1224", "couldn't write source channel `{source.name}` to the lock", error.message(), "fix the project lock permissions and run the command again")
@@ -131,43 +128,6 @@ cli_apply_locked_channels: fn(theme: Theme, project_dir: String, table: &SourceT
             return Err(CLIError.Reported(EXIT_USAGE))
         }
         table.set_upstream(source.name, lock.exact)
-    }
-}
-
-// The one failure carrier of manifest writeback; the text is the Rust error.
-#Error
-ChannelManifestError: struct {
-    message: String
-}
-
-// Write a resolved moving source back to the same declarative reference. The
-// policy marker remains visible, while the exact selector becomes explicit.
-cli_rewrite_channel_manifest: fn(project_dir: String, source: ChannelSource, exact: String) ChannelManifestError! -[FS]> {
-    if source.preserve_manifest -> return
-    path: EnvFile.path_in(project_dir)
-    current: files.read(path) ?? return Err(ChannelManifestError{message: "could not read `{path}`: {err}"})
-    if source.raw == "" -> return Err(ChannelManifestError{message: "source `{source.name}` has no manifest spelling"})
-    resolved: cli_manifest_channel_ref(exact, source.policy)
-    if source.raw == resolved -> return
-    // A pin the source-ref grammar can't spell (`#` inside the target, an
-    // `@nixpkgs` provider) stays in `.jet/lock` only: env.jet is left as is
-    // rather than rewritten into a ref the next run rejects (E0968).
-    if ProviderRef.classify(resolved) == .Err(_) -> return
-    next: current.replace(source.raw, resolved)
-    if next == current -> return Err(ChannelManifestError{message: "source `{source.name}` was not found in `{path}`"})
-    files.write(path, next) ?? return Err(ChannelManifestError{message: "could not write `{path}`: {err}"})
-}
-
-// `provider:target` becomes `target@provider`, then the policy marker.
-cli_manifest_channel_ref: fn(exact: String, policy: ChannelPolicy) -> String Never! {
-    flipped: if exact.split_once(REF_SEPARATOR) == {
-        .Val(parts) -> "{parts.after}{REF_PROVIDER_AT}{parts.before}"
-        .None -> exact
-    }
-    if policy == {
-        .Pinned -> flipped
-        .Manual -> "{flipped}{REF_CHANNEL_MARKER}{REF_CHANNEL_LATEST}"
-        .Automatic -> "{flipped}{REF_CHANNEL_MARKER}{REF_CHANNEL_AUTO}"
     }
 }
 
