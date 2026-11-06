@@ -2,6 +2,7 @@ use {
     fs :: core.files
     process :: core.process
     sys :: core.sys
+    term :: core.term
     time :: core.time
 }
 
@@ -14,6 +15,10 @@ fn crash_writer(path: Path) {
     fs.append_all(path, "event|2|") ?? panic("crash writer partial append")
     fs.fsync(path) ?? panic("crash writer partial fsync")
     print("crash_writer_ready")
+    // A piped stdout is written when its buffer fills or the process stops
+    // (D-STDOUT-BUFFER1): flush, so the parent sees the line while this waits.
+    out := term.stdout()
+    &out.flush() ?? panic("crash writer flush")
     time.sleep(30s)
     append_record(path, "event|3|late").drop("the writer is killed before this append")
 }
