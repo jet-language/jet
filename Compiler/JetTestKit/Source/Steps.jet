@@ -1315,9 +1315,10 @@ kit_steps_manifest_close: fn(tokens: [String], open: Int) -> Int {
     tokens.len()
 }
 
-// The `file` stem of the run output's `entry: file.callable` in the package
-// manifest at `root`: the output `defaults.run` names, else the one
-// Executable output. None for a package that declares no such output.
+// The file stem of the run output's entry in the package manifest at `root`:
+// `file` of `entry: file.callable`, or of the package source declaring a bare
+// `entry: callable`. The output `defaults.run` names, else the one Executable
+// output. None for a package that declares no such output.
 kit_steps_manifest_entry_stem: fn(root: String) -> String? {
     text: kit_exec_optional(files.join(root, "package.jet")) ?? return None
     tokens: kit_steps_manifest_tokens(text)
@@ -1351,9 +1352,14 @@ kit_steps_manifest_entry_stem: fn(root: String) -> String? {
                 record_close: kit_steps_manifest_close(tokens, kind_at + 1)
                 if tokens[kind_at] == "Executable" {
                     loop k in (kind_at + 2)..<record_close {
-                        if tokens[k] == "entry" && k + 3 < record_close && tokens[k + 1] == ":" && tokens[k + 3] == "." {
-                            &names.push(tokens[j].copy())
-                            &stems.push(tokens[k + 2].copy())
+                        if tokens[k] == "entry" && k + 2 < record_close && tokens[k + 1] == ":" {
+                            // `entry: file.callable`, or a bare `entry: callable`
+                            // built under the stem of the file declaring it.
+                            stem: if k + 3 < record_close && tokens[k + 3] == "." -> Val(tokens[k + 2].copy()) else -> kit_steps_callable_stem(root, tokens[k + 2])
+                            if stem == .Val(found) {
+                                names.push(tokens[j].copy())
+                                stems.push(found.copy())
+                            }
                         }
                     }
                 }
@@ -1369,6 +1375,50 @@ kit_steps_manifest_entry_stem: fn(root: String) -> String? {
         return None
     }
     if stems.len() == 1 -> return Val(stems[0].copy())
+    None
+}
+
+// The stem of the package source under `root` that declares the top-level
+// `callable: fn`, None when none does.
+kit_steps_callable_stem: fn(root: String, callable: String) -> String? {
+    sources := [String]{}
+    kit_steps_package_sources(root, sources)
+    loop path in sources {
+        text: files.read(path) ?? next
+        loop line in text.split("\n").to_list() {
+            if line.starts_with("{callable}: fn") {
+                name: files.basename(path)
+                return Val(kit_steps_byte_slice(name, 0, name.count_bytes() - 4))
+            }
+        }
+    }
+    None
+}
+
+// The workspace member a `jet build -p NAME` step selects, "" for none.
+kit_steps_build_member: fn(step: KitStep) -> String {
+    loop i in 2..<step.argv.len() {
+        argument: step.argv[i]
+        if argument == "--" -> return ""
+        if argument == "-p" && i + 1 < step.argv.len() -> return step.argv[i + 1].copy()
+    }
+    ""
+}
+
+// The directory under `root` whose `package.jet` declares `name: "NAME"`,
+// walked as kit_steps_package_sources walks; None when no package does.
+kit_steps_member_dir: fn(root: String, name: String) -> String? {
+    entries := files.list_dir(root) ?? return None
+    entries.sort_by(entry -> entry.name)
+    loop entry in entries {
+        if !entry.is_dir || entry.name.starts_with(".") || kit_expect_named(["target", "build", "node_modules", "bin"], entry.name) -> next
+        if kit_exec_optional(files.join(entry.path, "package.jet")) == .Val(text) {
+            tokens: kit_steps_manifest_tokens(text)
+            quoted: "\"{name}\""
+            if tokens.len() > 2 && tokens[0] == "name" && tokens[1] == ":" && tokens[2] == quoted -> return Val(entry.path.copy())
+        }
+        if kit_steps_member_dir(entry.path, name) == .Val(found) -> return Val(found.copy())
+    }
     None
 }
 
@@ -1401,7 +1451,11 @@ kit_steps_invoke: fn(step: KitStep, index: Int, context: KitStepCtx, previous: K
     overlay: kit_steps_environment(context.plan, policy, context.work, context.scratch, state.built)
     state.last = kit_steps_invoke_step(step, context.env, context.work, context.scratch, context.snapshots, context.plan.fixture, state.built, overlay)
     if step.argv.len() > 1 && step.argv[0] == "jet" && step.argv[1] == "build" && !kit_steps_help_request(step) && state.last.code == 0 && kit_exec_process_failure(state.last) == None {
-        cwd: if step.cwd == "" -> context.work else -> files.join(context.work, kit_steps_expand(step.cwd, context.env, context.work, context.scratch, state.built))
+        cwd := if step.cwd == "" -> context.work else -> files.join(context.work, kit_steps_expand(step.cwd, context.env, context.work, context.scratch, state.built))
+        // `jet build -p NAME` builds the workspace member named NAME, whose
+        // artifacts land under that member's root.
+        member: kit_steps_build_member(step)
+        if member != "" -> cwd = kit_steps_member_dir(cwd, member) ?? cwd
         entry := kit_steps_build_entry(step)
         if entry == "" {
             // A bare `jet build` names its artifact for the package's run
