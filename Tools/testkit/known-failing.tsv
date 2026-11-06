@@ -91,7 +91,6 @@ tests/ui/crypto_secret_nested_provenance	#6425	check not ported: E1004 and E0119
 tests/ui/generic_lambda_conflict	#6425	check not ported: E0904 inference conflict between argument 2 and the lambda return, with E0112 at the lambda (reports only E0112 at argument 2)
 tests/ui/reflect_name_ledger	#6425	check not ported: E0302 names an ambiguous imported owner by its module (`alpha.Point`; reports `Point`); the snapshot lines also predate the `use { "alpha" "beta" }` block (+2)
 tests/ui/taint/external_boundaries_seed_origin_facts_3	#6425	check not ported: E0433 after E1004 (the unresolved `process.run` call's value is not reported as thrown away)
-tests/cases/archive/archive_names_and_path_rejection_are_source_owned_on_all_tiers.case	#5454	verify-intent: ref build failed: E0109 Arithmetic needs matching number types
 tests/cases/authority/authority_boundary_consumers_take_the_named_value.case	#5454	assert not satisfied: original expect not satisfied
 tests/cases/authority/authority_comptime_uses_the_same_value.case	#5454	assert not satisfied: original expect not satisfied
 tests/cases/authority/authority_process_boundary_runs_on_all_hosted_tiers.case	#5454	verify-intent: ref build failed: E1004 `core.process` has no item `run`
@@ -150,7 +149,7 @@ tests/cases/collections_and_methods/list_remove_modes_and_surface_gaps.case	#545
 tests/cases/control_and_data/codable_union_distinct_member_uses_base_wire_shape.case	#5454	ref build failed: E2104 The Jet backend can't build `tests/run/control_and_data/codable_union_distinct_member_uses_base_wire_shape.jet` yet:\nrun [functio
 tests/cases/core_and_closures/stable_partition_and_sort_keep_ties_in_order.case	#5454	verify-intent: ref build failed: E0224 This call writes `sorted`, but it has no `&` mark
 tests/cases/core_and_closures/task_groups_preserve_worker_results_builds_and_runs.case	#5454	jet.MissingErrorConversion: task.all over `WorkerError!` workers can't convert `WorkerError` into the per-worker `Err` outcome; `task fail()` has the same gap
-tests/cases/core_and_closures/task_lambda_never_carrier_typed_list_builds_and_runs.case	#5454	verify-intent: ref build failed: E0108 This needs Task<String Never!>, but the value is Task<String>
+tests/cases/core_and_closures/task_lambda_never_carrier_typed_list_builds_and_runs.case	#5454	E0108 `[Task<String Never!>]` does not accept `task { report() }`: sema types the task lambda as `Task<String>` and does not treat `String Never!` as the same result
 tests/cases/language_features/distinct_and_unit_numeric_source_matrix.case	#5454	verify-intent: ref build failed: E2417 Explicit failure domain `String (text)` is not an Error type
 tests/cases/language_features/json_nested_variant_matching.case	#5454	verify-intent: ref build failed: E0108 This needs Int, but the value is String
 tests/cases/language_features/nested_callable_containers_keep_required_public_labels.case	#5454	assert not satisfied: original assert! not satisfied: [false]
@@ -172,12 +171,11 @@ tests/cases/corelib_parts_encoding_surface/xml_reader_writer_hostile_state_and_e
 tests/cases/collections_and_methods/card_2254_map_hoist_rejects_unknown_calls.case	#5454	Jet rejects the original source: E0433 the result of `observe` is thrown away
 tests/cases/collections_and_methods/card_2872_exact_int_division_family_uses_hot_kernels.case	#5454	`probe(9223372036854775808)` prints 26132887437755198126; the original expects 26132887437755198128
 tests/cases/comptime_core_pure_parity/registered_shared_kernel_edges_match_all_execution_tiers.case	#5454	ref build failed: E0003 A nested comptime-reachable function has no unique registered module owner
-tests/cases/comptime_core_pure_parity/rustc_backed_archive_matches_aot_comptime_and_dev_tiers.case	#5454	ref build failed: E0107 Nothing named `value` exists here
-tests/cases/comptime_core_pure_parity/rustc_backed_bag_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly.case	#5454	ref build failed: E0224 This call writes `values`, but it has no `&` mark
-tests/cases/comptime_core_pure_parity/rustc_backed_bits_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly.case	#5454	ref build failed: E0224 This call writes `bits`, but it has no `&` mark
+tests/cases/comptime_core_pure_parity/rustc_backed_bag_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly.case	#5454	E0506 `Tally<TallyToken>` is refused as not hashable although `TallyToken` is a fieldless enum (the Calls/Static.jet Tally element check)
+tests/cases/comptime_core_pure_parity/rustc_backed_bits_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly.case	#5454	ICE comptime.build unlowered: runtime route JetBitSet::clear
 tests/cases/comptime_core_pure_parity/rustc_backed_civil_and_measurement_methods_match_comptime_exactly.case	#5454	ref build failed: E0003 A nested comptime-reachable function has no unique registered module owner
 tests/cases/comptime_core_pure_parity/rustc_backed_pool_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly.case	#5454	ref build failed: E0312 `ID<String>` doesn't support `==`
-tests/cases/comptime_core_pure_parity/rustc_backed_rank_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly.case	#5454	ref build failed: E0224 This call writes `values`, but it has no `&` mark
+tests/cases/comptime_core_pure_parity/rustc_backed_rank_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly.case	#5454	ICE comptime.build unlowered: set builtin BTreeSet::clear
 tests/cases/comptime_core_pure_parity/rustc_backed_sequential_inline_hofs_match_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly.case	#5454	ICE comptime.build unlowered: closure method Partition
 tests/cases/comptime_core_pure_parity/rustc_backed_set_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly.case	#5454	ICE comptime.build unlowered: set builtin HashSet::clear
 tests/cases/comptime_core_pure_parity/rustc_backed_testing_fake_clock_writeback_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly.case	#5454	ref build failed: E0003 A nested comptime-reachable function has no unique registered module owner
@@ -195,7 +193,6 @@ tests/cases/comptime_core_pure_parity/public_transcript_covers_rank_methods_exac
 tests/cases/comptime_core_pure_parity/public_transcript_covers_remaining_core_pure_families.case	#5454	E2404 `saturating_sub_ns` fails with `Err`, which can't propagate into `time.TimeError` here
 tests/cases/comptime_core_pure_parity/public_transcript_covers_set_methods_exactly.case	#5454	E0956 The comptime evaluator can't build this item's code yet: set_view [function:main.set_view]: set builtin std::collections::HashSet::clear
 tests/cases/comptime_core_pure_parity/public_transcript_evaluates_pure_add_arguments_once.case	#5454	internal compiler error: comptime function checking did not return a complete body or dependency wait set
-tests/cases/comptime_core_pure_parity/public_transcript_keeps_checked_types_in_imported_functions.case	#5454	E0112 `abs` wants Int (a whole number) for argument 1, but this is `Decimal`
 tests/cases/comptime_core_pure_parity/public_transcript_preserves_sequential_inline_hof_mutations_exactly.case	#5454	E0118 The name `partition_shadow` is already taken here
 tests/cases/compiler_stack/public_compile_accepts_depth_256_and_reports_depth_257.case	#5454	E0003 This expression is nested too deeply, already at 254 parentheses (the original limit accepts 254 and reports E1403 "257 levels deep; limit is 256" at 255)
 tests/cases/task_state_tiers/repl_matches_canonical_task_output.case	#5454	jet repl exits 2 with E2104 `jet repl` is not built yet
@@ -225,7 +222,6 @@ tests/cases/core_files_opaque_handles/file_manual_close_consumes_the_checked_pro
 tests/cases/core_net_tls/configured_tls_client_keeps_native_builder_identity_and_exact_labels.case	#5454	E0764 names the canonical callee: "`core.net.tls.client` has no parameter labelled `host`" (the case expects the written `tls.client`)
 tests/cases/core_net_tls/tcp_stream_and_listener_reject_public_fields_and_forged_records.case	#5454	stream predicate count failed; first diagnostic: E0302 `.fd` only works on a declared struct or tuple field
 tests/cases/core_runtime_units/grouped_format_is_source_owned_without_a_dispatcher_row.case	#5454	E2104 The Jet backend can't build `main.jet` yet:\nrun [function:main.run]: runtime route jet_fmt_grouped: the Jet runtime cd29502ac2a852641408d60f1723eaba4b17b773175240573a3b7226908e9e4e exports no `jet_fmt_grouped`
-tests/cases/core_shared_sites/browser_admits_non_host_core_api_and_ordinary_shared.case	#5454	E0373 This explicit semicolon is not part of canonical Jet syntax.
 tests/cases/core_shared_sites/browser_refuses_direct_environment_api_with_spanless_diagnostic.case	#5454	FAIL: exit 0; expected nonzero
 tests/cases/core_testing_history/core_testing_histories_callback_failure_becomes_unavailable_across_i9_tiers.case	#5454	prints `unsupported` / "core.testing.histories command type `Dyn` has no checked enum schema": the Dyn schema strategy (HistorySchemaStrategy for Dyn commands) is not ported to Core
 tests/cases/corelib_parts_http_data/checked_sql_query_keeps_ordered_scalar_bindings.case	#5454	E2402 This implicit fallible call can't convert `[FieldError]` into `Err` — no declared conversion exists
