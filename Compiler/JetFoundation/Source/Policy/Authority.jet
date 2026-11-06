@@ -303,11 +303,10 @@ ApplicationAuthority: struct {
     // The one-line policy fix from the complete undecided set. Denied effects
     // are never turned into an allow suggestion; the floor stays granted
     // beside a written row, so the row names only the undecided rights.
-    policy_fix: fn(self) -> String Never! {
+    // `entry` is the program's entry file, which names the inline block.
+    policy_fix: fn(self, entry: String) -> String Never! {
         undecided: self.undecided_effects()
-        if undecided.len() > 0 && self.is_application_default() {
-            return "declare `allow: [{undecided.join(", ")}]` under `authority` in a leading `package: {{ … }}` block of this file (`jet fix --all` inserts it); otherwise approve the exact operation once in an interactive terminal"
-        }
+        if undecided.len() > 0 && self.is_application_default() -> return authority_inline_package_fix(entry, undecided)
         policy_step: if {
             undecided.len() == 0 -> "adjust the denial in `authority.deny`"
             else -> "add `allow: [{undecided.join(", ")}]` under `authority` in `package.jet`"
@@ -401,4 +400,42 @@ authority_parse_rights: fn(names: [String]) -> [String] Never! {
         &out.push(parsed)
     }
     authority_holds(out)
+}
+
+// The name of the inline Package that grants a manifest-less program its
+// rights: the entry file's stem, or `script` when the stem is not a plain
+// name. Every package needs a name (E0003), so the block always carries one.
+authority_inline_package_name: fn(path: String) -> String Never! {
+    raw: path.bytes()
+    start := raw.len()
+    loop start > 0 && raw[start - 1] != (U8{47}) && raw[start - 1] != (U8{92}) -> start -= 1
+    stem_end := raw.len()
+    index := raw.len() - 1
+    loop index > start {
+        if raw[index] == (U8{46}) {
+            stem_end = index
+            break
+        }
+        index -= 1
+    }
+    stem: String.from_bytes(raw[start..<stem_end]) ?? ""
+    if stem == "" -> return "script"
+    loop byte in stem.bytes() {
+        code: Int.from_u8(byte)
+        plain: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 || code == 45 || code == 46
+        if !plain -> return "script"
+    }
+    stem
+}
+
+// The leading inline Package `jet fix --all` inserts into the program at
+// `path` to grant it `allow`.
+authority_inline_package_block: fn(path: String, allow: [String]) -> String Never! {
+    "package: {{\n    name: \"{authority_inline_package_name(path)}\"\n    authority: {{ allow: [{allow.join(", ")}] }}\n}}\n\n"
+}
+
+// E1803's Fix for a program with no package block: the complete block that
+// grants the undecided rights, written as one line.
+authority_inline_package_fix: fn(path: String, undecided: [String]) -> String Never! {
+    "declare a leading `package: {{ name: \"{authority_inline_package_name(path)}\", authority: {{ allow: [{undecided.join(", ")}] }} }}` block in this file (`jet fix --all` inserts it); otherwise approve the exact operation once in an interactive terminal"
 }

@@ -1,0 +1,21 @@
+# A script with no package block opens a database, and DB is no default right,
+# so `jet run` stops with E1803. Its Fix names the complete leading block,
+# including the `name` every package needs (E0003), and `jet fix --all` inserts
+# that block, so the next run passes.
+fixture: db_script_gains_a_named_package_block_from_fix_all.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 1
+stdout: empty
+stderr: ~ "E1803" # DB is no default right
+stderr: ~ "declare a leading `package: { name: \"main\", authority: { allow: [DB] } }` block in this file" # the Fix names a complete block
+step: jet fix --all main.jet
+exit: 0
+file: main.jet ^= "package: {\n    name: \"main\"\n    authority: { allow: [DB] }\n}\n\n" # the inserted block carries the file-stem name
+step: jet check main.jet
+exit: 0
+step: jet run main.jet
+exit: 0
+stdout: = "open\ntrue\n"

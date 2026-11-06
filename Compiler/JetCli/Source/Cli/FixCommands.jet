@@ -3,7 +3,7 @@
 use {
     cli_files: core.files
     jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, jet_driver_present_diagnostics, jet_driver_inline_package, jet_driver_inline_trivia_end, jet_driver_inline_space, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
-    jet_foundation.[Diagnostic, Span, TextEdit, DiagnosticFixApplicability, DiagnosticFixSafety, diagnostic_with_edit_grade, DIAGNOSTIC_ERROR]
+    jet_foundation.[Diagnostic, Span, TextEdit, DiagnosticFixApplicability, DiagnosticFixSafety, authority_inline_package_block, diagnostic_with_edit_grade, DIAGNOSTIC_ERROR]
     jet_parser.[jet_format_unified_diff, parser_marker_placement_edits]
 }
 
@@ -49,19 +49,8 @@ jet_cli_inline_grant_refusal: fn(authority: JetCLIAuthority, file: String, sourc
     if !jet_cli_is_application_default(authority) || jet_driver_inline_package(source).found || jet_cli_undecided(authority).len() == 0 -> return None
     report: jet_cli_authority_refusal(authority, file, command) ?? return None
     at: jet_cli_fix_inline_insertion(source)
-    edit: TextEdit{span: Span{start: at, end: at}, new_text: jet_cli_fix_inline_authority(file, jet_cli_inline_allow_row(authority))}
+    edit: TextEdit{span: Span{start: at, end: at}, new_text: authority_inline_package_block(file, jet_cli_inline_allow_row(authority))}
     Val(diagnostic_with_edit_grade(report, edit, DiagnosticFixApplicability.Suggested, DiagnosticFixSafety.NeedsReview))
-}
-
-jet_cli_fix_inline_authority: fn(file: String, allow: [String]) -> String Never! {
-    stem: jet_cli_stem(jet_cli_file_name(file))
-    valid := stem != ""
-    loop byte in stem.bytes() {
-        code: Int.from_u8(byte)
-        if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 || code == 45 || code == 46) -> valid = false
-    }
-    name: if valid -> stem else -> "script"
-    "package: {{\n    name: \"{name}\"\n    authority: {{ allow: [{allow.join(", ")}] }}\n}}\n\n"
 }
 
 // Package::inline_package_insertion_offset: share the Driver trivia scanner;
