@@ -30,9 +30,9 @@ compress: fn(data: [U8]) -> [U8] GzipFileError! {
     payload: core.archive.deflate(data) ?? return Err(GzipFileError.Unsupported)
     loop b in payload -> out.push(b)
     crc: crc32(data)
-    loop k in 0..<4 -> out.push(to_u8(crc >> (k * 8)))
+    loop k in 0..<4 -> out.push(wrapping(U8{crc >> (k * 8)}))
     n: data.len()
-    loop k in 0..<4 -> out.push(to_u8(n >> (k * 8)))
+    loop k in 0..<4 -> out.push(wrapping(U8{n >> (k * 8)}))
     Ok(out)
 }
 /// Decode one RFC 1952 member. Malformed headers, deflate, trailers, and
@@ -166,10 +166,6 @@ read_u16le: fn(data: [U8], i: Int) -> Int Never! {
 
 u8_int: fn(b: U8) -> Int Never! { Int.from_u8(b) }
 
-to_u8: fn(n: Int) -> U8 Never! {
-    v: (n).bit_and(255)
-    (U8{v})
-}
 read_u32le: fn(data: [U8], i: Int) -> Int Never! {
     (((u8_int(data[i])).bit_or((u8_int(data[i + 1]) << 8))).bit_or((u8_int(data[i + 2]) << 16))).bit_or((u8_int(data[i + 3]) << 24))
 }

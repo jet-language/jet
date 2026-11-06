@@ -274,7 +274,7 @@ pae_part: fn(out: &[U8], bytes: [U8]) Never! {
 pae_len: fn(out: &[U8], value: Int) Never! {
     n := value
     loop _ in 0..<8 {
-        out.push(to_u8(n))
+        out.push(wrapping(U8{n}))
         n = n >> 8
     }
 }
@@ -295,7 +295,7 @@ b64url_decode: fn(text: String) -> [U8] AuthError! {
         bits = bits + 6
         if bits >= 8 {
             bits = bits - 8
-            out.push(to_u8(acc >> bits))
+            out.push(wrapping(U8{acc >> bits}))
         }
     }
     if bits != 0 && (acc.bit_and(((1 << bits) - 1))) != 0 -> return Err(AuthError.DecodeError("non-canonical base64 trailing bits"))
@@ -552,7 +552,7 @@ ct_text: fn(left: String, right: String) -> Bool Never! {
 encode_store: fn(records: [AuthRecord]) -> [U8] Never! {
     out := [U8]{}
     loop record in records {
-        out.push(to_u8(record.kind))
+        out.push(wrapping(U8{record.kind}))
         put_field(out, record.a)
         put_field(out, record.b)
         put_field(out, record.c)
@@ -564,10 +564,10 @@ encode_store: fn(records: [AuthRecord]) -> [U8] Never! {
 put_field: fn(out: &[U8], text: String) Never! {
     raw: text.bytes()
     n: raw.len()
-    out.push(to_u8(n))
-    out.push(to_u8(n >> 8))
-    out.push(to_u8(n >> 16))
-    out.push(to_u8(n >> 24))
+    out.push(wrapping(U8{n}))
+    out.push(wrapping(U8{n >> 8}))
+    out.push(wrapping(U8{n >> 16}))
+    out.push(wrapping(U8{n >> 24}))
     loop b in raw -> out.push(b)
 }
 
@@ -671,7 +671,7 @@ oauth_config: fn(provider: String) -[Env]> OAuthConfig {
     loop b in raw {
         n: Int.from_u8(b)
         if !(is_alnum(n) || n == 45 || n == 95) -> return Err("OAuth provider is invalid")
-        if n >= 97 && n <= 122 -> upper.push(to_u8(n - 32)) else -> upper.push(b)
+        if n >= 97 && n <= 122 -> upper.push(wrapping(U8{n - 32})) else -> upper.push(b)
     }
     suffix: String.from_bytes(upper) ?? return Err("OAuth provider is invalid")
     secret: sys.get("JET_OAUTH_{suffix}_SECRET") ?? return Err("OAuth provider is not configured")
@@ -731,7 +731,7 @@ oauth_b64: fn(text: String) -> [U8] {
         bits = bits + 6
         if bits >= 8 {
             bits = bits - 8
-            out.push(to_u8(acc >> bits))
+            out.push(wrapping(U8{acc >> bits}))
         }
     }
     if bits != 0 && (acc.bit_and(((1 << bits) - 1))) != 0 -> return Err("OAuth assertion encoding is non-canonical")
@@ -873,19 +873,19 @@ json_hex4: fn(raw: [U8], start: Int) -> Int? {
 
 push_scalar: fn(out: &[U8], cp: Int) Never! {
     if cp < 128 {
-        out.push(to_u8(cp))
+        out.push(wrapping(U8{cp}))
     } else if cp < 2048 {
-        out.push(to_u8((192).bit_or((cp >> 6))))
-        out.push(to_u8((128).bit_or((cp.bit_and(63)))))
+        out.push(wrapping(U8{(192).bit_or((cp >> 6))}))
+        out.push(wrapping(U8{(128).bit_or((cp.bit_and(63)))}))
     } else if cp < 65536 {
-        out.push(to_u8((224).bit_or((cp >> 12))))
-        out.push(to_u8((128).bit_or(((cp >> 6).bit_and(63)))))
-        out.push(to_u8((128).bit_or((cp.bit_and(63)))))
+        out.push(wrapping(U8{(224).bit_or((cp >> 12))}))
+        out.push(wrapping(U8{(128).bit_or(((cp >> 6).bit_and(63)))}))
+        out.push(wrapping(U8{(128).bit_or((cp.bit_and(63)))}))
     } else {
-        out.push(to_u8((240).bit_or((cp >> 18))))
-        out.push(to_u8((128).bit_or(((cp >> 12).bit_and(63)))))
-        out.push(to_u8((128).bit_or(((cp >> 6).bit_and(63)))))
-        out.push(to_u8((128).bit_or((cp.bit_and(63)))))
+        out.push(wrapping(U8{(240).bit_or((cp >> 18))}))
+        out.push(wrapping(U8{(128).bit_or(((cp >> 12).bit_and(63)))}))
+        out.push(wrapping(U8{(128).bit_or(((cp >> 6).bit_and(63)))}))
+        out.push(wrapping(U8{(128).bit_or((cp.bit_and(63)))}))
     }
 }
 
@@ -904,13 +904,13 @@ json_string: fn(raw: [U8], start: Int) -> JSONText? {
         }
         if n < 32 -> return None
         if n != 92 {
-            out.push(to_u8(n))
+            out.push(wrapping(U8{n}))
         } else {
             if pos >= raw.len() -> return None
             e: Int.from_u8(raw[pos])
             pos = pos + 1
             if {
-                e == 34 || e == 92 || e == 47 -> out.push(to_u8(e))
+                e == 34 || e == 92 || e == 47 -> out.push(wrapping(U8{e}))
                 e == 98 -> out.push(U8{8})
                 e == 102 -> out.push(U8{12})
                 e == 110 -> out.push(U8{10})
@@ -1052,13 +1052,6 @@ slice_u8: fn(bytes: [U8], start: Int, end: Int) -> [U8] Never! {
         i = i + 1
     }
     out
-}
-
-/// Low byte of `n`. The mask runs in `Int`, so a wide value never reaches the
-/// checked `U8{}` conversion.
-to_u8: fn(n: Int) -> U8 Never! {
-    v: (n).bit_and(255)
-    (U8{v})
 }
 
 b64url_for_test: fn(bytes: [U8]) -> String Never! {

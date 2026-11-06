@@ -395,7 +395,7 @@ hkdf_sha256: fn(ikm: [U8], salt: [U8], info: [U8], len: Int) -> Secret CryptoErr
         material := [U8]{}
         loop b in last_block -> material.push(b)
         loop b in info -> material.push(b)
-        material.push(to_u8(counter))
+        material.push(wrapping(U8{counter}))
         last_block = hmac_sha256_raw(prk, material)
         loop b in last_block {
             if out.len() >= len -> break
@@ -415,15 +415,15 @@ pbkdf2_hmac: fn(password: [U8], salt: [U8], iterations: Int, key_len: Int) -> [U
         salt_i := [U8]{}
         loop b in salt -> salt_i.push(b)
         bn: bi + 1
-        salt_i.push(to_u8(bn >> 24))
-        salt_i.push(to_u8(bn >> 16))
-        salt_i.push(to_u8(bn >> 8))
-        salt_i.push(to_u8(bn))
+        salt_i.push(wrapping(U8{bn >> 24}))
+        salt_i.push(wrapping(U8{bn >> 16}))
+        salt_i.push(wrapping(U8{bn >> 8}))
+        salt_i.push(wrapping(U8{bn}))
         u := hmac_sha256_raw(password, salt_i)
         acc := copy_bytes(u)
         loop round in 1..<iterations {
             u = hmac_sha256_raw(password, u)
-            loop j in 0..<32 -> acc[j] = to_u8(Int.from_u8(acc[j]).bit_xor(Int.from_u8(u[j])))
+            loop j in 0..<32 -> acc[j] = wrapping(U8{Int.from_u8(acc[j]).bit_xor(Int.from_u8(u[j]))})
         }
         loop b in acc {
             if out.len() >= key_len -> break
@@ -488,8 +488,8 @@ seal: fn(recipients: [X25519PublicKey], bytes: [U8], aad: [U8]) -[Rand]> Sealed 
     header.push(U8{1})
     header.push(U8{0})
     header.push(U8{0})
-    header.push(to_u8(sorted.len() /% 256))
-    header.push(to_u8(sorted.len() %% 256))
+    header.push(wrapping(U8{sorted.len() /% 256}))
+    header.push(wrapping(U8{sorted.len() %% 256}))
     loop b in eph_pk.bytes -> header.push(b)
     loop b in salt -> header.push(b)
     loop b in nonce -> header.push(b)
@@ -622,10 +622,10 @@ key_order: fn(a: [U8], b: [U8]) -> Int Never! {
 }
 
 append_be32: fn(out: &[U8], n: Int) -> Bool CryptoError! {
-    out.push(to_u8(n >> 24))
-    out.push(to_u8(n >> 16))
-    out.push(to_u8(n >> 8))
-    out.push(to_u8(n))
+    out.push(wrapping(U8{n >> 24}))
+    out.push(wrapping(U8{n >> 16}))
+    out.push(wrapping(U8{n >> 8}))
+    out.push(wrapping(U8{n}))
     true
 }
 
@@ -1130,7 +1130,7 @@ x25519_recipient_decode: fn(text: String) -> [U8]? {
         bits += 5
         if bits >= 8 {
             bits -= 8
-            out.push(to_u8(acc >> bits))
+            out.push(wrapping(U8{acc >> bits}))
         }
     }
     if ((acc).bit_and(((1 << bits) - 1))) != 0 -> return None
@@ -1358,7 +1358,7 @@ phc_b64_decode: fn(text: String) -> [U8]? {
         bits += 6
         if bits >= 8 {
             bits -= 8
-            out.push(to_u8(n >> bits))
+            out.push(wrapping(U8{n >> bits}))
             n = (n).bit_and(((1 << bits) - 1))
         }
     }
@@ -1477,13 +1477,6 @@ u8_int: fn(b: U8) -> Int Never! { Int.from_u8(b) }
 read_be32: fn(data: [U8], offset: Int) -> Int Never! {
     if offset < 0 || offset + 4 > data.len() -> return 0
     ((((Int.from_u8(data[offset]) << 24)).bit_or((Int.from_u8(data[offset + 1]) << 16))).bit_or((Int.from_u8(data[offset + 2]) << 8))).bit_or(Int.from_u8(data[offset + 3]))
-}
-
-/// Low 8 bits as `U8`. Mask in `Int` first so the constructor never sees a
-/// value outside `0..=255`.
-to_u8: fn(n: Int) -> U8 Never! {
-    v: (n).bit_and(255)
-    (U8{v})
 }
 
 /// Big-endian 32-bit word from four bytes at `i`.
@@ -1780,10 +1773,10 @@ hmac_sha256_raw: fn(key: [U8], data: [U8]) -> [U8] Never! {
     }
     inner := [U8]{}
     outer := [U8]{}
-    loop b in k -> inner.push(to_u8((u8_int(b)).bit_xor(0x36)))
+    loop b in k -> inner.push(wrapping(U8{(u8_int(b)).bit_xor(0x36)}))
     loop b in data -> inner.push(b)
     inner_hash: sha256_raw(inner)
-    loop b in k -> outer.push(to_u8((u8_int(b)).bit_xor(0x5c)))
+    loop b in k -> outer.push(wrapping(U8{(u8_int(b)).bit_xor(0x5c)}))
     loop b in inner_hash -> outer.push(b)
     sha256_raw(outer)
 }
@@ -1795,14 +1788,14 @@ rotl32: fn(x: Int, n: Int) -> Int Never! {
 
 be64: fn(n: Int) -> [U8] Never! {
     [U8]{
-        to_u8((n >> 56)),
-        to_u8((n >> 48)),
-        to_u8((n >> 40)),
-        to_u8((n >> 32)),
-        to_u8((n >> 24)),
-        to_u8((n >> 16)),
-        to_u8((n >> 8)),
-        to_u8(n),
+        wrapping(U8{n >> 56}),
+        wrapping(U8{n >> 48}),
+        wrapping(U8{n >> 40}),
+        wrapping(U8{n >> 32}),
+        wrapping(U8{n >> 24}),
+        wrapping(U8{n >> 16}),
+        wrapping(U8{n >> 8}),
+        wrapping(U8{n}),
     }
 }
 
@@ -1811,7 +1804,7 @@ words_to_bytes: fn(words: [Int], width: Int) -> [U8] Never! {
     loop w in words {
         shift := (width - 1) * 8
         loop _ in 0..<width {
-            out.push(to_u8((w >> shift)))
+            out.push(wrapping(U8{w >> shift}))
             shift -= 8
         }
     }
@@ -1841,8 +1834,8 @@ hex_encode: fn(bytes: [U8]) -> String Never! {
 }
 
 hex_nibble: fn(n: Int) -> U8 Never! {
-    if n < 10 -> return to_u8(48 + n)
-    to_u8(87 + n)
+    if n < 10 -> return wrapping(U8{48 + n})
+    wrapping(U8{87 + n})
 }
 
 slice_u8: fn(bytes: [U8], start: Int, end: Int) -> [U8] Never! {
@@ -1890,7 +1883,7 @@ hex_decode: fn(text: String) -> [U8]? {
         if i >= raw.len() -> return Val(out.copy())
         hi: hex_val(raw[i]) ?? return None
         lo: hex_val(raw[i + 1]) ?? return None
-        out.push(to_u8(hi * 16 + lo))
+        out.push(wrapping(U8{hi * 16 + lo}))
         i = i + 2
     }
 }
@@ -1986,7 +1979,7 @@ keccak: fn(input: [U8], rate: Int, out_len: Int, delim: Int) -> [U8] {
         if last.len() >= rate -> break
         last.push(U8{0})
     }
-    last[rate - 1] = to_u8((u8_int(last[rate - 1])).bit_or(0x80))
+    last[rate - 1] = wrapping(U8{(u8_int(last[rate - 1])).bit_or(0x80)})
     absorb(st, last, rate)
     keccak_f(st)
     out := [U8]{}
@@ -1996,7 +1989,7 @@ keccak: fn(input: [U8], rate: Int, out_len: Int, delim: Int) -> [U8] {
             lane: st[x]
             loop b in 0..<8 {
                 if out.len() >= out_len -> return slice_u8(out, 0, out_len)
-                out.push(to_u8((lane >> (b * 8))))
+                out.push(wrapping(U8{lane >> (b * 8)}))
             }
         }
         keccak_f(st)
@@ -2087,10 +2080,10 @@ chacha20_block: fn(key: [U8], nonce: [U8], counter: Int) -> [U8] Never! {
     out := [U8]{}
     loop i in 0..<16 {
         v: w[i]
-        out.push(to_u8(v))
-        out.push(to_u8((v >> 8)))
-        out.push(to_u8((v >> 16)))
-        out.push(to_u8((v >> 24)))
+        out.push(wrapping(U8{v}))
+        out.push(wrapping(U8{v >> 8}))
+        out.push(wrapping(U8{v >> 16}))
+        out.push(wrapping(U8{v >> 24}))
     }
     out
 }
@@ -2121,7 +2114,7 @@ chacha20_xor: fn(key: [U8], nonce: [U8], counter: Int, plain: [U8]) -> [U8] Neve
         ctr = ctr + 1
         loop j in 0..<64 {
             if i >= plain.len() -> return out
-            out.push(to_u8(u8_int(plain[i]).bit_xor(u8_int(block[j]))))
+            out.push(wrapping(U8{u8_int(plain[i]).bit_xor(u8_int(block[j]))}))
             i = i + 1
         }
     }
@@ -2137,7 +2130,7 @@ le_bytes: fn(n: Int, width: Int) -> [U8] Never! {
     out := [U8]{}
     v := n
     loop i in 0..<width {
-        out.push(to_u8(v))
+        out.push(wrapping(U8{v}))
         v = v >> 8
     }
     out
@@ -2220,10 +2213,10 @@ hchacha20: fn(key: [U8], nonce16: [U8]) -> [U8] Never! {
 }
 
 hchacha_word: fn(out: &[U8], v: Int) Never! {
-    out.push(to_u8(v))
-    out.push(to_u8((v >> 8)))
-    out.push(to_u8((v >> 16)))
-    out.push(to_u8((v >> 24)))
+    out.push(wrapping(U8{v}))
+    out.push(wrapping(U8{v >> 8}))
+    out.push(wrapping(U8{v >> 16}))
+    out.push(wrapping(U8{v >> 24}))
 }
 
 xchacha_seal: fn(key: [U8], nonce24: [U8], aad: [U8], plain: [U8]) -> [U8] Never! {
@@ -2409,10 +2402,10 @@ blake3_raw: fn(input: [U8]) -> [U8] {
             out := [U8]{}
             loop k in 0..<8 {
                 v: cvs[k]
-                out.push(to_u8(v))
-                out.push(to_u8((v >> 8)))
-                out.push(to_u8((v >> 16)))
-                out.push(to_u8((v >> 24)))
+                out.push(wrapping(U8{v}))
+                out.push(wrapping(U8{v >> 8}))
+                out.push(wrapping(U8{v >> 16}))
+                out.push(wrapping(U8{v >> 24}))
             }
             return out
         }
@@ -2466,10 +2459,10 @@ blake3_root_chunk: fn(data: [U8]) -> [U8] {
     out := [U8]{}
     loop k in 0..<8 {
         v: cv[k]
-        out.push(to_u8(v))
-        out.push(to_u8((v >> 8)))
-        out.push(to_u8((v >> 16)))
-        out.push(to_u8((v >> 24)))
+        out.push(wrapping(U8{v}))
+        out.push(wrapping(U8{v >> 8}))
+        out.push(wrapping(U8{v >> 16}))
+        out.push(wrapping(U8{v >> 24}))
     }
     out
 }
@@ -2477,16 +2470,16 @@ blake3_root_chunk: fn(data: [U8]) -> [U8] {
 blake3_parent: fn(left: [Int], right: [Int], is_root: Bool) -> [Int] {
     block := [U8]{}
     loop w in left {
-        block.push(to_u8(w))
-        block.push(to_u8((w >> 8)))
-        block.push(to_u8((w >> 16)))
-        block.push(to_u8((w >> 24)))
+        block.push(wrapping(U8{w}))
+        block.push(wrapping(U8{w >> 8}))
+        block.push(wrapping(U8{w >> 16}))
+        block.push(wrapping(U8{w >> 24}))
     }
     loop w in right {
-        block.push(to_u8(w))
-        block.push(to_u8((w >> 8)))
-        block.push(to_u8((w >> 16)))
-        block.push(to_u8((w >> 24)))
+        block.push(wrapping(U8{w}))
+        block.push(wrapping(U8{w >> 8}))
+        block.push(wrapping(U8{w >> 16}))
+        block.push(wrapping(U8{w >> 24}))
     }
     flags := 4
     if is_root -> flags = (flags).bit_or(8)

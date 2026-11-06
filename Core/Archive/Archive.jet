@@ -104,12 +104,12 @@ deflate: fn(data: [U8]) -> [U8] ArchiveError! {
         if n > 65535 -> n = 65535
         last := 0
         if i + n >= data.len() -> last = 1
-        out.push(to_u8(last))
-        out.push(to_u8(n))
-        out.push(to_u8(n >> 8))
+        out.push(wrapping(U8{last}))
+        out.push(wrapping(U8{n}))
+        out.push(wrapping(U8{n >> 8}))
         inv := 65535 - n
-        out.push(to_u8(inv))
-        out.push(to_u8(inv >> 8))
+        out.push(wrapping(U8{inv}))
+        out.push(wrapping(U8{inv >> 8}))
         loop k in 0..<n -> out.push(data[i + k])
         i = i + n
     }
@@ -183,10 +183,10 @@ compress: fn(data: [U8]) -> [U8] ArchiveError! {
     checksum: adler32(data)
     out := [U8]{(U8{120}), (U8{156})}
     loop byte in payload -> out.push(byte)
-    out.push(to_u8(checksum >> 24))
-    out.push(to_u8(checksum >> 16))
-    out.push(to_u8(checksum >> 8))
-    out.push(to_u8(checksum))
+    out.push(wrapping(U8{checksum >> 24}))
+    out.push(wrapping(U8{checksum >> 16}))
+    out.push(wrapping(U8{checksum >> 8}))
+    out.push(wrapping(U8{checksum}))
     Ok(out)
 }
 
@@ -703,15 +703,15 @@ zip_central_valid: fn(data: [U8], start: Int, files: [ZipFile], offsets: [Int], 
 }
 
 put16: fn(out: &[U8], n: Int) Never! {
-    out.push(to_u8(n))
-    out.push(to_u8(n >> 8))
+    out.push(wrapping(U8{n}))
+    out.push(wrapping(U8{n >> 8}))
 }
 
 put32: fn(out: &[U8], n: Int) Never! {
-    out.push(to_u8(n))
-    out.push(to_u8(n >> 8))
-    out.push(to_u8(n >> 16))
-    out.push(to_u8(n >> 24))
+    out.push(wrapping(U8{n}))
+    out.push(wrapping(U8{n >> 8}))
+    out.push(wrapping(U8{n >> 16}))
+    out.push(wrapping(U8{n >> 24}))
 }
 
 u16: fn(data: [U8], i: Int) -> Int Never! { (u8_int(data[i])).bit_or((u8_int(data[i + 1]) << 8)) }
@@ -744,7 +744,7 @@ tar_header_kind: fn(name: String, size: Int, kind: Int) -> [U8] Never! {
     write_octal(hdr, 116, 8, 0)
     write_octal(hdr, 124, 12, size)
     write_octal(hdr, 136, 12, 0)
-    hdr[156] = to_u8(kind)
+    hdr[156] = wrapping(U8{kind})
     // The ustar magic is part of the checksummed header, so it is written
     // before the checksum is summed.
     ustar: "ustar"
@@ -782,7 +782,7 @@ write_octal: fn(hdr: &[U8], off: Int, width: Int, value: Int) Never! {
     i := off + width - 2
     hdr[off + width - 1] = (U8{0})
     loop i >= off {
-        hdr[i] = to_u8(48 + ((n).bit_and(7)))
+        hdr[i] = wrapping(U8{48 + ((n).bit_and(7))})
         n = n >> 3
         i = i - 1
     }
@@ -993,16 +993,12 @@ json_escape: fn(value: String) -> String ArchiveError! {
 }
 
 hex_digit: fn(n: Int) -> U8 Never! {
-    if n < 10 -> return to_u8(48 + n)
-    to_u8(87 + n)
+    if n < 10 -> return wrapping(U8{48 + n})
+    wrapping(U8{87 + n})
 }
 
 u8_int: fn(b: U8) -> Int Never! { Int.from_u8(b) }
 
-to_u8: fn(n: Int) -> U8 Never! {
-    v: (n).bit_and(255)
-    (U8{v})
-}
 read_u32be: fn(data: [U8], i: Int) -> Int Never! {
     ((((u8_int(data[i]) << 24)).bit_or((u8_int(data[i + 1]) << 16))).bit_or((u8_int(data[i + 2]) << 8))).bit_or(u8_int(data[i + 3]))
 }
@@ -1090,7 +1086,7 @@ inflate_fixed: fn(r: &BitReader, out: &[U8]) -> Int Never! {
         if {
             sym < 256 -> {
                 if out.len() >= C_MAX_OUTPUT -> return C_INFLATE_UNSUPPORTED
-                out.push(to_u8(sym))
+                out.push(wrapping(U8{sym}))
             }
             sym == 256 -> { return C_INFLATE_OK }
             sym <= 285 -> {
@@ -1323,7 +1319,7 @@ inflate_dynamic: fn(r: &BitReader, out: &[U8]) -> Int Never! {
                     r.bad = false
                     return C_INFLATE_UNSUPPORTED
                 }
-                out.push(to_u8(sym))
+                out.push(wrapping(U8{sym}))
             }
             sym == 256 -> {
                 r.i = tmp.i

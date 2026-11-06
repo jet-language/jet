@@ -528,15 +528,10 @@ ipv6_packed: fn(addr: IPv6) -> [U8] Never! {
     if addr.words.len() != 8 -> return [U8]{}
     out := [U8]{}
     loop w in addr.words {
-        out.push(to_u8((w /% 256) %% 256))
-        out.push(to_u8(w %% 256))
+        out.push(wrapping(U8{(w /% 256) %% 256}))
+        out.push(wrapping(U8{w %% 256}))
     }
     out
-}
-
-to_u8: fn(n: Int) -> U8 Never! {
-    v: (n).bit_and(255)
-    (U8{v})
 }
 
 ipv6_compressed: fn(addr: IPv6) -> String Never! {

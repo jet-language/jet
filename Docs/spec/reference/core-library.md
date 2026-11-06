@@ -4200,6 +4200,22 @@ left operand's width, and its count may be any integer width (`U64{byte} << n`
 with `n: U8`); a count past the value's width traps rather than leaking a
 host-language panic.
 
+`wrapping(T{x})` is the truncating conversion from `Int` for every
+fixed-width integer type: it keeps the low bits of `x` in `T`'s width, two's
+complement for a signed `T`.
+
+```jet
+low_bits: fn(wide: Int, deep: Int) {
+    print(wrapping(U8{wide}))   // 112
+    print(wrapping(U16{wide}))  // 4464
+    print(wrapping(I32{deep}))  // -705032704
+}
+
+run: fn() {
+    low_bits(70000, -5000000000)
+}
+```
+
 Explicit narrowing is destination-owned and fallible. `U8.from_int`,
 `I16.from_int`, `F32.from_float`, `Int.from_float`, and the corresponding
 fixed-width conversions reject values outside the target's finite range;

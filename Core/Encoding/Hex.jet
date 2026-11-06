@@ -191,14 +191,14 @@ a2b_uu: fn(text: String) -> [U8] Never! {
             b: uu_value(raw[i + 1])
             c: uu_value(raw[i + 2])
             d: uu_value(raw[i + 3])
-            out.push(to_u8(((a << 2)).bit_xor((b >> 4))))
+            out.push(wrapping(U8{((a << 2)).bit_xor((b >> 4))}))
             produced += 1
             if produced < count {
-                out.push(to_u8(((b << 4)).bit_xor((c >> 2))))
+                out.push(wrapping(U8{((b << 4)).bit_xor((c >> 2))}))
                 produced += 1
             }
             if produced < count {
-                out.push(to_u8(((c << 6)).bit_xor(d)))
+                out.push(wrapping(U8{((c << 6)).bit_xor(d)}))
                 produced += 1
             }
             i += 4
@@ -269,13 +269,6 @@ dump: fn(data: [U8]) -> String Never! {
         offset += 16
     }
     String.from_bytes(out) ?? ""
-}
-
-/// Low byte of `n`. The mask runs in `Int`, so a wide value never reaches the
-/// checked `U8{}` conversion.
-to_u8: fn(n: Int) -> U8 Never! {
-    v: (n).bit_and(255)
-    (U8{v})
 }
 
 #Test("hex kernel vectors") {

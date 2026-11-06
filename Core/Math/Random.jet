@@ -300,7 +300,7 @@ bytes: fn(n: Int) -[Rand]> [U8] Never! {
         word: full_word64()
         loop k in 0..<8 {
             if out.len() >= n -> return out
-            out.push(to_u8(word >> (k * 8)))
+            out.push(wrapping(U8{word >> (k * 8)}))
         }
     }
 }
@@ -537,13 +537,6 @@ binomialvariate: fn(n: Int, p: Float) -[Rand]> Int Never! {
         if unit() < p -> successes += 1
     }
     successes
-}
-
-/// Low byte of `n`. The mask runs in `Int`, so a wide value never reaches the
-/// checked `U8{}` conversion.
-to_u8: fn(n: Int) -> U8 Never! {
-    v: (n).bit_and(255)
-    (U8{v})
 }
 
 // Captured from the retained Rust kernel before cutover (SHA256

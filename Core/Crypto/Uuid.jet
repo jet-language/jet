@@ -34,12 +34,12 @@ v7: fn(clock: &Clock) -[Rand, Time]> String UUIDError! {
     }
     tail: random.bytes(10) ?? return Err(UUIDError{reason: "secure random unavailable"})
     bytes := [U8]{
-        to_u8(timestamp >> 40),
-        to_u8(timestamp >> 32),
-        to_u8(timestamp >> 24),
-        to_u8(timestamp >> 16),
-        to_u8(timestamp >> 8),
-        to_u8(timestamp),
+        wrapping(U8{timestamp >> 40}),
+        wrapping(U8{timestamp >> 32}),
+        wrapping(U8{timestamp >> 24}),
+        wrapping(U8{timestamp >> 16}),
+        wrapping(U8{timestamp >> 8}),
+        wrapping(U8{timestamp}),
     }
     loop b in tail -> bytes.push(b)
     bytes[6] = U8{(((Int.from_u8(bytes[6])).bit_and(15))).bit_or(112)}
@@ -94,7 +94,7 @@ parse_uuid: fn(text: String) -> [U8]? {
     loop i in 0..<16 {
         hi: hex_value(digits[i * 2]) ?? return None
         lo: hex_value(digits[i * 2 + 1]) ?? return None
-        out.push(to_u8(((hi << 4)).bit_or(lo)))
+        out.push(wrapping(U8{((hi << 4)).bit_or(lo)}))
     }
     Val(out.copy())
 }
@@ -131,16 +131,9 @@ hex_decode: fn(text: String) -> [U8]? {
     loop i in 0..<raw.len(), 2 {
         hi: hex_value(raw[i]) ?? return None
         lo: hex_value(raw[i + 1]) ?? return None
-        out.push(to_u8(((hi << 4)).bit_or(lo)))
+        out.push(wrapping(U8{((hi << 4)).bit_or(lo)}))
     }
     Val(out.copy())
-}
-
-/// Low byte of `n`. The mask runs in `Int`, so a wide value never reaches the
-/// checked `U8{}` conversion.
-to_u8: fn(n: Int) -> U8 Never! {
-    v: (n).bit_and(255)
-    (U8{v})
 }
 
 #Test("UUID v7 keeps the manual Clock timestamp and RFC version and variant") {

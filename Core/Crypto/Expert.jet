@@ -38,11 +38,6 @@ rotl32: fn(x: Int, n: Int) -> Int Never! {
     ((((v << r)).bit_or((v >> (32 - r))))).bit_and(C_MASK32)
 }
 
-to_u8: fn(n: Int) -> U8 Never! {
-    v: (n).bit_and(255)
-    U8{v}
-}
-
 copy_bytes: fn(bytes: [U8]) -> [U8] Never! {
     out := [U8]{}
     loop b in bytes -> out.push(b)
@@ -69,7 +64,7 @@ le_bytes: fn(n: Int, width: Int) -> [U8] Never! {
     out := [U8]{}
     v := n
     loop i in 0..<width {
-        out.push(to_u8(v))
+        out.push(wrapping(U8{v}))
         v = v >> 8
     }
     out
@@ -116,10 +111,10 @@ chacha20_block: fn(key: [U8], nonce: [U8], counter: Int) -> [U8] Never! {
     out := [U8]{}
     loop i in 0..<16 {
         v: w[i]
-        out.push(to_u8(v))
-        out.push(to_u8(v >> 8))
-        out.push(to_u8(v >> 16))
-        out.push(to_u8(v >> 24))
+        out.push(wrapping(U8{v}))
+        out.push(wrapping(U8{v >> 8}))
+        out.push(wrapping(U8{v >> 16}))
+        out.push(wrapping(U8{v >> 24}))
     }
     out
 }
@@ -150,7 +145,7 @@ chacha20_xor: fn(key: [U8], nonce: [U8], counter: Int, plain: [U8]) -> [U8] Neve
         ctr = ctr + 1
         loop j in 0..<64 {
             if i >= plain.len() -> return out
-            out.push(to_u8(u8_int(plain[i]).bit_xor(u8_int(block[j]))))
+            out.push(wrapping(U8{u8_int(plain[i]).bit_xor(u8_int(block[j]))}))
             i = i + 1
         }
     }
@@ -237,10 +232,10 @@ hchacha20: fn(key: [U8], nonce16: [U8]) -> [U8] Never! {
 }
 
 hchacha_word: fn(out: &[U8], value: Int) Never! {
-    out.push(to_u8(value))
-    out.push(to_u8(value >> 8))
-    out.push(to_u8(value >> 16))
-    out.push(to_u8(value >> 24))
+    out.push(wrapping(U8{value}))
+    out.push(wrapping(U8{value >> 8}))
+    out.push(wrapping(U8{value >> 16}))
+    out.push(wrapping(U8{value >> 24}))
 }
 
 xchacha_seal: fn(key: [U8], nonce24: [U8], aad: [U8], plain: [U8]) -> [U8] Never! {
@@ -322,7 +317,7 @@ hkdf_sha256_raw: fn(ikm: [U8], salt: [U8], info: [U8], len: Int) -> Secret Crypt
         material := [U8]{}
         loop b in previous -> material.push(b)
         loop b in info -> material.push(b)
-        material.push(to_u8(counter))
+        material.push(wrapping(U8{counter}))
         previous = hmac_sha256_local(prk, material)
         loop b in previous {
             if out.len() >= len -> break

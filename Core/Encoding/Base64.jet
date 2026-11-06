@@ -188,10 +188,10 @@ ascii85_decode: fn(text: String) -> [U8] Base64Error! {
             value := 0
             loop d in group -> value = value * 85 + d
             if value > 4294967295 -> return Err(rewrap("invalid Ascii85 quantum; encoded value exceeds four bytes"))
-            out.push(to_u8(value >> 24))
-            out.push(to_u8(value >> 16))
-            out.push(to_u8(value >> 8))
-            out.push(to_u8(value))
+            out.push(wrapping(U8{value >> 24}))
+            out.push(wrapping(U8{value >> 16}))
+            out.push(wrapping(U8{value >> 8}))
+            out.push(wrapping(U8{value}))
             group = [Int]{}
         }
     }
@@ -202,7 +202,7 @@ ascii85_decode: fn(text: String) -> [U8] Base64Error! {
         value := 0
         loop d in group -> value = value * 85 + d
         if value > 4294967295 -> return Err(rewrap("invalid Ascii85 quantum; encoded value exceeds four bytes"))
-        loop j in 0..<(original - 1) -> out.push(to_u8(value >> (24 - j * 8)))
+        loop j in 0..<(original - 1) -> out.push(wrapping(U8{value >> (24 - j * 8)}))
     }
     Ok(out)
 }
@@ -263,17 +263,10 @@ base85_decode: fn(text: String, alphabet: String, require_full: Bool) -> [U8] Ba
         if value > 4294967295 -> return Err(rewrap("invalid Base85 quantum; encoded value exceeds four bytes"))
         count := 4
         if original < 5 -> count = original - 1
-        loop j in 0..<count -> out.push(to_u8(value >> (24 - j * 8)))
+        loop j in 0..<count -> out.push(wrapping(U8{value >> (24 - j * 8)}))
         i += width
     }
     Ok(out)
-}
-
-/// Low byte of `n`. The mask runs in `Int`, so a wide value never reaches the
-/// checked `U8{}` conversion.
-to_u8: fn(n: Int) -> U8 Never! {
-    v: (n).bit_and(255)
-    (U8{v})
 }
 
 encode_alphabet: fn(data: [U8], alphabet: String, padded: Bool) -> String Never! {

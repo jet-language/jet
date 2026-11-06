@@ -60,7 +60,7 @@ compress: fn(data: [U8]) -> [U8] ZstdFileError! {
     // Frame_Header_Descriptor: FCS_Flag = 11 (8-byte size), single segment, no checksum
     out.push(U8{0xE0})
     n: data.len()
-    loop k in 0..<8 -> out.push(to_u8(n >> (k * 8)))
+    loop k in 0..<8 -> out.push(wrapping(U8{n >> (k * 8)}))
     i := 0
     loop i < data.len() {
         left := data.len() - i
@@ -70,9 +70,9 @@ compress: fn(data: [U8]) -> [U8] ZstdFileError! {
         if i + chunk_len >= data.len() -> last = 1
         bh := chunk_len << 3
         if last != 0 -> bh = (bh).bit_or(1)
-        out.push(to_u8(bh))
-        out.push(to_u8(bh >> 8))
-        out.push(to_u8(bh >> 16))
+        out.push(wrapping(U8{bh}))
+        out.push(wrapping(U8{bh >> 8}))
+        out.push(wrapping(U8{bh >> 16}))
         loop k in 0..<chunk_len -> out.push(data[i + k])
         i = i + chunk_len
     }
@@ -932,18 +932,13 @@ xxh64_low32: fn(data: [U8]) -> Int Never! {
 }
 
 put32: fn(out: &[U8], n: Int) Never! {
-    out.push(to_u8(n))
-    out.push(to_u8(n >> 8))
-    out.push(to_u8(n >> 16))
-    out.push(to_u8(n >> 24))
+    out.push(wrapping(U8{n}))
+    out.push(wrapping(U8{n >> 8}))
+    out.push(wrapping(U8{n >> 16}))
+    out.push(wrapping(U8{n >> 24}))
 }
 
 u8_int: fn(b: U8) -> Int Never! { Int.from_u8(b) }
-
-to_u8: fn(n: Int) -> U8 Never! {
-    v: (n).bit_and(255)
-    (U8{v})
-}
 
 read_u16le: fn(data: [U8], i: Int) -> Int Never! {
     (u8_int(data[i])).bit_or((u8_int(data[i + 1]) << 8))
