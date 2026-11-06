@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6610,
-    "rev": 93400,
+    "rev": 93425,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -24299,6 +24299,11 @@
       "assignee": "Main",
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources); the AGENTS.md Performance gate (Jet/peer < 1.00 with no Rust band, then the asm-parity ceiling)."
+        },
+        {
           "at": "2026-10-23",
           "by": "agent",
           "text": "Board burndown 2026-10-22: re-phased (no building work logged since before 2026-10-20)."
@@ -24447,11 +24452,11 @@
       "parentId": "c0ut93qg",
       "needsAcceptance": false,
       "created": "2026-09-03T10:57:25.181Z",
-      "updated": "2026-11-06T18:37:45.072Z",
+      "updated": "2026-11-06T18:37:46.873Z",
       "updatedBy": "Main",
       "probe": null,
       "visualMedia": [],
-      "claimedAt": "2026-11-06T18:37:45.072Z",
+      "claimedAt": "2026-11-06T18:37:46.873Z",
       "goals": []
     },
     {
@@ -24465,11 +24470,16 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
-      "plan": "## Goal\nMake the ratified columnar layout (`#Layout(c)`, D-SOA1/D-SOA2) at least as fast as AoS on the particle update it exists for, and vectorize it the same way.\n\nMeasured, N=2,000 (`x += vx*dt`, `y += vy*dt`, checksum of `mass*(x+y)`):\n\n| Layout | AOT median | Particle-loop arithmetic |\n|---|---|---|\n| AoS `List<Particle>` | 0.0126 s | `vmulpd` 15 / `vaddpd` 5 / `vsubpd` 5 |\n| Manual SoA | 0.0118 s | — |\n| Columnar | 0.180 s (dev and release) | none, only moves and masks |\n\nAll three print `599.9999999999977`. The 15x loss breaks the performance-budget law (`Docs/spec/performance-budget-decisions.md`) on the layout's headline case. Evidence: `~/.cache/jet-test-scratch/mine-20260903/simd/results.md` S5.\n\n## Current state\n- Jet printer: `Compiler/JetCodegen/Source/Emit/Operations.jet:1578-1597` `jet_rust_emit_columnar_read` prints every read as `(base).cell(k, i, file, line).jet_col_<field>()`. That is a per-element enum match with no loop-invariant typed projection.\n- Lowering goes through `jet_columns_gather_cell` (`Codegen/Expressions.jet:4729-4733`, `MirSemanticOp.ColumnarRead`). Legality facts are at `Compiler/JetOptimizer/Source/Verification/Legality.jet:721-723`.\n- `Compiler/JetEval/Source/Evaluator.jet:7662,8347` reads per element through a Prelude argument vector.\n- Host code:\n  - `crates/jet-codegen/src/Prelude/Core/Columns.rs` `gather`/`gather_cell` build `views()` on every call.\n  - `crates/jet-jit/src/jit/Collections.rs` rebuilds `JetColumns::from_rows` on every read.\n- The witness exists: `tests/s5_columnar_witness.rs` with `tests/s5_columnar_witness/{aos,columnar}.jet`. It checks output identity only.\n- The dependency cards are all done: #2888, #2892, #2895, #2899 and #2893. #2893 owns automatic AoS→SoA transposition, which is out of scope here.\n\n## Changes\n1. Optimizer (`Compiler/JetOptimizer/Source/Facts/LoopVector.jet`, `Verification/Legality.jet`): for a read-only numeric columnar scan whose field is loop-invariant, record a typed column projection. That is one typed field slice per touched field, hoisted before the loop. Log it in the #2899 decision ledger with its one-time cost.\n2. Jet printer (`jet_rust_emit_columnar_read`):\n   - When the fact is present, print plain indexed reads on a borrowed `&[f64]` (or the proven field type), keeping the shared bounds check and the error location.\n   - Otherwise, keep today's route.\n   - Mirror the same printing in the shipped MIRRust.rs.\n3. JetEval: add direct column access with no per-element argument vector.\n4. Host:\n   - `Columns.rs`: `gather`/`gather_cell` use stable column borrows and stop allocating `views()`.\n   - JIT: keep the column store for the whole operation.\n   - Row views, serialization and whole-record gather stay unchanged.\n5. Extend `tests/s5_columnar_witness.rs` with `s5_columnar_release_loop_is_packed`, which checks the release binary's `objdump` for `vmulpd`/`vaddpd` in the particle loop.\n\n## Proof\n- `Tools/agent/jet-env cargo test --test s5_columnar_witness`: both tests pass. Output is identical on AOT, `jet run` and `--interpret`, and the columnar loop has packed f64 instructions.\n- Measurement: build `tests/s5_columnar_witness/{aos,columnar}.jet` with `jet build --release`, then run `hyperfine -w 3 -r 20 ./aos ./columnar`. The columnar median must be ≤ the AoS median.\n\n## Batch\nbatch-jetc-back: optimizer fact and printer, with the host Columns and JIT fixes in the same build.\n\n## Dependencies\nNone. All the prerequisite cards are done.\n",
+      "plan": "## Goal\nMake the ratified columnar layout (`#Layout(c)`, D-SOA1/D-SOA2) at least as fast as AoS on the particle update it exists for, and vectorize it the same way.\n\nMeasured, N=2,000 (`x += vx*dt`, `y += vy*dt`, checksum of `mass*(x+y)`):\n\n| Layout | AOT median | Particle-loop arithmetic |\n|---|---|---|\n| AoS `List<Particle>` | 0.0126 s | `vmulpd` 15 / `vaddpd` 5 / `vsubpd` 5 |\n| Manual SoA | 0.0118 s | — |\n| Columnar | 0.180 s (dev and release) | none, only moves and masks |\n\nAll three print `599.9999999999977`. The 15x loss breaks the performance-budget law (`Docs/spec/performance-budget-decisions.md`) on the layout's headline case. Evidence: `~/.cache/jet-test-scratch/mine-20260903/simd/results.md` S5.\n\n## Current state\n- Jet printer: `Compiler/JetCodegen/Source/Emit/Operations.jet:1578-1597` `jet_rust_emit_columnar_read` prints every read as `(base).cell(k, i, file, line).jet_col_<field>()`. That is a per-element enum match with no loop-invariant typed projection.\n- Lowering goes through `jet_columns_gather_cell` (`Codegen/Expressions.jet:4729-4733`, `MirSemanticOp.ColumnarRead`). Legality facts are at `Compiler/JetOptimizer/Source/Verification/Legality.jet:721-723`.\n- `Compiler/JetEval/Source/Evaluator.jet:7662,8347` reads per element through a Prelude argument vector.\n- Host code:\n  - `crates/jet-codegen/src/Prelude/Core/Columns.rs` `gather`/`gather_cell` build `views()` on every call.\n  - `crates/jet-jit/src/jit/Collections.rs` rebuilds `JetColumns::from_rows` on every read.\n- The witness exists: `tests/s5_columnar_witness.rs` with `tests/s5_columnar_witness/{aos,columnar}.jet`. It checks output identity only.\n- The dependency cards are all done: #2888, #2892, #2895, #2899 and #2893. #2893 owns automatic AoS→SoA transposition, which is out of scope here.\n\n## Changes\n1. Optimizer (`Compiler/JetOptimizer/Source/Facts/LoopVector.jet`, `Verification/Legality.jet`): for a read-only numeric columnar scan whose field is loop-invariant, record a typed column projection. That is one typed field slice per touched field, hoisted before the loop. Log it in the #2899 decision ledger with its one-time cost.\n2. Jet printer (`jet_rust_emit_columnar_read`):\n   - When the fact is present, print plain indexed reads on a borrowed `&[f64]` (or the proven field type), keeping the shared bounds check and the error location.\n   - Otherwise, keep today's route.\n   - Mirror the same printing in the shipped MIRRust.rs.\n3. JetEval: add direct column access with no per-element argument vector.\n4. Host:\n   - `Columns.rs`: `gather`/`gather_cell` use stable column borrows and stop allocating `views()`.\n   - JIT: keep the column store for the whole operation.\n   - Row views, serialization and whole-record gather stay unchanged.\n5. Extend `tests/s5_columnar_witness.rs` with `s5_columnar_release_loop_is_packed`, which checks the release binary's `objdump` for `vmulpd`/`vaddpd` in the particle loop.\n\n## Proof\n- `jet test Compiler --profile cases s5_columnar_witness/`: both tests pass. Output is identical on O0, O1 and O2, and the columnar loop has packed f64 instructions.\n- Measurement: build `tests/s5_columnar_witness/{aos,columnar}.jet` with `jet build --release`, then run `hyperfine -w 3 -r 20 ./aos ./columnar`. The columnar median must be ≤ the AoS median.\n\n## Batch\nbatch-jetc-back: optimizer fact and printer, with the host Columns and JIT fixes in the same build.\n\n## Dependencies\nNone. All the prerequisite cards are done.\n",
       "checkSteps": "Planned proof only; not run during preparation. Rebuild before compiler/runtime smoke. Run repository commands through scripts/agent/jet-env. Use exact narrow criterion evidence; broad suites remain milestone-gated.\n\nUse the same S5 fixtures and same machine; every Jet invocation goes through `scripts/agent/jet-env`.\n\n1. Build both fixtures in release and run the packet's existing hyperfine comparison. Observable result: columnar median is <= AoS median under the existing strict gate; report raw runs, candidate identity, CPU, and output.\n2. Inspect the generated release artifact and run `objdump -d` over the particle loop. Observable result: `vmulpd` and `vaddpd` occur in the columnar loop, and the loop body has no `jet_columns_gather_cell`, `views()`, or per-element generated cell-enum field match. A source inspection of generated Rust must show one typed projection before the loop, not a `Vec`/projection recreated inside it.\n3. Run the three variants through release AOT, `scripts/agent/jet-env jet run`, and `scripts/agent/jet-env jet run --interpret`. Observable result: each prints `599.9999999999977`.\n4. Run negative/edge cells: empty columnar list, zero-field record, out-of-range positive/negative index, mixed field widths if representable, and whole-record serialization. Observable result: errors and row/field order match the pre-change canonical operation; no typed projection bypasses bounds or changes serialization.\n5. Run the JIT and interpreter parity rows from the card. Observable result required by the existing card is output parity; the implementation proof additionally records that JIT does not rebuild from rows per read and interpreter does not allocate a per-element prelude argument vector.",
       "blockedBy": [],
       "assignee": "Main",
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
         {
           "at": "2026-10-30",
           "by": "Main",
@@ -24577,7 +24587,7 @@
         },
         {
           "n": 3,
-          "text": "All three variants still print 599.9999999999977 on AOT, jet run, and --interpret",
+          "text": "All three variants still print 599.9999999999977 on O0, O1 and O2",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -24604,7 +24614,7 @@
         },
         {
           "n": 6,
-          "text": "[retarget] All three variants still print 599.9999999999977 on AOT, jet run, and --interpret (JetEval)",
+          "text": "[retarget] All three variants still print 599.9999999999977 on O0, O1 and O2 (JetEval)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -24613,7 +24623,7 @@
         },
         {
           "n": 7,
-          "text": "[retarget] Jet-side proof (Rust freeze 2026-10-01): the behavior the replaced Rust test checks holds on the Jet compiler or the Jet-hosted tool, shown by an equivalent test against the Jet implementation; no new Rust test and no Rust compiler change. Replaces the Rust-compiler proof: \"`Tools/agent/jet-env cargo test --test s5_columnar_witness` passes including s5_columnar_release_loop_is_packed (vmulpd/vaddpd in the columnar particle loop; identical output on all tiers)\"",
+          "text": "[retarget] Jet-side proof (Rust freeze 2026-10-01): the behavior the replaced Rust test checks holds on the Jet compiler or the Jet-hosted tool, shown by an equivalent test against the Jet implementation; no new Rust test and no Rust compiler change. Replaces the Rust-compiler proof: \"`jet test Compiler --profile cases s5_columnar_witness/` passes including s5_columnar_release_loop_is_packed (vmulpd/vaddpd in the columnar particle loop; identical output on all tiers)\"",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -24677,11 +24687,11 @@
       "parentId": "c0i42tsl",
       "needsAcceptance": false,
       "created": "2026-09-03T19:06:19.185Z",
-      "updated": "2026-10-30T14:36:39.934Z",
+      "updated": "2026-11-06T18:37:52.414Z",
       "updatedBy": "Main",
       "probe": null,
       "visualMedia": [],
-      "claimedAt": "2026-10-30T14:36:39.934Z",
+      "claimedAt": "2026-11-06T18:37:52.414Z",
       "goals": []
     },
     {
@@ -25722,13 +25732,18 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
-      "plan": "## Goal\nDeliver D-DEEP-CHECK1=A (ratified): one opt-in compiler control for expensive in-memory checks, with optional package/function targeting, and no weakening of required contracts or safety. It extends the existing `#DebugOnly` path; it is not a second assertion mechanism.\n\nRatified A example (package \"tree\"):\n```jet\nfn run() {\n    tree := sample_tree()\n    tree.cached_size = 4\n    #DebugOnly(.deep) {\n        assert(deep_consistent(tree), \"tree size is wrong\")\n    }\n    serve(tree)\n}\n```\n`jet run app.jet` prints 4 and runs no deep check. `--deep-checks` fails before `serve`. `--deep-checks=tree` targets this package; `--deep-checks=tree::run` targets `fn run` in every version.\n\n## Current state\n- #3043 (erased-code isolation) is done, so it is a stale blocker.\n- Parser: `Compiler/JetParser/Source/Parser/Statements.jet:611` maps `Off | DebugOnly` to `Stmt.Switched(marker, body, span)`. No `.deep` argument is recognised.\n- Sema: `Compiler/JetSema/Source/Sema/Statements.jet:3304-3316` checks the erased scope against snapshots (scopes/state/context) and emits `TStmt.DebugOnly`.\n- Codegen: `Compiler/JetCodegen/Source/Codegen/Statements.jet:95-96` `jet_codegen_lower_debug_only` → `MirScopeKind.DebugOnly`, dispatched at :1908.\n- Driver: `Compiler/JetDriver/Source/Driver/Identity.jet:39` `JetDriverCompileRequest` has no check-selection field. No `--deep-checks` exists in Source/ or Compiler/ (grep).\n\n## Changes\n1. JetParser: accept `#DebugOnly(.deep)` as the only new marker argument (registered spelling). Any other argument is a registered error.\n2. JetSema: a `.deep` body keeps the current erased-scope isolation even when off: captures are read-only, only fresh non-escaping local mutation is allowed, external/authority effects are rejected transitively, `Mem.*`/Panic follow normal reachable-effect denial, and nonlocal exits are rejected. Each site records its owner (package, module, fn).\n3. JetDriver: add a typed `deep_checks` selection (off | all | scopes) to `JetDriverCompileRequest`. It resolves scopes to authored sites before checking and lowering (global, package/module/function, repeated union, same-named instance, and unmatched scope as a registered diagnostic). It keys unit, artifact and resident-module identity by the resolved sites, so equivalent selections reuse artifacts, changed selections rebuild only affected units, and missing selection metadata fails closed.\n4. JetCodegen: lower a selected `.deep` site as a live scope and an unselected one as today's erased scope.\n5. Host (Source/ CLI, REPL/notebook, debugger engines, compiler wrappers): parse `--deep-checks[=scope,...]` once into the same typed request. Sessions keep their starting selection. The flag is off in every profile. Keep `--no-prepare`/locked admission unchanged. Register the flag and diagnostics (`crates/jet-codegen/src/Prelude/Diagnostics.jet` → `node Compiler/Bootstrap/generate-diagnostic-rows.mjs`) with snapshots.\n6. Option B's settings path is not built. No SQLite bridge, Invariant revival, or public prebuilt format.\n\n## Proof\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.\n- `JET_GOLDEN_FILTER=contracts/deep_checks_tree Tools/agent/jet-env cargo test --test golden examples_compile_and_run` passes (default off, valid and corrupt data). `Tools/agent/jet-env jet run --interpret --deep-checks Examples/features/contracts/deep_checks_tree.jet` fails with the assert on the corrupt tree.\n- `Tools/agent/jet-env cargo test --test cli_commands -- deep_checks_selection` passes: global, package, `pkg::fn`, repeated union, unmatched scope, cache reuse on an equal selection, and a rebuild on a changed one.\n- `JET_UI_FILTER=tests/ui/deep_check_ Tools/agent/jet-env cargo test --test diagnostic_snapshots ui_snapshots` passes (captured-state write, IO effect, `return` inside the scope, unknown scope).\n\n## Batch\nbatch-jetc-driver: the selection resolution and identity keying in JetDriver are the load-bearing boundary. Parser, sema and codegen edits land in the same build.\n\n## Dependencies\nNone open (#3043 done). No performance claim is made; any perf adoption waits for the strict paired gate.\n",
+      "plan": "## Goal\nDeliver D-DEEP-CHECK1=A (ratified): one opt-in compiler control for expensive in-memory checks, with optional package/function targeting, and no weakening of required contracts or safety. It extends the existing `#DebugOnly` path; it is not a second assertion mechanism.\n\nRatified A example (package \"tree\"):\n```jet\nfn run() {\n    tree := sample_tree()\n    tree.cached_size = 4\n    #DebugOnly(.deep) {\n        assert(deep_consistent(tree), \"tree size is wrong\")\n    }\n    serve(tree)\n}\n```\n`jet run app.jet` prints 4 and runs no deep check. `--deep-checks` fails before `serve`. `--deep-checks=tree` targets this package; `--deep-checks=tree::run` targets `fn run` in every version.\n\n## Current state\n- #3043 (erased-code isolation) is done, so it is a stale blocker.\n- Parser: `Compiler/JetParser/Source/Parser/Statements.jet:611` maps `Off | DebugOnly` to `Stmt.Switched(marker, body, span)`. No `.deep` argument is recognised.\n- Sema: `Compiler/JetSema/Source/Sema/Statements.jet:3304-3316` checks the erased scope against snapshots (scopes/state/context) and emits `TStmt.DebugOnly`.\n- Codegen: `Compiler/JetCodegen/Source/Codegen/Statements.jet:95-96` `jet_codegen_lower_debug_only` → `MirScopeKind.DebugOnly`, dispatched at :1908.\n- Driver: `Compiler/JetDriver/Source/Driver/Identity.jet:39` `JetDriverCompileRequest` has no check-selection field. No `--deep-checks` exists in Source/ or Compiler/ (grep).\n\n## Changes\n1. JetParser: accept `#DebugOnly(.deep)` as the only new marker argument (registered spelling). Any other argument is a registered error.\n2. JetSema: a `.deep` body keeps the current erased-scope isolation even when off: captures are read-only, only fresh non-escaping local mutation is allowed, external/authority effects are rejected transitively, `Mem.*`/Panic follow normal reachable-effect denial, and nonlocal exits are rejected. Each site records its owner (package, module, fn).\n3. JetDriver: add a typed `deep_checks` selection (off | all | scopes) to `JetDriverCompileRequest`. It resolves scopes to authored sites before checking and lowering (global, package/module/function, repeated union, same-named instance, and unmatched scope as a registered diagnostic). It keys unit, artifact and resident-module identity by the resolved sites, so equivalent selections reuse artifacts, changed selections rebuild only affected units, and missing selection metadata fails closed.\n4. JetCodegen: lower a selected `.deep` site as a live scope and an unselected one as today's erased scope.\n5. Host (Source/ CLI, REPL/notebook, debugger engines, compiler wrappers): parse `--deep-checks[=scope,...]` once into the same typed request. Sessions keep their starting selection. The flag is off in every profile. Keep `--no-prepare`/locked admission unchanged. Register the flag and diagnostics (`crates/jet-codegen/src/Prelude/Diagnostics.jet` → `node Compiler/Bootstrap/generate-diagnostic-rows.mjs`) with snapshots.\n6. Option B's settings path is not built. No SQLite bridge, Invariant revival, or public prebuilt format.\n\n## Proof\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.\n- `jet test Compiler --profile golden contracts/deep_checks_tree` passes (default off, valid and corrupt data). `Tools/agent/jet-env jet run --deep-checks Examples/features/contracts/deep_checks_tree.jet` fails with the assert on the corrupt tree.\n- `Tools/agent/jet-env cargo test --test cli_commands -- deep_checks_selection` passes: global, package, `pkg::fn`, repeated union, unmatched scope, cache reuse on an equal selection, and a rebuild on a changed one.\n- `jet test Compiler --profile ui deep_check_` passes (captured-state write, IO effect, `return` inside the scope, unknown scope).\n\n## Batch\nbatch-jetc-driver: the selection resolution and identity keying in JetDriver are the load-bearing boundary. Parser, sema and codegen edits land in the same build.\n\n## Dependencies\nNone open (#3043 done). No performance claim is made; any perf adoption waits for the strict paired gate.\n",
       "checkSteps": "After owner selection, implement and prove only that option. For A, prove default-off, global/package/function selection, repeated-union behavior, blocking empty/unmatched occurrences and copyable dotted method scopes, declaration ownership and same-name instances. Prove valid/corrupt outcomes, disabled type checks, no escaped facts, nonlocal-exit rejection and Panic denial. Check resolved-selection cache reuse, changed-unit rebuilds, independent resident-session selections and missing-source refusals. Exercise all applicable engines and CLI and embedded compiler-option entry points. Preserve required contracts and the strict performance policy.\n\nThis ballot is a design, not runtime evidence. Cover missing, unreadable and unsupported selection identity with and without admitted source, including the default-off request.",
       "probe": null,
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources); proof on the admitted `jet` (no jetc0, compiler-diff or frozen-Rust evidence)."
+        },
         {
           "at": "2026-10-01",
           "by": "TowerCloser",
@@ -25834,7 +25849,7 @@
         },
         {
           "n": 8,
-          "text": "AOT, default run, interpreter and applicable web preserve one selected meaning. Ordinary assertions retain Panic and no implicit grant; no SQLite bridge, revived Invariant mechanism, compatibility branch or public prebuilt format is introduced.",
+          "text": "O0, O1, O2 and web where applicable preserve one selected meaning. Ordinary assertions retain Panic and no implicit grant; no SQLite bridge, revived Invariant mechanism, compatibility branch or public prebuilt format is introduced.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -25852,7 +25867,7 @@
         },
         {
           "n": 10,
-          "text": "[retarget] Jet compiler proof (Rust freeze 2026-10-01): golden contracts/deep_checks_tree, Examples/features/contracts/deep_checks_tree.jet pass when compiled by the Jet compiler (Compiler/ pipeline, for example the #670 compiler-diff candidate run or jetc0): goldens print their expected output on AOT and default run, UI fixtures match their snapshots; no Rust compiler change (a Core-library-only change may also be shown on the frozen Rust compiler as interim evidence). Replaces the Rust-compiler proof: \"`Examples/features/contracts/deep_checks_tree.jet` prints its default-off output under `jet run`, fails before `serve` under `jet run --deep-checks`, and honours `--deep-checks=tree` / `--deep-checks=tree::run` / an unmatched scope (registered diagnostic): `JET_GOLDEN_FILTER=contracts/deep_checks_tree Tools/agent/jet-env cargo test --test golden examples_compile_and_run` plus `Tools/agent/jet-env cargo test --test cli_commands -- deep_checks_selection` pass\"",
+          "text": "Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): a Jet test or case row proves what the retired Rust test checked: \"`Examples/features/contracts/deep_checks_tree.jet` prints its default-off output under `jet run`, fails before `serve` under `jet run --deep-checks`, and honours `--deep-checks=tree` / `--deep-checks=tree::run` / an unmatched scope (registered diagnostic): `JET_GOLDEN_FILTER=contracts/deep_checks_tree Tools/agent/jet-env cargo test --test golden examples_compile_and_run` plus `Tools/agent/jet-env cargo test --test cli_commands -- deep_checks_selection` pass\". Goldens pass on O0, O1 and O2; UI fixtures match their snapshots.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -25885,7 +25900,7 @@
       "parentId": "c018gdah",
       "needsAcceptance": false,
       "created": "2026-09-10T22:59:00.365Z",
-      "updated": "2026-10-28T11:55:06.992Z",
+      "updated": "2026-11-06T18:38:06.739Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -26851,13 +26866,18 @@
       "milestoneId": "e3-m25-http-service-runtime",
       "phase": "ready",
       "priority": "P2",
-      "plan": "## Goal\nImplement ratified D-ONE-LIFECYCLE1=A (shared operations with explicit policies). Readiness, stop-admission, finite drain and resource close compose in one App-owned order, using the existing HTTP server and DB pool owners. No universal Service, Resource or Async type is added. Separately, factor the repeated interpreter ambient registration without changing per-mode reset or retention.\n\n## Current state\n- The HTTP server already has bounded shutdown: `crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2062` `jet_http_server_shutdown(server, grace)`, proven by `tests/http_server_lifecycle.rs:3666,3719,3855,3904`. Jet surface: `Examples/features/net/http_server_lifecycle.jet:1-17`.\n- The DB pool has its own lifecycle in `crates/jet-codegen/src/Prelude/CoreLib/Top/DbPool.rs`: `ready` (`:476`), `drain(deadline_ms)` (`:500`) and `mark_drained` (`:158`). Jet entry is `Core/db/db.jet:28` `pool(url, max)`.\n- Nothing composes the two. `Examples/features/net/backend_battery/run.jet:95,145-147` prints the pool report and calls `bound.shutdown(100ms)` independently, and it has no golden.\n- `Source/JitBackend.rs:61-67`, `:91-97` and `:133-139` repeat the same seven `register_*_interpreter_ambient` calls plus hardware registration in run, hot_swap and restart.\n\n## Changes\n1. Host (`Source/JitBackend.rs`, retained JIT host): extract one `install_interpreter_ambient(ambient, program)` used by all three modes. The existing per-mode reset and retention stay at the call sites. Ambient registration must be idempotent, so a repeated install leaves no stale rows.\n2. New `Examples/features/net/app_lifecycle.jet`. It opens a DB pool and checks `ready()` before `bind`, serves, then shuts down in order:\n   - `server.shutdown(grace)` stops admission;\n   - a blocked handler gets a finite outcome (cancelled count reported);\n   - `pool.drain(deadline)` runs and the pool closes.\n   It prints each transition. A required resource that is not ready must refuse to bind and must never print a ready line.\n3. Where the ordering needs an owner hook (for example, drain waits for leased connections held by in-flight handlers), fix it in the owning HTTPServer.rs or DbPool.rs leaf, not in a new lifecycle type.\n4. Update backend_battery to use the same order.\n\n## Proof\n- `JET_GOLDEN_FILTER=net/app_lifecycle Tools/agent/jet-env cargo test --test golden examples_compile_and_run`: ready, serving, admission-stopped, drain-outcome and closed print in that order on AOT and default run, and `jet run --interpret` matches.\n- `Tools/agent/jet-env cargo test --test http_server_lifecycle` passes.\n- New `Tools/agent/jet-env cargo test --test output_callable -- interpreter_backend_run_hot_swap_restart_keep_persist_retention` passes. It drives InterpreterBackend through run, then hot_swap, then restart; `#Persist` counter prints 1, 2, 1, and no duplicate registrations occur.\n\n## Batch\nbatch-core-net: HTTP and DB lifecycle composition. The JitBackend refactor is a small host change riding the same build.\n\n## Dependencies\nNone.",
+      "plan": "## Goal\nImplement ratified D-ONE-LIFECYCLE1=A (shared operations with explicit policies). Readiness, stop-admission, finite drain and resource close compose in one App-owned order, using the existing HTTP server and DB pool owners. No universal Service, Resource or Async type is added. Separately, factor the repeated interpreter ambient registration without changing per-mode reset or retention.\n\n## Current state\n- The HTTP server already has bounded shutdown: `crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2062` `jet_http_server_shutdown(server, grace)`, proven by `tests/http_server_lifecycle.rs:3666,3719,3855,3904`. Jet surface: `Examples/features/net/http_server_lifecycle.jet:1-17`.\n- The DB pool has its own lifecycle in `crates/jet-codegen/src/Prelude/CoreLib/Top/DbPool.rs`: `ready` (`:476`), `drain(deadline_ms)` (`:500`) and `mark_drained` (`:158`). Jet entry is `Core/db/db.jet:28` `pool(url, max)`.\n- Nothing composes the two. `Examples/features/net/backend_battery/run.jet:95,145-147` prints the pool report and calls `bound.shutdown(100ms)` independently, and it has no golden.\n- `Source/JitBackend.rs:61-67`, `:91-97` and `:133-139` repeat the same seven `register_*_interpreter_ambient` calls plus hardware registration in run, hot_swap and restart.\n\n## Changes\n1. Host (`Source/JitBackend.rs`, retained JIT host): extract one `install_interpreter_ambient(ambient, program)` used by all three modes. The existing per-mode reset and retention stay at the call sites. Ambient registration must be idempotent, so a repeated install leaves no stale rows.\n2. New `Examples/features/net/app_lifecycle.jet`. It opens a DB pool and checks `ready()` before `bind`, serves, then shuts down in order:\n   - `server.shutdown(grace)` stops admission;\n   - a blocked handler gets a finite outcome (cancelled count reported);\n   - `pool.drain(deadline)` runs and the pool closes.\n   It prints each transition. A required resource that is not ready must refuse to bind and must never print a ready line.\n3. Where the ordering needs an owner hook (for example, drain waits for leased connections held by in-flight handlers), fix it in the owning HTTPServer.rs or DbPool.rs leaf, not in a new lifecycle type.\n4. Update backend_battery to use the same order.\n\n## Proof\n- `jet test Compiler --profile golden net/app_lifecycle`: ready, serving, admission-stopped, drain-outcome and closed print in that order on O0, O1 and O2.\n- `jet test Compiler --profile cases http_server_lifecycle/` passes.\n- New `Tools/agent/jet-env cargo test --test output_callable -- interpreter_backend_run_hot_swap_restart_keep_persist_retention` passes. It drives InterpreterBackend through run, then hot_swap, then restart; `#Persist` counter prints 1, 2, 1, and no duplicate registrations occur.\n\n## Batch\nbatch-core-net: HTTP and DB lifecycle composition. The JitBackend refactor is a small host change riding the same build.\n\n## Dependencies\nNone.",
       "checkSteps": "1. Not ready before required resources are usable.\n2. Shutdown stops new admission before resource close.\n3. A blocked request/worker has a finite drain outcome and observable failure.\n4. No clean-exit claim hides unfinished tasks or leaked resource ownership.",
       "probe": "Reproducible evidence and bounded future witness: docs/research/mine-for-jet-2026-09-12.md#finding-nestjs-app-readiness-drain. Reuse the exact retained inputs and commands where recorded. Run no broad suite as a substitute for this contract. Historical receipts remain historical; no measurement or current-tree success is claimed here.",
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
         {
           "at": "2026-10-23",
           "by": "agent",
@@ -26942,7 +26962,7 @@
         },
         {
           "n": 5,
-          "text": "InterpreterBackend registration reuse preserves exact fresh-run/hot-swap/restart retention and reset, with repeated initialization free of stale registrations.",
+          "text": "The O0 host's ambient registration is shared by fresh run, hot swap and restart, preserves exact retention and reset, and repeated initialization leaves no stale registrations.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -26960,7 +26980,7 @@
         },
         {
           "n": 7,
-          "text": "Actual lifecycle and applicable backend transitions prove readiness/drain/cleanup; source naming alone never proves compiled-JIT or durable-work behavior.",
+          "text": "Actual lifecycle and applicable backend transitions prove readiness/drain/cleanup; source naming alone never proves compiled O0 or durable-work behavior.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -26969,7 +26989,7 @@
         },
         {
           "n": 8,
-          "text": "`JET_GOLDEN_FILTER=net/app_lifecycle Tools/agent/jet-env cargo test --test golden examples_compile_and_run` shows pool ready before bind, admission stopped before pool drain, a finite drain outcome for a blocked handler, and close last, on AOT and default run.",
+          "text": "`jet test Compiler --profile golden net/app_lifecycle` shows pool ready before bind, admission stopped before pool drain, a finite drain outcome for a blocked handler, and close last, on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -27045,7 +27065,7 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-09-12T12:53:32.615Z",
-      "updated": "2026-10-28T11:31:25.906Z",
+      "updated": "2026-11-06T18:38:09.877Z",
       "updatedBy": "Main",
       "workOrder": 87,
       "goals": []
@@ -27318,13 +27338,18 @@
       "milestoneId": "e3-m23-core-cli-text",
       "phase": "ready",
       "priority": "P2",
-      "plan": "## Goal\nComplete the explicit-entry cutover under D-ENTRY-EXPLICIT2=A (ratified). An ordinary executable `.jet` file runs only through an explicit `fn run` (or an existing checked metadata-selected callable). Loose statements and runtime top-level initializers are rejected with registered diagnostics and safe wrapping fixes. Libraries, test-only files and build/dev/test override-only files need no dummy run. REPL/notebook cells keep implicit host wrapping.\n\n## Current state\n- Archived Rust already enforces the law: `crates/jet-sema/src/Sema/Bundle.rs:1917-1936` (E0620 imported script with executable statements, E0621 top-level statements need `fn run`). Snapshots: `tests/ui/script_explicit_run.stderr`, `tests/ui/script_imported/stderr`.\n- Self-hosted: the parser still collects loose statements, `Compiler/JetParser/Source/Parser/Entry.jet:68` (`&program.script_body.push(...)`). `Compiler/JetSema/Source/Sema/CheckProgram.jet:831` only folds `program.script_body.len() == 0` into `complete`; it emits neither E0620 nor E0621. Rows exist at `DiagnosticRows.jet:6327,6343`.\n- Rust fixes are prose-only (\"move the statements into `fn run`\"). No structured wrap edit exists.\n\n## Changes\n1. JetSema `CheckProgram.jet`: for the entry module, a non-empty `script_body` reports E0621 at the first statement. For an imported module it reports E0620 naming the module. A runtime-valued top-level initializer is rejected, while compile-time-valued declarations stay valid. Test-only, library and override-only (`@build.jet`, `@dev.jet`) roles never require `run`.\n2. Safe fix (JetSema, through `diagnostic_with_edit`): wrap the loose statements in `fn run() { … }` only when that preserves scope, order, comments and captures and does not change entry selection or multiplicity. Refuse the fix, with an explanation, for imported, library or test-only sources and when a `fn run` already exists (mixed export).\n3. Host (retained boundary): REPL and notebook cells keep implicit wrapping through the same entry model (`crates/jet-repl`, `Source/CmdNotebook.rs`). Notebook export writes an explicit `fn run` for executable cells, refuses a mixed existing-run export without mutating anything, and gives consolidation guidance. Cross-submission bindings, move state, failures and reruns keep session semantics.\n4. Rust mirror: add the same structured wrap edit to the E0620/E0621 sites in `Bundle.rs`.\n5. Migrate any remaining in-repo loose-code callers (Examples/, fixtures, Core/, Jetpack/, formatter/LSP projections). Remove the obsolete file-script lowering and stale law wording. Record the cutover in `Docs/spec/syntax-decisions.md` and the Syntax.rs entry, and regenerate `jet devtools` grammars.\n\n## Proof\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.\n- `JET_UI_FILTER=script_ Tools/agent/jet-env cargo test --test diagnostic_snapshots ui_snapshots` passes, including the new `tests/ui/script_runtime_initializer.jet` and `tests/ui/script_wrap_refused/` and their `.fixed.jet` wrap round trip.\n- `Tools/agent/jet-env cargo test --test cli_commands -- notebook_export_explicit_run repl_cross_submission_bindings` passes (new focused tests).\n- `JET_GOLDEN_FILTER=script_mode/ Tools/agent/jet-env cargo test --test golden examples_compile_and_run` passes (AOT, default run), and `Tools/agent/jet-env jet run --interpret` on one script_mode example matches its `.out`.\n\n## Batch\nbatch-jetc-sema: the missing piece is the JetSema entry-role check. The host REPL/notebook items and the Rust wrap edit ride the same build.\n\n## Dependencies\nNone; D-ENTRY-EXPLICIT2=A is ratified.\n",
+      "plan": "## Goal\nComplete the explicit-entry cutover under D-ENTRY-EXPLICIT2=A (ratified). An ordinary executable `.jet` file runs only through an explicit `fn run` (or an existing checked metadata-selected callable). Loose statements and runtime top-level initializers are rejected with registered diagnostics and safe wrapping fixes. Libraries, test-only files and build/dev/test override-only files need no dummy run. REPL/notebook cells keep implicit host wrapping.\n\n## Current state\n- Archived Rust already enforces the law: `crates/jet-sema/src/Sema/Bundle.rs:1917-1936` (E0620 imported script with executable statements, E0621 top-level statements need `fn run`). Snapshots: `tests/ui/script_explicit_run.stderr`, `tests/ui/script_imported/stderr`.\n- Self-hosted: the parser still collects loose statements, `Compiler/JetParser/Source/Parser/Entry.jet:68` (`&program.script_body.push(...)`). `Compiler/JetSema/Source/Sema/CheckProgram.jet:831` only folds `program.script_body.len() == 0` into `complete`; it emits neither E0620 nor E0621. Rows exist at `DiagnosticRows.jet:6327,6343`.\n- Rust fixes are prose-only (\"move the statements into `fn run`\"). No structured wrap edit exists.\n\n## Changes\n1. JetSema `CheckProgram.jet`: for the entry module, a non-empty `script_body` reports E0621 at the first statement. For an imported module it reports E0620 naming the module. A runtime-valued top-level initializer is rejected, while compile-time-valued declarations stay valid. Test-only, library and override-only (`@build.jet`, `@dev.jet`) roles never require `run`.\n2. Safe fix (JetSema, through `diagnostic_with_edit`): wrap the loose statements in `fn run() { … }` only when that preserves scope, order, comments and captures and does not change entry selection or multiplicity. Refuse the fix, with an explanation, for imported, library or test-only sources and when a `fn run` already exists (mixed export).\n3. Host (retained boundary): REPL and notebook cells keep implicit wrapping through the same entry model (`crates/jet-repl`, `Source/CmdNotebook.rs`). Notebook export writes an explicit `fn run` for executable cells, refuses a mixed existing-run export without mutating anything, and gives consolidation guidance. Cross-submission bindings, move state, failures and reruns keep session semantics.\n4. Rust mirror: add the same structured wrap edit to the E0620/E0621 sites in `Bundle.rs`.\n5. Migrate any remaining in-repo loose-code callers (Examples/, fixtures, Core/, Jetpack/, formatter/LSP projections). Remove the obsolete file-script lowering and stale law wording. Record the cutover in `Docs/spec/syntax-decisions.md` and the Syntax.rs entry, and regenerate `jet devtools` grammars.\n\n## Proof\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.\n- `jet test Compiler --profile ui script_` passes, including the new `tests/ui/script_runtime_initializer.jet` and `tests/ui/script_wrap_refused/` and their `.fixed.jet` wrap round trip.\n- `Tools/agent/jet-env cargo test --test cli_commands -- notebook_export_explicit_run repl_cross_submission_bindings` passes (new focused tests).\n- `jet test Compiler --profile golden script_mode/` passes on O0, O1 and O2.\n\n## Batch\nbatch-jetc-sema: the missing piece is the JetSema entry-role check. The host REPL/notebook items and the Rust wrap edit ride the same build.\n\n## Dependencies\nNone; D-ENTRY-EXPLICIT2=A is ratified.\n",
       "checkSteps": "After rebuilding, exercise the focused entry and diagnostic fixtures plus actual CLI commands for explicit hello, a declaration-only library, a test-only source, imported loose statements, and compile-time versus runtime initialization. Run jet fix on a safe wrapper case and an ambiguous refusal case and compare resulting meaning. Exercise REPL/cell execution and exported source without changing notebook UI. Prove applicable AOT/run/dev/interpreter/web output and refresh only affected goldens/UI snapshots. Cover override-only files, metadata-selected callables, imported-helper fix refusal, stateful interactive submissions, mixed-entry export refusal, and observed JIT identity using existing run_jit_once/dev_iteration paths.\n\nExisting focused regression starting points (future commands, not executed; they do not alone cover the new criteria):\n- `scripts/agent/jet-env cargo test --test run_entry bare_run_stays_valid -- --exact`\n- `scripts/agent/jet-env cargo test --test run_entry imported_scripts_are_rejected_before_their_body_can_run -- --exact`\n- `scripts/agent/jet-env cargo test -p jet-pkg-model --lib output_entry_override_resolves_one_package_function`\nRebuild through jet-env before compiler smoke work. Add only missing behavioral boundary proof; do not count source inspection, test-name presence, or interpreter fallback as runtime/tier evidence.",
       "probe": "Reproducible evidence and bounded future witness: docs/research/mine-for-jet-2026-09-12.md#finding-script-f33. Reuse the exact retained inputs and commands where recorded. Run no broad suite as a substitute for this contract. Historical receipts remain historical; no measurement or current-tree success is claimed here.",
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources); D-EXEC2=A (native code generator only; Cranelift and MIREval are retired)."
+        },
         {
           "at": "2026-10-28",
           "by": "agent",
@@ -27409,7 +27434,7 @@
         },
         {
           "n": 6,
-          "text": "AOT, default run/dev, interpreter, and applicable web execution agree; absent build/dev/test override defaults remain unchanged.",
+          "text": "O0, O1, O2 and web where applicable execution agree; absent build/dev/test override defaults remain unchanged.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -27454,7 +27479,7 @@
         },
         {
           "n": 11,
-          "text": "Observed Cranelift JIT, forced interpreter, AOT, normal run/dev, and applicable web evidence prevent fallback from masquerading as tier coverage.",
+          "text": "Observed O0, O1, O2 and web evidence prevents fallback from masquerading as tier coverage.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -27463,7 +27488,7 @@
         },
         {
           "n": 12,
-          "text": "Syntax.rs entry updated",
+          "text": "Syntax registry entry updated (Compiler/JetFoundation/Data/Syntax)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -27508,7 +27533,7 @@
         },
         {
           "n": 17,
-          "text": "`JET_UI_FILTER=script_ Tools/agent/jet-env cargo test --test diagnostic_snapshots ui_snapshots` passes (existing `script_explicit_run` E0621 and `script_imported` E0620, plus new `script_runtime_initializer` and `script_wrap_refused` fixtures), and `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0 with the Jet checker emitting E0620/E0621",
+          "text": "`jet test Compiler --profile ui script_` passes (existing `script_explicit_run` E0621 and `script_imported` E0620, plus new `script_runtime_initializer` and `script_wrap_refused` fixtures), and `jet check Compiler` exits 0 with the Jet checker emitting E0620/E0621",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -27546,7 +27571,7 @@
       "parentId": "c0svnelx",
       "needsAcceptance": false,
       "created": "2026-09-12T12:54:29.620Z",
-      "updated": "2026-10-28T11:28:22.130Z",
+      "updated": "2026-11-06T18:38:14.858Z",
       "updatedBy": "Main",
       "workOrder": 230,
       "goals": []
@@ -27961,7 +27986,7 @@
       "milestoneId": "e3-m20-enum-language-reflection",
       "phase": "ready",
       "priority": "P2",
-      "plan": "## Goal\nImplement ratified D-ENUM-CASEMETA1=A inside the existing reflection model: typed `TypeInfo.cases` descriptors and the runtime active-case projection `value.case()`. Type-only metadata stays erased and payload values stay typed. No enum-only library, visitor or runtime registry.\n\n## Current state\n- Enum TypeInfo is built by `sema_comptime_reflection_enum_type_info` (`Compiler/JetSema/Source/Sema/Comptime/Reflection.jet:1395-1449`). It puts variants in the generic `fields` slot as `FieldInfo` rows (`sema_comptime_reflection_enum_variant_info`, :1129-1155) whose `ty` is a display string (`\"Unit\"`, the payload type name, or `\"{a: Int}\"`, :1118-1127). There is no `cases` field or `CaseInfo` row, and no canonical wire name.\n- Typed accessors are limited to `has_marker/implements/has_method` (`Compiler/JetSema/Source/Sema/Calls/Reflection.jet:132-155`). Codegen and eval mirror that list (`Compiler/JetCodegen/Source/Codegen/ReflectionMethods.jet:19-22`, `Compiler/JetEval/Source/ReflectionMethods.jet:11-15`). There is no `case()` projection anywhere in Compiler/ or `Core/reflect`.\n- Criterion 1 (owner ratification) is met. The scope extension (2026-09-21) asks for a typed descriptor for every type family or a precise refusal, with no fabricated empty catalogs.\n\n## Changes\n1. `Reflection.jet`: add `CaseInfo` rows under a `cases` field. Each row carries identity, source name, canonical wire name (serde markers), index or discriminant, group, ordered payload shape (`Unit`, tuple or named) with typed payload `TypeInfo` references, and markers in source-versus-expanded order. Rows are derived from `EnumDef.variants/groups/payloads`. Stop emitting variants as `FieldInfo`. Non-enum types return a registered refusal for `cases`, not an empty list. Generic enums describe the instantiated arguments.\n2. `Calls/Reflection.jet`: type `TypeInfo.cases`, the `CaseInfo` accessors and `value.case()`.\n3. `ReflectionMethods.jet` in codegen and eval: `value.case()` returns the active case identity plus typed payload fields through one Prelude helper. It does complete-or-refuse capture, refuses shared or noncopyable graphs, and follows copy rules. A program that never reflects emits no case table and allocates nothing.\n4. Layout and ABI facts (discriminant width, payload offsets) come from `Compiler/JetFoundation/Source/Target/Layout.jet` for the selected target.\n5. Archived crates (`jet-foundation/Reflection.rs`, `jet-comptime/Reflect.rs`, `core_types.rs`, `jet-codegen/TIR`) are not edited.\n\n## Proof\n- `JET_GOLDEN_FILTER=reflection/enum_cases cargo test --test golden examples_compile_and_run`: a new example covers unit, named-payload and tuple cases plus one generic enum. It prints `cases` and `value.case()` identically on AOT and `jet run`, and `jet run --interpret` matches.\n- `JET_UI_FILTER=tests/ui/reflect_cases_non_enum.jet cargo test --test diagnostic_snapshots ui_snapshots` covers the refusal.\n- Generated Rust for a non-reflecting enum program contains no case table (criterion 12).\n- The example uses the current ratified reflection spelling. #3662 migrates it if D-META-ROOT3=A retires `T.reflect()`.\n\n## Batch\n`batch-jetc-sema`: the descriptor model and typing are sema. The runtime projection is a thin codegen/eval consumer.\n\n## Dependencies\n#3520 (the closed D-METAREFLECT1 metadata path, building). The runtime proof runs on the self-hosted compiler, so #218 is needed.",
+      "plan": "## Goal\nImplement ratified D-ENUM-CASEMETA1=A inside the existing reflection model: typed `TypeInfo.cases` descriptors and the runtime active-case projection `value.case()`. Type-only metadata stays erased and payload values stay typed. No enum-only library, visitor or runtime registry.\n\n## Current state\n- Enum TypeInfo is built by `sema_comptime_reflection_enum_type_info` (`Compiler/JetSema/Source/Sema/Comptime/Reflection.jet:1395-1449`). It puts variants in the generic `fields` slot as `FieldInfo` rows (`sema_comptime_reflection_enum_variant_info`, :1129-1155) whose `ty` is a display string (`\"Unit\"`, the payload type name, or `\"{a: Int}\"`, :1118-1127). There is no `cases` field or `CaseInfo` row, and no canonical wire name.\n- Typed accessors are limited to `has_marker/implements/has_method` (`Compiler/JetSema/Source/Sema/Calls/Reflection.jet:132-155`). Codegen and eval mirror that list (`Compiler/JetCodegen/Source/Codegen/ReflectionMethods.jet:19-22`, `Compiler/JetEval/Source/ReflectionMethods.jet:11-15`). There is no `case()` projection anywhere in Compiler/ or `Core/reflect`.\n- Criterion 1 (owner ratification) is met. The scope extension (2026-09-21) asks for a typed descriptor for every type family or a precise refusal, with no fabricated empty catalogs.\n\n## Changes\n1. `Reflection.jet`: add `CaseInfo` rows under a `cases` field. Each row carries identity, source name, canonical wire name (serde markers), index or discriminant, group, ordered payload shape (`Unit`, tuple or named) with typed payload `TypeInfo` references, and markers in source-versus-expanded order. Rows are derived from `EnumDef.variants/groups/payloads`. Stop emitting variants as `FieldInfo`. Non-enum types return a registered refusal for `cases`, not an empty list. Generic enums describe the instantiated arguments.\n2. `Calls/Reflection.jet`: type `TypeInfo.cases`, the `CaseInfo` accessors and `value.case()`.\n3. `ReflectionMethods.jet` in codegen and eval: `value.case()` returns the active case identity plus typed payload fields through one Prelude helper. It does complete-or-refuse capture, refuses shared or noncopyable graphs, and follows copy rules. A program that never reflects emits no case table and allocates nothing.\n4. Layout and ABI facts (discriminant width, payload offsets) come from `Compiler/JetFoundation/Source/Target/Layout.jet` for the selected target.\n5. Archived crates (`jet-foundation/Reflection.rs`, `jet-comptime/Reflect.rs`, `core_types.rs`, `jet-codegen/TIR`) are not edited.\n\n## Proof\n- `jet test Compiler --profile golden reflection/enum_cases`: a new example covers unit, named-payload and tuple cases plus one generic enum. It prints `cases` and `value.case()` identically on O0, O1 and O2.\n- `jet test Compiler --profile ui reflect_cases_non_enum` covers the refusal.\n- Generated Rust for a non-reflecting enum program contains no case table (criterion 12).\n- The example uses the current ratified reflection spelling. #3662 migrates it if D-META-ROOT3=A retires `T.reflect()`.\n\n## Batch\n`batch-jetc-sema`: the descriptor model and typing are sema. The runtime projection is a thin codegen/eval consumer.\n\n## Dependencies\n#3520 (the closed D-METAREFLECT1 metadata path, building). The runtime proof runs on the self-hosted compiler, so #218 is needed.",
       "checkSteps": "1. Owner ratifies whether general case descriptors are public and where they live; a full example includes unit, named-payload and tuple-like cases.\n2. Descriptors carry identity, source/canonical wire names, payload fields/types and markers without constructing arbitrary payload values.\n3. Use D-METAREFLECT1’s one closed metadata path; non-enums, generics, ordering and visibility have explicit behavior.\n4. Runtime inspection exposes only the active case and typed payload fields; ordinary enum use needs no reflection allocation or pre-stringified values.\n\nRebuild: scripts/agent/jet-env cargo build -p jet --bin jet with CARGO_INCREMENTAL=0. Keep scratch at ~/.cache/jet-test-scratch. Existing stale CoreModuleExports.rs is an execution prerequisite, not evidence that any feature passes.\n\nExtend tests/reflect.rs and the existing enum reflection witnesses. Add a golden type-catalog example covering every AST Type family and enum case shape. Exercise declared and instantiated types, same-layout distinct nominals, field visibility, target layout and generic identity. Compare selected target facts to the target dossier, not host sizeof.\n\nFor each planned package witness, use scripts/agent/jet-env jet check, jet run, jet run --interpret, jet dev --watch=off where relevant, and jet build from that package directory; launch its emitted .jet/build/run artifact. Compare the named golden and actual state changes. Use the existing web harness when the feature reaches web. No broad suite outside the composed closeout gate.",
       "probe": "Reproducible evidence and bounded future witness: docs/research/mine-for-jet-2026-09-12.md#finding-enum-f21-case-metadata-api. Reuse the exact retained inputs and commands where recorded. Run no broad suite as a substitute for this contract. Historical receipts remain historical; no measurement or current-tree success is claimed here.",
       "visualMedia": [],
@@ -27970,6 +27995,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
         {
           "at": "2026-11-04",
           "by": "Main",
@@ -28167,7 +28197,7 @@
         },
         {
           "n": 17,
-          "text": "(was #1632 c1) The two hardcoded discriminant tables in types_meta.rs are gone; the values come from the single Prelude definition [precut audit: failing on 9c7ddf1359: C:comptime_cli_parity/comptime_enum_discriminants_keep_duplicates_and_report_invalid_expressions FAIL exit 0; expected nonzero]",
+          "text": "(was #1632 c1) Enum discriminants come from the single Prelude definition; no second table exists in Compiler/ [precut audit: failing on 9c7ddf1359: C:comptime_cli_parity/comptime_enum_discriminants_keep_duplicates_and_report_invalid_expressions FAIL exit 0; expected nonzero]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -28176,7 +28206,7 @@
         },
         {
           "n": 18,
-          "text": "(was #1632 c2) A test proves the JIT and Prelude discriminants agree for every covered enum and fails when they drift [precut audit: failing on 9c7ddf1359: C:comptime_cli_parity/comptime_enum_discriminants_keep_duplicates_and_report_invalid_expressions FAIL exit 0; expected nonzero]",
+          "text": "(was #1632 c2) A test proves every backend reads the Prelude discriminants for every covered enum and fails when they drift [precut audit: failing on 9c7ddf1359: C:comptime_cli_parity/comptime_enum_discriminants_keep_duplicates_and_report_invalid_expressions FAIL exit 0; expected nonzero]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -28185,7 +28215,7 @@
         },
         {
           "n": 19,
-          "text": "(was #1632 c3) Reordering a Prelude enum variant fails the build or updates the JIT automatically; it can no longer pass silently [precut audit: failing on 9c7ddf1359: C:comptime_cli_parity/comptime_enum_discriminants_keep_duplicates_and_report_invalid_expressions FAIL exit 0; expected nonzero]",
+          "text": "(was #1632 c3) Reordering a Prelude enum variant fails the build or updates every consumer automatically; it can no longer pass silently [precut audit: failing on 9c7ddf1359: C:comptime_cli_parity/comptime_enum_discriminants_keep_duplicates_and_report_invalid_expressions FAIL exit 0; expected nonzero]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -28194,7 +28224,7 @@
         },
         {
           "n": 20,
-          "text": "(was #1632 c4) Enum values print the same on AOT, jet run (JIT) and the interpreter [precut audit: failing on 9c7ddf1359: C:comptime_cli_parity/comptime_enum_discriminants_keep_duplicates_and_report_invalid_expressions FAIL exit 0; expected nonzero]",
+          "text": "(was #1632 c4) Enum values print the same on O0, O1 and O2 [precut audit: failing on 9c7ddf1359: C:comptime_cli_parity/comptime_enum_discriminants_keep_duplicates_and_report_invalid_expressions FAIL exit 0; expected nonzero]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -28237,8 +28267,8 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T13:26:55.371Z",
-      "updated": "2026-11-04T23:57:15.980Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-06T18:38:17.827Z",
+      "updatedBy": "Main",
       "workOrder": 171,
       "goals": []
     },
@@ -29432,13 +29462,18 @@
       "milestoneId": "e3-m22-encoding-validation",
       "phase": "ready",
       "priority": "P1",
-      "plan": "## Goal\nClose custom-codec and reflection interoperability under D-ONE-CODECS1=A, with D-VALIDATE-DECODE1=B stated as current law. Field traversal, constraint application, override precedence and field-error paths get one canonical owner. Each wire format keeps its own leaves (duplicate keys, binary/text, extension tags, mixed XML, lossless numerics). The comparison targets are selected Serde, Glaze and Jackson custom mappings, without importing their reflection systems. No new marker, public error family, data-algebra category or storage mechanism is added.\n\n## Current state\n- The original finding is `Docs/research/mine-for-jet-2026-09-12.md#finding-core-f007`. The old `docs/` path is stale.\n- Sema: `Compiler/JetSema/Source/Sema/Serde.jet` checks codec admissibility, generic bounds and wire reachability (`sema_serde_field_reaches_wire` at :94, `sema_serde_type_is_admissible` at :148). Registration lives at `Registration/Checked.jet:140-141`.\n- Codegen: `Compiler/JetCodegen/Source/Codegen/Functions.jet:277-286` lowers type-level `MirSerdeAttribute` (RenameAll, Tag, Untagged, DenyUnknownFields). `AutoDerives.jet` and `EncodingCodecs.jet` generate Encode/Decode.\n- The format adapters are `Core/encoding/*.jet` and the host kernel `crates/jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs`.\n- Existing witnesses in `Examples/features/serde/`: `hand_codec`, `field_metadata_edges`, `serde_derive`, `serde_generic`, `codable_default`, `decode_migration`, `json_typed`, `csv_typed`, `cbor_profile`, plus the `encoding_*_stream` examples.\n\n## Changes\n1. Capability inventory (criteria 1 and 3). Build a table covering alias, rename, skip, read-only, constraints, variants, enums, chrono, custom context and generic targets. For each row give the Jet spelling (derived and hand-written), the owning code (Serde.jet / AutoDerives.jet / EncodingCodecs.jet / Core adapter) and the status: supported, missing-by-law or missing-defect. Classify every missing capability before proposing anything. A new marker or API needs its own ballot. The table goes in the card log.\n2. One owner (criterion 4). Move field traversal, constraint application and error-path construction into one helper set in `AutoDerives.jet`, which `EncodingCodecs.jet` and every format adapter call. The precedence rule is: an explicit custom codec wins, then field attributes, then type-level `MirSerdeAttribute`, then derived defaults. Format syntax errors stay distinct from field errors.\n3. Formats (criterion 5): full, selective and streaming decoding must agree in meaning for each profile. Streaming does not fake buffering or allocation parity.\n4. Add examples for any gaps the inventory finds: `Examples/features/serde/codec_override_precedence.jet` and `codec_field_errors.jet`, each with a golden.\n\n## Proof\n- `JET_GOLDEN_FILTER=serde/ Tools/agent/jet-env cargo test --test golden examples_compile_and_run`: passes on AOT, `jet run` and `--interpret`, including the two new examples.\n- `Tools/agent/jet-env cargo test --test auto_derive_policy`: passes.\n- The capability table (criteria 1 and 3) is attached to the card log.\n\n## Batch\nbatch-jetc-back: the consolidation lives in derive generation (AutoDerives and EncodingCodecs). The Core adapters ride in the same build.\n\n## Dependencies\nNone. D-ONE-CODECS1 is ratified.\n",
+      "plan": "## Goal\nClose custom-codec and reflection interoperability under D-ONE-CODECS1=A, with D-VALIDATE-DECODE1=B stated as current law. Field traversal, constraint application, override precedence and field-error paths get one canonical owner. Each wire format keeps its own leaves (duplicate keys, binary/text, extension tags, mixed XML, lossless numerics). The comparison targets are selected Serde, Glaze and Jackson custom mappings, without importing their reflection systems. No new marker, public error family, data-algebra category or storage mechanism is added.\n\n## Current state\n- The original finding is `Docs/research/mine-for-jet-2026-09-12.md#finding-core-f007`. The old `docs/` path is stale.\n- Sema: `Compiler/JetSema/Source/Sema/Serde.jet` checks codec admissibility, generic bounds and wire reachability (`sema_serde_field_reaches_wire` at :94, `sema_serde_type_is_admissible` at :148). Registration lives at `Registration/Checked.jet:140-141`.\n- Codegen: `Compiler/JetCodegen/Source/Codegen/Functions.jet:277-286` lowers type-level `MirSerdeAttribute` (RenameAll, Tag, Untagged, DenyUnknownFields). `AutoDerives.jet` and `EncodingCodecs.jet` generate Encode/Decode.\n- The format adapters are `Core/encoding/*.jet` and the host kernel `crates/jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs`.\n- Existing witnesses in `Examples/features/serde/`: `hand_codec`, `field_metadata_edges`, `serde_derive`, `serde_generic`, `codable_default`, `decode_migration`, `json_typed`, `csv_typed`, `cbor_profile`, plus the `encoding_*_stream` examples.\n\n## Changes\n1. Capability inventory (criteria 1 and 3). Build a table covering alias, rename, skip, read-only, constraints, variants, enums, chrono, custom context and generic targets. For each row give the Jet spelling (derived and hand-written), the owning code (Serde.jet / AutoDerives.jet / EncodingCodecs.jet / Core adapter) and the status: supported, missing-by-law or missing-defect. Classify every missing capability before proposing anything. A new marker or API needs its own ballot. The table goes in the card log.\n2. One owner (criterion 4). Move field traversal, constraint application and error-path construction into one helper set in `AutoDerives.jet`, which `EncodingCodecs.jet` and every format adapter call. The precedence rule is: an explicit custom codec wins, then field attributes, then type-level `MirSerdeAttribute`, then derived defaults. Format syntax errors stay distinct from field errors.\n3. Formats (criterion 5): full, selective and streaming decoding must agree in meaning for each profile. Streaming does not fake buffering or allocation parity.\n4. Add examples for any gaps the inventory finds: `Examples/features/serde/codec_override_precedence.jet` and `codec_field_errors.jet`, each with a golden.\n\n## Proof\n- `jet test Compiler --profile golden serde/`: passes on O0, O1 and O2, including the two new examples.\n- `jet test Compiler --profile cases auto_derive_policy/`: passes.\n- The capability table (criteria 1 and 3) is attached to the card log.\n\n## Batch\nbatch-jetc-back: the consolidation lives in derive generation (AutoDerives and EncodingCodecs). The Core adapters ride in the same build.\n\n## Dependencies\nNone. D-ONE-CODECS1 is ratified.\n",
       "checkSteps": "1. Account aliases/rename/skip/read-only/constraints/variants/enums/chrono/custom context and generic targets.\n2. preserve custom override precedence and error ownership.\n3. classify each missing capability before proposing any new marker/API.",
       "probe": "Reproducible evidence and bounded future witness: docs/research/mine-for-jet-2026-09-12.md#finding-core-f007. Reuse the exact retained inputs and commands where recorded. Run no broad suite as a substitute for this contract. Historical receipts remain historical; no measurement or current-tree success is claimed here.",
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources); proof on the admitted `jet` (no jetc0, compiler-diff or frozen-Rust evidence)."
+        },
         {
           "at": "2026-11-04",
           "by": "Main",
@@ -29541,7 +29576,7 @@
         },
         {
           "n": 7,
-          "text": "[retarget] Jet compiler proof (Rust freeze 2026-10-01): golden serde/ pass when compiled by the Jet compiler (Compiler/ pipeline, for example the #670 compiler-diff candidate run or jetc0): goldens print their expected output on AOT and default run, UI fixtures match their snapshots; no Rust compiler change (a Core-library-only change may also be shown on the frozen Rust compiler as interim evidence). Replaces the Rust-compiler proof: \"`JET_GOLDEN_FILTER=serde/ Tools/agent/jet-env cargo test --test golden examples_compile_and_run` passes including new codec_override_precedence and codec_field_errors examples, and the capability classification table is attached\"",
+          "text": "Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): `jet test Compiler --profile golden serde/` passes including new codec_override_precedence and codec_field_errors examples, and the capability classification table is attached. Goldens pass on O0, O1 and O2; UI fixtures match their snapshots.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -29649,7 +29684,7 @@
         },
         {
           "n": 19,
-          "text": "(was #1813 c3) Boundary planning and focused proof show the same law through AOT, jet run, and interpreter paths [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #1813 c3) Boundary planning and focused proof show the same law through O0, O1 and O2 [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -29676,7 +29711,7 @@
         },
         {
           "n": 22,
-          "text": "(was #1817 c3) Prelude, AOT emit, JIT hosts, and interpreter ambient call one semantic path, with hostile taint and tier-parity proof [precut audit: failing on 9c7ddf1359: U:taint/origin_marked_text_rejects_raw_sinks FAIL snapshot mismatch: tests/ui/taint/origin_marked_text_rejects_raw_sinks.stderr]",
+          "text": "(was #1817 c3) Prelude, O0, O1 and O2 call one semantic path, with hostile taint and tier-parity proof [precut audit: failing on 9c7ddf1359: U:taint/origin_marked_text_rejects_raw_sinks FAIL snapshot mismatch: tests/ui/taint/origin_marked_text_rejects_raw_sinks.stderr]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -29685,7 +29720,7 @@
         },
         {
           "n": 23,
-          "text": "(was #1817 c5) `examples/features/effects/taint.jet` and its expected output include failed decode, successful typed decode, raw-sink refusal, and `#Scrub`; `jet run --release`, default `jet run`, and `jet run --interpret` match the golden byte-for-byte [precut audit: failing on 9c7ddf1359: U:taint/origin_marked_text_rejects_raw_sinks FAIL snapshot mismatch: tests/ui/taint/origin_marked_text_rejects_raw_sinks.stderr]",
+          "text": "(was #1817 c5) `examples/features/effects/taint.jet` and its expected output include failed decode, successful typed decode, raw-sink refusal, and `#Scrub`; O0, O1 and O2 match the golden byte-for-byte [precut audit: failing on 9c7ddf1359: U:taint/origin_marked_text_rejects_raw_sinks FAIL snapshot mismatch: tests/ui/taint/origin_marked_text_rejects_raw_sinks.stderr]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -29753,7 +29788,7 @@
       "parentId": "c0iuv3zr",
       "needsAcceptance": false,
       "created": "2026-09-12T14:30:12.813Z",
-      "updated": "2026-11-04T23:45:46.179Z",
+      "updated": "2026-11-06T18:38:20.660Z",
       "updatedBy": "Main",
       "workOrder": 74,
       "goals": []
@@ -30648,13 +30683,18 @@
       "milestoneId": "e3-m23-core-cli-text",
       "phase": "ready",
       "priority": "P2",
-      "plan": "**Goal**\nDeliver the four ratified ArgsSpec reference projections from one checked command model: `to_markdown` (D-CORE-CLI-MARKDOWN1=A), `to_man` (D-CORE-CLI-MAN1=A), `to_rest` (D-CORE-CLI-REST1=A), and `to_yaml` (D-CORE-CLI-YAML1=A, exact version1 fields). #3291, #3292, and #3293 are historical redirects, and their criteria map to 9-30 here.\n\n**Current state**\n- `crates/jet-codegen/src/Prelude/CoreLib/Top/Args.rs:85` `JetArgsSpec::help` is the only renderer.\n- No `to_markdown`, `to_man`, `to_rest`, or `to_yaml` exists in Compiler/, crates/, or Core/.\n- ArgsSpec methods are routed through:\n  - `Compiler/JetSema/Source/Sema/Calls/ProcessHandles.jet:55-145` (op, arity, return type, and parameter tables);\n  - `Compiler/JetCodegen/Source/Codegen/HandleMethods.jet:1175-1185`;\n  - the Rust mirror in `crates/jet-codegen/src/Codegen/TIR/mod.rs:13101`, `routes.rs:2927`, `TIR/subset/handles.rs:354`, and `crates/jet-comptime/src/Comptime/ArgsLite.rs`.\n\n**Changes**\n1. Jet compiler first. In `ProcessHandles.jet`, add ops `ArgsSpecToMarkdown`, `ToMan`, `ToRest`, and `ToYaml`:\n   - arity 0, except `to_man(date: String)` (explicit date, never ambient);\n   - return `String`;\n   - receiver access `Read`.\n   Add the `HandleMethods.jet` routes to `jet_args_to_*`.\n2. Rust mirror (needed so the shipped binary proves it): the same four ops in TIR `mod.rs`, `routes.rs`, `subset/handles.rs`, and ArgsLite.\n3. `Args.rs`: add one `jet_args_command_doc(&JetArgsSpec) -> CommandDoc` projection (command path, inherited options, defaults, visibility, examples, with hidden/secret entries omitted) and four small leaves:\n   - Markdown fences and anchors;\n   - roff escaping with an explicit `.TH` date;\n   - ReST sections and links;\n   - YAML through the existing Core YAML writer's escaping rules.\n   Output is capped with a structured error on overflow. There is no parsing of help text.\n4. Malformed metadata returns the fallible error path, never a panic or exit.\n\n**Proof**\n- New golden `Examples/features/cli/args_reference.jet`, one shared fixture with nested, inherited, hidden, and secret options, multiline punctuation, and fences: `JET_GOLDEN_FILTER=cli/args_reference cargo test --test golden examples_compile_and_run` matches `args_reference.out` on AOT, default run, and interpreter.\n- New `cargo test --test cli_surface -- args_reference_consumers`:\n  - `man -l` / `groff -man -Tutf8` renders the man output without warnings;\n  - `python3 -c 'import yaml'` round-trips the YAML with exact version1 keys;\n  - `rst2html --halt=warning` accepts the ReST;\n  - `pandoc -f gfm` accepts the Markdown.\n  A missing consumer is reported as a skip, not a pass.\n\n**Batch**\n`batch-host-runtime`: the Prelude renderers with tier parity. The sema and codegen rows ride along.\n\n**Dependencies**\nNone. All four decisions are ratified. Completion (#3241) and menus (#3294) stay separate.",
+      "plan": "**Goal**\nDeliver the four ratified ArgsSpec reference projections from one checked command model: `to_markdown` (D-CORE-CLI-MARKDOWN1=A), `to_man` (D-CORE-CLI-MAN1=A), `to_rest` (D-CORE-CLI-REST1=A), and `to_yaml` (D-CORE-CLI-YAML1=A, exact version1 fields). #3291, #3292, and #3293 are historical redirects, and their criteria map to 9-30 here.\n\n**Current state**\n- `crates/jet-codegen/src/Prelude/CoreLib/Top/Args.rs:85` `JetArgsSpec::help` is the only renderer.\n- No `to_markdown`, `to_man`, `to_rest`, or `to_yaml` exists in Compiler/, crates/, or Core/.\n- ArgsSpec methods are routed through:\n  - `Compiler/JetSema/Source/Sema/Calls/ProcessHandles.jet:55-145` (op, arity, return type, and parameter tables);\n  - `Compiler/JetCodegen/Source/Codegen/HandleMethods.jet:1175-1185`;\n  - the Rust mirror in `crates/jet-codegen/src/Codegen/TIR/mod.rs:13101`, `routes.rs:2927`, `TIR/subset/handles.rs:354`, and `crates/jet-comptime/src/Comptime/ArgsLite.rs`.\n\n**Changes**\n1. Jet compiler first. In `ProcessHandles.jet`, add ops `ArgsSpecToMarkdown`, `ToMan`, `ToRest`, and `ToYaml`:\n   - arity 0, except `to_man(date: String)` (explicit date, never ambient);\n   - return `String`;\n   - receiver access `Read`.\n   Add the `HandleMethods.jet` routes to `jet_args_to_*`.\n2. Rust mirror (needed so the shipped binary proves it): the same four ops in TIR `mod.rs`, `routes.rs`, `subset/handles.rs`, and ArgsLite.\n3. `Args.rs`: add one `jet_args_command_doc(&JetArgsSpec) -> CommandDoc` projection (command path, inherited options, defaults, visibility, examples, with hidden/secret entries omitted) and four small leaves:\n   - Markdown fences and anchors;\n   - roff escaping with an explicit `.TH` date;\n   - ReST sections and links;\n   - YAML through the existing Core YAML writer's escaping rules.\n   Output is capped with a structured error on overflow. There is no parsing of help text.\n4. Malformed metadata returns the fallible error path, never a panic or exit.\n\n**Proof**\n- New golden `Examples/features/cli/args_reference.jet`, one shared fixture with nested, inherited, hidden, and secret options, multiline punctuation, and fences: `jet test Compiler --profile golden cli/args_reference` matches `args_reference.out` on O0, O1 and O2.\n- New `cargo test --test cli_surface -- args_reference_consumers`:\n  - `man -l` / `groff -man -Tutf8` renders the man output without warnings;\n  - `python3 -c 'import yaml'` round-trips the YAML with exact version1 keys;\n  - `rst2html --halt=warning` accepts the ReST;\n  - `pandoc -f gfm` accepts the Markdown.\n  A missing consumer is reported as a skip, not a pass.\n\n**Batch**\n`batch-host-runtime`: the Prelude renderers with tier parity. The sema and codegen rows ride along.\n\n**Dependencies**\nNone. All four decisions are ratified. Completion (#3241) and menus (#3294) stay separate.",
       "checkSteps": "1. Command names/options/examples/defaults agree with parsing and help.\n2. deterministic output and escaping.\n3. malformed/foreign embedded metadata fails safely.\n4. source program is not executed to extract docs.\n5. Compare the complete shared command fixture with parse/help and generated Markdown.\n6. Exercise punctuation/fences/multiline text, descendant anchors and hidden/secret omission.\n7. Verify real Markdown rendering plus bounded deterministic output.\n8. Keep one schema/formatter owner and no target or filesystem side effects.",
       "probe": "Reproducible evidence and bounded future witness: docs/research/mine-for-jet-2026-09-12.md#finding-core-f015. Reuse the exact retained inputs and commands where recorded. Run no broad suite as a substitute for this contract. Historical receipts remain historical; no measurement or current-tree success is claimed here.",
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
         {
           "at": "2026-10-23",
           "by": "agent",
@@ -30978,7 +31018,7 @@
         },
         {
           "n": 31,
-          "text": "`JET_GOLDEN_FILTER=cli/args_reference cargo test --test golden examples_compile_and_run` passes and `cargo test --test cli_surface -- args_reference_consumers` validates man, ReST, Markdown and YAML output with real consumers.",
+          "text": "`jet test Compiler --profile golden cli/args_reference` passes and `cargo test --test cli_surface -- args_reference_consumers` validates man, ReST, Markdown and YAML output with real consumers.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -31034,7 +31074,7 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-09-12T14:30:20.532Z",
-      "updated": "2026-11-05T15:30:35.335Z",
+      "updated": "2026-11-06T18:38:23.285Z",
       "updatedBy": "Main",
       "workOrder": 141,
       "goals": [
@@ -31052,13 +31092,18 @@
       "milestoneId": "e3-m22-encoding-validation",
       "phase": "ready",
       "priority": "P2",
-      "plan": "**Goal**\nClose the core.text/core.regex/codec contract on scalar boundaries, case and normalization, regex complexity and invalid encoding, with exercised witnesses. Fix the one real gap: case folding beyond Latin-1.\n\n**Current state**\n- Core/text/text.jet:14-19: UTF-8 decode, Hangul NFD/NFC, UAX #29 graphemes and words, and width are Jet. Case mapping is Latin-1 only, and full case-fold tables map to identity. :73-78 `lower`/`upper`/`casefold` → `map_case` (:467). `casefold` is just `lower`, so `casefold(\"Straße\")` stays `straße`.\n- :82-88 `nfc`/`nfd`/`nfkc`/`nfkd`/`graphemes`/`words` exist.\n- Core/regex/regex.jet:15-18 is a bounded backtracking NFA over UTF-8 bytes with ASCII-only `ignore_case`. :488-498 `budget_limit` is (nodes+1)×(min(bytes,4096)+1)×32, clamped to [4096, 1,000,000]. :458-461 caps quantifiers at 4096.\n- Examples/features/text/unicode_text.jet, unicode_17.jet and regex.jet have goldens. Related open cards: #1471 (regex gaps, building), #3370 (producers), #3107 (index boundaries).\n\n**Changes**\n1. Core/text/text.jet: generate full Unicode simple and full case mapping plus C+F folding tables into Jet data, the same way the existing normalization tables are generated. Route `map_case` and `casefold` through them. Casefold is locale-neutral; Turkish dotted I is not special-cased. Update the header comment at :14-19.\n2. Regex: keep the byte NFA and budget. Document in regex.jet that budget exhaustion is a typed failure, and add a witness that proves it. `ignore_case` stays ASCII, stated explicitly; Unicode case-insensitive regex belongs to #1471.\n3. Invalid encoding: `String.from_bytes` → None and codec `EncodingError` are the policy. Add a witness for lossy vs strict where core.text exposes it.\n4. Add Examples/features/text/unicode_contracts.jet plus its golden. Record unsupported cells as printed lines.\n5. Owned vs view costs: measure only the rows exercised above, through the existing text perf cell. Make no claim without a receipt.\n\n**Proof**\n- `JET_GOLDEN_FILTER=text/unicode_contracts Tools/agent/jet-env cargo test --test golden examples_compile_and_run`: passes.\n- `JET_GOLDEN_FILTER=text/unicode_text Tools/agent/jet-env cargo test --test golden examples_compile_and_run` and `JET_GOLDEN_FILTER=text/regex …`: still pass. Existing goldens change only where casefold output was wrong.\n- `for m in --release '' --interpret; do Tools/agent/jet-env jet run $m Examples/features/text/unicode_contracts.jet | diff - Examples/features/expected/text/unicode_contracts.out; done`: empty.\n\n**Batch**\nbatch-core-text: Core/text and Core/regex Jet only, proved by text goldens.\n\n**Dependencies**\nNone. New parser or control APIs (for example, a Unicode regex mode) need their own ballot (criterion 3).",
+      "plan": "**Goal**\nClose the core.text/core.regex/codec contract on scalar boundaries, case and normalization, regex complexity and invalid encoding, with exercised witnesses. Fix the one real gap: case folding beyond Latin-1.\n\n**Current state**\n- Core/text/text.jet:14-19: UTF-8 decode, Hangul NFD/NFC, UAX #29 graphemes and words, and width are Jet. Case mapping is Latin-1 only, and full case-fold tables map to identity. :73-78 `lower`/`upper`/`casefold` → `map_case` (:467). `casefold` is just `lower`, so `casefold(\"Straße\")` stays `straße`.\n- :82-88 `nfc`/`nfd`/`nfkc`/`nfkd`/`graphemes`/`words` exist.\n- Core/regex/regex.jet:15-18 is a bounded backtracking NFA over UTF-8 bytes with ASCII-only `ignore_case`. :488-498 `budget_limit` is (nodes+1)×(min(bytes,4096)+1)×32, clamped to [4096, 1,000,000]. :458-461 caps quantifiers at 4096.\n- Examples/features/text/unicode_text.jet, unicode_17.jet and regex.jet have goldens. Related open cards: #1471 (regex gaps, building), #3370 (producers), #3107 (index boundaries).\n\n**Changes**\n1. Core/text/text.jet: generate full Unicode simple and full case mapping plus C+F folding tables into Jet data, the same way the existing normalization tables are generated. Route `map_case` and `casefold` through them. Casefold is locale-neutral; Turkish dotted I is not special-cased. Update the header comment at :14-19.\n2. Regex: keep the byte NFA and budget. Document in regex.jet that budget exhaustion is a typed failure, and add a witness that proves it. `ignore_case` stays ASCII, stated explicitly; Unicode case-insensitive regex belongs to #1471.\n3. Invalid encoding: `String.from_bytes` → None and codec `EncodingError` are the policy. Add a witness for lossy vs strict where core.text exposes it.\n4. Add Examples/features/text/unicode_contracts.jet plus its golden. Record unsupported cells as printed lines.\n5. Owned vs view costs: measure only the rows exercised above, through the existing text perf cell. Make no claim without a receipt.\n\n**Proof**\n- `jet test Compiler --profile golden text/unicode_contracts`: passes.\n- `jet test Compiler --profile golden text/unicode_text` and `JET_GOLDEN_FILTER=text/regex …`: still pass. Existing goldens change only where casefold output was wrong.\n- `jet test Compiler --profile golden text/unicode_contracts` passes on O0, O1 and O2.\n\n**Batch**\nbatch-core-text: Core/text and Core/regex Jet only, proved by text goldens.\n\n**Dependencies**\nNone. New parser or control APIs (for example, a Unicode regex mode) need their own ballot (criterion 3).",
       "checkSteps": "1. Account normalization/case/grapheme versus byte/scalar jobs, regex complexity/limits and invalid encoding policy.\n2. measure owned/view costs only where exercised.\n3. new parser/control APIs require independent gates.",
       "probe": "Reproducible evidence and bounded future witness: docs/research/mine-for-jet-2026-09-12.md#finding-core-f038. Reuse the exact retained inputs and commands where recorded. Run no broad suite as a substitute for this contract. Historical receipts remain historical; no measurement or current-tree success is claimed here.",
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
         {
           "at": "2026-11-04",
           "by": "Main",
@@ -31150,7 +31195,7 @@
         },
         {
           "n": 4,
-          "text": "`JET_GOLDEN_FILTER=text/unicode_contracts Tools/agent/jet-env cargo test --test golden examples_compile_and_run` passes, with witnesses for full case folding (`Straße`→`strasse`, Greek final sigma, Turkish dotted I as the documented default), NFC/NFD/NFKC/NFKD, grapheme vs scalar vs byte counts, regex step-budget exhaustion and invalid-UTF-8 decode policy.",
+          "text": "`jet test Compiler --profile golden text/unicode_contracts` passes, with witnesses for full case folding (`Straße`→`strasse`, Greek final sigma, Turkish dotted I as the documented default), NFC/NFD/NFKC/NFKD, grapheme vs scalar vs byte counts, regex step-budget exhaustion and invalid-UTF-8 decode policy.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -31415,7 +31460,7 @@
       "parentId": "c0gibkuw",
       "needsAcceptance": false,
       "created": "2026-09-12T14:30:46.432Z",
-      "updated": "2026-11-04T23:45:38.112Z",
+      "updated": "2026-11-06T18:38:26.064Z",
       "updatedBy": "Main",
       "workOrder": 218,
       "goals": []
@@ -32525,13 +32570,18 @@
       "milestoneId": "e3-m21-iterator-stdlib",
       "phase": "ready",
       "priority": "P1",
-      "plan": "## Goal\nImplement D-ONE-OPERATIONS1=A (ratified 2026-09-13) in the self-hosted compiler. Author one checked operation-contract row per collection/Iter operation and derive every repeated view from it: arity and access, callback types, result types, TBuiltinOp/TClosureOp selection, docs, completion and explain. Remove the replaced tables in one cutover. Keep D-CORE-EAGER1/2=A and the LAST ties from #2298.\n\n## Current state\n- The operation facts are split across four parallel `if method == …` tables in `Compiler/JetFoundation/Source/Collections.jet`:\n  - arity and access in `sema_collection_method_contract` (`:136-282`);\n  - callback and argument types in `sema_collection_method_argument_type` (`:301-420`);\n  - result types in `sema_collection_method_result_type` (`:423-667`);\n  - operation selection in `sema_collection_method_operation` (`:669-924`).\n- Each new Iter method (#3315, #3333, #3334, #3371 and others) must currently touch all four.\n- Core call facts also live in `Compiler/JetFoundation/Source/Registry/CoreCalls.jet` (565 lines) and `CoreCallRows.jet` (2011 lines). Their consumers are `Compiler/JetSema/Source/Sema/Calls/Collections.jet`, `Compiler/JetCodegen/Source/Codegen/BuiltinMethods.jet` and `ClosureMethods.jet`, and `Compiler/JetEval/Source/Routes`.\n- The host kernels (`crates/jet-codegen/src/Prelude/Core/Collections.rs`, `Prelude/Core.jet`) are retained runtime. The rows reference them without re-describing them.\n- The archived `crates/jet-foundation/src/Collections.rs` and `Syntax/core_calls.rs` are reference only, and this card does not edit them.\n- The finding is at Docs/research/mine-for-jet-2026-09-12.md#finding-iter-f013 (READ-F02/READ-F12).\n\n## Changes\n1. `Compiler/JetFoundation/Source/Collections.jet`:\n   - Define one `CollectionOperationRow`: receiver kinds, access, arity, callback shape, result projection, TIR op, eager/lazy timing, callback count/order, stop-item consumption, failure channel, empty result, buffering, and a status of current, proposed or source-only.\n   - Author every existing operation as a row.\n   - Rewrite the four functions as lookups over the rows, then delete the `if` chains.\n2. Cut every consumer over in the same pass: JetSema `Calls/Collections.jet`, JetCodegen `BuiltinMethods.jet`/`ClosureMethods.jet` (route rows keyed from the operation row), JetEval `Routes`, and the Web/JIT route inventories in Compiler/. Remove the replaced Path, owned-adapter and inclusion inventories.\n3. Generate the Core reference operation table and the explain/completion text from the rows, through the existing `Tools/agent/gen-core-tables.mjs` pipeline.\n   - Correct the all/any teaching: empty `all` is true and empty `any` is false.\n   - Rewrite `Docs/spec/reference/core-library.md:289-320` from the generated table.\n4. Add `Examples/features/collections/operation_contract.jet` with the criteria cells. The remainder-continuation cell uses the #3315 `next`.\n5. Criteria 1-6 and 7-12 duplicate each other (the pre-retarget and retargeted wording). Closing 7-12 closes 1-6.\n\n## Proof\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.\n- `node Tools/agent/gen-core-tables.mjs --check` passes.\n- `JET_GOLDEN_FILTER=collections/operation_contract Tools/agent/jet-env cargo test --test golden examples_compile_and_run` passes, and `jet run` and `jet run --interpret` produce empty diffs.\n- `JET_GOLDEN_FILTER=collections/ Tools/agent/jet-env cargo test --test golden examples_compile_and_run` passes, as a regression check that every existing collections golden is unchanged.\n\n## Batch\n`batch-jetc-sema`: JetFoundation tables consumed by JetSema first, then codegen and eval.\n\n## Dependencies\n#3315 is needed only for the remainder-continuation cell and can land in the same batch. Land this row refactor first within the batch: the new-method cards (#3315, #3333, #3334, #3371, #3329, #3354) then add rows, not four table edits.",
+      "plan": "## Goal\nImplement D-ONE-OPERATIONS1=A (ratified 2026-09-13) in the self-hosted compiler. Author one checked operation-contract row per collection/Iter operation and derive every repeated view from it: arity and access, callback types, result types, TBuiltinOp/TClosureOp selection, docs, completion and explain. Remove the replaced tables in one cutover. Keep D-CORE-EAGER1/2=A and the LAST ties from #2298.\n\n## Current state\n- The operation facts are split across four parallel `if method == …` tables in `Compiler/JetFoundation/Source/Collections.jet`:\n  - arity and access in `sema_collection_method_contract` (`:136-282`);\n  - callback and argument types in `sema_collection_method_argument_type` (`:301-420`);\n  - result types in `sema_collection_method_result_type` (`:423-667`);\n  - operation selection in `sema_collection_method_operation` (`:669-924`).\n- Each new Iter method (#3315, #3333, #3334, #3371 and others) must currently touch all four.\n- Core call facts also live in `Compiler/JetFoundation/Source/Registry/CoreCalls.jet` (565 lines) and `CoreCallRows.jet` (2011 lines). Their consumers are `Compiler/JetSema/Source/Sema/Calls/Collections.jet`, `Compiler/JetCodegen/Source/Codegen/BuiltinMethods.jet` and `ClosureMethods.jet`, and `Compiler/JetEval/Source/Routes`.\n- The host kernels (`crates/jet-codegen/src/Prelude/Core/Collections.rs`, `Prelude/Core.jet`) are retained runtime. The rows reference them without re-describing them.\n- The archived `crates/jet-foundation/src/Collections.rs` and `Syntax/core_calls.rs` are reference only, and this card does not edit them.\n- The finding is at Docs/research/mine-for-jet-2026-09-12.md#finding-iter-f013 (READ-F02/READ-F12).\n\n## Changes\n1. `Compiler/JetFoundation/Source/Collections.jet`:\n   - Define one `CollectionOperationRow`: receiver kinds, access, arity, callback shape, result projection, TIR op, eager/lazy timing, callback count/order, stop-item consumption, failure channel, empty result, buffering, and a status of current, proposed or source-only.\n   - Author every existing operation as a row.\n   - Rewrite the four functions as lookups over the rows, then delete the `if` chains.\n2. Cut every consumer over in the same pass: JetSema `Calls/Collections.jet`, JetCodegen `BuiltinMethods.jet`/`ClosureMethods.jet` (route rows keyed from the operation row), JetEval `Routes`, and the Web/JIT route inventories in Compiler/. Remove the replaced Path, owned-adapter and inclusion inventories.\n3. Generate the Core reference operation table and the explain/completion text from the rows, through the existing `Tools/agent/gen-core-tables.mjs` pipeline.\n   - Correct the all/any teaching: empty `all` is true and empty `any` is false.\n   - Rewrite `Docs/spec/reference/core-library.md:289-320` from the generated table.\n4. Add `Examples/features/collections/operation_contract.jet` with the criteria cells. The remainder-continuation cell uses the #3315 `next`.\n5. Criteria 1-6 and 7-12 duplicate each other (the pre-retarget and retargeted wording). Closing 7-12 closes 1-6.\n\n## Proof\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.\n- `node Tools/agent/gen-core-tables.mjs --check` passes.\n- `jet test Compiler --profile golden collections/operation_contract` passes on O0, O1 and O2.\n- `jet test Compiler --profile golden collections/` passes, as a regression check that every existing collections golden is unchanged.\n\n## Batch\n`batch-jetc-sema`: JetFoundation tables consumed by JetSema first, then codegen and eval.\n\n## Dependencies\n#3315 is needed only for the remainder-continuation cell and can land in the same batch. Land this row refactor first within the batch: the new-method cards (#3315, #3333, #3334, #3371, #3329, #3354) then add rows, not four table edits.",
       "checkSteps": "1. Every operation states receiver/result ownership, eager/lazy timing, callback count/order, stop-item consumption, failure channel, empty result and required buffering.\n2. Examples cover empty all/any, zero, first failure, strict/short/pad zip and continuing the remainder; source errors are not advertised as valid successes.\n3. Named current versus proposed versus source-only behavior is distinguishable; LAST ties remain pinned by#2298 and eager defaults remain D-CORE-EAGER1/2=A.",
       "probe": "Reproducible evidence and bounded future witness: docs/research/mine-for-jet-2026-09-12.md#finding-iter-f013. Reuse the exact retained inputs and commands where recorded. Run no broad suite as a substitute for this contract. Historical receipts remain historical; no measurement or current-tree success is claimed here.",
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
         {
           "at": "2026-10-05",
           "by": "Pip",
@@ -32618,7 +32668,7 @@
         },
         {
           "n": 4,
-          "text": "Repeated operation facts have one checked owner or an explicit representation-specific reason; replaced Path, owned-adapter, JIT/Web and inclusion inventories are removed in one cutover.",
+          "text": "Repeated operation facts have one checked owner or an explicit representation-specific reason; replaced Path, owned-adapter, Web and inclusion inventories are removed in one cutover.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -32636,7 +32686,7 @@
         },
         {
           "n": 6,
-          "text": "Focused current-source evidence proves generated freshness and the applicable AOT, default run, interpreter/deopt and Web contracts; no performance gate is weakened.",
+          "text": "Focused current-source evidence proves generated freshness and the applicable O0, O1, O2 and web where applicable contracts; no performance gate is weakened.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -32672,7 +32722,7 @@
         },
         {
           "n": 10,
-          "text": "[retarget] The four parallel method tables in Compiler/JetFoundation/Source/Collections.jet collapse to one authored source; the replaced Path, owned-adapter, JIT/Web and inclusion inventories in Compiler/ are removed in one cutover.",
+          "text": "[retarget] The four parallel method tables in Compiler/JetFoundation/Source/Collections.jet collapse to one authored source; the replaced Path, owned-adapter, Web and inclusion inventories in Compiler/ are removed in one cutover.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -32690,7 +32740,7 @@
         },
         {
           "n": 12,
-          "text": "[retarget] A rebuilt self-hosted jet proves generated freshness plus AOT, default run, interpreter/deopt and Web contracts on the focused examples; no performance gate is weakened.",
+          "text": "[retarget] A rebuilt self-hosted jet proves generated freshness plus O0, O1, O2 and web where applicable contracts on the focused examples; no performance gate is weakened.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -32786,7 +32836,7 @@
       "parentId": "c0pi33zu",
       "needsAcceptance": false,
       "created": "2026-09-12T14:48:23.748Z",
-      "updated": "2026-11-04T18:38:09.792Z",
+      "updated": "2026-11-06T18:38:28.977Z",
       "updatedBy": "Main",
       "workOrder": 44,
       "goals": [
@@ -33342,6 +33392,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT)."
+        },
+        {
           "at": "2026-10-23",
           "by": "agent",
           "text": "Board burndown 2026-10-22: the open decision in this card is drafted as owner ballot D-NIX-FREE1 (draft for Main to file). The card text is background, not the decision."
@@ -33385,8 +33440,7 @@
           "metBy": "Main",
           "verifiedBy": "Main",
           "evidence": "#6563 c1 closure audit (Prep, 2026-11-04): D-NIX-FREE1, ratified A on this card, records the owner contract this criterion asks for.",
-          "at": "2026-11-04T18:38:16.725Z",
-          "closure": "decision"
+          "at": "2026-11-04T18:38:16.725Z"
         },
         {
           "n": 2,
@@ -33471,7 +33525,7 @@
         },
         {
           "n": 11,
-          "text": "[retarget] C9 proof runs through the Jet-built jetpack (Jetpack/Bootstrap/check.sh --tests plus a mixed native/Nixpkgs env realize/run/update/remove on AOT and default jet run), not the Rust crate; the E1272 postgres@nixpkgs hole is replaced by real native realization.",
+          "text": "[retarget] C9 proof runs through the Jet-built jetpack (Jetpack/Bootstrap/check.sh --tests plus a mixed native/Nixpkgs env realize/run/update/remove on O0, O1 and O2), not the Rust crate; the E1272 postgres@nixpkgs hole is replaced by real native realization.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -33511,7 +33565,7 @@
       "parentId": "c06osxzz",
       "needsAcceptance": false,
       "created": "2026-09-13T11:40:48.925Z",
-      "updated": "2026-11-04T18:38:16.725Z",
+      "updated": "2026-11-06T18:38:31.904Z",
       "updatedBy": "Main",
       "goals": [
         "G7"
@@ -35597,13 +35651,18 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
-      "plan": "**Goal.** This is the foundations wave of #3690 (W1 plus part of W2). Each foundational Core member (text, collections, math, units, time, encoding, regex, args, files/path, io/mem, portable crypto) gets exactly one meaning: its Jet body in Core/*.jet, or a declared typed provider leaf. No Rust dispatcher row, JIT shim or interpreter route may duplicate it.\n\n**Current state.**\n- `crates/jet-codegen/src/Prelude/Core.jet` (2412 lines) holds 1,814 `dispatcher_row`s. 693 are in foundation modules, and 657 of those name members the module's `source_module … owns {…}` line already gives to Jet. Those are duplicate meanings and an I9 risk.\n\n| Module | Rows | Jet-owned |\n|---|---|---|\n| math | 220 | 219 |\n| text | 137 | 137 |\n| encoding | 124 | 123 |\n| collections | 52 | 52 |\n| time | 48 | 39 |\n| files | 45 | 38 |\n| crypto | 42 | 25 |\n| regex | 20 | 19 |\n| args | 3 | 3 |\n| mem | 2 | 2 |\n\n- The remaining 36 unowned rows (crypto 17, time 9, files 7, math/encoding/regex 1 each) need either a Jet body or a leaf declaration.\n- The self-hosted routing mirror is `Compiler/JetFoundation/Source/Registry/{CoreCallRows,CoreCalls,CoreHostSignatures}.jet`, `Compiler/JetCodegen/Source/Codegen/HandleMethods.jet` and `Compiler/JetEval/Source/Routes/`.\n- From merged #3517: the text/file source attempts were reverted on 2026-09-21 because the compiler rejected private source paths. `Core/text/string.jet` is now a private source part (`crates/jet-foundation/src/CoreSourceParts.rs:30`).\n- c4 is met, but #3584 (building) now requires ALL_CAPS module constants. c7 tracks that.\n\n**Changes (one module per patch, in dependency order).**\n1. **F1 route cut, per module:** delete the Jet-owned `dispatcher_row`/`ambient_route` lines in Core.jet. Regenerate with `node Tools/agent/gen-core-tables.mjs --write`, which rewrites `CoreModuleExports.rs` and `CoreCallRows.jet`. Remove the now-dead `crates/jet-codegen/src/Prelude/CoreLib/**` functions and JIT shims. Remove matching routes in `HandleMethods.jet`/`JetEval/Source/Routes`.\n2. Order: text + collections (confirm the `Core/text` and `Core/files` private helpers check first), then encoding/regex/args, then math/units/time, then files/path/io/mem, then crypto (hands off to #3667 for seal/open semantics).\n3. For each unowned row: write the Jet body, or keep it as a typed provider leaf marked in Core source (F4 once ratified; until then the existing `source_module` leaf convention).\n4. Migrate callers/examples/goldens in the same patch. Rename module constants to ALL_CAPS (#3584).\n5. Perf: text/collections are gate cells. Rerun the matched text/collections perf cells before deleting the Rust route. A loss keeps that route and goes on a card.\n\n**Proof.**\n- The commands in add_criteria.\n- `cargo test --test core_surface_ledger`: passes.\n\n**Batch.** `batch-host-runtime`: deleting Prelude CoreLib Rust rows changes the embedded dispatcher. Proof needs one compiler build and one tier-parity golden pass.\n\n**Dependencies.** Parent #3690. Crypto overlaps #3667/#3668, which own the crypto semantics. None of these block the other modules.\n",
+      "plan": "**Goal.** This is the foundations wave of #3690 (W1 plus part of W2). Each foundational Core member (text, collections, math, units, time, encoding, regex, args, files/path, io/mem, portable crypto) gets exactly one meaning: its Jet body in Core/*.jet, or a declared typed provider leaf. No Rust dispatcher row, JIT shim or interpreter route may duplicate it.\n\n**Current state.**\n- `crates/jet-codegen/src/Prelude/Core.jet` (2412 lines) holds 1,814 `dispatcher_row`s. 693 are in foundation modules, and 657 of those name members the module's `source_module … owns {…}` line already gives to Jet. Those are duplicate meanings and an I9 risk.\n\n| Module | Rows | Jet-owned |\n|---|---|---|\n| math | 220 | 219 |\n| text | 137 | 137 |\n| encoding | 124 | 123 |\n| collections | 52 | 52 |\n| time | 48 | 39 |\n| files | 45 | 38 |\n| crypto | 42 | 25 |\n| regex | 20 | 19 |\n| args | 3 | 3 |\n| mem | 2 | 2 |\n\n- The remaining 36 unowned rows (crypto 17, time 9, files 7, math/encoding/regex 1 each) need either a Jet body or a leaf declaration.\n- The self-hosted routing mirror is `Compiler/JetFoundation/Source/Registry/{CoreCallRows,CoreCalls,CoreHostSignatures}.jet`, `Compiler/JetCodegen/Source/Codegen/HandleMethods.jet` and `Compiler/JetEval/Source/Routes/`.\n- From merged #3517: the text/file source attempts were reverted on 2026-09-21 because the compiler rejected private source paths. `Core/text/string.jet` is now a private source part (`crates/jet-foundation/src/CoreSourceParts.rs:30`).\n- c4 is met, but #3584 (building) now requires ALL_CAPS module constants. c7 tracks that.\n\n**Changes (one module per patch, in dependency order).**\n1. **F1 route cut, per module:** delete the Jet-owned `dispatcher_row`/`ambient_route` lines in Core.jet. Regenerate with `node Tools/agent/gen-core-tables.mjs --write`, which rewrites `CoreModuleExports.rs` and `CoreCallRows.jet`. Remove the now-dead `crates/jet-codegen/src/Prelude/CoreLib/**` functions and JIT shims. Remove matching routes in `HandleMethods.jet`/`JetEval/Source/Routes`.\n2. Order: text + collections (confirm the `Core/text` and `Core/files` private helpers check first), then encoding/regex/args, then math/units/time, then files/path/io/mem, then crypto (hands off to #3667 for seal/open semantics).\n3. For each unowned row: write the Jet body, or keep it as a typed provider leaf marked in Core source (F4 once ratified; until then the existing `source_module` leaf convention).\n4. Migrate callers/examples/goldens in the same patch. Rename module constants to ALL_CAPS (#3584).\n5. Perf: text/collections are gate cells. Rerun the matched text/collections perf cells before deleting the Rust route. A loss keeps that route and goes on a card.\n\n**Proof.**\n- The commands in add_criteria.\n- `jet test Compiler --profile cases core_surface_ledger/`: passes.\n\n**Batch.** `batch-host-runtime`: deleting Prelude CoreLib Rust rows changes the embedded dispatcher. Proof needs one compiler build and one tier-parity golden pass.\n\n**Dependencies.** Parent #3690. Crypto overlaps #3667/#3668, which own the crypto semantics. None of these block the other modules.\n",
       "checkSteps": null,
       "probe": "scripts/agent/jet-env jet check Core/crypto/crypto.jet",
       "visualMedia": [],
       "blockedBy": [],
       "assignee": "Main",
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
         {
           "at": "2026-11-04",
           "by": "Main",
@@ -35874,7 +35933,7 @@
         },
         {
           "n": 5,
-          "text": "[retarget] Every foundational Core/<module> member has a Jet body or a declared typed provider leaf, and no Rust dispatcher row, JIT shim or interpreter route re-implements it (#3690 c1 scoped to foundations).",
+          "text": "[retarget] Every foundational Core/<module> member has a Jet body or a declared typed provider leaf, and no second implementation (host leaf, tier-specific shim or compiler-side route) re-implements it (#3690 c1 scoped to foundations).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -35883,7 +35942,7 @@
         },
         {
           "n": 6,
-          "text": "[retarget] Callers, Compiler/JetFoundation registry rows, examples and goldens use the canonical contract, and golden output is identical on AOT/default/interpreter/web where applicable.",
+          "text": "[retarget] Callers, Compiler/JetFoundation registry rows, examples and goldens use the canonical contract, and golden output is identical on O0, O1, O2 and web where applicable.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -35901,7 +35960,7 @@
         },
         {
           "n": 8,
-          "text": "After each foundation module cutover, `crates/jet-codegen/src/Prelude/Core.jet` has no `dispatcher_row` for any member that module's `source_module` line owns. Proof: `node Tools/agent/check-core-surface-ledger.mjs` passes, plus a count of 0 Jet-owned foundation rows. Then `cargo test --test core_<module>_foundations` passes (text/encoding/regex/time/files/io/memory/units/args/crypto/set/array), and `JET_GOLDEN_FILTER=text/ cargo test --test golden examples_compile_and_run` and `JET_GOLDEN_FILTER=serde/ cargo test --test golden examples_compile_and_run` pass on AOT/default-run/interpreter.",
+          "text": "After each foundation module cutover, `Compiler/Prelude/Core.jet` has no `dispatcher_row` for any member that module's `source_module` line owns. Proof: `node Tools/agent/check-core-surface-ledger.mjs` passes, plus a count of 0 Jet-owned foundation rows. Then `cargo test --test core_<module>_foundations` passes (text/encoding/regex/time/files/io/memory/units/args/crypto/set/array), and `jet test Compiler --profile golden text/` and `jet test Compiler --profile golden serde/` pass on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -36135,7 +36194,7 @@
         },
         {
           "n": 34,
-          "text": "(was #1631 c3) Every core.os fact reports the same value on AOT, jet run (JIT) and the interpreter [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #1631 c3) Every core.os fact reports the same value on O0, O1 and O2 [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -36216,7 +36275,7 @@
         },
         {
           "n": 43,
-          "text": "(was #2854 c1) Source-complete: UTC leap-second parsing/formatting/order stay in shared Time Prelude; checked Civil/Period methods route through one core.time HandleMethod identity across AOT, JIT, interpreter, and web adapters. Runtime goldens and diagnostic snapshots are deferred to #2919 by owner instruction [precut audit: leap-second label on UTC instants; today's corpus rejects 23:59:60, so the asked label is not shown]",
+          "text": "(was #2854 c1) Source-complete: UTC leap-second parsing/formatting/order stay in shared Time Prelude; checked Civil/Period methods route through one core.time HandleMethod identity across O0, O1, O2 and web where applicable. Runtime goldens and diagnostic snapshots are deferred to #2919 by owner instruction [precut audit: leap-second label on UTC instants; today's corpus rejects 23:59:60, so the asked label is not shown]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -36261,9 +36320,9 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-22T00:15:02.908Z",
-      "updated": "2026-11-04T23:41:32.871Z",
+      "updated": "2026-11-06T18:38:37.280Z",
       "updatedBy": "Main",
-      "claimedAt": "2026-11-04T23:41:32.871Z",
+      "claimedAt": "2026-11-06T18:38:37.280Z",
       "goals": []
     },
     {
@@ -36277,13 +36336,18 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
-      "plan": "**Goal.** This is the system wave of #3690 (W2/W3): archive, process/tasks, event/watcher, term/log/sys, email/db and net transports. Jet source owns protocol, policy, validation and typed failures. Host access stays behind typed, policy-free provider leaves.\n\n**Current state.**\n- c4 (sys.expand parity) is met: `tests/corelib_parts/system.rs:461` `core_sys_expand_home_patterns_are_identical_across_tiers`.\n- c5 fails. `Core/sys/sys.jet:16` `pub fn set(name, value) -[Env]> { core.sys.set(name, value) }` is infallible. The leaf `crates/jet-codegen/src/Prelude/CoreLib/Top/FSIoEnvOsTesting.rs:677` `jet_std_env_set(...) -> Result<(), EnvError>` runs `jet_env_validate_name/value` in Rust, which is policy in the leaf. The emitted Rust assigns that Result to a `()` MIR slot (E0308; log 2026-09-24). The test is `tests/corelib_parts/system.rs:488`.\n- Dispatcher rows in `crates/jet-codegen/src/Prelude/Core.jet` for system modules: 355 in total, 293 of them already Jet-owned duplicates.\n\n| Module | Rows | Jet-owned |\n|---|---|---|\n| net | 107 | 107 |\n| service | 59 | 5 |\n| sys | 52 | 52 |\n| log | 28 | 28 |\n| http | 27 | 24 |\n| term | 22 | 20 |\n| sync | 17 | 17 |\n| db | 13 | 13 |\n| event | 7 | 7 |\n| process | 6 | 6 |\n| tasks | 6 | 4 |\n| email | 6 | 5 |\n| watcher | 4 | 4 |\n\n- Sibling owners of sub-contracts: #3594 (process binary streams), #3596 (archive streaming), #3557 (TCP handle shape, building), #3669 (db semantics) and #3665/#3666 (HTTP/TLS).\n\n**Changes.**\n1. **c5 first:**\n   - Move env name/value validation (empty, `=`, NUL, and the platform length cap) into `Core/sys/sys.jet`.\n   - `set` becomes `-[Env]> EnvError!`, matching `unset` at :18, under the ratified typed-failure/no-fake-success law.\n   - The leaf `jet_std_env_set` becomes policy-free and returns `()`.\n   - Update the provider row (`Core.jet:352`) and regenerate with `node Tools/agent/gen-core-tables.mjs --write`.\n   - Update the test witness to `sys.set(key, v) ?? return` and add an invalid-name line.\n2. Then, one module per patch: net → sys/log/term → sync/event/watcher/process/tasks → db/email → service. Delete the Jet-owned `dispatcher_row`/`ambient_route` lines and the dead `Prelude/CoreLib` functions and JIT shims (F1). Mirror the removal in `Compiler/JetFoundation/Source/Registry/*.jet` and `Compiler/JetCodegen/Source/Codegen/HandleMethods.jet`.\n3. The 54 `core.service` rows with no Jet owner need Jet bodies over typed leaves. Raw sockets and OS calls stay leaves, using the F4 declaration once ratified.\n4. Migrate callers, examples and goldens in each patch.\n\n**Proof.**\n- The command in add_criteria.\n- `cargo test --test corelib_system` (focused set), `cargo test --test process_sessions`, `cargo test --test corelib_net`.\n- `JET_GOLDEN_FILTER=io/log cargo test --test golden examples_compile_and_run` and `JET_GOLDEN_FILTER=io/process_ cargo test --test golden examples_compile_and_run`: identical output on every tier.\n- `node Tools/agent/check-core-surface-ledger.mjs`: passes.\n\n**Batch.** `batch-host-runtime`: the work edits the Prelude dispatcher and CoreLib Rust leaves, and proof is a tier-parity run after one build.\n\n**Dependencies.** Parent #3690. Sibling sub-contract owners are listed above and do not block the c5 fix or the F1 route cuts.\n",
+      "plan": "**Goal.** This is the system wave of #3690 (W2/W3): archive, process/tasks, event/watcher, term/log/sys, email/db and net transports. Jet source owns protocol, policy, validation and typed failures. Host access stays behind typed, policy-free provider leaves.\n\n**Current state.**\n- c4 (sys.expand parity) is met: `tests/corelib_parts/system.rs:461` `core_sys_expand_home_patterns_are_identical_across_tiers`.\n- c5 fails. `Core/sys/sys.jet:16` `pub fn set(name, value) -[Env]> { core.sys.set(name, value) }` is infallible. The leaf `crates/jet-codegen/src/Prelude/CoreLib/Top/FSIoEnvOsTesting.rs:677` `jet_std_env_set(...) -> Result<(), EnvError>` runs `jet_env_validate_name/value` in Rust, which is policy in the leaf. The emitted Rust assigns that Result to a `()` MIR slot (E0308; log 2026-09-24). The test is `tests/corelib_parts/system.rs:488`.\n- Dispatcher rows in `crates/jet-codegen/src/Prelude/Core.jet` for system modules: 355 in total, 293 of them already Jet-owned duplicates.\n\n| Module | Rows | Jet-owned |\n|---|---|---|\n| net | 107 | 107 |\n| service | 59 | 5 |\n| sys | 52 | 52 |\n| log | 28 | 28 |\n| http | 27 | 24 |\n| term | 22 | 20 |\n| sync | 17 | 17 |\n| db | 13 | 13 |\n| event | 7 | 7 |\n| process | 6 | 6 |\n| tasks | 6 | 4 |\n| email | 6 | 5 |\n| watcher | 4 | 4 |\n\n- Sibling owners of sub-contracts: #3594 (process binary streams), #3596 (archive streaming), #3557 (TCP handle shape, building), #3669 (db semantics) and #3665/#3666 (HTTP/TLS).\n\n**Changes.**\n1. **c5 first:**\n   - Move env name/value validation (empty, `=`, NUL, and the platform length cap) into `Core/sys/sys.jet`.\n   - `set` becomes `-[Env]> EnvError!`, matching `unset` at :18, under the ratified typed-failure/no-fake-success law.\n   - The leaf `jet_std_env_set` becomes policy-free and returns `()`.\n   - Update the provider row (`Core.jet:352`) and regenerate with `node Tools/agent/gen-core-tables.mjs --write`.\n   - Update the test witness to `sys.set(key, v) ?? return` and add an invalid-name line.\n2. Then, one module per patch: net → sys/log/term → sync/event/watcher/process/tasks → db/email → service. Delete the Jet-owned `dispatcher_row`/`ambient_route` lines and the dead `Prelude/CoreLib` functions and JIT shims (F1). Mirror the removal in `Compiler/JetFoundation/Source/Registry/*.jet` and `Compiler/JetCodegen/Source/Codegen/HandleMethods.jet`.\n3. The 54 `core.service` rows with no Jet owner need Jet bodies over typed leaves. Raw sockets and OS calls stay leaves, using the F4 declaration once ratified.\n4. Migrate callers, examples and goldens in each patch.\n\n**Proof.**\n- The command in add_criteria.\n- `cargo test --test corelib_system` (focused set), `jet test Compiler --profile cases process_sessions/`, `jet test Compiler --profile cases corelib_net/`.\n- `jet test Compiler --profile golden io/log` and `jet test Compiler --profile golden io/process_`: identical output on every tier.\n- `node Tools/agent/check-core-surface-ledger.mjs`: passes.\n\n**Batch.** `batch-host-runtime`: the work edits the Prelude dispatcher and CoreLib Rust leaves, and proof is a tier-parity run after one build.\n\n**Dependencies.** Parent #3690. Sibling sub-contract owners are listed above and do not block the c5 fix or the F1 route cuts.\n",
       "checkSteps": null,
       "probe": "scripts/agent/jet-env cargo test -p jet --test core_net_tls tls_rejects_empty_dns_labels_before_transport_on_all_tiers -- --exact --nocapture",
       "visualMedia": [],
       "blockedBy": [],
       "assignee": "Main",
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
         {
           "at": "2026-11-02",
           "by": "Main",
@@ -36674,7 +36738,7 @@
         },
         {
           "n": 10,
-          "text": "`cargo test --test corelib_system core_sys_set_then_get_mutation_is_identical_across_tiers` passes on AOT, default run and the interpreter, with the witness updated to the fallible spelling. An invalid name (`\"A=B\"`, empty, or NUL) returns `EnvError` from Jet-owned validation, and no exit-101 ICE occurs.",
+          "text": "`jet test Compiler --profile cases corelib/core_sys_set_then_get_mutation_is_identical_across_tiers` passes on O0, O1 and O2, with the witness updated to the fallible spelling. An invalid name (`\"A=B\"`, empty, or NUL) returns `EnvError` from Jet-owned validation, and no exit-101 ICE occurs.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -36746,9 +36810,9 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-22T00:15:03.647Z",
-      "updated": "2026-11-04T18:38:08.481Z",
+      "updated": "2026-11-06T18:38:40.345Z",
       "updatedBy": "Main",
-      "claimedAt": "2026-11-02T22:57:39.338Z",
+      "claimedAt": "2026-11-06T18:38:40.345Z",
       "goals": []
     },
     {
@@ -182928,6 +182992,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-06T18:38:40.345Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0fi6uj5",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:38:39.398Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0fi6uj5",
+      "note": "criteria,plan"
+    },
+    {
+      "at": "2026-11-06T18:38:37.280Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c03ai7mm",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:38:36.442Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c03ai7mm",
+      "note": "criteria,plan"
+    },
+    {
+      "at": "2026-11-06T18:38:31.904Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0svneex",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:38:30.924Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0svneex",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:38:28.977Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0l0ygs4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:38:28.054Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0l0ygs4",
+      "note": "criteria,plan"
+    },
+    {
+      "at": "2026-11-06T18:38:26.065Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0uyfbge",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:38:25.276Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0uyfbge",
+      "note": "criteria,plan"
+    },
+    {
+      "at": "2026-11-06T18:38:23.285Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ym70o1",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:38:22.467Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ym70o1",
+      "note": "criteria,plan"
+    },
+    {
+      "at": "2026-11-06T18:38:20.660Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0eymgfx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:38:19.855Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0eymgfx",
+      "note": "criteria,plan"
+    },
+    {
+      "at": "2026-11-06T18:38:17.827Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0w7t4qu",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:38:16.860Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0w7t4qu",
+      "note": "criteria,plan"
+    },
+    {
+      "at": "2026-11-06T18:38:14.858Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01231wx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:38:13.934Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01231wx",
+      "note": "criteria,plan"
+    },
+    {
+      "at": "2026-11-06T18:38:09.877Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0uasubv",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:38:08.802Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0uasubv",
+      "note": "criteria,plan"
+    },
+    {
+      "at": "2026-11-06T18:38:06.739Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0cshs43",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:38:05.853Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0cshs43",
+      "note": "criteria,plan"
+    },
+    {
+      "at": "2026-11-06T18:37:52.414Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0duj9rp",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:37:51.403Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0duj9rp",
+      "note": "criteria,plan"
+    },
+    {
+      "at": "2026-11-06T18:37:46.873Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0j1k587",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-06T18:37:45.072Z",
       "by": "Main",
