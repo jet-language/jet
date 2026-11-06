@@ -39,6 +39,12 @@ fn pkg_fetch_error(code: String, what: String, why: String, fix: String) -> Pack
 fn pkg_fetch_registry_error(name: String, detail: String) -> PackageFetchError Never! {
     pkg_fetch_error("E1207", "registry dependency `{name}` cannot be resolved: {detail}", "registry package identity is source-backed and must be verified before it enters the lock", "restore the trusted immutable registry checkpoint and artifact, then run `jet fetch`")
 }
+// Malformed or tampered registry evidence (E2607) refuses the dependency:
+// fetch reports it as E1207 naming the package, with the evidence detail.
+fn pkg_fetch_registry_evidence_error(name: String, diagnostic: Diagnostic) -> PackageFetchError Never! {
+    if diagnostic.code == "E2607" -> return pkg_fetch_registry_error(name, diagnostic.what)
+    PackageFetchError{diagnostic: diagnostic}
+}
 fn pkg_fetch_lock_error(error: LockError) -> PackageFetchError Never! {
     if error == {
         .Reported(diagnostic) -> return PackageFetchError{diagnostic: diagnostic}
@@ -50,9 +56,20 @@ fn pkg_fetch_lock_error(error: LockError) -> PackageFetchError Never! {
 fn pkg_fetch_load_manifest(directory: String, name: String) -[FS, Env]> Manifest PackageFetchError! {
     if pkg_manifest_load(directory) == {
         .Val(found) -> Ok(found)
-        .None -> Err(pkg_fetch_error("E1215", "dependency `{name}` has no `{PACKAGE_FILE}`", "every Jet package must have a manifest", "add `{PACKAGE_FILE}` to `{directory}`"))
+        .None -> Err(pkg_fetch_missing_manifest(directory, name))
         .Err(error) -> Err(PackageFetchError{diagnostic: error.diagnostic})
     }
+}
+// The manifest of an installed Hangar object, whose files are shared links.
+fn pkg_fetch_load_store_manifest(directory: String, name: String) -[FS, Env]> Manifest PackageFetchError! {
+    if pkg_store_manifest_load(directory) == {
+        .Val(found) -> Ok(found)
+        .None -> Err(pkg_fetch_missing_manifest(directory, name))
+        .Err(error) -> Err(PackageFetchError{diagnostic: error.diagnostic})
+    }
+}
+fn pkg_fetch_missing_manifest(directory: String, name: String) -> PackageFetchError Never! {
+    pkg_fetch_error("E1215", "dependency `{name}` has no `{PACKAGE_FILE}`", "every Jet package must have a manifest", "add `{PACKAGE_FILE}` to `{directory}`")
 }
 fn pkg_fetch_closure(lock: LockFile, target: String) -> [String] Never! {
     seen := [String]{}

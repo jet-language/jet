@@ -9684,10 +9684,10 @@ struct UnresolvedInlineDependency {
         meaning :: "An inline script dependency (`use pkg#version;`) didn't resolve"
         detail :: true
         no_fix :: .Behavior
-        fix_next :: "Commit a local inline dependency copy, or initialize a package and declare the dependency there."
+        fix_next :: "Run the script once with `jet run` to fetch and lock it, or commit a local inline dependency copy."
         fn what(self) -> String { "Inline dependency `{self.name}#{self.selector}` didn't resolve." }
-        fn why(self) -> String { "A manifest-less script's `use {self.name}#{self.selector};` has no source to resolve from — the Jet package registry has no fetch path yet, so an inline dependency only resolves from a committed local copy." }
-        fn fix(self) -> String { "Commit a copy at `.jet/inline-deps/{self.name}/<version>/`, or run `jet init` and depend on `{self.name}` through `package.jet` once you have a real source for it." }
+        fn why(self) -> String { "A manifest-less script's `use {self.name}#{self.selector};` resolves from a local copy under `.jet/inline-deps/{self.name}/`, and only `jet run` and `jet fetch --lock` fetch a package no local copy knows from the configured package registry." }
+        fn fix(self) -> String { "Run the script with `jet run`, which fetches and locks `{self.name}` on its first run, or commit a copy at `.jet/inline-deps/{self.name}/<version>/`." }
     }
 }
 

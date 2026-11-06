@@ -152,7 +152,7 @@ fn publication_tuf_test_command(root: String, project: String, bare: String, sto
     files.write(manifest_path, denied_manifest) ?? panic("denied manifest")
     denied :: publication_tuf_test_command(root, consumer, bare, store, [String]{"fetch"}).run() ?? panic("denied fetch")
     assert(!denied.success)
-    loop detail in ([String]{"E1207", "source authority", "consumer -> textkit#1.2.0", "package `consumer`", "use an allowed source"}) -> assert(denied.errors.contains(detail))
+    loop detail in ([String]{"E1207", "source authority", "consumer -> textkit#1.2.0", "Package `consumer`", "Use an allowed source"}) -> assert(denied.errors.contains(detail), denied.errors)
     roots :: HangarRoots.at(files.join(root, "jetpack-root"))
     loop stored in store_list(&verification, roots) -> assert(!(stored.name == "textkit" && stored.version == "1.2.0"))
     files.write(manifest_path, allowed) ?? panic("allowed manifest")
@@ -201,6 +201,48 @@ fn publication_tuf_test_command(root: String, project: String, bare: String, sto
     }
     offline :: publication_tuf_test_command(root, consumer, bare, store, [String]{"fetch", "--offline"}).env("JET_REGISTRY_URL", "file://{root}/must-not-be-read.git").run() ?? panic("offline fetch")
     assert(offline.success, offline.errors)
+    store_make_tree_writable_for_removal(root) ?? panic("unseal the Hangar fixture")
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+// #3590 c9 (D-JPK-SCRIPTDEP1=A): a loose script's first `jet run` fetches,
+// verifies and locks `use textkit#1.4` from the configured registry with no
+// `jet add` step; the second run resolves from the locked local copy with the
+// registry gone and no engine to ask, so it opens no connection.
+#Test("jetpack script dependency first run fetches verifies and locks then runs offline") {
+    verification := StoreVerification.new()
+    root :: registry_cli_test_root("script-dep")
+    publisher :: files.join(root, "publisher")
+    publication_tuf_test_project(publisher, "textkit", "1.4.2")
+    files.write(files.join(publisher, "textkit.jet"), "fn hi() -> String {{ \"hi from textkit\" }}\n") ?? panic("library source")
+    _ :: publication_tuf_test_git(publisher, [String]{"add", "."})
+    _ :: publication_tuf_test_git(publisher, [String]{"commit", "-m", "library"})
+    bare :: publication_tuf_test_registry(root, "textkit", "1.4.2")
+    store :: files.join(root, "legacy-store")
+    files.create_dir_all(store) ?? panic("legacy store")
+    published :: publication_tuf_test_command(root, publisher, bare, store, [String]{"registry", "publish"}).run() ?? panic("publish")
+    assert(published.success, published.errors)
+    script_dir :: files.join(root, "script")
+    files.create_dir_all(script_dir) ?? panic("script dir")
+    files.write(files.join(script_dir, "stats.jet"), "use textkit#1.4\n\nfn run() {{\n    print(textkit.hi())\n}}\n") ?? panic("script")
+    first :: publication_tuf_test_command(root, script_dir, bare, store, [String]{"run", "stats.jet"}).run() ?? panic("first run")
+    assert(first.success, first.errors)
+    assert(first.output.contains("hi from textkit"), first.output)
+    lock :: files.read(files.join(script_dir, "stats.jet.lock")) ?? panic("the first run must write stats.jet.lock")
+    loop field in ([String]{"name = \"textkit\"", "selector = \"1.4\"", "resolved = \"1.4.2\"", "content_hash = \"sha256-", "script_hash = \"sha256-"}) -> assert(lock.contains(field), lock)
+    assert(files.is_dir(files.join(files.join(files.join(files.join(script_dir, ".jet"), "inline-deps"), "textkit"), "1.4.2")))
+    roots :: HangarRoots.at(files.join(root, "jetpack-root"))
+    verified := false
+    loop stored in store_list(&verification, roots) {
+        if stored.name == "textkit" && stored.version == "1.4.2" && stored.envelope.provenance.contains("package=textkit#1.4.2") -> verified = true
+    }
+    assert(verified, "the first run must ingest the verified registry artifact into Hangar")
+    files.remove_all(bare) ?? panic("take the registry away")
+    second :: publication_tuf_test_command(root, script_dir, bare, store, [String]{"run", "stats.jet"}).env("JET_REGISTRY_URL", "file://{root}/must-not-be-read.git").env("JETPACK_BIN", files.join(root, "no-engine")).run() ?? panic("second run")
+    assert(second.success, second.errors)
+    assert(second.output.contains("hi from textkit"), second.output)
+    // Hangar objects are read-only; make the tree writable before removal.
+    store_make_tree_writable_for_removal(root) ?? panic("unseal the Hangar fixture")
     files.remove_all(root) ?? panic("cleanup")
 }
 
@@ -280,13 +322,16 @@ fn registry_cli_test_entry_with(verification: &StoreVerification, roots: HangarR
     reused :: registry_cli_test_fetch(root, consumer, bare, store, "200")
     assert(reused.success, "an exact lock must remain usable when advisory metadata expires: {reused.errors}")
     same := false
+    seen := [String]{}
     loop stored in store_list(&verification, roots) {
+        if stored.name == "freshlib" && stored.version == "1.2.0" -> &seen.push("{stored.out}: {stored.envelope.provenance}")
         if stored.name == "freshlib" && stored.version == "1.2.0" && stored.out == entry.out && stored.envelope.provenance.contains("advisory-feed=sequence=1") -> same = true
     }
-    assert(same, "an exact lock must reuse the same Hangar object and keep its advisory receipt")
+    assert(same, "an exact lock must reuse the same Hangar object and keep its advisory receipt; expected {entry.out}, Hangar holds {seen.join("; ")}")
     if previous_keys == {
         .Val(value) -> sys.set("JET_KEYS_DIR", value)
         .None -> { _ :: sys.unset("JET_KEYS_DIR") ?? panic("restore env") }
     }
+    store_make_tree_writable_for_removal(root) ?? panic("unseal the Hangar fixture")
     files.remove_all(root) ?? panic("cleanup")
 }

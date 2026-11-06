@@ -4,14 +4,15 @@
 // `jet fetch --lock` writes a `<script>.lock` sidecar, and `jet init` lifts
 // the inline refs into a generated `package.jet`.
 //
-// Resolution is local and offline: a committed or explicitly materialized
-// source tree, never an implicit registry request.
+// Resolution itself is local and offline:
 //   1. `<script_dir>/.jet/inline-deps/<name>/<version>/`, the managed-folder
-//      copy (committed or populated by `jet fetch --lock`).
+//      copy (committed, or written by `jet fetch --lock`).
 //   2. `JET_INLINE_DEPS_FIXTURES=<dir>`, an offline test/dev override with
 //      the same `<name>/<version>/` shape, checked only when set.
-// Anything else is E1253: an honest unresolved dependency, never a fake
-// success.
+// A package neither knows is fetched only by `jet run` (its first run) and
+// `jet fetch --lock`, through the configured package registry
+// (D-JPK-SCRIPTDEP1); anywhere else it is E1253. A local package stays
+// authoritative: an unmatched selector is E1253, never a fetch.
 use {
     jet_foundation.[Diagnostic, ImportDecl, Program, Span, diagnostic_from_registry]
     jetpack_foundation.[
@@ -316,7 +317,7 @@ fn pkg_inline_deps_e1253(dep: InlineDep, reason: InlineDepUnresolved) -> Diagnos
     explanation :: if reason == {
         .InvalidName -> (fix: "use a single package name without path separators.", why: "`{dep.name}` is not a safe local package name.")
         .InvalidSelector -> (fix: "use `major`, `major.minor`, or `major.minor.patch`.", why: "`{dep.selector}` is not a supported dotted numeric version selector.")
-        .UnknownPackage -> (fix: "commit a copy at `.jet/inline-deps/{dep.name}/<version>/`, materialize the source locally first, or run `jet init` and depend on `{dep.name}` through `package.jet`.", why: "no local source knows a package named `{dep.name}` — an inline dependency must resolve from a committed or explicitly materialized local copy.")
+        .UnknownPackage -> (fix: "run the script with `jet run`, which fetches and locks `{dep.name}` from the configured package registry on its first run, or commit a copy at `.jet/inline-deps/{dep.name}/<version>/`.", why: "no local copy under `.jet/inline-deps/{dep.name}/` holds `{dep.name}`, and only `jet run` and `jet fetch --lock` fetch a missing inline dependency.")
         .NoMatch -> (fix: "commit a matching version under `.jet/inline-deps/{dep.name}/`, or loosen the selector to one you have.", why: "`{dep.name}` is available locally, but no version satisfies `#{dep.selector}`.")
         .InvalidTree(error) -> (fix: "remove the hostile or oversized entry from `.jet/inline-deps/{dep.name}/`, then try again.", why: "the local source for `{dep.name}` cannot be hashed safely: {error.message()}.")
     }

@@ -1615,6 +1615,8 @@ fn jet_cli_run_result(file: String, source: String, color: Bool, options: BuildO
 }
 
 fn jet_cli_compile_run(file: String, entry: String?, source: String, color: Bool, options: BuildOptions, verbose: Bool, json: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetCLIRunStep {
+    // A loose script's first run fetches and locks its inline dependencies.
+    if jet_cli_script_dependency_fetch(file, source, color, json) == .Val(refused) -> return JetCLIRunStep.Output{output: refused}
     // A traced or verbose run reports its compile, so only a plain run may
     // reuse a kept program; one starting at a command function is never kept.
     if !verbose && trace_sink == None && entry == None -> return jet_cli_compile_kept(file, source, color, json, options, threads, program_args, invocation)

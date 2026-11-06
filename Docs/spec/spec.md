@@ -4832,10 +4832,17 @@ numeric text such as `1.4` or `1.4.2`, not an operator range, and applies only
 to a single-segment package name. `core.files#1.0` is not a package dependency.
 
 `jet run stats.jet` collects inline references from the entry file and resolves
-them into the module search. Resolution is local: a matching copy under
-`.jet/inline-deps/<name>/<version>/` or the documented fixture override. It
-never executes dependency code during resolution and does not fetch from the
-public registry by name. An unresolved reference is E1253.
+them into the module search from a matching copy under
+`.jet/inline-deps/<name>/<version>/` or the documented fixture override. On
+its first run, a reference to a package no local copy knows is fetched through
+the configured package registry on the same path as `jet fetch --lock`: the
+artifact is verified, ingested into the Hangar, copied to
+`.jet/inline-deps/<name>/<version>/` and locked in `stats.jet.lock`, with no
+`jet add` step. Later runs resolve from that copy offline. A local package
+stays authoritative: when it has no matching version, the registry is not
+asked. Resolution never executes dependency code. A reference that still
+doesn't resolve, or one `jet check` or `jet build` meets without a local copy,
+is E1253.
 
 An exact `major.minor.patch` selector is pinned. A looser selector such as
 `1.4` is accepted but emits L0203 until

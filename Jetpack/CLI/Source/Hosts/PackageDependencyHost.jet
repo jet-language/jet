@@ -127,14 +127,22 @@ fn cli_package_dependency_read(path: String, color: Bool, json: Bool) -[FS, Env]
 }
 
 // The checked Package carrier of `entry`: its inline `package { }` block, or
-// the root's `package.jet`.
+// the root's `package.jet`. A project with no entry file yet (a package that
+// only declares dependencies) has the root's `package.jet` alone.
 fn cli_package_dependency_input(root: String, entry: String, color: Bool, json: Bool) -[FS, Env]> PackageDependencyInput PackageDependencyError! {
+    cache := WorkspaceDeclarationCache.new()
+    if !files.exists(entry) {
+        rooted :: if pkg_package_facts_for_root(&cache, root) == {
+            .Ok(value) -> value
+            .Err(error) -> { return Err(cli_package_dependency_source_error(PACKAGE_FILE, "", error.diagnostic)) }
+        }
+        return cli_package_dependency_root_input(root, rooted ?? return Err(cli_package_dependency_cli_error("E2105", "couldn't resolve package facts for {root}", None, color, json)), color, json)
+    }
     source :: cli_package_dependency_read(entry, color, json)
     inline :: if pkg_extract_inline_package(source.raw) == {
         .Ok(value) -> value
         .Err(error) -> { return Err(cli_package_dependency_source_error(entry, source.raw, error.diagnostic())) }
     }
-    cache := WorkspaceDeclarationCache.new()
     found :: if pkg_package_facts_for_entry(&cache, entry) == {
         .Ok(value) -> value
         .Err(error) -> { return Err(cli_package_dependency_source_error(entry, source.raw, error.diagnostic)) }
@@ -144,6 +152,11 @@ fn cli_package_dependency_input(root: String, entry: String, color: Bool, json: 
         manifest :: pkg_to_manifest(facts, block.body(source.raw)) ?? return Err(cli_package_dependency_source_error(entry, block.body(source.raw), err.diagnostic))
         return Ok(PackageDependencyInput{path: entry, raw: source.raw, inline: inline, manifest: manifest, authority: ^source.authority})
     }
+    cli_package_dependency_root_input(root, facts, color, json)
+}
+
+// The root's `package.jet` as the carrier of `facts`.
+fn cli_package_dependency_root_input(root: String, facts: PackageFacts, color: Bool, json: Bool) -[FS, Env]> PackageDependencyInput PackageDependencyError! {
     located :: if pkg_manifest_path_checked(root) == {
         .Ok(value) -> value
         .Err(error) -> { return Err(cli_package_dependency_source_error(PACKAGE_FILE, "", error.diagnostic)) }
@@ -207,11 +220,15 @@ fn cli_package_dependency_edit_success(command: String, name: String, path: Stri
 }
 
 // `jet fetch --lock <script>`: resolve every inline `use pkg#version` of a
-// loose script through the shared offline resolver and write its
-// `<script>.lock` sidecar, keyed by the script's content hash. An
-// unresolved dependency is E1253 and writes no lock. A relative `script`
-// names a file under `root`, jet's working directory.
-fn cli_package_dependency_script_lock(root: String, script: String, quiet: Bool, color: Bool, json: Bool) -[FS, Env]> PackageDependencyOutput Never! {
+// loose script and write its `<script>.lock` sidecar, keyed by the script's
+// content hash. A dependency no local copy satisfies resolves through the
+// configured package registry on the one fetch path (pkg_fetch_resolve:
+// verified, then ingested into Hangar) and is copied to
+// `.jet/inline-deps/<name>/<version>/`, so the locked script resolves offline
+// afterwards. `--offline` never asks the registry. An unresolved dependency
+// is E1253 and writes no lock. A relative `script` names a file under `root`,
+// jet's working directory.
+fn cli_package_dependency_script_lock(root: String, script: String, offline: Bool, quiet: Bool, color: Bool, json: Bool) -[FS, Env, Exec, Net, Time, Time.Wait]> PackageDependencyOutput Never! {
     path :: if script.starts_with("/") -> script else -> files.join(root, script)
     source :: cli_package_dependency_read(path, color, json) ?? return err.output
     parsed :: parse_source(source.raw.bytes())
@@ -221,7 +238,20 @@ fn cli_package_dependency_script_lock(root: String, script: String, quiet: Bool,
     script_dir :: files.dirname(path)
     deps := [LockedInlineDep]{}
     loop dep in pkg_inline_deps_collect(parsed.program) {
-        resolved :: pkg_inline_deps_resolve(dep, script_dir) ?? return PackageDependencyOutput{stderr: diagnostic_render_all(script, source.raw, [Diagnostic]{pkg_inline_deps_e1253(dep, err)}, color), exit_code: EXIT_USER_ERROR}
+        resolved :: if pkg_inline_deps_resolve(dep, script_dir) == {
+            .Ok(found) -> found
+            .Err(reason) -> {
+                // A local package stays authoritative: only an unknown one
+                // is fetched.
+                missed :: if reason == {
+                    .UnknownPackage -> true
+                    else -> false
+                }
+                if offline || !missed -> return PackageDependencyOutput{stderr: diagnostic_render_all(script, source.raw, [Diagnostic]{pkg_inline_deps_e1253(dep, reason)}, color), exit_code: EXIT_USER_ERROR}
+                cli_package_dependency_inline_fetch(script, script_dir, dep) ?? return cli_package_dependency_source_error(script, source.raw, err.diagnostic).output
+                pkg_inline_deps_resolve(dep, script_dir) ?? return PackageDependencyOutput{stderr: diagnostic_render_all(script, source.raw, [Diagnostic]{pkg_inline_deps_e1253(dep, err)}, color), exit_code: EXIT_USER_ERROR}
+            }
+        }
         &deps.push(LockedInlineDep{name: dep.name, selector: dep.selector, resolved: resolved.resolved_version, content_hash: resolved.content_hash})
     }
     script_hash :: pkg_inline_deps_file_hash(path) ?? return cli_package_dependency_cli_error("E2105", "couldn't hash {script}: {err}", None, color, json).output
@@ -230,13 +260,50 @@ fn cli_package_dependency_script_lock(root: String, script: String, quiet: Bool,
     PackageDependencyOutput{stdout: "locked {script} in {env_script_lock_sidecar_path(script)}\n"}
 }
 
+// One inline dependency through the registry: the selector becomes the
+// registry requirement it means (`1.4.2` exactly, `1.4` any `1.4.x`), the
+// verified artifact is ingested into Hangar, and its tree is copied to the
+// script's managed `.jet/inline-deps/<name>/<version>/` folder.
+fn cli_package_dependency_inline_fetch(script: String, script_dir: String, dep: InlineDep) PackageFetchError! -[FS, Env, Exec, Net, Time, Time.Wait]> {
+    root :: files.canonicalize(script_dir) ?? return Err(pkg_fetch_error("E1224", "couldn't open the script directory", "{err}", "restore the script's directory"))
+    parts :: pkg_inline_deps_numeric_version(dep.selector) ?? return Err(pkg_fetch_registry_error(dep.name, "invalid inline selector `{dep.selector}`"))
+    words := [String]{}
+    loop part in parts -> &words.push("{part}")
+    requirement :: if words.len() == 3 -> "={words.join(".")}" else -> "{words.join(".")}.*"
+    roots :: pkg_resolve_roots()
+    context :: ProviderCtx{fixtures: provider_fixtures_from_env(None), store_dir: roots.hangar_dir(), offline: false, project_dir: Val(root), nix_index: None, nix_roots: None, allow_local_nix_catalog: false}
+    resolver := PackageFetchResolver{root: root, previous: None, options: PackageFetchOptions{}, policy: PackagePolicy.default(), nodes: [String: PackageFetchNode]{}, versions: [String: PackageFetchVersion]{}, visiting: [String]{}, registry_plan: [String: PublicationIndexEntry]{}, update_scope: pkg_fetch_update_scope(None, PackageFetchOptions{}), foreign: [String: ForeignRealization]{}, advisory_loaded: false, advisory: None}
+    verification := StoreVerification.new()
+    pkg_fetch_resolve(&verification, roots, context, &resolver, dep.name, DepSpec.Registry(requirement), root, [String]{"{script} (script)", dep.name})
+    node :: resolver.nodes[dep.name]
+    cli_package_dependency_inline_copy(root, dep.name, node.package.version, node.directory) ?? return Err(pkg_fetch_error("E1224", "couldn't copy `{dep.name}` into .jet/inline-deps", "{err}", "make the script directory writable, then run the script again"))
+}
+
+// Stage the verified tree beside its final name, then rename it into place;
+// a failed copy leaves no partial version directory.
+fn cli_package_dependency_inline_copy(root: String, name: String, version: String, source: String) IOError! -[FS, Env, Time]> {
+    project :: foundation_open_directory_authority(root)
+    package :: project.child(".jet", true).child("inline-deps", true).child(name, true)
+    if package.child(version) == .Ok(_) -> return
+    stage :: package.private_child("fetch")
+    stage_name :: files.basename(stage.path())
+    if stage.copy_tree_from(foundation_open_directory_authority(source), reject_hardlinks: false) == .Err(error) {
+        package.remove_tree(stage_name).drop("the copy error is the primary failure")
+        return Err(error)
+    }
+    if package.rename(stage_name, version) == .Err(error) {
+        package.remove_tree(stage_name).drop("the rename error is the primary failure")
+        return Err(error)
+    }
+}
+
 // `raw` is the command's words as typed, command first. `--quiet` keeps
 // success silent; the lock check of `jet build --locked` runs that way.
 fn cli_package_dependency(root: String, entry: String, raw: [String], color: Bool, json: Bool) -[FS, Env, Exec, Net, Time, Time.Wait]> PackageDependencyOutput Never! {
     command :: raw[0]
     words :: cli_package_dependency_words(raw, color, json) ?? return err.output
     quiet :: raw.contains("--quiet") || raw.contains("-q")
-    if command == "fetch" && cli_package_dependency_flag(raw, "--lock") == .Val(script) -> return cli_package_dependency_script_lock(root, script, quiet, color, json)
+    if command == "fetch" && cli_package_dependency_flag(raw, "--lock") == .Val(script) -> return cli_package_dependency_script_lock(root, script, raw.contains("--offline"), quiet, color, json)
     prefix := ""
     if command == "add" || command == "remove" {
         name := ""

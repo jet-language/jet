@@ -1,6 +1,7 @@
 // Manifestless script admission reuses PackageModel's offline selector,
 // resolver, tree identity and teaching diagnostics. No package manifest is
-// synthesized, and no provider, compiler subprocess or network is consulted.
+// synthesized, and admission consults no provider, compiler subprocess or
+// network; only `jet run`'s first run fetches (jet_cli_script_dependency_fetch).
 use {
     jet_driver.[JetDriverScriptDependency]
     jet_pkg_model.[
@@ -9,7 +10,7 @@ use {
         pkg_inline_deps_resolve, pkg_inline_deps_valid_package_name,
     ]
     jet_driver.[
-        JET_DRIVER_EXIT_USER_ERROR, JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot,
+        JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot,
         JetDriverVerbOutput,
     ]
     jet_foundation.[AppAuthorizedDirectory, Diagnostic, diagnostic_render_all]
@@ -22,6 +23,41 @@ use {
 
 fn jet_cli_script_dependency_error(path: String, source: String, dep: InlineDep, reason: InlineDepUnresolved, color: Bool) -> JetDriverVerbOutput Never! {
     JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(path, source, [Diagnostic]{pkg_inline_deps_e1253(dep, reason)}, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+}
+
+// D-JPK-SCRIPTDEP1: when a loose script's `use pkg#version` names a package
+// no local copy knows, `jet run` first runs the engine's one fetch path,
+// `jet fetch --lock <script>` (registry, verification, Hangar, the
+// `.jet/inline-deps/<name>/<version>/` copy and the `<script>.lock`
+// sidecar). Every later run resolves from that copy without the engine or
+// the network. A local package stays authoritative, and admission
+// (jet_cli_script_dependency_roots) owns every other failure.
+fn jet_cli_script_dependency_fetch(file: String, source: String, color: Bool, json: Bool) -[FS, Env, Exec, Time.Wait]> JetDriverVerbOutput? Never! {
+    if !source.contains("#") -> return None
+    entry_path :: cli_files.realpath(file) ?? return None
+    script_dir :: jet_cli_parent(entry_path) ?? return None
+    if cli_files.exists(cli_files.join(script_dir, "package.jet")) -> return None
+    inline :: if PackageFacts.parse_inline(source, entry_path) == {
+        .Ok(value) -> { value }
+        .Err(_) -> { return None }
+    }
+    if inline == .Val(_) -> return None
+    program :: jet_cli_parsed_program(source) ?? return None
+    missing := false
+    loop dep in pkg_inline_deps_collect(program) {
+        if !pkg_inline_deps_valid_package_name(dep.name) || pkg_inline_deps_numeric_version(dep.selector) == None -> next
+        if pkg_inline_deps_resolve(dep, script_dir) == .Err(reason) {
+            if reason == {
+                .UnknownPackage -> { missing = true }
+                else -> {}
+            }
+        }
+    }
+    if !missing -> return None
+    argv :: [String]{JET_CLI_PACKAGE_ENGINE_VERB, script_dir, "", if color -> "1" else -> "0", if json -> "1" else -> "0", "fetch", "--lock", entry_path, "--quiet"}
+    fetched :: jet_cli_engine_dispatch(JET_CLI_JETPACK_BINARY, "run", argv)
+    if fetched.exit_code != JET_DRIVER_EXIT_OK -> return Val(fetched)
+    None
 }
 
 // Hold every ancestor before the shared path-based resolver may inspect it.

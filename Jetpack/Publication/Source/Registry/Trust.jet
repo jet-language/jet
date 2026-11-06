@@ -63,7 +63,7 @@ fn publication_ensure_registry_root_key(registry_name: String, public_key: Strin
     if parent == "" -> return Err(publication_read_error(.InvalidInput, path, "registry root key has no parent"))
     authority :: foundation_open_directory_authority(parent, true)
     lock_name :: "{files.basename(path).removesuffix(".pub")}.lock"
-    lock :: publication_acquire_registry_lock(parent, lock_name, 20, "registry root-key pin is busy")
+    lock :: publication_acquire_registry_lock(parent, lock_name, 20, 30000, "registry root-key pin is busy")
     // Recheck under the lock: the final key is never an empty create-new file.
     if publication_install_registry_root_pin(path, public_key) == {
         .Ok(installed) -> {

@@ -33,7 +33,18 @@ fn pkg_has_both_manifests(dir: String) -[FS, Env]> Bool Never! {
 
 // Load and parse the package manifest in a directory; None when absent.
 fn pkg_manifest_load(dir: String) -[FS, Env]> Manifest? ManifestError! {
-    resolver :: AuthorityResolver.open(dir) ?? {
+    pkg_manifest_load_with_hardlink_policy(dir, false)
+}
+
+// A sealed Hangar object's manifest: its payload files are shared hard links
+// (the CAS and the build-deps materialization), so the one-link rule of a
+// mutable source tree does not apply.
+fn pkg_store_manifest_load(dir: String) -[FS, Env]> Manifest? ManifestError! {
+    pkg_manifest_load_with_hardlink_policy(dir, true)
+}
+
+fn pkg_manifest_load_with_hardlink_policy(dir: String, allow_hardlinks: Bool) -[FS, Env]> Manifest? ManifestError! {
+    resolver :: AuthorityResolver.open_with_hardlink_policy(dir, allow_hardlinks) ?? {
         if err.is_missing() -> return Ok(None)
         return Err(ManifestError{diagnostic: err.diagnostic()})
     }

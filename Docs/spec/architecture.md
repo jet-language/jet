@@ -1473,6 +1473,9 @@ output-private mounts, locks, dependency identity, or the cache's root key count
 Manifest-less `use package#version` admission reuses the package model's local,
 offline inline-dependency resolver: `.jet/inline-deps` is authoritative, with
 the explicit fixture root as a fallback only when the package is absent.
+Before admission, `jet run` hands a package neither root knows to the engine's
+`jet fetch --lock <script>` (registry, verification, Hangar, the
+`.jet/inline-deps` copy and the script lock), so admission itself stays offline.
 The CLI snapshots the selected no-follow authority root; the Driver binds its
 recorded name, selector, selected version, and content digest into the source
 and package receipts. Loose selectors retain `L0203`, unresolved dependencies

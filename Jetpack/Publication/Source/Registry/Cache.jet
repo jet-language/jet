@@ -59,6 +59,8 @@ fn publication_registry_clone_arguments(url: String, pinned: String, path: Strin
 // Rust RegistryRootKeyLock/RegistryCacheLock share marker acquisition, but
 // retain different names, waits and diagnostics. Foundation retains the held
 // chain; closing this owner removes only its own marker, including action Err.
+// A live holder's marker is waited on for `wait_ms` (its fsyncs can take
+// seconds on a loaded disk); a marker older than five minutes is stale.
 struct PublicationRegistryMarkerLock {
     authority: FoundationDirectoryAuthority
     name: String
@@ -68,10 +70,11 @@ impl PublicationRegistryMarkerLock.Close {
         self.authority.remove(self.name).drop("release the owned registry marker on every result")
     }
 }
-fn publication_acquire_registry_lock(parent: String, name: String, delay_ms: Int, busy: String) -[FS, Env, Time, Time.Wait]> PublicationRegistryMarkerLock IOError! {
+fn publication_acquire_registry_lock(parent: String, name: String, delay_ms: Int, wait_ms: Int, busy: String) -[FS, Env, Time, Time.Wait]> PublicationRegistryMarkerLock IOError! {
     authority :: foundation_open_directory_authority(parent)
     path :: files.join(parent, name)
-    loop _ in 0..<100 {
+    deadline :: time.unix_ns() + wait_ms * 1000000
+    loop time.unix_ns() < deadline {
         writer :: if authority.create_exclusive(name, 384) == {
             .Ok(file) -> file
             .Err(error) -> if error == {
@@ -201,7 +204,7 @@ fn publication_ensure_index_clone_with_network<N: PublicationRegistryNet>(regist
     parent_path :: files.dirname(dir)
     if parent_path == "" -> return Err(publication_registry_cache_error(registry, "registry cache path has no parent"))
     authority :: foundation_open_directory_authority(parent_path, true) ?? return Err(publication_registry_cache_error(registry, "{err}"))
-    lock :: publication_acquire_registry_lock(parent_path, publication_registry_cache_lock_name(registry.name), 50, "registry cache refresh is busy") ?? return Err(publication_registry_cache_error(registry, "{err}"))
+    lock :: publication_acquire_registry_lock(parent_path, publication_registry_cache_lock_name(registry.name), 50, 120000, "registry cache refresh is busy") ?? return Err(publication_registry_cache_error(registry, "{err}"))
     if publication_ensure_index_clone_locked(registry, dir, authority, transport, network) == {
         .Ok(path) -> {
             close(^lock)

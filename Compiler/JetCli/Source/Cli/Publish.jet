@@ -349,6 +349,11 @@ fn jet_cli_publish(force: Bool, no_sign: Bool, quiet: Bool, color: Bool) -[FS, E
     }
     repo :: checkout.path
     existing_entries :: publication_read_entries(repo, name) ?? return jet_cli_publish_checkout_failed(log, checkout, publication_e2607("registry index", "{err}"))
+    // D-VERSION1 on the fresh checkout too: a concurrent publisher may land
+    // this version between the source-clone check above and this checkout.
+    loop published in existing_entries {
+        if published.version == version -> return jet_cli_publish_checkout_failed(log, checkout, publication_e1234(name, version))
+    }
 
     // #1912: name policy before signing, staging or index mutation; a
     // warning is visible and non-blocking, a block refuses.

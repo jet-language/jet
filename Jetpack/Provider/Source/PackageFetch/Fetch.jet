@@ -73,7 +73,7 @@ fn pkg_fetch_semantic_records(root: String, lock: LockFile, manifest: Manifest, 
     loop package in lock.packages {
         if scope == .Val(names) && !names.contains(package.name) -> next
         if package.source == .Registry(registry, reference, output, hash, repository, _, _, _) {
-            dependency :: pkg_fetch_load_manifest(output, package.name)
+            dependency :: pkg_fetch_load_store_manifest(output, package.name)
             receipt :: publication_authorize_package_candidate(manifest.policy, package.name, package.version, dependency.package.license, registry) ?? return Err(PackageFetchError{diagnostic: publication_package_policy_edge_diagnostic(manifest.package.name, "{manifest.package.name} -> {package.name}#{package.version}", registry, err)})
             metadata :: if publication_read_registry_package_metadata(output, package.name, package.version) == {
                 .Val(found) -> Val(found)
@@ -165,7 +165,7 @@ fn pkg_fetch_locked_registry(verification: &StoreVerification, roots: HangarRoot
             .Err(error) -> { return Err(pkg_fetch_registry_error(name, "locked registry index could not be read: {error}")) }
         }
         if reference != "{name}#{package.version}" || hash == "" || selected.content_hash != hash || publication_tier_label(selected.tier) != tier || publication_gate_summary(selected.gate_status) != gate -> return Err(pkg_fetch_registry_error(name, "locked registry identity, hash, tier or gate status disagrees with the local index"))
-        all :: publication_verify_registry_package(repo, registry, name) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
+        all :: publication_verify_registry_package(repo, registry, name) ?? return Err(pkg_fetch_registry_evidence_error(name, err.diagnostic))
         publication_verify_entry_tier(selected) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
         _ :: publication_verify_index_entry(all, selected, selected.tier == .Community, registry) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
         snapshot :: publication_snapshot_verified_artifact(repo, selected) ?? return Err(pkg_fetch_registry_error(name, "locked artifact is unavailable: {err}"))
@@ -184,9 +184,9 @@ fn pkg_fetch_locked_registry(verification: &StoreVerification, roots: HangarRoot
             &expected.push(child)
         }
         if pkg_overlay_sorted_unique(package.dependencies) != pkg_overlay_sorted_unique(expected) -> return Err(pkg_fetch_registry_error(name, "locked dependency roles, features, or constraints disagree with the artifact metadata"))
-        receipt :: publication_authorize_package_candidate(manifest.policy, name, package.version, dependency.package.license, registry) ?? return Err(PackageFetchError{diagnostic: publication_package_policy_edge_diagnostic(manifest.package.name, "{name}#{package.version}", registry, err)})
+        receipt :: publication_authorize_package_candidate(manifest.policy, name, package.version, dependency.package.license, registry) ?? return Err(PackageFetchError{diagnostic: publication_package_policy_edge_diagnostic(manifest.package.name, "{manifest.package.name} -> {name}#{package.version}", registry, err)})
         resolver :: PackageFetchResolver{root: root, previous: Val(lock), options: PackageFetchOptions{locked: true}, policy: manifest.policy, nodes: [String: PackageFetchNode]{}, versions: [String: PackageFetchVersion]{}, visiting: [String]{}, registry_plan: [String: PublicationIndexEntry]{}, update_scope: [String]{}, foreign: [String: ForeignRealization]{}, advisory_loaded: false, advisory: None}
-        installed :: pkg_fetch_registry_ingest(&verification, roots, resolver, config, selected, snapshot.path(), [String]{}, None, receipt, publication_active_source_exception(manifest.policy.exceptions, name, package.version))
+        installed :: pkg_fetch_registry_ingest(&verification, roots, resolver, config, selected, snapshot.path(), [String]{}, None, receipt, publication_active_source_exception(manifest.policy.exceptions, name, package.version), true)
         close(^snapshot)
         // A hashing failure is a failed content hash; `hash` is never empty here.
         if (publication_registry_artifact_hash(installed.out) ?? "") != hash -> return Err(pkg_fetch_registry_error(name, "stored registry artifact failed its content hash"))
