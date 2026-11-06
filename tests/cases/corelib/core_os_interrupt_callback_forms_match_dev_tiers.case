@@ -1,8 +1,9 @@
 # Port of tests/corelib_parts/compile.rs::core_os_interrupt_callback_forms_match_dev_tiers; guest sources preserved verbatim.
+# The guests flush stdout after `ready`: a pipe stdout is written when its buffer fills (spec.md print).
 requires: os:unix
 # PENDING-GRAMMAR(batch-four): exact readiness/rest and SIGINT protocol.
 fixture: fixtures/core_os_interrupt_callback_forms_match_dev_tiers
-step: jet build aot.jet
+step: jet build --allow=Env,Exec aot.jet
 session aot raw: built
 recv aot until = "ready\n"
 stdout: = "ready\n"

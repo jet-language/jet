@@ -1874,8 +1874,19 @@ whether the call goes through the module alias or a direct import:
 | `mkfifo(path, mode)` | `!IOError -[FS, Env]>` | Create a named pipe. |
 | `atexit(handler)` | `Unit` | Register a `fn()` handler that runs at the explicit process boundary after scope cleanup (D-FAIL-EXIT1). |
 
-The `core.sys` module does not export `on_interrupt`; use the process signal
-and task APIs for interrupt handling.
+`on_interrupt(handler)` (`Unit -[Env]>`) registers a `fn()` handler for SIGINT.
+Registration is additive and lasts for the process: it is
+live when the call returns, and nothing unregisters it. The first call installs
+the SIGINT handler, which only counts the signal (async-signal-safe), and starts
+the runtime's signal dispatcher thread. For every counted SIGINT the dispatcher
+runs every registered handler in registration order, each under its own stop
+boundary. A handler that stops (a panic, a deadline) has its report written to
+stderr, and the later handlers still run. After the last handler, the first
+stopped handler's exit code ends the process. `process.exit(code)` in a handler
+ends the process at once. A handler runs on the dispatcher thread, concurrently
+with the program. A program that never calls `on_interrupt` installs no SIGINT
+handler and links no handler runner. Registration fails with a panic when the
+host refuses the SIGINT handler or the dispatcher thread.
 
 Typed `sys.decode<T>()` keeps the existing `Dotenv` annotation and `Decode`
 protocol. Its source policy requires a project-relative file with no parent

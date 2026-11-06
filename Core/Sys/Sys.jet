@@ -642,6 +642,13 @@ fn atexit(handler: fn()) Never! -[Env]> {
     core.sys.__atexit_os(handler)
 }
 
+// Every registered handler runs, in registration order, once per SIGINT the
+// process receives, each under its own stop boundary on the runtime's signal
+// dispatcher thread (ProcessSignal.jet jet_rt_native_interrupt).
+fn on_interrupt(handler: fn()) Never! -[Env]> {
+    core.sys.__interrupt_os(handler)
+}
+
 #Unsafe("posix mkfifo: the caller owns `path` and removes the named pipe it creates") fn mkfifo(path: String, mode: Int) IOError! -[FS, Env]> {
     if is_unix() && has_nul(path) -> return Err(syscall_input(.Resolve, Val(path), "path contains NUL"))
     call_unit(core.sys.__mkfifo(path, mode), "mkfifo", .Resolve, Val(path))
