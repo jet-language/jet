@@ -2495,6 +2495,9 @@ they do not fetch. `jet env info [--env <name>] [--preset <name>] [--json]` is a
 read-only report of one selected environment plan: package references, typed
 service facts, jobs and checks, variables with source labels, managed files,
 and integrations. It does not realize, start, or apply anything (U23, U26/#789).
+`jet env fetch-toolchain` downloads this jet's C toolchain pack into the Hangar
+ahead of the first `jet cc`, so later C builds work offline
+([`reference/cc-driver.md`](reference/cc-driver.md)).
 
 The selected environment facts are also available through the existing LSP
 resource bridge as `jet://environment` via `resources/list` and

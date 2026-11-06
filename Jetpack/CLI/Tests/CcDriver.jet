@@ -54,3 +54,47 @@ fn cli_test_cc_parse_error(args: [String]) -> String {
     options :: cli_test_cc_parse([String]{"--", "--project-root", "literal.c"})
     assert_eq(options.sources, [String]{"--project-root", "literal.c"})
 }
+
+// A pack-layout descriptor for `target`, built from the facts a pack target
+// entry records.
+fn cli_test_cc_pack_descriptor(target: String) -> CcToolchainDescriptor {
+    facts :: [String: String]{
+        "cc.bundle.sha256": "sha256-bundle",
+        "cc.compiler.root.sha256": "sha256-pack",
+        "cc.sysroot": "sysroot",
+        "cc.sysroot.sha256": "sha256-sysroot",
+        "cc.host": "x86_64-unknown-linux-gnu",
+        "cc.target": target,
+        "cc.version": "clang-21.1.8+lld-21.1.8",
+        "cc.abi": "musl",
+        "cc.compiler": CC_PACK_CLANG,
+        "cc.compiler.sha256": "clang",
+        "cc.cxx": CC_PACK_CLANG,
+        "cc.cxx.sha256": "clang",
+        "cc.linker": CC_PACK_LLD,
+        "cc.linker.sha256": "lld"
+    }
+    plan :: ProviderPlanFacts.from_facts([String: String]{"action.kind": "cc-toolchain-provision", "action.recipe": CC_TOOLCHAIN_RECIPE_ID}) ?? panic("plan facts")
+    producer :: ProducerRecord{provider: CC_TOOLCHAIN_PRODUCER, immutable_source: "jet-release:pack", source_digest: "sha256-bundle", plan: plan, toolchain_facts: CC_TOOLCHAIN_RECIPE_ID, policy_facts: "", facts: facts}
+    envelope :: Envelope{output_hash: "sha256-bundle", platform: "", signature: "", provenance: ""}
+    provider_cc_pack_descriptor("entry", "/hangar/entry", "/hangar/objects/sha256-pack", [String]{"sha256-pack"}, envelope, producer) ?? panic("pack descriptor")
+}
+
+#Test("cc pack argv names the target, sysroot, resource directory, loader and the pack's own link runtime") {
+    musl :: cli_test_cc_pack_descriptor("aarch64-unknown-linux-musl")
+    sysroot :: "--sysroot={musl.sysroot_path()}"
+    resource :: "-resource-dir={musl.resource_dir_path()}"
+    assert_eq(cli_cc_toolchain_argv(musl, "cc", true, false), [String]{"--target=aarch64-unknown-linux-musl", sysroot, resource})
+    assert_eq(cli_cc_toolchain_argv(musl, "cc", false, false), [String]{"--target=aarch64-unknown-linux-musl", sysroot, resource, "-fuse-ld=lld", "--rtlib=compiler-rt", "--unwindlib=none", "-static"})
+    gnu :: cli_test_cc_pack_descriptor("x86_64-unknown-linux-gnu")
+    head :: "--target=x86_64-unknown-linux-gnu"
+    gnu_sysroot :: "--sysroot={gnu.sysroot_path()}"
+    gnu_resource :: "-resource-dir={gnu.resource_dir_path()}"
+    assert_eq(cli_cc_toolchain_argv(gnu, "c++", false, false), [String]{head, gnu_sysroot, gnu_resource, "--driver-mode=g++", "-fuse-ld=lld", "--rtlib=compiler-rt", "--unwindlib=none", "-Wl,--dynamic-linker=/lib64/ld-linux-x86-64.so.2", "-nostdlib++"})
+    assert_eq(cli_cc_toolchain_argv(gnu, "cc", false, true), [String]{head, gnu_sysroot, gnu_resource, "-fuse-ld=lld", "--rtlib=compiler-rt", "--unwindlib=none"})
+    arm :: cli_test_cc_pack_descriptor("aarch64-unknown-linux-gnu")
+    assert(cli_cc_toolchain_argv(arm, "cc", false, false).contains("-Wl,--dynamic-linker=/lib/ld-linux-aarch64.so.1"))
+    assert(musl.sysroot_path().ends_with("/sysroot"))
+    assert(musl.resource_dir_path().ends_with("/compiler/lib/clang/21"))
+    assert_eq(cli_cc_compiler_version(musl), "21.1.8")
+}

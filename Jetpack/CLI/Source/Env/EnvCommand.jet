@@ -4,8 +4,8 @@
 // explicit ref. U16 adds `-p <pkg>...` ad-hoc packages (same trust gate and
 // realize path as a manifest ref) and the `--flake` / no-`env.*` fallback to
 // a foreign `flake.nix` / `devenv.nix` through the bounded native
-// projection. The reserved subverbs `hook`, `export`, `test`, `sync`, and
-// `info` share this entry.
+// projection. The reserved subverbs `hook`, `export`, `test`, `sync`,
+// `info`, and `fetch-toolchain` share this entry.
 
 // The reserved first-positional subverbs of `jet env`.
 enum EnvSubverb {
@@ -14,6 +14,7 @@ enum EnvSubverb {
     Test
     Sync
     Info
+    FetchToolchain
 
     fn parse(word: String) -> EnvSubverb? Never! {
         if word == {
@@ -22,6 +23,7 @@ enum EnvSubverb {
             ENV_TEST_VERB -> Val(EnvSubverb.Test)
             ENV_SYNC_VERB -> Val(EnvSubverb.Sync)
             ENV_INFO_VERB -> Val(EnvSubverb.Info)
+            ENV_FETCH_TOOLCHAIN_VERB -> Val(EnvSubverb.FetchToolchain)
             else -> None
         }
     }
@@ -69,6 +71,7 @@ fn cli_cmd_env_project(verification: &StoreVerification, cache: &WorkspaceDeclar
                 .Test -> cli_cmd_env_test(&verification, &cache, theme, parsed)
                 .Sync -> cli_cmd_env_sync(&cache, theme, parsed)
                 .Info -> cli_cmd_env_info(&cache, theme, parsed)
+                .FetchToolchain -> cli_cmd_env_fetch_toolchain(&verification, theme, parsed)
             }
         }
     }
@@ -397,6 +400,27 @@ fn cli_cmd_env_test(verification: &StoreVerification, cache: &WorkspaceDeclarati
         if command.len() > 0 -> return &env.run_clean_command(command)
     }
     theme.ok("environment checks passed in a clean process")
+    EXIT_OK
+}
+
+// `jet env fetch-toolchain`: put this jet's C toolchain pack in the Hangar
+// now, so a later `jet cc` works offline. A pack already there is
+// re-verified without touching the network.
+fn cli_cmd_env_fetch_toolchain(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    if parsed.positional.len() > 1 {
+        theme.error_coded("E2102", "`jet env fetch-toolchain` takes no arguments", "unexpected `{parsed.positional[1]}`", "run `jet env fetch-toolchain` on its own")
+        return EXIT_USAGE
+    }
+    asset :: provider_cc_pack_asset_for_host() ?? {
+        cli_cc_report_provider_error(ProviderError.Unsupported(err.message()))
+        return EXIT_USER_ERROR
+    }
+    tools :: provider_cc_pack_ensure(&verification, pkg_resolve_roots(), asset, provider_cc_pack_default_sources(), parsed.flags.offline) ?? {
+        cli_cc_report_provider_error(err)
+        return EXIT_USER_ERROR
+    }
+    theme.ok("C toolchain pack for jet is ready: clang {tools.manifest.llvm}, musl {tools.manifest.musl}, glibc {tools.manifest.glibc}")
+    theme.detail(tools.root)
     EXIT_OK
 }
 

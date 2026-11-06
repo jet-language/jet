@@ -52,7 +52,7 @@ struct NativeReleaseProvider {
         Ok(plan)
     }
 
-    fn realize(self, verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Net, Time, Time.Wait]> Realized ProviderError! {
+    fn realize(self, verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait]> Realized ProviderError! {
         if provider_cc_toolchain_is_reference(spec) -> return provider_cc_toolchain_realize(&verification, spec, ctx)
         facts :: provider_native_release_facts(spec, table, ctx) ?? return Err(err.into_provider(RegistryErrorKind.NativeRelease))
         identity :: provider_plain_cache_identity(provider_native_source_fingerprint(facts), NATIVE_RECIPE_ID, ctx)
@@ -441,7 +441,13 @@ fn provider_native_fetch_declared_artifact(url: String, destination: String) Reg
 // encoding, and a byte cap checked on Content-Length and while streaming into
 // a staging file that must not exist yet.
 fn provider_native_get(url: String, label: String) -[Net, Time.Wait]> HTTPResponse RegistryError! {
-    request :: http_client.request("GET", url).total_timeout(120000).redirects(NATIVE_FETCH_MAX_REDIRECTS).header("Accept-Encoding", "identity")
+    provider_native_get_within(url, label, 120000)
+}
+
+// The same seam with a caller-chosen total budget, for the large C toolchain
+// pack.
+fn provider_native_get_within(url: String, label: String, timeout_ms: Int) -[Net, Time.Wait]> HTTPResponse RegistryError! {
+    request :: http_client.request("GET", url).total_timeout(timeout_ms).redirects(NATIVE_FETCH_MAX_REDIRECTS).header("Accept-Encoding", "identity")
     response :: http_client.send(request) ?? return Err(RegistryError.Reason("could not fetch {label}: {err}"))
     status :: response.status()
     if status < 200 || status >= 300 -> return Err(RegistryError.Reason("{label} URL returned HTTP {status}"))

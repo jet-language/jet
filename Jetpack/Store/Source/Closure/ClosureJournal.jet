@@ -379,10 +379,11 @@ fn store_validates_complete_closure(verification: &StoreVerification, roots: Han
         "adapter" | "cran" | "luarocks" -> output == local && store_rehashes_as_recorded(&verification, roots, meta, record)
         "hangar-ingest" -> output == local && authority == "hangar-cas" && store_rehashes_as_recorded(&verification, roots, meta, record)
         "store-record" -> authority == "hangar-cas" && store_rehashes_as_recorded(&verification, roots, meta, record)
-        // A jetpackage release artifact is a complete native output with no
-        // dependency edges. Store registration has already canonicalized it
-        // into Hangar, so the same byte proof used by Core applies here.
-        "jetpackage" -> output == local && store_rehashes_as_recorded(&verification, roots, meta, record)
+        // A jetpackage release artifact and jet's verified C toolchain pack
+        // are complete native outputs with no dependency edges. Store
+        // registration has already canonicalized them into Hangar, so the
+        // same byte proof used by Core applies here.
+        "jetpackage" | "jet-cc" -> output == local && store_rehashes_as_recorded(&verification, roots, meta, record)
         "nix" -> {
             if output == local -> return store_rehashes_as_recorded(&verification, roots, meta, record)
             if !store_path_starts_with(output, "/nix/store") -> return false

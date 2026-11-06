@@ -29,6 +29,7 @@ fn cli_cc_main(verification: &StoreVerification, verb: String, args: [String]) -
         return EXIT_USER_ERROR
     }
     target :: options.target ?? "native"
+    fixtures :: provider_fixtures_from_env(options.fixtures)
     reference :: if target == "native" || target == "host" -> "cc-toolchain@jetpack" else -> "cc-toolchain@jetpack#target={target}"
     spec :: RefSpec.classify(reference) ?? {
         cli_cc_report_usage_error(verb, "invalid target selection: {err}")
@@ -39,10 +40,21 @@ fn cli_cc_main(verification: &StoreVerification, verb: String, args: [String]) -
             cli_cc_report_usage_error(verb, "invalid target selection: {error.message()}")
             return EXIT_USAGE
         }
-        .Ok(_) -> {}
+        .Ok(requested) -> {
+            // Without fixtures the toolchain is the pack, which covers a
+            // fixed target set; name it instead of failing later.
+            if fixtures == None {
+                if provider_cc_pack_covered_target(requested) == {
+                    .Err(error) -> {
+                        cli_cc_report_usage_error(verb, error.message())
+                        return EXIT_USAGE
+                    }
+                    .Ok(_) -> {}
+                }
+            }
+        }
     }
     roots :: pkg_resolve_roots()
-    fixtures :: provider_fixtures_from_env(options.fixtures)
     descriptor :: cli_cc_resolve_toolchain(&verification, roots, spec, fixtures, options.offline, project_root) ?? {
         cli_cc_report_provider_error(err)
         return EXIT_USER_ERROR
@@ -76,16 +88,14 @@ fn cli_cc_main(verification: &StoreVerification, verb: String, args: [String]) -
         cli_cc_report_operational_error("C/C++ toolchain could not enter the build graph", err.debug_text(), "repair the pinned Hangar descriptor and retry")
         return EXIT_USER_ERROR
     }
-    // The target is already a declared ToolchainSpec fact and action-key
-    // label. Do not inject Clang's `--target` spelling into the pinned GCC
-    // driver.
     action_argv := [String]{verb}
-    if !sys.is_windows() -> &action_argv.push("--sysroot={descriptor.sysroot_path()}")
+    static_link :: options.argv.contains("-static") || options.argv.contains("-static-pie")
+    &action_argv.extend(cli_cc_toolchain_argv(descriptor, verb, options.compile_only, static_link))
     &action_argv.extend(invocation.argv.slice(1, invocation.argv.len()))
     action := ActionSpec.cached(action_argv)
         .with_inputs(invocation.inputs)
         .with_outputs(invocation.outputs)
-        .with_env("PATH", descriptor.virtual_path_env())
+        .with_env("PATH", descriptor.virtual_bin())
         .with_env("LANG", "C")
         .with_env_allowlist([String]{"PATH", "LANG"})
         .with_kind(ActionKind.Compile)
@@ -262,13 +272,12 @@ fn cli_cc_resolve_toolchain(verification: &StoreVerification, roots: HangarRoots
             if !error.is_missing_descriptor(target) -> return Err(ProviderError.BadOutput(error.message()))
         }
     }
-    nix_index :: if fixtures == None -> Val(NixIndexClient.from_roots_with_mode(roots, offline) ?? return Err(ProviderError.NixIndex(err))) else -> None
     ctx :: ProviderCtx{
         fixtures: fixtures,
         store_dir: hangar,
         offline: offline,
         project_dir: Val(project_root),
-        nix_index: nix_index,
+        nix_index: None,
         nix_roots: Val(roots),
         allow_local_nix_catalog: false
     }
@@ -411,10 +420,41 @@ fn cli_cc_replace_extension(path: String, extension: String) -> String Never! {
     "{directory}{stem}.{extension}"
 }
 
-// The bare compiler version: `gcc-13.2.0+jet1` is `13.2.0`.
+// The bare compiler version: `clang-21.1.8+lld-21.1.8` (or a fixture's
+// `gcc-13.2.0+jet1`) is `21.1.8` (`13.2.0`).
 fn cli_cc_compiler_version(descriptor: CcToolchainDescriptor) -> String Never! {
-    version :: descriptor.version.removeprefix("gcc-")
+    version :: descriptor.version.removeprefix("clang-").removeprefix("gcc-")
     version.split_once("+")?.before ?? version
+}
+
+// The toolchain flags ahead of the forwarded argv. A fixture bundle's
+// compiler is target-specific, so it gets only the sysroot. The pack's clang
+// is one cross compiler: it gets the target, the sysroot, the pack's resource
+// directory, and for C++ the g++ driver mode; a link also uses lld and the
+// pack's compiler-rt, statically for musl, and leaves the C++ standard
+// library to a package dependency. A dynamic glibc link names the target's
+// loader, which the pack's (Nix) clang leaves out; a `-static` or
+// `-static-pie` link (`static_link`) names none.
+fn cli_cc_toolchain_argv(descriptor: CcToolchainDescriptor, verb: String, compile_only: Bool, static_link: Bool) -> [String] Never! {
+    argv := [String]{}
+    if !descriptor.is_pack_layout() {
+        if !sys.is_windows() -> &argv.push("--sysroot={descriptor.sysroot_path()}")
+        return argv
+    }
+    &argv.push("--target={descriptor.target}")
+    &argv.push("--sysroot={descriptor.sysroot_path()}")
+    &argv.push("-resource-dir={descriptor.resource_dir_path()}")
+    cxx :: verb == "c++"
+    if cxx -> &argv.push("--driver-mode=g++")
+    if compile_only -> return argv
+    &argv.extend([String]{"-fuse-ld=lld", "--rtlib=compiler-rt", "--unwindlib=none"})
+    if descriptor.target.ends_with("-musl") {
+        &argv.push("-static")
+    } else if !static_link && provider_cc_pack_target(descriptor.target) == .Val(target) && target.loader != "" {
+        &argv.push("-Wl,--dynamic-linker={target.loader}")
+    }
+    if cxx -> &argv.push("-nostdlib++")
+    argv
 }
 
 fn cli_cc_report_usage_error(verb: String, reason: String) -[IO, Env, Time.Wait]> {
@@ -425,10 +465,10 @@ fn cli_cc_report_usage_error(verb: String, reason: String) -[IO, Env, Time.Wait]
 fn cli_cc_report_provider_error(error: ProviderError) -[IO, Env, Time.Wait]> {
     theme :: Theme.resolve_choice(ColorChoice.Auto)
     if error == {
-        .Offline(reason) -> theme.error_coded("E1276", "C/C++ toolchain is unavailable offline", reason, "install or import the pinned Hangar bundle, then retry without `--offline` only when acquisition is allowed")
+        .Offline(reason) -> theme.error_coded("E1276", "C/C++ toolchain is unavailable offline", reason, "run `jet env fetch-toolchain` while online, or install jet from the release archive that carries the C toolchain pack")
         .SandboxUnavailable(reason) -> theme.error_coded("E1275", "C/C++ build sandbox is unavailable", reason, "install the native sandbox backend and retry; Jet will not run the compiler unsandboxed")
-        .Unsupported(reason) -> theme.error_coded("E1340", "no pinned C/C++ toolchain is available", reason, "provide the declared Hangar bundle for this target; Jet will not use a host or PATH compiler")
-        .BadOutput(reason) -> theme.error_coded("E1340", "the pinned C/C++ toolchain failed integrity checks", reason, "repair or remove the corrupt Hangar object and provision it again from a trusted bundle")
+        .Unsupported(reason) -> theme.error_coded("E1340", "no pinned C/C++ toolchain is available", reason, "use a covered target, or install jet from a release that publishes the C toolchain pack for this machine; Jet will not use a host or PATH compiler")
+        .BadOutput(reason) -> theme.error_coded("E1340", "the pinned C/C++ toolchain failed integrity checks", reason, "run `jet env fetch-toolchain` with a pack whose SHA-256 matches (the release's, or the copy beside jet); a refused copy never enters the Hangar, and a corrupt Hangar object must be removed first")
         else -> error.report(theme)
     }
 }
@@ -450,7 +490,8 @@ fn cli_cc_report_operational_error(headline: String, reason: String, fix: String
 }
 
 // The declared-only toolchain spec the build executor consumes: every tool
-// is a virtual path under read-only mounts of the verified Hangar objects.
+// is a virtual path under read-only mounts of the verified Hangar objects
+// (for a pack target, the pack and the target's sysroot).
 fn cli_cc_toolchain_spec(descriptor: CcToolchainDescriptor) -> ToolchainSpec Never! {
     provenance :: BuildProvenance.jetpack_dependency("{CC_TOOLCHAIN_PACKAGE}@{CC_TOOLCHAIN_SOURCE}", LockRecord.new("hangar", descriptor.bundle_sha256))
     spec := ToolchainSpec.target(descriptor.target, provenance)
@@ -462,13 +503,10 @@ fn cli_cc_toolchain_spec(descriptor: CcToolchainDescriptor) -> ToolchainSpec Nev
     spec = spec.with_tool("c++", descriptor.cxx_virtual_path())
     spec = spec.with_tool("ld", descriptor.linker_virtual_path())
     spec = spec.declared_only()
-    if descriptor.is_nix_layout() {
+    if descriptor.is_pack_layout() {
         loop mount in descriptor.mounts {
             spec = spec.with_read_only_mount_identity(mount.source, mount.destination, mount.digest)
         }
-        spec = spec.with_read_only_mount_identity(descriptor.compiler_root, descriptor.role_virtual_root(CcToolchainRole.Compiler), descriptor.bundle_sha256)
-        spec = spec.with_read_only_mount_identity(descriptor.linker_root, descriptor.role_virtual_root(CcToolchainRole.Linker), descriptor.linker_root_digest())
-        spec = spec.with_read_only_mount_identity(descriptor.sysroot_root, descriptor.role_virtual_root(CcToolchainRole.Sysroot), descriptor.sysroot_sha256)
         return spec
     }
     spec.with_read_only_mount_identity(descriptor.root, descriptor.virtual_root(), descriptor.bundle_sha256)

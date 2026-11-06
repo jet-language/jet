@@ -31,3 +31,160 @@
         .Err(_) -> panic("a plain version must be accepted")
     }
 }
+
+#Test("cc short target spellings select the covered triples") {
+    assert_eq(provider_cc_normalize_target("aarch64-linux-musl") ?? panic("short musl target"), "aarch64-unknown-linux-musl")
+    assert_eq(provider_cc_normalize_target("x86_64-linux-gnu") ?? panic("short gnu target"), "x86_64-unknown-linux-gnu")
+    covered :: provider_cc_pack_covered_target("aarch64-linux-musl") ?? panic("aarch64 musl is covered")
+    assert_eq(covered.libc, "musl")
+}
+
+#Test("cc uncovered target names every covered target") {
+    if provider_cc_pack_covered_target("riscv64-unknown-linux-gnu") == {
+        .Ok(_) -> panic("riscv64 is not covered")
+        .Err(error) -> {
+            assert(error == .UncoveredTarget(_))
+            message :: error.message()
+            assert(message.contains("riscv64-unknown-linux-gnu"))
+            loop target in CC_PACK_TARGETS {
+                assert(message.contains(target.triple))
+                assert(message.contains(target.short))
+            }
+        }
+    }
+}
+
+// A stub pack: the manifest and three tool files, zstd-compressed.
+fn provider_cc_pack_test_archive() -> [U8] Never! {
+    manifest :: "{{\"schema\":1,\"host\":\"x86_64-linux\",\"llvm\":\"21.1.8\",\"musl\":\"1.2.5\",\"glibc\":\"2.42\",\"targets\":[{{\"triple\":\"x86_64-unknown-linux-gnu\"}},{{\"triple\":\"aarch64-unknown-linux-gnu\"}},{{\"triple\":\"x86_64-unknown-linux-musl\"}},{{\"triple\":\"aarch64-unknown-linux-musl\"}}]}}"
+    tar :: provider_registry_test_tar([[U8]]{
+        provider_registry_test_member("./jet-cc-pack.json", 48, manifest.bytes()),
+        provider_registry_test_member("./bin/clang", 48, "stub clang".bytes()),
+        provider_registry_test_member("./bin/ld.lld", 48, "stub lld".bytes()),
+        provider_registry_test_member("./bin/llvm-ar", 48, "stub llvm-ar".bytes())
+    })
+    zstd.compress(tar) ?? panic("compress the stub pack")
+}
+
+fn provider_cc_pack_test_asset(archive: [U8]) -[Env]> CcPackAsset Never! {
+    CcPackAsset{host: provider_cc_toolchain_host_target_triple(), system: "x86_64-linux", platform: "linux-x64", file: "jet-cc-pack-test.tar.zst", sha256: pkg_sha256_hex(archive), size: archive.len()}
+}
+
+// A directory holding `archive` under the asset name, as a combined archive
+// unpacks it beside jet.
+fn provider_cc_pack_test_beside(base: String, label: String, asset: CcPackAsset, archive: [U8]?) -[FS]> String Never! {
+    dir :: files.join(base, label)
+    files.create_dir_all(dir) ?? panic("create the beside directory")
+    if archive == .Val(bytes) -> files.write_bytes(files.join(dir, asset.file), bytes) ?? panic("write the stub pack")
+    dir
+}
+
+#Test("cc pack beside jet is verified, recorded, then reused offline from the Hangar") {
+    verification := StoreVerification.new()
+    base :: files.tmpdir("jet-cc-pack-beside-") ?? panic("scratch")
+    roots :: HangarRoots.at(files.join(base, "home"))
+    archive :: provider_cc_pack_test_archive()
+    asset :: provider_cc_pack_test_asset(archive)
+    beside :: provider_cc_pack_test_beside(base, "seed", asset, Val(archive))
+    first :: provider_cc_pack_ensure(&verification, roots, asset, CcPackSources{beside: Val(beside), url: None, release_base: "https://invalid.invalid"}, false) ?? panic("install the beside pack: {err.message()}")
+    assert_eq(first.manifest.llvm, "21.1.8")
+    assert_eq(first.clang_sha256, pkg_sha256_hex("stub clang".bytes()))
+    assert(first.root.starts_with(files.join(roots.hangar_dir(), "objects")))
+    // A Hangar hit needs neither the beside copy nor the network.
+    empty :: provider_cc_pack_test_beside(base, "empty", asset, None)
+    second :: provider_cc_pack_ensure(&verification, roots, asset, CcPackSources{beside: Val(empty), url: None, release_base: "https://invalid.invalid"}, true) ?? panic("the Hangar pack is reused offline: {err.message()}")
+    assert_eq(second.digest, first.digest)
+    files.remove_all(base).drop("best-effort test cleanup")
+}
+
+#Test("cc pack with the wrong hash is refused, deleted and named") {
+    verification := StoreVerification.new()
+    base :: files.tmpdir("jet-cc-pack-hash-") ?? panic("scratch")
+    roots :: HangarRoots.at(files.join(base, "home"))
+    archive :: provider_cc_pack_test_archive()
+    asset := provider_cc_pack_test_asset(archive)
+    expected :: pkg_sha256_hex("another pack".bytes())
+    asset.sha256 = expected
+    beside :: provider_cc_pack_test_beside(base, "seed", asset, Val(archive))
+    if provider_cc_pack_ensure(&verification, roots, asset, CcPackSources{beside: Val(beside), url: None, release_base: "https://invalid.invalid"}, false) == {
+        .Ok(_) -> panic("a wrong-hash pack must be refused")
+        .Err(error) -> {
+            message :: error.message()
+            assert(message.contains(expected))
+            assert(message.contains(pkg_sha256_hex(archive)))
+        }
+    }
+    leftovers := 0
+    loop entry in files.list_dir(roots.hangar_dir()) ?? panic("list the Hangar") {
+        if entry.name.contains(".tar.zst.partial") -> leftovers += 1
+    }
+    assert_eq(leftovers, 0)
+    files.remove_all(base).drop("best-effort test cleanup")
+}
+
+#Test("cc pack missing offline names both fixes") {
+    verification := StoreVerification.new()
+    base :: files.tmpdir("jet-cc-pack-offline-") ?? panic("scratch")
+    roots :: HangarRoots.at(files.join(base, "home"))
+    asset :: provider_cc_pack_test_asset(provider_cc_pack_test_archive())
+    beside :: provider_cc_pack_test_beside(base, "seed", asset, None)
+    files.write(files.join(beside, CC_PACK_RELEASE_FILE), "0.4.2\n") ?? panic("write RELEASE")
+    if provider_cc_pack_ensure(&verification, roots, asset, CcPackSources{beside: Val(beside), url: None, release_base: "https://invalid.invalid"}, true) == {
+        .Ok(_) -> panic("an offline miss must fail")
+        .Err(error) -> {
+            assert(error == .Offline(_))
+            message :: error.message()
+            assert(message.contains("jet env fetch-toolchain"))
+            assert(message.contains("jet-0.4.2-linux-x64-cc.tar.gz"))
+        }
+    }
+    files.remove_all(base).drop("best-effort test cleanup")
+}
+
+#Test("cc pack is fetched from the release named by RELEASE") {
+    verification := StoreVerification.new()
+    base :: files.tmpdir("jet-cc-pack-release-") ?? panic("scratch")
+    roots :: HangarRoots.at(files.join(base, "home"))
+    archive :: provider_cc_pack_test_archive()
+    asset :: provider_cc_pack_test_asset(archive)
+    beside :: provider_cc_pack_test_beside(base, "seed", asset, None)
+    files.write(files.join(beside, CC_PACK_RELEASE_FILE), "0.4.2\n") ?? panic("write RELEASE")
+    release :: provider_cc_pack_test_beside(base, "releases/0.4.2", asset, Val(archive))
+    tools :: provider_cc_pack_ensure(&verification, roots, asset, CcPackSources{beside: Val(beside), url: None, release_base: "file://{files.join(base, "releases")}"}, false) ?? panic("fetch the release pack: {err.message()}")
+    assert_eq(tools.manifest.glibc, "2.42")
+    assert(provider_cc_is_regular_file(files.join(release, asset.file)))
+    files.remove_all(base).drop("best-effort test cleanup")
+}
+
+#Test("cc pack JET_CC_PACK_URL takes a file:// double offline and refuses a wrong hash") {
+    verification := StoreVerification.new()
+    base :: files.tmpdir("jet-cc-pack-url-") ?? panic("scratch")
+    roots :: HangarRoots.at(files.join(base, "home"))
+    archive :: provider_cc_pack_test_archive()
+    asset :: provider_cc_pack_test_asset(archive)
+    double :: provider_cc_pack_test_beside(base, "double", asset, Val(archive))
+    previous :: sys.get(CC_PACK_URL_ENV)
+    sys.set(CC_PACK_URL_ENV, "file://{files.join(double, asset.file)}")
+    sources := provider_cc_pack_default_sources()
+    if previous == {
+        .Val(value) -> sys.set(CC_PACK_URL_ENV, value)
+        .None -> { sys.unset(CC_PACK_URL_ENV) ?? panic("restore {CC_PACK_URL_ENV}") }
+    }
+    assert_eq(sources.url, Val("file://{files.join(double, asset.file)}"))
+    sources.beside = Val(provider_cc_pack_test_beside(base, "seed", asset, None))
+    wrong := provider_cc_pack_test_asset(archive)
+    expected :: pkg_sha256_hex("another pack".bytes())
+    wrong.sha256 = expected
+    if provider_cc_pack_ensure(&verification, roots, wrong, sources, true) == {
+        .Ok(_) -> panic("a wrong-hash pack must be refused")
+        .Err(error) -> {
+            message :: error.message()
+            assert(message.contains(expected))
+            assert(message.contains(pkg_sha256_hex(archive)))
+        }
+    }
+    tools :: provider_cc_pack_ensure(&verification, roots, asset, sources, true) ?? panic("the file:// pack is fetched offline: {err.message()}")
+    assert_eq(tools.manifest.llvm, "21.1.8")
+    assert(provider_cc_is_regular_file(files.join(double, asset.file)))
+    files.remove_all(base).drop("best-effort test cleanup")
+}
