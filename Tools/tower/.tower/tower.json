@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6614,
-    "rev": 93683,
+    "rev": 93684,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -77414,7 +77414,7 @@
       "parentId": "c0xiig3k",
       "needsAcceptance": false,
       "created": "2026-10-29T12:53:42.058Z",
-      "updated": "2026-11-05T15:30:23.246Z",
+      "updated": "2026-11-06T21:05:25.801Z",
       "updatedBy": "Main"
     },
     {
@@ -180721,6 +180721,230 @@
       "created": "2026-11-06T17:05:04.109Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-06"
+    },
+    {
+      "id": "D-HOST-LEAF1",
+      "cardId": "c0w1wcfc",
+      "group": "stdlib",
+      "title": "Core declares the runtime functions it calls with a checked #Import(jet), bound only to the runtime's published #Export(jet) surface",
+      "situation": "Core calls runtime functions that no Jet source declares. Core/Time/Time.jet calls core.time.__sleep_ns(duration.ns), and only a row in Compiler/Prelude/Core.jet binds it to jet_std_time_sleep_duration_ns. Dev 97ec15f323 has 1057 such rows naming 575 runtime symbols. The runtime defines 3216 #Export(c) functions, so most exports are internals that Core never binds. The runtime side is typed Jet already: HostTime.jet:214 exports jet_std_time_sleep_duration_ns(nanos: I64). Packages bind C symbols with `#Import(c) name: fn(…) -> T = \"symbol\"`, a gated unsafe region. `#Import(jet)` does not parse today (E0081). Card #6151 needs one ratified, safe way for any package to declare such a leaf, so the compiler tables and module-name gates can go.",
+      "gist": "How does Jet source, Core included, declare a function the Jet runtime provides, so that the call is checked, safe and keeps its effects?",
+      "lesson": "A pairs the runtime's export with the package's import, using the marker Jet already has for foreign symbols. The runtime marks what it publishes `#Export(jet)` and writes the effects there. A package writes `#Import(jet) name: fn(…) -[Effects]> T = \"symbol\"`, and the compiler checks both signatures, effects included. A declaration can then neither drop an effect nor reach an internal runtime function. Internal functions stay `#Export(c)`, reachable only through `#Import(c)` inside `#Unsafe`. The cost is one cutover of 575 symbols and an export manifest inside jet.",
+      "explainer": "",
+      "story": "Core's sleep is ordinary Jet: `sleep: fn(duration: Duration) Never! -[Time.Wait]> { __sleep_ns(duration.ns) }`, and `__sleep_ns` is declared one line above it, not hidden in a compiler table. Mia writes a metrics package and wants the runtime's monotonic clock. She writes the same one-line import Core uses, the compiler checks it against what the runtime publishes, and her package's authority line must still grant Time. When she copies a symbol that the runtime keeps internal, the compiler refuses it and points at the published list.",
+      "inWild": "Rust binds foreign symbols in `extern` blocks renamed with #[link_name], and every call is `unsafe` (https://doc.rust-lang.org/reference/items/external-blocks.html). Zig's `extern fn` binds by name and trusts the declaration (https://ziglang.org/documentation/master/#extern). Swift's unofficial @_silgen_name binds a declaration to a runtime symbol without a check (https://github.com/swiftlang/swift/blob/main/docs/ReferenceGuides/UnderscoredAttributes.md). Go's //go:linkname let packages reach runtime internals, and Go 1.23 began restricting it because those internals could no longer change (https://go.dev/doc/go1.23#linker). None checks a declaration against the provider's signature.",
+      "detail": "WHAT VOTING A INCLUDES\n\n1. Runtime side. A runtime function published to Jet code is written `#Export(jet) symbol: fn(params) -[Effects]> T Failure! { … }`. `#Export(c)` stays for the C ABI and for internals. Published signatures obey a Jet-safe boundary law: typed handles, no raw pointers, no bare handle ids.\n\n2. Package side. A package writes `#Import(jet) name: fn(params) -[Effects]> T Failure! = \"symbol\"`, a bodiless declaration like `#Import(c)`. The symbol must be a published export. Types must match under the Int-to-I64 marshalling law. Effects and failure must be identical. Each mismatch is one registered diagnostic with a UI snapshot (#6151 c3).\n\n3. Calls. A call needs no `#Unsafe`. Its effects come from the declaration, so the package's authority must grant them. `jet inspect` shows the same effects for a Core call and a user call (c33). Visibility is ordinary: a `__` name is module-private (c5, c6).\n\n4. Internals. An unpublished runtime symbol is reachable only as `#Import(c)` inside `#Unsafe(\"reason\")`. That is today's expert path, with its sentry and ratchet row. Core uses it for handle internals as vetted standard-library code (I1).\n\n5. Manifest. jet generates the export manifest when it builds its runtime pack, embeds it, and ships it with each release. A chain drift check compares it with the runtime sources. The web tier links the same published symbols from the shared runtime (I9). A target that cannot provide an export reports it through the existing target-capability rule.\n\n6. Cutover. The 575 bound symbols move to `#Export(jet)`, with effects taken from today's Core wrappers. Each dispatcher row becomes an `#Import(jet)` declaration in its Core module. The dispatcher tables and member-keyed Route*.jet tables are deleted (c11). Core and user leaves lower to one IR call shape (c12).\n\nNEW SPELLINGS (I7). The marker argument `jet` on `#Import` and `#Export`. Both markers and the `= \"symbol\"` form already exist.\n\nREVIEW FINDINGS. The draft let a declaration choose its own effects, which bypasses authority; A now checks effects against the export. The draft let any package bind any of 3216 exports; A now publishes a deliberate surface. Measured counts replaced the draft's estimate of 2,000 rows. Option D was added.\n\nLIMITS. Runtime-side effects are asserted by vetted runtime code, not proved. Web provision of every published export is required by I9 but not yet measured.",
+      "options": [
+        {
+          "key": "A",
+          "name": "#Import(jet) bound to the runtime's published #Export(jet) surface, checked (recommended)",
+          "detail": "The runtime marks what it publishes and writes the effects there; packages import by symbol with the same marker they use for C. The compiler checks types, effects and failure on both sides. Internal runtime functions stay #Export(c), reachable only through #Import(c) inside #Unsafe.",
+          "technical": "New marker argument `jet` on #Import/#Export. Parser: `#Import(jet)` takes the `= \"symbol\"` body like `#Import(c)`. Sema: a manifest of #Export(jet) signatures (generated with the runtime pack, embedded in jet) checks each import; calls carry the declaration's effects. Codegen: one foreign-call IR shape for every leaf.",
+          "code": "// Compiler/JetRuntime/Source/HostTime.jet (the runtime publishes it)\n#Export(jet) jet_std_time_sleep_duration_ns: fn(nanos: I64) -[Time.Wait]> { … }\n\n// Core/Time/Time.jet (or any package)\n#Import(jet) __sleep_ns: fn(nanos: Int) -[Time.Wait]> = \"jet_std_time_sleep_duration_ns\"\n\nsleep: fn(duration: Duration) Never! -[Time.Wait]> {\n    __sleep_ns(duration.ns)\n}\n\n// Dropping the effect, or naming an internal symbol, is a compile error:\n// #Import(jet) nap: fn(nanos: Int) = \"jet_std_time_sleep_duration_ns\"   // effect row differs from the export\n// #Import(jet) free: fn(id: Int) = \"jet_rt_handle_release\"              // not a published #Export(jet)"
+        },
+        {
+          "key": "B",
+          "name": "A separate #Host marker, with the same checks",
+          "detail": "`#Host(\"symbol\") name: fn(…) -[Effects]> T` declares a runtime leaf; the runtime still publishes with #Export(jet) or a matching #Hosted marker. Checks and safety as in A.",
+          "technical": "A new registered marker with its own parser rule, formatter rule and sema path beside #Import.",
+          "code": "#Host(\"jet_std_time_sleep_duration_ns\") __sleep_ns: fn(nanos: Int) -[Time.Wait]>\n\nsleep: fn(duration: Duration) Never! -[Time.Wait]> {\n    __sleep_ns(duration.ns)\n}"
+        },
+        {
+          "key": "C",
+          "name": "#Import(jet) with the symbol derived from the module path",
+          "detail": "No symbol string: `#Import(jet) __sleep_ns: fn(nanos: Int) -[Time.Wait]>` in core.time binds `jet_core_time___sleep_ns` by a naming law. Checks as in A.",
+          "technical": "Every published runtime export is renamed to the law in one cutover. Moving a Core function to another module renames its runtime symbol (an ABI change), and one runtime function cannot serve two Jet names.",
+          "code": "#Import(jet) __sleep_ns: fn(nanos: Int) -[Time.Wait]>\n// binds jet_core_time___sleep_ns\n\nsleep: fn(duration: Duration) Never! -[Time.Wait]> {\n    __sleep_ns(duration.ns)\n}"
+        },
+        {
+          "key": "D",
+          "name": "A generated runtime module; no leaf declarations at all",
+          "detail": "jet generates a module `jet.runtime` from the #Export(jet) manifest. Core and packages write `use rt: jet.runtime` and call `rt.jet_std_time_sleep_duration_ns(d.ns)`. Nothing can drift, because nothing is hand-written.",
+          "technical": "No new marker on the import side. Callers see C-style symbol names, and every package sees the whole published surface. #6151 c1 and c3 (a declaration that can disagree) have no subject and would need rewording.",
+          "code": "use rt: jet.runtime\n\nsleep: fn(duration: Duration) Never! -[Time.Wait]> {\n    rt.jet_std_time_sleep_duration_ns(duration.ns)\n}"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A keeps one marker pair for binding a declaration to a provided symbol. It checks the runtime case, so it is safe. It closes both holes of an unchecked leaf: dropped effects and reachable internals.",
+        "gains": [
+          "Core leaves are ordinary declared Jet; the compiler's Core tables and member-keyed route tables go.",
+          "Any package can bind a published runtime service safely, with its effects enforced by authority.",
+          "The runtime's internal functions stay changeable, because only #Export(jet) is a public contract."
+        ],
+        "losses": [
+          {
+            "loss": "The runtime's published surface becomes an ABI that packages depend on.",
+            "mitigation": "Only #Export(jet) is published, never all 3216 exports; a removal is a greenfield cutover now and a versioned change after the owner declares compatibility."
+          },
+          {
+            "loss": "One large cutover: 575 symbols gain #Export(jet) and effect rows, and 1057 rows become declarations.",
+            "mitigation": "Mechanical from today's dispatcher rows and Core wrapper effects; the manifest drift check proves it complete."
+          },
+          {
+            "loss": "Effects on the runtime side are asserted by the runtime author, not proved.",
+            "mitigation": "This is the same vetting duty Core has today; the runtime is vetted standard-library code under I1, and the ratchet counts every #Unsafe route around it."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Same checks as A, but a second marker for the meaning #Import already has (an I8 cost) with its own parser, formatter and sema path."
+          },
+          {
+            "key": "C",
+            "reason": "Ties runtime symbol names to Core module paths: moving a function becomes an ABI change, one runtime function cannot serve two Jet names, and all published symbols are renamed."
+          },
+          {
+            "key": "D",
+            "reason": "No drift, but C-style names leak into every caller, Core keeps no readable leaf declarations, and #6151 c1/c3 lose their subject."
+          }
+        ],
+        "tradeoff": "A buys checked, effect-preserving runtime leaves for every package at the price of publishing a deliberate runtime surface and one mechanical cutover."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main, reviewing by owner direction. The review added effect checking, a published runtime surface and option D, and replaced estimates with measured counts."
+      },
+      "checkInstructions": "Probes: dev 97ec15f323 with s1 at 6c15482301. `jet check` of a file declaring `#Import(jet) sleep_ns: fn(nanos: Int) -[Time.Wait]> Unit = \"jet_std_time_sleep_duration_ns\"` gives E0081 and an invalid-statement error. Compiler/Prelude/Core.jet has 1057 `dispatcher_row` lines naming 575 runtime symbols. Compiler/JetRuntime/Source has 3216 `#Export(c)` functions,. parser_marker_is_c_guest_import (JetParser Items.jet:1204) accepts only `c`. safety.md lines 206-208 make #Import(c) a gated region.",
+      "surface": {
+        "gist": "How should Jet code, Core included, declare a runtime function so the call is checked, safe and keeps its effects?",
+        "lesson": "A pairs a runtime #Export(jet) with a package #Import(jet) and checks them against each other, effects included; runtime internals stay behind #Unsafe.",
+        "trio": {
+          "current": {
+            "note": "Core calls a runtime function that no source declares; a compiler table binds it.",
+            "code": "// Core/Time/Time.jet\nsleep: fn(duration: Duration) Never! -[Time.Wait]> {\n    core.time.__sleep_ns(duration.ns)   // bound by a row in Compiler/Prelude/Core.jet\n}"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "An extern block binds a symbol; nothing checks it, so every call is unsafe.",
+            "code": "extern \"C\" {\n    #[link_name = \"jet_std_time_sleep_duration_ns\"]\n    fn sleep_ns(nanos: i64);\n}\nunsafe { sleep_ns(1000) }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Checked #Import(jet) to #Export(jet)",
+            "gist": "One marker pair, checked both ways, effects kept.",
+            "gains": [
+              "No compiler tables",
+              "Safe for any package",
+              "Internals stay private"
+            ],
+            "losses": [
+              "A published runtime surface",
+              "One mechanical cutover"
+            ],
+            "proposed": {
+              "code": "#Import(jet) __sleep_ns: fn(nanos: Int) -[Time.Wait]> = \"jet_std_time_sleep_duration_ns\"\nsleep: fn(duration: Duration) Never! -[Time.Wait]> { __sleep_ns(duration.ns) }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "#Host marker",
+            "gist": "Same checks, a second marker.",
+            "gains": [
+              "Visually distinct from FFI"
+            ],
+            "losses": [
+              "Second mechanism (I8)"
+            ],
+            "proposed": {
+              "code": "#Host(\"jet_std_time_sleep_duration_ns\") __sleep_ns: fn(nanos: Int) -[Time.Wait]>\nsleep: fn(duration: Duration) Never! -[Time.Wait]> { __sleep_ns(duration.ns) }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Derived symbol",
+            "gist": "No strings; names follow module paths.",
+            "gains": [
+              "No spelling drift"
+            ],
+            "losses": [
+              "Moves become ABI changes",
+              "Mass rename"
+            ],
+            "proposed": {
+              "code": "#Import(jet) __sleep_ns: fn(nanos: Int) -[Time.Wait]>\n// binds jet_core_time___sleep_ns by the naming law"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Generated runtime module",
+            "gist": "No declarations; call the runtime module.",
+            "gains": [
+              "Nothing to drift"
+            ],
+            "losses": [
+              "C names in callers",
+              "c1/c3 need rewording"
+            ],
+            "proposed": {
+              "code": "use rt: jet.runtime\nsleep: fn(duration: Duration) Never! -[Time.Wait]> { rt.jet_std_time_sleep_duration_ns(duration.ns) }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Checked, effect-preserving runtime leaves for every package with one marker pair; runtime internals stay changeable.",
+          "gains": [
+            "Core leaves are ordinary declared Jet; the compiler tables go.",
+            "Any package binds published runtime services safely, effects enforced."
+          ],
+          "losses": [
+            {
+              "loss": "A published runtime surface and one mechanical cutover.",
+              "mitigation": "Only #Export(jet) is published; the drift check proves the cutover complete."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Same checks as A, but a second marker for one meaning (I8)."
+            },
+            {
+              "key": "C",
+              "reason": "Moving a function becomes an ABI change, and every symbol is renamed."
+            },
+            {
+              "key": "D",
+              "reason": "C names leak into callers, and #6151 c1/c3 lose their subject."
+            }
+          ],
+          "tradeoff": "Checked runtime leaves for every package, for a deliberate runtime surface and one cutover."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "An unchecked leaf could drop its effect row and bypass a package's authority.",
+          "attempts": [
+            "Effects are written on the runtime #Export(jet) and must be identical on the #Import(jet)."
+          ],
+          "result": "Removed by design; a mismatch is a registered compile error."
+        },
+        {
+          "loss": "Any package could call runtime internals (free a handle, forge an id) from safe code, breaking I1.",
+          "attempts": [
+            "Only #Export(jet) is importable without #Unsafe; published exports must obey the Jet-safe boundary law (typed handles, no raw pointers or bare ids)."
+          ],
+          "result": "Removed by design; internals need #Import(c) inside #Unsafe, counted by the ratchet."
+        },
+        {
+          "loss": "The compiler needs the runtime's signatures at check time.",
+          "attempts": [
+            "Generate the manifest when jet builds its runtime pack and embed it; the chain's drift check compares it with the runtime sources."
+          ],
+          "result": "Required design; cost is one generated table inside jet."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-06T21:05:25.801Z"
     }
   ],
   "questions": [
@@ -183767,6 +183991,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-06T21:05:25.801Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-HOST-LEAF1",
+      "note": "Core declares the runtime functions it calls with a checked #Import(jet), bound only to the runtime's published #Export(jet) surface"
+    },
     {
       "at": "2026-11-06T20:54:11.901Z",
       "by": "Main",
